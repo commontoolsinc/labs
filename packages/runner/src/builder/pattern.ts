@@ -6,6 +6,7 @@ import type {
 import {
   debugStr,
   hashStringOf,
+  isDeepFrozen,
   isWalkableObjectOrArray,
 } from "@commonfabric/data-model";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -41,6 +42,7 @@ import {
   getStableInternalPathSegment,
   KeepAsCell,
   sanitizeAndFreezeSchemaForLinks,
+  sanitizeAndInternSchemaForLinks,
   sanitizeSchemaForLinks,
 } from "../link-utils.ts";
 import {
@@ -579,16 +581,26 @@ function factoryFromPattern<T, R>(
       }
     }
 
-    const rawSanitizedSchema = cellReference.schema !== undefined
-      ? sanitizeSchemaForLinks(cellReference.schema, KeepAsCell.All)
-      : undefined;
     // The binding's schema position emits like a link's: a reference under
     // the flag, keeping FabricValue-bearing schema content (defaults) out
     // of the otherwise plain binding record; inline otherwise, and inline
-    // whenever decomposition refuses or the schema is a bare boolean.
+    // whenever decomposition refuses or the schema is a bare boolean. The
+    // reference is minted from the canonical strip of a deep-frozen schema,
+    // which the strip memoizes by identity and decomposition by the strip's,
+    // so a cell bound at many positions decomposes its schema once; a
+    // mutable schema is stripped as it is rather than frozen in place. An
+    // inline schema is a strip of its own per position: `createRef()` hashes
+    // an object it reaches twice in one cause as `null`, so two positions
+    // sharing one object would derive other ids.
+    const externalizeAlias = getContentAddressedSchemasConfig();
+    const rawSanitizedSchema = cellReference.schema === undefined
+      ? undefined
+      : externalizeAlias && isDeepFrozen(cellReference.schema)
+      ? sanitizeAndInternSchemaForLinks(cellReference.schema, KeepAsCell.All)
+      : sanitizeSchemaForLinks(cellReference.schema, KeepAsCell.All);
     const sanitizedSchema = rawSanitizedSchema !== undefined &&
         typeof rawSanitizedSchema === "object" &&
-        getContentAddressedSchemasConfig()
+        externalizeAlias
       ? externalizeSchema(rawSanitizedSchema as JSONSchemaObj)
       : rawSanitizedSchema;
     const partialCause = derivedInternalPartialCausesByRoot.get(top);

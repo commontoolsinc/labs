@@ -1,6 +1,7 @@
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import {
   debugStr,
+  deepFreeze,
   fabricAwareEqual,
   type FabricValue,
   hashStringOf,
@@ -1068,6 +1069,12 @@ export const resolveCfcSchemaRef = (
   }
   const result = resolveCfcSchemaRefUncached(fullSchema, schemaRef);
   if (cacheable) {
+    // The view is a document of its own wherever it carries a map other
+    // than the referrer's, and the identity-keyed memos downstream — the
+    // resolution of a `$ref` within a document, the narrowing of a path —
+    // key on a deep-frozen root alone. Its parts are the frozen document's;
+    // freezing it costs the root object and nothing below.
+    deepFreeze(result);
     let byRef = resolvedRefCache.get(fullSchema as object);
     if (byRef === undefined) {
       byRef = new Map();
