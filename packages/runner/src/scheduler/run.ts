@@ -1228,13 +1228,17 @@ function finalizeReactiveActionCommit(
   // writes are withdrawn rather than sealed. The read is refused the same way
   // every time, so the run is not retried: it runs again when another of its
   // inputs changes, and withdraws again while it still reads the document.
+  // Only a serving manager refuses reads by construction, so on any other
+  // runtime the transaction is not inspected for them at all.
   //
   // A served run that read a scoped instance the serving loop has not
   // produced yet (`unproducedScopedInstance`) is withdrawn the same way, for
   // the same reason: the absence it read is not that instance's state. Its
   // read of the instance stays subscribed, so it runs again once the instance
   // is produced.
-  const refused = refusedReadIn(state.runtime.storageManager, args.tx);
+  const refused = state.runtime.storageManager.servingHomeSpace === undefined
+    ? undefined
+    : refusedReadIn(state.runtime.storageManager, args.tx.tx);
   const unproduced = args.tx.tx.unproducedScopedInstance;
   if (args.tx.status().status === "ready") {
     if (refused !== undefined) {
