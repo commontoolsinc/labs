@@ -13,7 +13,7 @@
  * broken channel.
  *
  * Attribution is carried, not inferred. A command the Weaver runs without the
- * person (a reviewed read) runs as the agent; a command the person approves
+ * person (an automatic command) runs as the agent; a command the person approves
  * with a tap runs as the user, because the tap is the person's own act. The
  * invocation names the approval the console asks for and the settlement names
  * the approval and actor the Weaver applied, so the executor and the service

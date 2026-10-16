@@ -195,7 +195,9 @@ uses person approval for mutations on consoles without that feature.
 `loom.add`, `loom.move`, `page.write`, or `create.note`. The Weaver calls
 `POST /command` directly without the `X-Loom-Agent-Run-Id` header, so its origin
 is never derived as `session`. No CFS change is needed for this checkpoint's
-query, or for the candidate mutations, which run as `user` after approval.
+query or mutations. `loom.set-style` is the only mutation currently admitted
+automatically and runs as `agent:cf-harness`; other mutations run as `user`
+after approval.
 
 **Contract.** `packages/cf-harness/src/contracts/client-command.ts` and
 `shared/WeaverClientCommand.swift` define the invocation, catalog, settlement
@@ -374,8 +376,8 @@ correctly. Standalone `/patterns`/`/feedback` endpoint resolution, whitespace in
 code is touched here; they do not gate the unified session flow.
 
 Now expand the command adapter to the required Loom operations. Use a small
-reviewed allowlist to run queries automatically and route actions through
-existing approval controls. Loom's registry carries no query/action or read-only
+reviewed allowlist to run queries and `loom.set-style` automatically; other
+mutations use the existing approval controls. Loom's registry carries no query/action or read-only
 flag (it records `reversible`, `locality`, `tier`, `grant`, `actors`, and
 `origins_refused`), so the allowlist is a static reviewed list. 106 verbs refuse
 the `session` origin and an omitted actor defaults to `user`; the adapter sends
@@ -393,6 +395,7 @@ Use these candidate implementations to begin hands-on verification:
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | List/find/open Looms        | Weaver listing and native open; no new search backend. `/looms-find` is a GET route, not a Loom command, and Loom has no list or find command for looms.                                                                   |
 | Inspect layout              | `loom.inspect` returns manifest, component IDs, and version.                                                                                                                                                               |
+| Change loom style           | `loom.set-style` runs automatically as the agent, using the captured target and version. Verify the confirmed style, unchanged view and draft, and no Run/Decline prompt. Other mutations still require a tap. |
 | Read contents               | Add a structured query resolving a selected component through the page/source reader or a Fabric handle. Manifest inspection is insufficient; `search.run` creates a panel and is not a read query.                        |
 | Add pages/panels; rearrange | `page.write` supplies page contents, `loom.add` attaches a component, and `loom.move` rearranges it. Verify the complete create-and-place flow; use `create.note` where its behavior fits. Preserve version preconditions. |
 
