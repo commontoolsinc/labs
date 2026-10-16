@@ -556,6 +556,34 @@ function factoryFromPattern<T, R>(
       });
     }
   });
+  // The binding's schema position emits like a link's: a reference under
+  // the flag, keeping FabricValue-bearing schema content (defaults) out of
+  // the otherwise plain binding record; inline otherwise, and inline
+  // whenever decomposition refuses or the schema is a bare boolean. The
+  // reference is minted from the canonical strip of a deep-frozen schema,
+  // which the strip memoizes by identity and decomposition by the strip's,
+  // so a cell bound at many positions decomposes its schema once; a mutable
+  // schema is stripped as it is rather than frozen in place. An inline
+  // schema is a strip of its own per position, the refused decomposition's
+  // included: `createRef()` hashes an object it reaches twice in one cause
+  // as `null`, so two positions sharing one object would derive other ids.
+  const externalizeAlias = getContentAddressedSchemasConfig();
+  const aliasSchemaFor = (
+    schema: JSONSchema | undefined,
+  ): JSONSchema | undefined => {
+    if (schema === undefined || typeof schema === "boolean") return schema;
+    if (externalizeAlias && isDeepFrozen(schema)) {
+      const canonical = sanitizeAndInternSchemaForLinks(schema, KeepAsCell.All);
+      if (typeof canonical === "object") {
+        const externalized = externalizeSchema(canonical);
+        if (externalized !== canonical) return externalized;
+      }
+    }
+    const own = sanitizeSchemaForLinks(schema, KeepAsCell.All);
+    return externalizeAlias && typeof own === "object"
+      ? externalizeSchema(own)
+      : own;
+  };
   const resolveCellAlias: CellAliasResolver = (
     cell, // opaque cell that we found
     serializationPath, // path where we encountered the cell
@@ -581,28 +609,7 @@ function factoryFromPattern<T, R>(
       }
     }
 
-    // The binding's schema position emits like a link's: a reference under
-    // the flag, keeping FabricValue-bearing schema content (defaults) out
-    // of the otherwise plain binding record; inline otherwise, and inline
-    // whenever decomposition refuses or the schema is a bare boolean. The
-    // reference is minted from the canonical strip of a deep-frozen schema,
-    // which the strip memoizes by identity and decomposition by the strip's,
-    // so a cell bound at many positions decomposes its schema once; a
-    // mutable schema is stripped as it is rather than frozen in place. An
-    // inline schema is a strip of its own per position: `createRef()` hashes
-    // an object it reaches twice in one cause as `null`, so two positions
-    // sharing one object would derive other ids.
-    const externalizeAlias = getContentAddressedSchemasConfig();
-    const rawSanitizedSchema = cellReference.schema === undefined
-      ? undefined
-      : externalizeAlias && isDeepFrozen(cellReference.schema)
-      ? sanitizeAndInternSchemaForLinks(cellReference.schema, KeepAsCell.All)
-      : sanitizeSchemaForLinks(cellReference.schema, KeepAsCell.All);
-    const sanitizedSchema = rawSanitizedSchema !== undefined &&
-        typeof rawSanitizedSchema === "object" &&
-        externalizeAlias
-      ? externalizeSchema(rawSanitizedSchema as JSONSchemaObj)
-      : rawSanitizedSchema;
+    const sanitizedSchema = aliasSchemaFor(cellReference.schema);
     const partialCause = derivedInternalPartialCausesByRoot.get(top);
     if (partialCause !== undefined) {
       if (!deepEqual(partialCause, cellReference.partialCause)) {
