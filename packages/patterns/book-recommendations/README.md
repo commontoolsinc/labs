@@ -7,9 +7,10 @@ cells, defaulting to empty arrays. Every finished book is a separate cell with
 
 The request passes the two input cells and a named `book_0`, `book_1`, and so on
 for each finished book. These are cell references, not values interpolated into
-the task. The tools are `loom_search` and `loom_page_read`. The named book
-inputs let a model select held book handles without a separate tool for
-traversing the list.
+the task; the run reads them through `describe_handle` and `read_value`, which
+every run has. The retrieval tools it names are `loom_search` and
+`loom_page_read`. The named book inputs let a model select held book handles
+without a separate tool for traversing the list.
 
 The result has exactly five `picks`, each containing a read-only `book` link and
 an inline `why` string. An optional `sources` array contains read-only links to
