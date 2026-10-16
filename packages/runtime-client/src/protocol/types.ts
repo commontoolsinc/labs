@@ -3850,6 +3850,14 @@ export type LoggerCountsResponse = {
    * no index signature does not satisfy, and every counter there is a number.
    */
   cfc: Record<string, number>;
+
+  /**
+   * The pattern manager's compile-cache counters: `hits`, `misses` and
+   * `byIdentityHits`, as `PatternManager.getCompileCacheStats()` reports
+   * them. A capture reading them beside the `compile-cache` timing rows can
+   * tell a worker that recompiled once from one that never hits.
+   */
+  compileCache: Record<string, number>;
 };
 
 /** The worker's pattern coverage, where this worker collects any. */
