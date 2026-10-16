@@ -35,6 +35,7 @@ import {
 import { CATCH_RULE, emptyState } from "./test-selection/score.ts";
 import { CATCH_WEIGHT_MAIN } from "./test-selection/policy.ts";
 import { stateObjectName, statePrefix } from "./test-selection/store.ts";
+import { coverageGateSuite } from "./test-topology/coverage-gates.ts";
 import { MANIFEST_SCHEMA_VERSION } from "./test-selection/manifest.ts";
 import {
   batchMeasurementName,
@@ -186,6 +187,15 @@ describe("test-selection-publish", () => {
       expect(parseArgs(["--days"])).toBeUndefined();
       expect(parseArgs(["--concurrency", "x"])).toBeUndefined();
       expect(parseArgs(["--out"])).toBeUndefined();
+      expect(parseArgs(["--create"])).toBeUndefined();
+    });
+
+    it("takes a directory to create from, and nothing beside it", () => {
+      expect(parseArgs(["--create", "/tmp/out"])?.create).toBe("/tmp/out");
+      expect(parseArgs(["--create", "/tmp/out", "--bootstrap"]))
+        .toBeUndefined();
+      expect(parseArgs(["--dry-run", "--create", "/tmp/out"]))
+        .toBeUndefined();
     });
   });
 
@@ -398,10 +408,30 @@ function object(
   file?: string,
   name = "space > writes",
 ): string {
-  const context: RunContext = {
+  const record: TestRecord = {
+    line: "record",
+    test: { k: "unit", s: "memory", n: name },
+    outcome,
+    durationMs: 40,
+    ...(file === undefined ? {} : { file }),
+  };
+  return buildObjectBody(
+    ciContext(`report-${commit}-${outcome}`, commit, at, branch),
+    [record],
+  );
+}
+
+/** The context of one CI report, at one commit. */
+function ciContext(
+  reportId: string,
+  commit: string,
+  at: string,
+  branch = "main",
+): RunContext {
+  return {
     schema: 1,
     line: "context",
-    reportId: `report-${commit}-${outcome}`,
+    reportId,
     repo: "commonfabric/labs",
     commit,
     dirty: false,
@@ -419,14 +449,6 @@ function object(
     denoVersion: "2.9.4",
     startedAt: at,
   };
-  const record: TestRecord = {
-    line: "record",
-    test: { k: "unit", s: "memory", n: name },
-    outcome,
-    durationMs: 40,
-    ...(file === undefined ? {} : { file }),
-  };
-  return buildObjectBody(context, [record]);
 }
 
 /** One object holding one run of one test on somebody's workstation. */
@@ -608,6 +630,44 @@ describe("publish()", () => {
     // `CATCH_WEIGHT_MAIN` written out: comparing against the dial would
     // hold just as well for a dial of zero and a catch never counted.
     expect(manifest!.entries[0]!.inputs.catches).toBe(1.5);
+  });
+
+  it("scores a coverage gate's record and packs it in no lane", async () => {
+    // A gate is a verdict the job joining the lanes reaches, so the
+    // publisher scores it like a test and leaves it out of the lanes it
+    // packs for reference.
+
+    const measured: Suite = {
+      ...TOPOLOGY[0]!,
+      measured: [{
+        member: "packages/memory",
+        reachedBy: ["packages/memory/"],
+        units: [UNIT],
+      }],
+    };
+    const gate = { k: "gate", s: "memory", n: "coverage-gate workspace-unit" };
+    const objects = seed();
+    objects[CI(DAY, "3")] = buildObjectBody(
+      ciContext("report-c2-gate", "c2", "2026-08-20T02:00:00.000Z"),
+      [{ line: "record", test: gate, outcome: "pass", durationMs: 3 }],
+    );
+    const { store, created } = fakeStore(objects);
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      store,
+      NOW,
+      () => Promise.resolve([measured, coverageGateSuite([measured])]),
+      noPrevious,
+    );
+    const manifest = await publishedManifest(created);
+    expect(
+      manifest.entries.filter((entry) => entry.suite === "coverage-gate")
+        .map((entry) => [entry.test, entry.unit]),
+    ).toEqual([[gate, "workspace-unit/packages/memory"]]);
+    expect(manifest.lanes.flatMap((lane) => lane.batches.map((b) => b.suite)))
+      .not.toContain("coverage-gate");
+    expect(manifest.lanes.flatMap((lane) => lane.batches.map((b) => b.suite)))
+      .toContain("workspace-unit");
   });
 
   it("publishes what a lane costs beyond the tests it runs", async () => {
@@ -1213,6 +1273,90 @@ describe("publish()", () => {
     );
     expect(created.size).toBe(0);
     expect(code).toBe(0);
+  });
+
+  describe("--create", () => {
+    /** A directory a dry run of a bootstrap wrote, and what it wrote. */
+    async function staged() {
+      const dir = await Deno.makeTempDir();
+      const { store, created } = fakeStore(seed());
+      const code = await publish(
+        ["--bootstrap", "--days", "1", "--dry-run", "--out", dir],
+        store,
+        NOW,
+        suites,
+        noPrevious,
+      );
+      expect(code).toBe(0);
+      expect(created.size).toBe(0);
+      return {
+        dir,
+        manifest: await Deno.readTextFile(join(dir, "manifest.json")),
+        state: await Deno.readTextFile(join(dir, "state.json")),
+      };
+    }
+
+    it("creates the manifest and the state a dry run wrote", async () => {
+      const { dir, manifest, state } = await staged();
+      const { store, created } = fakeStore({});
+      try {
+        expect(await publish(["--create", dir], store)).toBe(0);
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+      const names = [...created.keys()];
+      expect(names.length).toBe(2);
+      // The two share the identifier that pairs a manifest with the
+      // aggregate it was built from, and the state is filed under the day
+      // the manifest was generated.
+      const id = names[0]!.match(/-([0-9A-Z]{26})\.json\.gz$/)?.[1];
+      expect(id).toBeDefined();
+      expect(names[0]).toContain(
+        `/manifest-${NOW.toISOString()}-${id}.json.gz`,
+      );
+      expect(names[1]).toBe(stateObjectName("2026-08-20", id!));
+      // Compared as written rather than as parsed, so a field the parse
+      // would drop is one this notices.
+      expect(JSON.parse(await gunzipToText(created.get(names[0]!)!)))
+        .toEqual(JSON.parse(manifest));
+      expect(await gunzipToText(created.get(names[1]!)!)).toBe(state);
+    });
+
+    it("creates nothing from a directory it did not write", async () => {
+      const { dir } = await staged();
+      const { store, created } = fakeStore({});
+      try {
+        await Deno.writeTextFile(join(dir, "manifest.json"), "{}");
+        expect(await publish(["--create", dir], store)).toBe(1);
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+      expect(created.size).toBe(0);
+    });
+
+    it("creates nothing from an aggregate it cannot read", async () => {
+      const { dir } = await staged();
+      const { store, created } = fakeStore({});
+      try {
+        await Deno.writeTextFile(join(dir, "state.json"), "[]");
+        expect(await publish(["--create", dir], store)).toBe(1);
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+      expect(created.size).toBe(0);
+    });
+
+    it("creates nothing without a credential", async () => {
+      const { dir } = await staged();
+      const { store, created } = fakeStore({});
+      const anonymous: StoreAccess = { ...store, token: () => undefined };
+      try {
+        expect(await publish(["--create", dir], anonymous)).toBe(0);
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+      expect(created.size).toBe(0);
+    });
   });
 
   it("reports a malformed command line rather than publishing", async () => {

@@ -6,6 +6,12 @@
  *
  *   deno run -A tasks/test-selection-publish.ts [--days N] [--bootstrap]
  *     [--out <dir>] [--dry-run] [--concurrency N]
+ *   deno run -A tasks/test-selection-publish.ts --create <dir>
+ *
+ * `--create <dir>` creates the manifest and the aggregate a
+ * `--dry-run --out <dir>` run wrote, and reads nothing else. The fold
+ * needs no credential, so it can finish, however long it takes, before
+ * the credential for creating is obtained.
  *
  * A run folds what the newest aggregate it can read does not already
  * hold, which in the steady state is about two thousand objects. A cold
@@ -102,10 +108,12 @@ import {
   declaredSchema,
   type Manifest,
   MANIFEST_SCHEMA_VERSION,
+  parseManifest,
   serializeManifest,
   writtenAhead,
 } from "./test-selection/manifest.ts";
 import { costliestUnschedulable, plan } from "./test-selection/plan.ts";
+import { gatesOf } from "./test-selection/census.ts";
 import {
   COST_WINDOW_DAYS,
   LANE_BUDGET_SECONDS,
@@ -223,6 +231,8 @@ export interface Options {
   dryRun: boolean;
   out?: string;
   concurrency: number;
+  /** A directory a `--dry-run --out` run wrote, to create from. */
+  create?: string;
 }
 
 export function parseArgs(args: readonly string[]): Options | undefined {
@@ -264,10 +274,19 @@ export function parseArgs(args: readonly string[]): Options | undefined {
         options.out = out;
         break;
       }
+      case "--create": {
+        const create = args[++i];
+        if (create === undefined) return undefined;
+        options.create = create;
+        break;
+      }
       default:
         return undefined;
     }
   }
+  // Creating reads nothing but the directory, so every other flag
+  // alongside it is one it would ignore.
+  if (options.create !== undefined && args.length !== 2) return undefined;
   return options;
 }
 
@@ -627,9 +646,12 @@ export async function publish(
   if (options === undefined) {
     console.error(
       "usage: test-selection-publish.ts [--days N] [--bootstrap] " +
-        "[--out <dir>] [--dry-run] [--concurrency N]",
+        "[--out <dir>] [--dry-run] [--concurrency N] | --create <dir>",
     );
     return 2;
+  }
+  if (options.create !== undefined) {
+    return await createFrom(options.create, store);
   }
 
   const startedAt = now;
@@ -951,6 +973,9 @@ export async function publish(
     mandatory: new Map(),
     capabilities,
     wholeUnits: wholeUnits(suites),
+    // The gates of no change, so that none is packed as a lane's work and
+    // none is chosen.
+    gates: gatesOf(suites, manifest.entries, manifest.entries, new Set()),
   });
   // What the packer refused, from the packer, carrying the cost the bound
   // was compared against rather than a raw one that leaves out every
@@ -1003,9 +1028,37 @@ export async function publish(
     console.log(`test selection: wrote ${options.out}/manifest.json`);
   }
   if (options.dryRun) return 0;
+  return await create(store, manifest, JSON.stringify(folded.aggregate));
+}
 
-  const token = store.token();
-  if (token === undefined) {
+/**
+ * Creates the manifest and the aggregate a `--dry-run --out` run wrote
+ * to a directory. Both are read back and checked before anything is
+ * created, so a directory holding anything else creates nothing.
+ */
+async function createFrom(dir: string, store: StoreAccess): Promise<number> {
+  const manifest = parseManifest(
+    await Deno.readTextFile(join(dir, "manifest.json")),
+  );
+  const state = await Deno.readTextFile(join(dir, "state.json"));
+  if (manifest === undefined || parseAggregate(state) === undefined) {
+    console.error(
+      `test selection: ${dir} does not hold a manifest and an aggregate ` +
+        "this publisher wrote, so nothing was created. The previous " +
+        "manifest is still the newest one.",
+    );
+    return 1;
+  }
+  return await create(store, manifest, state);
+}
+
+/** Creates one manifest and the aggregate it was built from. */
+async function create(
+  store: StoreAccess,
+  manifest: Manifest,
+  state: string,
+): Promise<number> {
+  if (store.token() === undefined) {
     console.warn(
       "test selection: no write credential, so nothing was created. The " +
         "previous manifest is still the newest one.",
@@ -1021,8 +1074,8 @@ export async function publish(
   await store.create(name, await manifestBody(manifest));
   console.log(`test selection: created ${name}`);
   await store.create(
-    stateObjectName(today, id),
-    await gzipText(JSON.stringify(folded.aggregate)),
+    stateObjectName(manifest.generatedAt.slice(0, 10), id),
+    await gzipText(state),
   );
   return 0;
 }

@@ -127,7 +127,6 @@ import type { ConsoleMessage } from "./interface.ts";
 import { addressKey } from "./link-types.ts";
 import {
   CellLink,
-  inlineExternalSchemaRefsInValue,
   isCellLink,
   isNormalizedFullLink,
   isSigilLink,
@@ -4347,29 +4346,30 @@ export class Runtime {
     cfcLabelView?: CfcLabelView,
   ): Cell<any> {
     // Builder artifacts and cells enter through their encodable forms. Frozen
-    // Fabric input remains shared; unstored links need inline schema closures.
-    // Renderer trust is identity-based authority, so a marked event is copied
-    // before it becomes ordinary immutable data.
+    // Fabric input remains shared. A link's schema stays in the form the
+    // caller held it: a reference among them names a closure the registry
+    // holds, and a reader of the snapshot resolves it there
+    // (`mintedFromUnstoredValue`). Renderer trust is identity-based
+    // authority, so a marked event is copied before it becomes ordinary
+    // immutable data.
     const store = immutableCellsFor(this);
     const readerSchema = internCellLinkSchema(schema);
     const snapshot = store.create(
-      inlineExternalSchemaRefsInValue(
-        fabricFromConvertibleJsValue(
-          flattenBuilderArtifacts(data, {
-            isLeaf: isRendererTrustedEvent,
-            replaceOther: (value) =>
-              isRendererTrustedEvent(value)
-                ? deepFreeze(cloneIfNecessary(
-                  fabricFromConvertibleJsValue(
-                    flattenBuilderArtifacts(value, {
-                      replaceOther: cellAsLink,
-                    }),
-                  ),
-                  { frozen: false },
-                ))
-                : cellAsLink(value),
-          }),
-        ),
+      fabricFromConvertibleJsValue(
+        flattenBuilderArtifacts(data, {
+          isLeaf: isRendererTrustedEvent,
+          replaceOther: (value) =>
+            isRendererTrustedEvent(value)
+              ? deepFreeze(cloneIfNecessary(
+                fabricFromConvertibleJsValue(
+                  flattenBuilderArtifacts(value, {
+                    replaceOther: cellAsLink,
+                  }),
+                ),
+                { frozen: false },
+              ))
+              : cellAsLink(value),
+        }),
       ),
     );
     const cell = createCell(

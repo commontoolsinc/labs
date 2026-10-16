@@ -87,6 +87,7 @@ import {
   type CrowdingSuite,
   type FullLaneCount,
   fullLaneCount,
+  type GateChoice,
   type Plan,
   plan,
   type Selection,
@@ -105,12 +106,15 @@ import {
 } from "./test-selection/census.ts";
 import {
   type CoverageGateSelection,
+  coverageGateSelection,
   measuredMembersOf,
+  measuresSuite,
+} from "./test-selection/coverage.ts";
+import {
   measuredSetDirectory,
   measuredSetName,
   measuredSets,
-  measuresSuite,
-} from "./test-selection/coverage.ts";
+} from "./test-topology/coverage-gates.ts";
 import type {
   Manifest,
   ManifestEntry,
@@ -902,6 +906,30 @@ async function directoriesIn(at: string): Promise<string[]> {
   return names.sort();
 }
 
+/** What one pass of a batch recorded, and what its processes registered. */
+export interface Execution {
+  /** The units the pass was asked to run. */
+  units: readonly Unit[];
+
+  /**
+   * Every record the pass collected. The tests its units' skip lists
+   * named are among them, which the batch's own records leave out: none
+   * of those ships, but a skipped test reported inside a `describe` shows
+   * that `describe` ran as far as its tests.
+   */
+  records: TestRecord[];
+
+  /**
+   * The names the pass's test processes registered, by unit. A unit that
+   * is one file is here by the names `readRegistrations()` reads for that
+   * file. A unit of several files that one process runs, such as a
+   * package's browser tests, is here by the mark its runner leaves on
+   * running every test of every file. A unit whose processes said neither
+   * is not here.
+   */
+  registered: Map<string, Set<string>>;
+}
+
 /**
  * Runs one batch, once per repeat, gathering each execution's records
  * before the next can reuse a path the runner owns. Every repeat must
@@ -932,41 +960,17 @@ export async function runBatch(
   conflicts: TestRecord[];
   seconds: number;
   unexplained: number;
-  silent: string[];
-  /**
-   * What the tests this batch's own skip lists named recorded. None of it
-   * ships, but a skipped test reported inside a `describe` shows that
-   * `describe` ran as far as its tests.
-   */
-  passedOver: TestRecord[];
-
-  /**
-   * The names this batch's test processes registered over every execution,
-   * by unit. A unit that is one file is here by the names
-   * `readRegistrations()` reads for that file. A unit of several files that
-   * one process runs, such as a package's browser tests, is here by the
-   * mark its runner leaves on running every test of every file. A unit
-   * whose processes said neither is not here.
-   */
-  registered: Map<string, Set<string>>;
+  executions: Execution[];
 }> {
   const records: TestRecord[] = [];
-  const passedOver: TestRecord[] = [];
-  const registered = new Map<string, Set<string>>();
-  /** Adds `names` to what `unit` registered. */
-  const register = (unit: string, names: Iterable<string>): void => {
-    const known = registered.get(unit);
-    if (known === undefined) registered.set(unit, new Set(names));
-    else for (const name of names) known.add(name);
-  };
   const conflicts: TestRecord[] = [];
+  // What each pass recorded, kept apart from the other passes. Whether a
+  // pass ran what it was asked to is a statement about that pass, and a
+  // reader taking the batch's records as one list cannot tell a pass that
+  // ran from one that stopped part way.
+  const executions: Execution[] = [];
   let ok = true;
   let seconds = 0;
-  // Units an execution was asked to run and recorded nothing for. Only
-  // this loop can answer that: a unit runs its tests or it does not, and
-  // a reader taking the batch's records as one list sees the execution
-  // that ran beside the one that did not and cannot tell them apart.
-  const silent = new Set<string>();
   // Executions that ended badly having recorded no failure of their own,
   // which is a failure somewhere the records cannot see: a runner that
   // could not start, a command that died before reporting.
@@ -1006,11 +1010,20 @@ export async function runBatch(
         request.skip.map((name) => `${request.unit}\t${name}`)
       ),
     );
-    // The units this execution recorded anything at all for, gathered
-    // across whatever invocations the suite splits it into.
-    const heard = new Set<string>();
     // What this pass's units' hooks took, summed over their reports.
     const hooked = new Map<string, number>();
+    const execution: Execution = {
+      units: asked.map(({ unit }) => unit),
+      records: [],
+      registered: new Map(),
+    };
+    executions.push(execution);
+    /** Adds `names` to what `unit` registered in this pass. */
+    const register = (unit: string, names: Iterable<string>): void => {
+      const known = execution.registered.get(unit);
+      if (known === undefined) execution.registered.set(unit, new Set(names));
+      else for (const name of names) known.add(name);
+    };
     const invocations = await batch.suite.command(asked, {
       root: options.root,
       outputDir,
@@ -1071,16 +1084,13 @@ export async function runBatch(
         unexplained += 1;
       }
       for (const record of collected.records) {
+        execution.records.push(record);
         const location = batch.suite.locate(record);
         if (location?.level === "unit") {
-          heard.add(location.unit);
           if (
             record.outcome === "skip" &&
             skipped.has(`${location.unit}\t${record.test.n}`)
-          ) {
-            passedOver.push(record);
-            continue;
-          }
+          ) continue;
           ran += record.durationMs / 1000;
         }
         records.push(record);
@@ -1111,9 +1121,6 @@ export async function runBatch(
       }
       await Deno.remove(batchSpool, { recursive: true }).catch(() => {});
       await Deno.mkdir(batchSpool, { recursive: true });
-    }
-    for (const request of asked) {
-      if (!heard.has(request.unit)) silent.add(request.unit);
     }
     for (const [unit, seconds] of hooked) {
       ran += seconds;
@@ -1199,9 +1206,7 @@ export async function runBatch(
     conflicts,
     seconds,
     unexplained,
-    silent: [...silent].sort(),
-    passedOver,
-    registered,
+    executions,
   };
 }
 
@@ -1214,22 +1219,31 @@ export interface Accounting {
   excused: string[];
 
   /**
-   * Identities the batch was asked to run and no record accounts for,
-   * which the tree holds or may hold. An excused failure beside one of
-   * these is not excused: an invocation that recorded a failure and then
-   * stopped has run almost nothing while satisfying any weaker test.
+   * Identities a pass was asked to run and no record of that pass
+   * accounts for, which the tree holds or may hold, by key. An excused
+   * failure beside one of these is not excused: an invocation that
+   * recorded a failure and then stopped has run almost nothing while
+   * satisfying any weaker test.
    */
-  unaccounted: string[];
+  unaccounted: Missed[];
 
   /**
-   * Identities the batch was asked to run that the tree holds no test
-   * for, as the names their unit's own test processes registered show. A
-   * manifest carries one for a test renamed since it was published, and
-   * for a test only a branch ever ran, in a file the tree still holds.
+   * Identities a pass was asked to run that the tree holds no test for,
+   * as the names that pass's test processes registered show, and that no
+   * pass left unaccounted for. A manifest carries one for a test renamed
+   * since it was published, and for a test only a branch ever ran, in a
+   * file the tree still holds.
    * An invocation that stopped cannot have left one of these unrecorded,
    * since there was nothing to record, so an excusal stands beside them.
    */
   absent: string[];
+
+  /**
+   * Units a pass was asked to run and recorded nothing for. A unit runs
+   * its tests or it does not, so nothing recorded is a runner that ran
+   * none of it.
+   */
+  silent: Missed[];
 
   /**
    * The units a failure was seen in, whether or not it was excused. A
@@ -1239,8 +1253,27 @@ export interface Accounting {
   failedUnits: string[];
 }
 
+/** Something passes of a batch were asked to run, and which missed it. */
+export interface Missed {
+  /** An identity's key, or a unit. */
+  name: string;
+
+  /** The passes that missed it, counting from one. */
+  passes: number[];
+
+  /** How many passes ran its unit. */
+  of: number;
+}
+
 /**
- * Reads one batch's records against what it was asked to run.
+ * Reads one batch's records against what it was asked to run, a pass at
+ * a time.
+ *
+ * Each pass is judged on its own records and its own registrations,
+ * since the rule is per invocation and not per set of them: a pass that
+ * stopped part way has not run what it was asked to however much the
+ * other passes recorded. A suite hands each unit of a pass to one of its
+ * invocations, so judging a pass judges each invocation it ran.
  *
  * An identity is accounted for by a record naming it or naming a test
  * inside it. A stand-in is accounted for by its unit recording anything
@@ -1249,70 +1282,86 @@ export interface Accounting {
  * is named for a test rather than for a file.
  *
  * An identity that went unaccounted for while its unit recorded costs an
- * excusal rather than the run, unless `registered` shows the tree holds
- * no such test. A manifest is hours old by construction, and it holds
- * every identity any run recorded in a file the tree still holds, so it
- * names tests renamed since and tests that only a branch ever ran. No run
+ * excusal rather than the run, unless what the pass registered shows the
+ * tree holds no such test. A manifest is hours old by construction, and it
+ * holds every identity any run recorded in a file the tree still holds, so
+ * it names tests renamed since and tests that only a branch ever ran. No run
  * of this tree can record one of those, and its missing record says
  * nothing about whether an invocation stopped, so it is set apart as
- * absent and an excusal stands beside it. Where `registered` says nothing
- * about a unit, as for a suite whose processes leave no name map, the
- * identity stays unaccounted for.
- *
- * Whether every execution ran what it was asked to is not a question for
- * this. A batch's records arrive as one list however many executions
- * wrote them, so only the loop that ran them can tell an execution that
- * recorded its unit from one that did not; `runBatch` answers that.
+ * absent and an excusal stands beside it. Where the pass's registrations
+ * say nothing about a unit, as for a suite whose processes leave no name
+ * map or a process that stopped before leaving one, the identity stays
+ * unaccounted for.
  */
 export function accountFor(
   batch: Batch,
   asked: readonly Selection[],
-  records: readonly TestRecord[],
+  executions: readonly Execution[],
   nonGating: ReadonlySet<string>,
-  registered: ReadonlyMap<string, ReadonlySet<string>> = new Map(),
 ): Accounting {
-  const gating: string[] = [];
-  const excused: string[] = [];
-  const heard = new Set<string>();
-  const heardUnits = new Set<string>();
+  const gating = new Set<string>();
+  const excused = new Set<string>();
   const failedUnits = new Set<string>();
-  for (const record of records) {
-    const location = batch.suite.locate(record);
-    if (location?.level === "unit") heardUnits.add(location.unit);
-    const key = testIdentityKey(record.test);
-    heard.add(key);
-    // Ingestion drops the case a `describe` reports for itself wherever a
-    // leaf inside it reports, unless the batch knows it or it failed on its
-    // own account, so a leaf's record, skipped or not, is what accounts for
-    // every other `describe` enclosing it.
-    for (const outer of enclosingNames(record.test.n)) {
-      heard.add(testIdentityKey({ ...record.test, n: outer }));
-    }
-    if (record.outcome !== "fail") continue;
-    if (location?.level === "unit") failedUnits.add(location.unit);
-    (nonGating.has(key) ? excused : gating).push(key);
-  }
-  const unaccounted: string[] = [];
-  const absent: string[] = [];
-  for (const selection of asked) {
-    if (selection.entry.suite !== batch.suite.id) continue;
-    if (isStandIn(selection.entry)) {
-      if (!heardUnits.has(selection.entry.unit)) {
-        unaccounted.push(testIdentityKey(selection.entry.test));
+  const unaccounted = new Map<string, Missed>();
+  const absent = new Set<string>();
+  const silent = new Map<string, Missed>();
+  const mine = asked.filter(({ entry }) => entry.suite === batch.suite.id);
+  for (const [index, { units, records, registered }] of executions.entries()) {
+    const pass = index + 1;
+    /** Notes that this pass missed `name`, which `unit` holds. */
+    const miss = (into: Map<string, Missed>, name: string, unit: string) => {
+      const missed = into.get(name) ?? {
+        name,
+        passes: [],
+        of: executions.filter((ran) => ran.units.includes(unit)).length,
+      };
+      // Once per pass, however many selections name it.
+      if (missed.passes.at(-1) !== pass) missed.passes.push(pass);
+      into.set(name, missed);
+    };
+    const heard = new Set<string>();
+    const heardUnits = new Set<string>();
+    for (const record of records) {
+      const location = batch.suite.locate(record);
+      if (location?.level === "unit") heardUnits.add(location.unit);
+      const key = testIdentityKey(record.test);
+      heard.add(key);
+      // Ingestion drops the case a `describe` reports for itself wherever a
+      // leaf inside it reports, unless the batch knows it or it failed on its
+      // own account, so a leaf's record, skipped or not, is what accounts for
+      // every other `describe` enclosing it.
+      for (const outer of enclosingNames(record.test.n)) {
+        heard.add(testIdentityKey({ ...record.test, n: outer }));
       }
-      continue;
+      if (record.outcome !== "fail") continue;
+      if (location?.level === "unit") failedUnits.add(location.unit);
+      (nonGating.has(key) ? excused : gating).add(key);
     }
-    const key = testIdentityKey(selection.entry.test);
-    if (heard.has(key)) continue;
-    const names = registered.get(selection.entry.unit);
-    if (registersNoSuchTest(names, selection.entry.test.n)) absent.push(key);
-    else unaccounted.push(key);
+    for (const unit of units) {
+      if (!heardUnits.has(unit)) miss(silent, unit, unit);
+    }
+    for (const { entry } of mine) {
+      if (!units.includes(entry.unit)) continue;
+      const key = testIdentityKey(entry.test);
+      if (isStandIn(entry)) {
+        if (!heardUnits.has(entry.unit)) miss(unaccounted, key, entry.unit);
+        continue;
+      }
+      if (heard.has(key)) continue;
+      if (registersNoSuchTest(registered.get(entry.unit), entry.test.n)) {
+        absent.add(key);
+      } else miss(unaccounted, key, entry.unit);
+    }
   }
+  /** What was missed, in order of name. */
+  const byName = (missed: Map<string, Missed>): Missed[] =>
+    [...missed.values()].sort((a, b) => a.name < b.name ? -1 : 1);
   return {
-    gating: [...new Set(gating)].sort(),
-    excused: [...new Set(excused)].sort(),
-    unaccounted: [...new Set(unaccounted)].sort(),
-    absent: [...new Set(absent)].sort(),
+    gating: [...gating].sort(),
+    excused: [...excused].sort(),
+    unaccounted: byName(unaccounted),
+    absent: [...absent].filter((key) => !unaccounted.has(key)).sort(),
+    silent: byName(silent),
     failedUnits: [...failedUnits].sort(),
   };
 }
@@ -1357,7 +1406,6 @@ export function describeAccounting(
   suite: string,
   accounting: Accounting,
   excusing: boolean,
-  silent: readonly string[],
 ): void {
   const lines: string[] = [];
   /** One paragraph of the batch's summary, headed and then listed. */
@@ -1376,8 +1424,9 @@ export function describeAccounting(
       ? `${suite}: ${accounting.excused.length} failures too flaky to ` +
         `judge a change by, which do not fail this run:`
       : `${suite}: ${accounting.excused.length} failures a flake rate ` +
-        `would excuse, which fail this run because the batch did not ` +
-        `account for everything it was asked to run that the tree holds:`,
+        `would excuse, which fail this run because a pass of the batch did ` +
+        `not account for everything it was asked to run that the tree ` +
+        `holds:`,
     accounting.excused,
   );
   // Named whenever there are any, because this is the one list that
@@ -1385,9 +1434,9 @@ export function describeAccounting(
   // something unaccounted for and not saying what is a message nobody can
   // act on.
   section(
-    `${suite}: ${accounting.unaccounted.length} identities no record ` +
-      `accounts for, which the tree holds or may hold:`,
-    accounting.unaccounted,
+    `${suite}: ${accounting.unaccounted.length} identities a pass has no ` +
+      `record of, which the tree holds or may hold:`,
+    accounting.unaccounted.map(describeMissed),
   );
   // Named as well, though they decide nothing: a rename among them keeps
   // its history under the old name until an alias joins it to the new
@@ -1399,11 +1448,23 @@ export function describeAccounting(
     accounting.absent,
   );
   section(
-    `${suite}: ${silent.length} units an execution recorded nothing for, ` +
-      `so nothing ran them:`,
-    silent,
+    `${suite}: ${accounting.silent.length} units a pass recorded nothing ` +
+      `for, and so did not run:`,
+    accounting.silent.map(describeMissed),
   );
   if (lines.length > 0) say(lines);
+}
+
+/**
+ * Names what passes missed, and which passes did where only some of the
+ * passes asked to run it missed it.
+ */
+function describeMissed({ name, passes, of }: Missed): string {
+  if (passes.length === of) return name;
+  const which = passes.length === 1
+    ? `pass ${passes[0]}`
+    : `passes ${passes.slice(0, -1).join(", ")} and ${passes.at(-1)}`;
+  return `${name} (${which} of ${of})`;
 }
 
 /**
@@ -1703,11 +1764,13 @@ const WITHHELD_REASONS: Record<WithheldReason, string> = {
  * withheld, since a change touching what a failing test covers is very
  * likely a fix and must be allowed to prove itself. Saying which of them
  * that happened to is the difference between "this did not run" and
- * "this ran because you touched it".
+ * "this ran because you touched it". An identity in `judged` comes back
+ * too, because a coverage gate the plan chose runs the whole of its set.
  */
 export function describeWithheld(
   withheld: Manifest["withheld"],
   mandatory: ReadonlyMap<string, SelectionReason>,
+  judged: ReadonlySet<string> = new Set(),
 ): void {
   if (withheld.length === 0) return;
   const lines = [
@@ -1717,11 +1780,15 @@ export function describeWithheld(
     "| --- | --- | --- | --- |",
   ];
   for (const entry of withheld) {
-    const back = mandatory.has(testIdentityKey(entry.test));
+    const key = testIdentityKey(entry.test);
+    const back = mandatory.has(key)
+      ? "yes, the change reaches it"
+      : judged.has(key)
+      ? "yes, a coverage gate the plan chose runs its set"
+      : "no";
     lines.push(
-      `| ${testIdentityKey(entry.test)} | ${entry.suite} | ` +
-        `${WITHHELD_REASONS[entry.reason]} | ` +
-        `${back ? "yes, the change reaches it" : "no"} |`,
+      `| ${key} | ${entry.suite} | ${WITHHELD_REASONS[entry.reason]} | ` +
+        `${back} |`,
     );
   }
   say(lines);
@@ -2008,6 +2075,13 @@ export interface PlanOver {
 
   /** What the tree holds, packed into the run's lanes. */
   laid: Plan;
+
+  /**
+   * The measured sets the change reached, and those whose gates the plan
+   * chose, which are the sets the lanes measure and the verdicts the job
+   * joining them reaches.
+   */
+  coverage: CoverageGateSelection;
 }
 
 /**
@@ -2020,6 +2094,16 @@ export interface PlanOver {
  * differ by here. Under `everything` every identity is required, so the
  * exclusions and the value, density and exploration passes have nothing
  * left to act on and the packer behaves the same way for both.
+ *
+ * A suite is priced as measured when the run measures it, and a pull
+ * request measures the suites of the gates its plan chose, which pricing
+ * has to know before the plan is packed. So the plan is packed first with
+ * no suite priced as measured, which is the answer wherever it chooses no
+ * gate. Where it chose some, it is packed again with those gates' suites
+ * priced as measured and only their gates offered, and again with fewer
+ * for as long as it then chooses no gate of some of those suites. The
+ * suites it may choose from shrink each time, so this ends, and it ends
+ * with every suite priced the way the lanes will run it.
  */
 export function planOver(input: {
   suites: readonly Suite[];
@@ -2028,35 +2112,62 @@ export function planOver(input: {
   full: boolean;
   lanes: number;
 }): PlanOver {
-  const seen = pricedOver(input);
+  const read = census(input.suites, input.manifest, input.changed);
+  const packed = (
+    gates: readonly GateChoice[],
+    measured: ReadonlySet<string>,
+  ) => {
+    const seen = pricedForRun(
+      read,
+      input.suites,
+      (suite) => input.full || measured.has(suite),
+    );
+    return {
+      seen,
+      laid: plan({
+        manifest: seen.manifest,
+        mandatory: seen.mandatory,
+        capabilities: capabilitiesBySuite(input.suites),
+        wholeUnits: wholeUnits(input.suites),
+        lanes: input.lanes,
+        gates,
+        ...(input.full ? { policy: "everything" as const } : {}),
+      }),
+    };
+  };
+  const judging = new Map(
+    read.gates.map((gate) => [testIdentityKey(gate.entry.test), gate.judges]),
+  );
+  let gates = read.gates;
+  let measured = new Set<string>();
+  let { seen, laid } = packed(gates, measured);
+  for (;;) {
+    const chosen = new Set(
+      laid.gates.flatMap((gate) => {
+        const suite = judging.get(testIdentityKey(gate.entry.test));
+        return suite === undefined ? [] : [suite];
+      }),
+    );
+    if (
+      input.full ||
+      (chosen.size === measured.size &&
+        [...chosen].every((suite) => measured.has(suite)))
+    ) {
+      break;
+    }
+    measured = chosen;
+    gates = gates.map((gate) =>
+      gate.reached && !chosen.has(gate.judges)
+        ? { ...gate, reached: false }
+        : gate
+    );
+    ({ seen, laid } = packed(gates, measured));
+  }
   return {
     seen,
-    laid: plan({
-      manifest: seen.manifest,
-      mandatory: seen.mandatory,
-      capabilities: capabilitiesBySuite(input.suites),
-      wholeUnits: wholeUnits(input.suites),
-      lanes: input.lanes,
-      ...(input.full ? { policy: "everything" as const } : {}),
-    }),
+    laid,
+    coverage: coverageGateSelection(input.suites, read.gates, laid.gates),
   };
-}
-
-/**
- * Helper for `planOver` and the full run's lane count, which reads a
- * tree against a manifest and prices it the way the run prices it.
- */
-function pricedOver(input: {
-  suites: readonly Suite[];
-  manifest: Manifest | undefined;
-  changed: ReadonlySet<string>;
-  full: boolean;
-}): PricedCensus {
-  return pricedForRun(
-    census(input.suites, input.manifest, input.changed),
-    input.suites,
-    input.full,
-  );
 }
 
 /** What every lane of a run works out before taking its own share. */
@@ -2180,7 +2291,11 @@ function fullLanesNeeded(
   changed: ReadonlySet<string>,
   full: boolean,
 ): FullLaneCount {
-  const seen = pricedOver({ suites, manifest, changed, full });
+  const seen = pricedForRun(
+    census(suites, manifest, changed),
+    suites,
+    () => full,
+  );
   if (seen.unmeasured === seen.manifest.entries.length) {
     // Nothing at all has a measured cost, so a cost model here would be
     // arithmetic over a figure this invented, and the answer would be
@@ -2203,7 +2318,9 @@ function fullLanesNeeded(
     // have all been renamed away carries what the units it lost cost
     // onto every stand-in, and a count that assumed the bare figure
     // would be out by that whole multiple.
+    // A suite of gates holds verdicts, which no lane runs.
     const running = suites.filter((suite) => {
+      if (suite.judges !== undefined) return false;
       const unavailable = unavailableUnits(suite);
       return suite.units.some((unit) => !unavailable.has(unit));
     });
@@ -2249,7 +2366,11 @@ export async function runLane(
   // no child of it inherits the token except through the capability.
   const githubToken = takeGithubToken();
   const suites = await (deps.topology ?? loadTopology)(options.root);
-  const { seen, fetched, laid } = await lanePlan(options, suites, deps);
+  const { seen, fetched, laid, coverage } = await lanePlan(
+    options,
+    suites,
+    deps,
+  );
   const mine = laid.lanes.find((lane) => lane.lane === options.lane);
   if (mine === undefined) {
     // A lane outside the run it belongs to. Taking an empty share
@@ -2303,7 +2424,17 @@ export async function runLane(
       },
       laid.budgetSeconds,
     );
-    describeWithheld(laid.withheld, seen.mandatory);
+    describeWithheld(
+      laid.withheld,
+      seen.mandatory,
+      new Set(
+        laid.lanes.flatMap((lane) =>
+          lane.selections
+            .filter((selection) => selection.reason === "coverage-gate")
+            .map((selection) => testIdentityKey(selection.entry.test))
+        ),
+      ),
+    );
   }
   if (options.dryRun) return true;
   const stop = deps.stop?.() ?? new LaneStop();
@@ -2372,8 +2503,9 @@ export async function runLane(
   // short by whatever that test would have reached.
   const failedUnits = new Set<string>();
   // What a failure here is allowed not to fail the run for. A pull
-  // request holds these back rather than running them, so the set is
-  // empty there and the whole of this is the full run's.
+  // request holds these back rather than running them, unless a coverage
+  // gate its plan chose runs their units, so on a pull request this is
+  // only those.
   const nonGating = new Set(
     laid.nonGating.map((entry) => testIdentityKey(entry.test)),
   );
@@ -2401,7 +2533,7 @@ export async function runLane(
         workDir,
         spool,
         env,
-        batchCoverage(options, batch.suite.id, seen.coverage),
+        batchCoverage(options, batch.suite.id, coverage),
         stop,
       );
       for (const conflict of result.conflicts) conflicts.push(conflict);
@@ -2415,18 +2547,17 @@ export async function runLane(
       const accounting = accountFor(
         batch,
         mine.selections,
-        [...result.records, ...result.passedOver],
+        result.executions,
         nonGating,
-        result.registered,
       );
       // An invocation is excused only when it accounted for every
       // identity it was asked to run that the tree holds: one that
       // recorded a failure and then stopped has run almost nothing while
       // satisfying any weaker test.
       const excusing = accounting.unaccounted.length === 0;
-      describeAccounting(batch.suite.id, accounting, excusing, result.silent);
+      describeAccounting(batch.suite.id, accounting, excusing);
       if (
-        accounting.gating.length > 0 || result.silent.length > 0 ||
+        accounting.gating.length > 0 || accounting.silent.length > 0 ||
         result.unexplained > 0 ||
         (accounting.excused.length > 0 && !excusing)
       ) {
@@ -2547,14 +2678,14 @@ export async function runLane(
       ),
     ]);
   }
-  describeCoverage(seen.coverage, converted.reports, marked);
+  describeCoverage(coverage, converted.reports, marked);
   return ok;
 }
 
 /**
- * Says what the coverage gate is doing, and what this lane measured for
- * it. A change that reached a set and is not being gated says why here,
- * so that a set the cap left unforced is visible rather than absent.
+ * Says which coverage gates the plan chose, and what this lane measured for
+ * them. A gate the change reached and the plan did not choose is named
+ * here too, so that a set nothing measured is visible rather than absent.
  */
 export function describeCoverage(
   gate: CoverageGateSelection,
@@ -2562,18 +2693,27 @@ export function describeCoverage(
   marked: readonly string[] = [],
 ): void {
   if (
-    gate.reached.length === 0 && reports.length === 0 && marked.length === 0
+    gate.reached.length === 0 && gate.sets.length === 0 &&
+    reports.length === 0 && marked.length === 0
   ) {
     return;
   }
   const lines = ["## Coverage", ""];
-  if (gate.off !== undefined) {
-    lines.push(`No measured set is forced: ${gate.off}.`, "");
-    lines.push("Reached, and not forced:", "");
-    for (const ref of gate.reached) lines.push(`- ${measuredSetName(ref)}`);
-  } else if (gate.sets.length > 0) {
-    lines.push("Measured sets this change reaches, run whole and scored:", "");
-    for (const ref of gate.sets) lines.push(`- ${measuredSetName(ref)}`);
+  const chosen = new Set(gate.sets.map(measuredSetName));
+  if (chosen.size > 0) {
+    lines.push("Measured sets whose gates the plan chose, run whole:", "");
+    for (const name of chosen) lines.push(`- ${name}`);
+  }
+  const passedOver = gate.reached.map(measuredSetName)
+    .filter((name) => !chosen.has(name));
+  if (passedOver.length > 0) {
+    if (chosen.size > 0) lines.push("");
+    lines.push(
+      "Measured sets the change reaches whose gates the plan did not " +
+        "choose, which nothing measures:",
+      "",
+    );
+    for (const name of passedOver) lines.push(`- ${name}`);
   }
   if (reports.length > 0) {
     // A report belonging to a set is named as the set, so one summary
@@ -2581,7 +2721,7 @@ export function describeCoverage(
     // suite wrote and no set is scored from, which only the full run's
     // merge reads.
     const named = new Map(
-      gate.reached.map((
+      [...gate.reached, ...gate.sets].map((
         ref,
       ) => [measuredSetDirectory(ref), measuredSetName(ref)]),
     );

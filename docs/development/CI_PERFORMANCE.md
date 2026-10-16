@@ -48,8 +48,8 @@ merge protection stores and matches the job's name on its own.
 It runs after failed and skipped dependencies, and not on a cancelled run. It
 fails unless every dependency succeeded or was skipped. It also fails unless
 `tests` succeeded, since a run whose lanes were skipped has not passed its
-tests. Its steps also hold the run's records to the topology and, on a pull
-request, hold the measured sets to their baselines; either can fail it. Do not
+tests. Its steps also hold the run's records to the topology and judge the
+coverage gates the run chose; on a pull request, either can fail it. Do not
 require the lanes themselves. Each lane's name, `Tests (N/M)`, carries a lane
 count, and the full run's count changes from run to run. A new kind of test is
 a suite in the topology rather than a job, so `Status`'s `needs` list does not
@@ -376,7 +376,7 @@ step bound only stops a lane that hangs, so it sits above both, and
 of the same job definition and take the same bounds, so a pull-request lane that
 hangs is stopped only at the lane step's bound, although it is packed to finish
 in five minutes. A lane's mandatory work can exceed its budget, for example when
-a change forces a large measured set or the full run is capped at
+a change edits many test files or the full run is capped at
 `FULL_LANES_MAX`. Such a lane runs long rather than being stopped with its later
 batches unrun and unmeasured, and its job log says how far its plan was
 projected past the budget. So moving either lane bound in `policy.ts` moves

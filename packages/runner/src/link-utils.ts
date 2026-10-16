@@ -239,9 +239,10 @@ export function externalizeSchema(schema: JSONSchemaObj): JSONSchema {
  * external documents are loaded from the space holding the declaration;
  * the target space need not hold them. A declaration inside an immutable
  * document, which no space stores, is held by the space in the address
- * naming that document. An incomplete declaration selects nothing until its
- * missing documents arrive. A declaration rejected by the decomposer logs a
- * warning and selects nothing.
+ * naming that document, or by the registry alone for a document minted
+ * from a value no space has stored. An incomplete declaration selects
+ * nothing until its missing documents arrive. A declaration rejected by the
+ * decomposer logs a warning and selects nothing.
  */
 export function schemaForSpaceCrossing(
   tx: IExtendedStorageTransaction,
@@ -272,10 +273,9 @@ export function schemaForSpaceCrossing(
 }
 
 // The inline form each external reference recomposed to, by reference.
-// Recomposition builds a fresh closure every time, so without this every
-// node plan's inputs document deep-froze and hashed the same few schemas
-// again; a reference names one content, so the form it recomposed to in
-// this registry epoch is the form it has.
+// Recomposition builds a fresh closure every time; a reference names one
+// content, so the form it recomposed to in this registry epoch is the form
+// it has.
 let inlinedSchemaByRef = new Map<string, FabricValue>();
 onSchemaRegistryClear(() => {
   inlinedSchemaByRef = new Map();
@@ -283,15 +283,11 @@ onSchemaRegistryClear(() => {
 
 /**
  * Rewrites reference-form link schemas inside `value` back to their inline
- * (recomposed) form, for a value no space has stored that is about to
- * become an immutable document. A link inside an immutable document resolves its
- * schema's references in the space of the address naming the document
- * (`schemaForSpaceCrossing`), and the traversal admits a reference there
- * only where that space persists its closure. No write has put the closure
- * behind such a value's references in any space, so each link carries its
- * schema inline, exactly as with the flag off. A reference whose closure
- * the registry cannot supply stays a reference; the traversal's loader
- * gates that read either way.
+ * (recomposed) form, for a value whose reader has no registry to resolve a
+ * reference in: one encoded into a portable `data:` identifier, one about
+ * to cross the runtime boundary, and the content identity two immutable
+ * documents are compared by. A reference whose closure the registry cannot
+ * supply stays a reference.
  */
 export function inlineExternalSchemaRefsInValue<T extends FabricValue>(
   value: T,
@@ -336,11 +332,9 @@ function wireByteLength(value: unknown): number | undefined {
  * Rewrites inline link schemas inside `value` to their reference form, the
  * form a link created by `createSigilLinkFromParsedLink()` carries with the
  * flag on, registering each closure in the realm registry as that does. A
- * value copied out of an immutable document minted from unstored data carries
- * its link schemas inline (`inlineExternalSchemaRefsInValue`), and written
+ * value a pattern built by hand carries its link schemas inline, and written
  * as it stands into an ordinary document it would store, and send, every
- * closure in full for every link: a nested instance's argument document
- * carries one per captured input. A reference already stamped, a trivial
+ * closure in full for every link. A reference already stamped, a trivial
  * schema, a schema decomposition refuses, and a schema that takes no more
  * wire bytes than the reference that would replace it (a bare handle stamp
  * such as `{ asCell: ["stream"] }`, which readers combine structurally) ride
