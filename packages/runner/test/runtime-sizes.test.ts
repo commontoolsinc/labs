@@ -2,7 +2,9 @@ import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { URI } from "@commonfabric/memory/interface";
 import type { JSONSchema } from "../src/builder/types.ts";
+import { immutableCellsFor } from "../src/immutable-cell.ts";
 import { Runtime, type RuntimeOptions } from "../src/runtime.ts";
 import {
   CFC_REJECTION_REASON_LIMIT,
@@ -12,6 +14,7 @@ import {
 } from "../src/runtime-sizes.ts";
 import type { Action } from "../src/scheduler/types.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import type { SpaceReplica } from "../src/storage/v2.ts";
 
 const signer = await Identity.fromPassphrase("runner-runtime-sizes");
 const space: MemorySpace = signer.did();
@@ -175,6 +178,37 @@ describe("runtime-sizes", () => {
       expect(runtime.getSizes().runtime.immutableSnapshots - before).toBe(2);
     });
 
+    it("counts an element snapshot a child store retains", () => {
+      // Element traversal retains its snapshots in a store of their own, not
+      // in the runtime's root store, and the count includes them all the same.
+
+      const runtime = createRuntime();
+      const base = runtime.getCell(space, "elements", { type: "object" })
+        .getAsNormalizedFullLink();
+      const before = runtime.getSizes().runtime.immutableSnapshots;
+      immutableCellsFor(runtime).createElement({ name: "Ada" }, base);
+
+      expect(runtime.getSizes().runtime.immutableSnapshots - before).toBe(1);
+    });
+
+    it("counts a storage sink once however often it registers and cancels", () => {
+      const runtime = createRuntime();
+      const replica = storageManager!.open(space).replica as SpaceReplica;
+      const uri = runtime.getCell(space, "sunk-document")
+        .getAsNormalizedFullLink()
+        .id as URI;
+      const sink = () => {};
+      const subscriptions = () => runtime.getSizes().storage?.subscriptions;
+
+      const cancel = replica.sinkDocument(uri, sink);
+      replica.sinkDocument(uri, sink);
+      expect(subscriptions()).toBe(1);
+
+      cancel();
+      cancel();
+      expect(subscriptions()).toBe(0);
+    });
+
     it("tallies a commit CFC enforcement refused under its reason's prefix", async () => {
       // A labeled target linked to a source whose document stores no CFC
       // metadata is refused with the reason `missing link source metadata
@@ -220,6 +254,53 @@ describe("runtime-sizes", () => {
       ]);
       expect(runtime.getSizes().cfcRejectionsByReason).toEqual({
         "missing link source metadata": 1,
+      });
+    });
+
+    it("tallies a commit whose CFC preparation crashed", async () => {
+      // A stored envelope carrying two ifc-bearing `anyOf` branches makes the
+      // next merging writer's preparation throw, and that commit is refused
+      // before storage as a `CommitPreparationError`.
+
+      const runtime = createRuntime();
+      const profile: JSONSchema = {
+        type: "object",
+        properties: {
+          name: { type: "string", ifc: { confidentiality: ["secret"] } },
+        },
+      };
+      const ambiguous: JSONSchema = {
+        type: "object",
+        properties: {
+          result: {
+            anyOf: [
+              profile,
+              { type: "string", ifc: { confidentiality: ["other"] } },
+            ],
+          },
+          candidates: { type: "array", items: profile },
+        },
+      };
+      const seed = runtime.edit();
+      runtime.getCell(space, "wish", ambiguous, seed).set({
+        candidates: [{ name: "Bob" }],
+      });
+      seed.prepareCfc();
+      expect((await seed.commit().settled).error).toBeUndefined();
+
+      const tx = runtime.edit();
+      const resolved = runtime.getCell(space, "wish-resolved", profile, tx);
+      resolved.set({ name: "Ada" });
+      runtime.getCell(space, "wish", ambiguous, tx).set({
+        result: resolved,
+        candidates: [],
+      });
+      runtime.prepareTxForCommit(tx);
+      const result = await tx.commit().settled;
+
+      expect(result.error?.name).toBe("CommitPreparationError");
+      expect(runtime.getSizes().cfcRejectionsByReason).toEqual({
+        "CFC commit preparation crashed": 1,
       });
     });
   });
