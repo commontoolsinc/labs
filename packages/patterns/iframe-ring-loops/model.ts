@@ -409,19 +409,22 @@ export function cellKey(ringId: string, step: number, lane: number): string {
 /**
  * Returns the notes of `notes` that the layout can draw and play: those whose
  * ring exists, whose step and lane fall inside it, and that sit under the key
- * of their own cell. A removed note, and one left over from a layout with
- * other rings, is not among them.
+ * of their own cell. A removed note, a value that is not a note, and a note
+ * left over from a layout with other rings are not among them. The values are
+ * read as anyone with write access to the space may have stored them, so an
+ * `authorName` that is not a string is dropped.
  */
 export function liveNotes(
   layout: RingLayout,
-  notes: Readonly<Record<string, PlacedNote | null | undefined>>,
+  notes: Readonly<Record<string, unknown>>,
 ): LiveNote[] {
   const ringIndexById = new Map(
     layout.rings.map((ring, index) => [ring.id, index]),
   );
   const live: LiveNote[] = [];
-  for (const [key, note] of Object.entries(notes)) {
-    if (note === null || note === undefined) continue;
+  for (const [key, value] of Object.entries(notes)) {
+    const note = readNote(value);
+    if (!note) continue;
     const ringIndex = ringIndexById.get(note.ringId);
     if (ringIndex === undefined) continue;
     const { steps } = layout.rings[ringIndex];
@@ -731,6 +734,36 @@ function isIndexBelow(value: number, length: number): boolean {
   return Number.isInteger(value) && value >= 0 && value < length;
 }
 
+/** Returns whether `value` is a record whose fields can be read by name. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Helper for `liveNotes()`, which reads a stored value as a note, or returns
+ * `undefined` where a field of a note is missing or of the wrong type. An
+ * `authorName` that is not a string reads as absent.
+ */
+function readNote(value: unknown): PlacedNote | undefined {
+  if (!isRecord(value)) return undefined;
+  const { ringId, step, lane, authorId, color, authorName } = value;
+  if (
+    typeof ringId !== "string" || typeof step !== "number" ||
+    typeof lane !== "number" || typeof authorId !== "string" ||
+    typeof color !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    ringId,
+    step,
+    lane,
+    authorId,
+    color,
+    ...(typeof authorName === "string" && { authorName }),
+  };
+}
+
 //
 // Presence
 //
@@ -1019,11 +1052,6 @@ export function padForKey(
 /** Returns the key that plays lane `lane` of ring `ringIndex`, if any. */
 export function keyForPad(ringIndex: number, lane: number): string | undefined {
   return PAD_KEY_ROWS[ringIndex]?.[lane];
-}
-
-/** Returns whether `value` is a record whose fields can be read by name. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** Helper for `readPeer()`, which reads a pointer facet. */

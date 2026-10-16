@@ -262,6 +262,38 @@ describe("model", () => {
       expect(liveNotes(layout, { "drums:1:0": noteAt("drums", 0, 0) }))
         .toEqual([]);
     });
+
+    it("returns a stored note whose `authorName` is not a string without one", () => {
+      // Anyone with write access to the space can store a note, so a name of
+      // the wrong type must not reach the code that trims names.
+
+      const stored = {
+        ringId: "bass",
+        step: 3,
+        lane: 1,
+        authorId: "someone",
+        color: "#4dabf7",
+        authorName: 42,
+      };
+      const live = liveNotes(layout, { "bass:3:1": stored });
+      expect(live).toEqual([{
+        ringIndex: 2,
+        note: {
+          ringId: "bass",
+          step: 3,
+          lane: 1,
+          authorId: "someone",
+          color: "#4dabf7",
+        },
+      }]);
+      expect(authorNameOf(live[0].note)).toBe("Someone");
+    });
+
+    it("omits a stored value that lacks a field of a note", () => {
+      const stored = { ringId: "bass", step: 3, lane: 1, color: "#4dabf7" };
+      expect(liveNotes(layout, { "bass:3:1": stored, "bass:4:1": "bass" }))
+        .toEqual([]);
+    });
   });
 
   describe("noteFor()", () => {
