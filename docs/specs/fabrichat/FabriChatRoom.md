@@ -108,14 +108,16 @@ delivery" and §4). So two sends of the same text are two messages.
 
 An act on a message, and a reply, takes the message by its cell and reads it
 alone. A handler checks what the element's write policy does not — whose
-message or reaction it is, the obliteration rights, and, for an act on a
-message, that the message lives in the room's space — and drops anything
-else without a word: the room's rendering offers only acts the viewer can
-take, so no event outside the rules comes from it. The acts on a message are
-bound to a handle on one of the room's records, which names the room's space
-and is read for nothing else. A message's write policy names its handlers,
-not a room, so the space is what keeps one room's rules, its kind and its
-`ownersMayObliterate`, off a message another room's rules govern.
+message or reaction it is, the obliteration rights, and that a message acted
+on or replied to lives in the room's space — and drops anything else without
+a word: the room's rendering offers only acts the viewer can take, so no
+event outside the rules comes from it. The acts on a message are bound to a
+handle on one of the room's records, and the sends to the room's messages,
+either of which names the room's space and is read for nothing else for
+this. A message's write policy names its handlers, not a room, so the space
+is what keeps one room's rules, its kind and its `ownersMayObliterate`, off
+a message another room's rules govern, and what keeps a reply from linking
+the room to a document of another space.
 
 `commitEdit` and `commitDelete` are admitted only for the message's own sender.
 `commitEdit` records the new text in place, with the time as `editedAt`.

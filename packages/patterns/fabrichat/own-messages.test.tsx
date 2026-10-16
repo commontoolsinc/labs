@@ -1,12 +1,13 @@
 /**
- * A FabriChat room's acts on a message take only a message of the room's own
- * space. Handed a message that lives elsewhere, an edit and an obliteration
- * are dropped, so a room's rules, its kind and its policy, never reach a
- * message another room's rules govern. Dropped means untouched and without
- * an error: an act that went on to write the message would have its
- * transaction refused by the runtime's write isolation, and this test
- * tolerates no runtime error. The same acts on the room's own messages
- * land. Alice and Bob run here as this lane's one principal, which
+ * A FabriChat room's acts on a message, and its replies, take only a message
+ * of the room's own space. Handed a message that lives elsewhere, an edit and
+ * an obliteration are dropped, so a room's rules, its kind and its policy,
+ * never reach a message another room's rules govern. Dropped means untouched
+ * and without an error: an act that went on to write the message would have
+ * its transaction refused by the runtime's write isolation, and this test
+ * tolerates no runtime error. A reply to that message is dropped too, so the
+ * room links no document of another space. The same acts on the room's own
+ * messages land. Alice and Bob run here as this lane's one principal, which
  * holds OWNER in every space it creates, so what tells them apart is their
  * profiles alone.
  */
@@ -143,6 +144,17 @@ export default pattern(() => {
           bodyOf(elsewhere.get()?.message) === "Alice elsewhere"
         ),
       },
+
+      // A reply to the message elsewhere is dropped.
+      {
+        action: alice.sendMessage,
+        event: {
+          body: "A reply to elsewhere",
+          replyTo: { message: messageOf(foreign), shownIn: "main" },
+        },
+        trustedUi: sendGesture,
+      },
+      { assertion: assert(() => bodies(messages) === "Alice in the room") },
 
       // The same acts on the room's own message land.
       {

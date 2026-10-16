@@ -755,10 +755,12 @@ const emojiOf = (event: RoomStreamEvent, bound: string | undefined): unknown =>
   event?.emoji ?? bound ?? event?.target?.value?.trim();
 
 /**
- * Whether `target` is one of the room's messages as far as an act on it
- * goes: a message of the space `room`, any of the room's records, lives in.
- * An act on a message elsewhere would apply this room's rules, its kind and
- * its policy, to a message another room's rules govern.
+ * Whether `target` is one of the room's messages as far as an act on it, or
+ * a reply to it, goes: a message of the space `room`, any of the room's
+ * records, lives in. An act on a message elsewhere would apply this room's
+ * rules, its kind and its policy, to a message another room's rules govern,
+ * and a reply to one would have the room's views read a document of
+ * another space.
  */
 const isInRoomOf = (room: Cell<unknown>, target: Cell<unknown>): boolean =>
   spaceOf(target) === spaceOf(room);
@@ -787,13 +789,14 @@ const leaveTombstone = (target: MessageCell, keepsAuthor: boolean): void => {
 /**
  * Pushes a send onto `messages`: the text `event` carries, from `myProfile`,
  * as a reply to `reply` where that names a message, shown `shownIn`, with a
- * reaction list of its own; then `joined` is told. A send with no text, or
- * before the profile resolves, pushes nothing. Returns whether it pushed.
+ * reaction list of its own; then `joined` is told. A send with no text,
+ * before the profile resolves, or replying to a message outside the room's
+ * space, pushes nothing. Returns whether it pushed.
  *
  * Every handler here takes the event a rendered control of the room sends,
  * and the controls offer only acts the viewer may take, so a handler checks
- * what the element's write policy does not — whose message it is, and, for
- * an act on a message, that it is one of the room's — and drops anything
+ * what the element's write policy does not — whose message it is, and that
+ * a message acted on or replied to is one of the room's — and drops anything
  * else without a word.
  */
 const sendInto = (
@@ -808,6 +811,7 @@ const sendInto = (
   const body = textOf(event);
   if (profile === undefined || body === "") return false;
   const target = reply?.resolveAsCell();
+  if (target !== undefined && !isInRoomOf(messages, target)) return false;
   // A message may link only a list that exists, so the list is made before
   // the message links it.
   const reactions = new Writable<ReactionsValue>([] as ReactionsValue);

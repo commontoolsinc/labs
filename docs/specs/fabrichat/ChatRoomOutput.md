@@ -367,10 +367,11 @@ Sends a message from the sender.
 - **Effect:** appends a [`ChatMessage`](ChatMessage.md) to the room's messages,
   with the sender's profile as `authorProfile`, `body` as `body`, the handler
   clock as `sentAt` (see [times](ChatMessage.md#times)), and no reactions.
-- **Dropped:** a `body` that isn't a non-empty string, or a sender whose
-  profile hasn't resolved. The room takes `replyTo` as sent: a client sends a
-  reply only to a message of the room that is not deleted, with a `shownIn`
-  its target allows (see [`ChatReply`](ChatReply.md)).
+- **Dropped:** a `body` that isn't a non-empty string, a sender whose profile
+  hasn't resolved, or a `replyTo` whose `message` is outside the room's space.
+  Otherwise the room takes `replyTo` as sent: a client sends a reply only to a
+  message of the room that is not deleted, with a `shownIn` its target allows
+  (see [`ChatReply`](ChatReply.md)).
 
 Two messages with the same text are two sends, so sending "YES!" three times
 makes three messages.
