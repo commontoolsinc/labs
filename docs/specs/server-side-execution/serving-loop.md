@@ -1219,11 +1219,11 @@ the 2026-08-24 ruling; the owner may re-rule it).
   subscribed, and a change to any other input runs it again.
 - A derivation run that read, through a link, an absent user- or
   session-scoped instance of a document another derivation registered in
-  this runtime writes aborts its tx the same way: the serving loop has not
-  produced that instance yet, so the absence is not its state
-  (speculation.md §2's serving-runtime corollary to the scoped
-  first-write carve-out). Its read of the instance stays subscribed, so it
-  runs again once the instance is produced.
+  this runtime declares as a write (a builtin's stores included) aborts its
+  tx the same way: the serving loop has not produced that instance yet, so
+  the absence is not its state (speculation.md §2's serving-runtime
+  corollary to the scoped first-write carve-out). Its read of the instance
+  stays subscribed, so it runs again once the instance is produced.
 - On a client (OFF arm, and speculation in the ON arm) seal == commit /
   overlay-apply as today — one abstraction, two destinations. Anchor:
   `packages/runner/src/storage/extended-storage-transaction.ts`.
