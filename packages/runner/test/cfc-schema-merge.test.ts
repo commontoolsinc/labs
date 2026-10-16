@@ -2468,16 +2468,27 @@ describe("canonicalizeCfcSchemaDocument", () => {
     });
   });
 
+  // Deno disables the legacy `__proto__` setter, so an assignment into `{}`
+  // keeps the name as an own property here and the failure this guards
+  // against shows only under `deno test --unsafe-proto`, which restores
+  // browser semantics; the file passes under both.
   it("keeps a definition named __proto__", () => {
-    const canonical = canonicalizeCfcSchemaDocument({
+    const definition = {
+      type: "string",
+      ifc: { confidentiality: ["secret"] },
+    } as const;
+    const schema: JSONSchemaObj = {
       type: "object",
       properties: { a: { $ref: "#/$defs/__proto__" } },
-      $defs: Object.fromEntries([["__proto__", { type: "string" }]]),
-    }) as JSONSchemaObj;
+      $defs: Object.fromEntries([["__proto__", definition]]),
+    };
+    const canonical = canonicalizeCfcSchemaDocument(schema) as JSONSchemaObj;
     expect(Object.hasOwn(canonical.$defs!, "__proto__")).toBe(true);
     expect(Object.entries(canonical.$defs!)).toEqual([
-      ["__proto__", { type: "string" }],
+      ["__proto__", definition],
     ]);
+    const merged = mergeCfcSchemaEnvelopes(schema, schema) as JSONSchemaObj;
+    expect(Object.hasOwn(merged.$defs ?? {}, "__proto__")).toBe(true);
   });
 
   it("prunes a retained authored definition below the root", () => {
@@ -2494,6 +2505,83 @@ describe("canonicalizeCfcSchemaDocument", () => {
     }) as JSONSchemaObj;
     expect(canonical.$defs).toEqual({
       Unused: { type: "object", properties: { x: { type: "number" } } },
+    });
+  });
+
+  it("reads a literal $ref inside policy or default data as data, not as a ref", () => {
+    // Two definitions that differ only in a literal atom carrying a `$ref`
+    // member, and a minted copy of the definition the atoms name: folding
+    // must leave the atoms as they are, so the two stay distinct and the
+    // policies of a document merged with itself are unchanged.
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: {
+        a: { $ref: "#/$defs/A" },
+        b: { $ref: "#/$defs/B" },
+        c: { $ref: "#/$defs/__cfc_hoisted_0_X" },
+        d: { $ref: "#/$defs/X", default: { $ref: "#/$defs/Y" } },
+      },
+      $defs: {
+        A: {
+          type: "string",
+          ifc: {
+            confidentiality: [
+              { type: "https://example.com/Reader", $ref: "#/$defs/X" },
+            ],
+          },
+        },
+        B: {
+          type: "string",
+          ifc: {
+            confidentiality: [
+              { type: "https://example.com/Reader", $ref: "#/$defs/Y" },
+            ],
+          },
+        },
+        X: { type: "string" },
+        Y: { type: "string" },
+        __cfc_hoisted_0_X: { type: "string" },
+      },
+    };
+    const canonical = canonicalizeCfcSchemaDocument(schema) as JSONSchemaObj;
+    const defs = canonical.$defs as Record<string, JSONSchemaObj>;
+    expect(Object.keys(defs).toSorted()).toEqual(["A", "B", "X", "Y"]);
+    expect(defs.A.ifc).toEqual(schema.$defs!.A.ifc);
+    expect(defs.B.ifc).toEqual(schema.$defs!.B.ifc);
+    expect((canonical.properties as Record<string, JSONSchemaObj>).d).toEqual({
+      $ref: "#/$defs/X",
+      default: { $ref: "#/$defs/Y" },
+    });
+    expect(
+      cfcSchemaPoliciesEqual(schema, mergeCfcSchemaEnvelopes(schema, schema)),
+    )
+      .toBe(true);
+  });
+
+  it("keeps definitions apart whose Fabric-valued defaults differ", () => {
+    const canonical = canonicalizeCfcSchemaDocument({
+      type: "object",
+      properties: {
+        a: { $ref: "#/$defs/Bytes" },
+        b: { $ref: "#/$defs/__cfc_hoisted_0_Bytes" },
+      },
+      $defs: {
+        Bytes: {
+          type: "object",
+          default: new FabricBytes(new Uint8Array([1, 2])),
+        },
+        __cfc_hoisted_0_Bytes: {
+          type: "object",
+          default: new FabricBytes(new Uint8Array([3])),
+        },
+      },
+    }) as JSONSchemaObj;
+    expect(Object.keys(canonical.$defs!).toSorted()).toEqual([
+      "Bytes",
+      "__cfc_hoisted_0_Bytes",
+    ]);
+    expect((canonical.properties as Record<string, JSONSchemaObj>).b).toEqual({
+      $ref: "#/$defs/__cfc_hoisted_0_Bytes",
     });
   });
 
