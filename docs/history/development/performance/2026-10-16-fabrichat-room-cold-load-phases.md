@@ -190,6 +190,26 @@ pair where it ran first and the before arm had the lighter load. That is
 the size of the pre-sync work the change removes, not of the load: the
 three phases above remain.
 
+The same row again the next morning, after the branch caught up with
+`main` at `126a4eb0a8` (nine commits past the branch point, among them the
+CFC handle and link-label changes of commonfabric/labs#8790, #8788 and
+#8767): the before arm built from that `main`, the after arm from the
+branch merged with it, four pairs alternating which arm ran first, at a
+one-minute load of 15 to 58:
+
+| pair | first arm | second arm | load, first to second |
+| --- | --- | --- | --- |
+| 1 | before 19.6 s (17.3 … 21.0) | after 16.9 s (15.7 … 17.8) | 19 → 18 → 15 |
+| 2 | after 25.2 s (20.3 … 28.2) | before 22.3 s (16.2 … 26.6) | 15 → 21 → 38 |
+| 3 | before 21.8 s (20.2 … 24.1) | after 26.0 s (25.2 … 26.8) | 35 → 23 → 58 |
+| 4 | after 16.6 s (14.5 … 18.0) | before 24.9 s (20.5 … 27.2) | 58 → 25 → 26 |
+
+One binary spans 16.6 to 26.0 s across these runs, and each pair's
+difference follows the load more than the arm. On this shared machine the
+benchmark's `30` row cannot resolve a change of two or three seconds; the
+pairs taken the evening before, at loads that fell steadily, could, and
+the counts above are what the change is measured by.
+
 A full run of the benchmark on the before binary earlier in the day, at
 a lower load, gave 16.2 s (16.0 … 16.3) for `10`, 2.1 s for `send 10` and
 14.4 s (14.1 … 14.9) for `30`; its `send 30` timed out after the server
