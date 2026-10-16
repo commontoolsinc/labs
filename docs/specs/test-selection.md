@@ -662,8 +662,8 @@ Two rules force a test in.
   it is unknown, when the score chooses it, and in a run over the whole
   corpus. Anything else that has to answer "which
   parts of this repository did the change touch" answers from the same
-  declarations, including a consumer deciding not which tests to run but
-  which packages to measure. A second mechanism for the same question is
+  declarations, including the [coverage gates](#coverage) a change may
+  choose. A second mechanism for the same question is
   a second thing to be wrong about, and the two would disagree.
 
   A declaration is bounded rather than exhaustive, so that what a change
@@ -790,6 +790,11 @@ where an identity costing more than a whole budget runs. An identity that
 would be repeated takes as many of its runs as fit, giving them up one at
 a time down to one.
 
+A coverage gate the change reaches is a candidate of these three passes
+as well, taken at its own score. Choosing one places every identity its
+set holds, under these same rules, across as many lanes as that takes.
+[Which gates a change runs](#which-gates-a-change-runs) says how.
+
 ## Coverage
 
 Selection breaks a gate on the repository's whole coverage number: a
@@ -805,12 +810,11 @@ the comparison against the default branch stays honest.
 
 A suite declares its measured sets. Each one names the member whose lines
 it counts, the units that measure it, and the paths a change reaches it
-by. Those paths are declarations in the sense above, and reaching one is
-what makes every unit of the set mandatory: the coverage gate adds no
-second way of asking what a change touched. A set every one of whose
-units the configuration deliberately does not run is not a set at all,
-since scoring it would score whatever else happened to write into its
-directory.
+by. Those paths are declarations in the sense above, and the coverage
+gates add no second way of asking what a change touched. A set every one
+of whose units the configuration deliberately does not run is not a set
+at all, since scoring it would score whatever else happened to write into
+its directory.
 
 The suite that runs each workspace member's own tests declares one set for
 every member under `packages/` with tests that run under Deno alone, at
@@ -818,6 +822,77 @@ whatever depth the member sits, reached by its own tree less the trees of
 members nested inside it. The repository's `tasks` and `scripts` trees
 carry none. That suite leaves a member out only where the member is named,
 with a reason, on `EXCLUDED_FROM_COVERAGE_GATE`.
+
+### A gate is a test
+
+Each measured set has a **gate**: the comparison of what the set's units
+reached in its member against what the same set reached on the default
+branch. A gate is a test in everything selection reads. It has an
+identity, of kind `gate`, owned by the member whose lines it counts and
+named for the suite whose units it judges, such as `coverage-gate
+workspace-unit`. Every run that reaches its verdict records it, and the
+publisher scores those records like any other identity's. A gate
+therefore earns a place in a pull request by what it has caught, as a
+test does.
+
+What sets a gate apart is where its verdict is reached. Several lanes may
+share a set's units between them, so no lane can judge the set, and the
+job that joins the lanes does. The topology holds the gates as a suite of
+their own, one unit per set, whose units are verdicts over other suites'
+units. A lane never runs one, and a plan never places one in a lane.
+
+### Which gates a change runs
+
+A change may choose only the gates of sets it reaches. A gate whose set
+the change does not reach is never chosen, whatever it scores.
+
+Among those, a gate is chosen by score, in the value, density and
+exploration passes, like any test. Choosing a gate places every identity
+of every unit of its set, each in a lane that holds it inside its budget,
+across as many lanes as that takes. A gate is chosen only where the whole
+of that fits inside the pass's share, since a count over part of a set
+measures nothing. What it costs the pass is what those identities add to
+the lanes. An identity of the set already placed for another reason, a
+test the change edited among them, is part of the set's run and is not
+placed again, so a gate whose whole set already runs costs nothing more.
+Each identity of the set runs as many times as its own flake rate asks
+for, and an identity the manifest holds back is placed all the same,
+since the set is measured whole or not at all.
+
+In the density pass a gate's density is its score over what choosing it
+adds. Working that out is a packing of a whole set, so a gate is weighed
+when it is offered, when it reaches the head of the queue, and after a
+gate is chosen, rather than after every placement.
+
+A gate the plan does not choose forces nothing. Its set is reported as
+not measured, and nothing fails for it.
+
+Neither rule that forces a test in reaches a gate. A gate is not a unit,
+and the units of its set are under both rules already. A gate nothing has
+recorded is offered at the floor of the score, under the identity its
+suite says it records under. The default branch reaches every gate's
+verdict on every push, so that is where its record starts. A gate the
+manifest holds back is not chosen, and the full policy runs it and fails
+nothing for it, as it does any excluded identity.
+
+A lane charges a suite at what its batches cost with coverage on where
+the run measures that suite, and a pull request measures the suites of
+the gates its plan chose. Pricing has to know that before the plan is
+packed. So the plan is packed first with no suite priced as measured,
+which is the answer wherever it chooses no gate. Where it chose some, it is
+packed again with those gates' suites priced as measured and only their
+gates offered, and again with fewer for as long as it then chooses no gate
+of some of those suites. Each packing after the second offers fewer
+suites, so this ends, and it ends with every suite priced the way the
+lanes will run it.
+
+The job that joins the lanes packs the same plan, from the same tree and
+the same manifest, to learn which gates were chosen. On a pull request it
+refuses to judge anything where it cannot read the store, as a lane
+refuses to pack. A run of every test chooses every gate whatever the
+store says.
+
+### Measuring a set
 
 Five rules hold of every measurement.
 
@@ -827,41 +902,28 @@ Five rules hold of every measurement.
   member are two counts and are never added together, and neither is
   added to the source group of the same name, which is the same lines
   measured by every test in the run.
-- **Measuring a set does not change how often anything runs.** Its units
-  are mandatory, so they leave the selectable set and no later pass
-  takes them again; each runs as many times as its own flake rate asks
-  for, which is the count anything else in the run would have given it,
-  and a repeat reaches that unit and no other. A repeat leaves the set's
-  number where it was, since a count is the union over what the runs
-  reached. Two sets reaching one suite run the union of their units.
+- **Measuring a set does not change how often anything runs.** Each of
+  its identities runs as many times as its own flake rate asks for, which
+  is the count anything else in the run would have given it, and a repeat
+  reaches that unit and no other. A repeat leaves the set's number where
+  it was, since a count is the union over what the runs reached. Two
+  chosen gates over one suite run the union of their units.
 - **A set's lines are its member's own tree**, less the tree of any
   member nested inside it, counted by the rules the repository-wide
   metric already uses. A member's browser half is not part of any set,
   so that adding a test needing a browser costs a member nothing here,
   and what that half reaches is not counted toward the set.
-- **A change's lanes instrument only what is scored.** They turn coverage
-  on for the members of the sets the gate scores and run everything else
-  unmeasured, since instrumenting a run costs it time and nothing reads a
-  profile no set is scored from. A run over the whole corpus instruments
-  every member, since the baselines and the repository-wide figure come
-  from it.
-- **Nothing about coverage fails a run on the default branch.** That run
-  measures every set, which is where the baselines come from, and merges
-  every report it produced into the one repository-wide figure, which is
-  a trend rather than a gate.
+- **A change's lanes instrument only what is judged.** They turn coverage
+  on for the members of the sets whose gates the plan chose and run
+  everything else unmeasured, since instrumenting a run costs it time and
+  nothing reads a profile no gate judges. A run over the whole corpus
+  instruments every member, since the baselines and the repository-wide
+  figure come from it.
+- **The default branch measures every set.** That is where the baselines
+  come from, and its run merges every report it produced into the one
+  repository-wide figure, which is a trend rather than a gate.
 
-A change forces the sets it reaches when it reaches at most
-`LOCAL_COVERAGE_MAX_SETS` of them. Past that it forces none, rather than
-some of the ones it reached, and what stopped the forcing is reported.
-
-What is scored is a separate question from what is forced. Forcing costs
-a run the whole of a set's unit list, and the cap is what bounds that
-cost. Whether a number may be compared against the baseline turns on
-whether the set ran whole, so every set the change reached that some run
-measured is scored, however that run came to measure it. A run that
-measures every set — which is what the default branch does, and what a
-change may ask for — has produced comparisons exactly as sound as forced
-ones.
+### The verdict
 
 A set is compared against the count the same set had at the newest
 default-branch commit the change contains, which the manifest carries.
@@ -869,23 +931,64 @@ Newest is settled by the order of those commits in the default branch's
 own history, and never by when the run that measured one was created: a
 re-run of an older commit produces a later run of an earlier tree.
 
-Three states report rather than fail, and each is one where the
-comparison would be against something other than the change: a set with
-no baseline the change contains, a set the cap left unforced that no run
-measured, and a run with a failing test, whose coverage was measured
-through that failure.
-
-A forced set that no report measured fails, whatever else happened in
-the run: one no report was written for, and one whose reports name no
-line of its member. The change was made to measure it, so a rise in it
-cannot be ruled out.
+A commit on the default branch is compared against its first parent's
+count and nothing else. A verdict there is attributed to the commit that
+reached it, by the rule under [what a run owes the change behind
+it](#what-a-run-on-the-default-branch-owes-the-change-behind-it). A
+baseline further back holds every commit in between, among them a rise
+another pull request accepted. The publisher carries a commit's figures
+into a manifest hours after its run, so the parent's count is read from
+the parent's own push run as well as from the manifest: from the first of
+that run's attempts to upload its figures, which it does at the end of its
+`Status` job, whether or not the rest of the run has finished. Those
+figures leave out every set a unit of which failed in that run, as the
+manifest's do. A parent whose run has not uploaded them yet, or whose
+upload cannot be read, has no count to compare against unless the manifest
+already carries one, and the verdict otherwise compares nothing; nothing
+waits for it. Nor does the head of a push that lands several commits,
+since its parent was never a push of its own. Because this depends on when
+the gate asks, two attempts of one run can differ, one comparing and one
+not, where everything else a gate reads is fixed by the commit; once the
+parent's figures exist, every attempt reads the same ones.
 
 A rise is accepted by an `ACCEPT_COVERAGE_DEBT` marker in the change's
 description, which names the member and the lines, and accepts the rise
 for every measured set over that member. Two markers naming one thing
 are refused, since the author meant one number and would be given the
-other. A marker naming anything but a workspace member fails, because nothing
-consults it.
+other.
+
+Four verdicts compare nothing, and each is one where the comparison would
+be against something other than the change: a set with no baseline the
+change contains, or on the default branch none at the parent; a run with a failing test, whose coverage was measured
+through that failure; a set some lane measured through a failure the run
+excused; and a set no report measured, either because no report was
+written for it or because its reports name no line of its member.
+
+A gate's record follows from its verdict. A rise no acceptance covers is
+a failure, and a comparison that found no rise is a pass. Every other
+verdict is a skip. One that compared nothing says nothing about whether
+the set rose, and a pass or a failure would score the gate for a
+measurement it did not make. An accepted rise is a rise a person let
+through rather than a set that did not rise, and its acceptance is
+usually written between a run of a commit that recorded the rise as a
+failure and a re-run of the same commit, so a pass there would read as
+the gate disagreeing with itself.
+
+A gate fails a run only on a pull request, and only where the change
+reaches its set and the run does not excuse it as too flaky to judge by.
+Such a gate fails the run for a rise no acceptance covers, and for a set
+no report measured, since the change was made to measure the set and a
+rise in it cannot be ruled out. A marker that cannot be read, or that
+names anything but a workspace member some set scores, fails the run as
+well, because nothing consults it. A run of every test on a pull request
+chooses every gate, and those whose sets the change does not reach are
+judged for their records alone.
+
+The default branch's run judges every gate on every push and fails for
+none of them. It reads the markers of the pull request it merged, so that
+a rise that pull request accepted is not recorded as a failure; a marker
+it cannot read is reported, and every gate is judged as though nothing
+were accepted.
 
 ## The manifest
 

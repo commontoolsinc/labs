@@ -19,17 +19,11 @@ import {
 } from "../test-topology/suite.ts";
 import { pricedCalibration } from "./calibrate.ts";
 import {
-  coverageGateFor,
-  type CoverageGateSelection,
-  measuredUnitKeys,
-  measuresSuite,
-} from "./coverage.ts";
-import {
   emptyManifest,
   type Manifest,
   type ManifestEntry,
 } from "./manifest.ts";
-import type { SelectionReason } from "./plan.ts";
+import type { GateChoice, SelectionReason } from "./plan.ts";
 import { UNMEASURED_COST_SECONDS, VALUE_FLOOR } from "./policy.ts";
 import { percentile90 } from "./score.ts";
 
@@ -172,13 +166,14 @@ export interface Census {
   unmeasured: number;
 
   /**
-   * What the coverage gate decided about this change: the measured sets
-   * it runs whole and scores, everything the change reached, and the
-   * reason the gate is off where it is. Every consumer reads this rather
-   * than working the question out again, so the lane that measures and
-   * the job that scores cannot disagree about which sets are gated.
+   * Every gate the topology declares, with what choosing it runs in this
+   * tree and whether the change reaches it. A gate is no lane's work, so
+   * none is among the entries above. Every consumer reads this rather than
+   * working the question out again, so the lanes that measure and the job
+   * that reaches the verdicts cannot disagree about which gates a change
+   * could choose.
    */
-  coverage: CoverageGateSelection;
+  gates: GateChoice[];
 }
 
 /**
@@ -190,10 +185,12 @@ export interface Census {
  * that never runs the unselected starves its own data, and a renamed test
  * is an unknown identity until an alias lands.
  *
- * The first rule is what the coverage gate rides on. A measured set the
- * change reaches is a declaration saying the change touched what every
- * one of its units covers, so its units are mandatory under the same rule
- * and through the same declaration vocabulary rather than a second one.
+ * Neither rule makes a gate mandatory. A gate is a verdict over units
+ * rather than a unit, and the units it judges are each under both rules
+ * already. The change reaching a gate, through the same declaration
+ * vocabulary, is what lets a plan choose it. A gate nothing has recorded
+ * is offered at the floor of the score, since the default branch reaches
+ * every gate's verdict on every run, and that is where its record starts.
  */
 export function census(
   suites: readonly Suite[],
@@ -231,8 +228,6 @@ export function census(
     const suite = key.slice(0, key.indexOf("\t"));
     costs.set(suite, [...costs.get(suite) ?? [], total]);
   }
-  const coverage = coverageGateFor(suites, changed);
-  const measured = measuredUnitKeys(suites, coverage);
   const entries: ManifestEntry[] = [];
   const mandatory = new Map<string, SelectionReason>();
   const taken = new Set<string>(
@@ -240,6 +235,7 @@ export function census(
   );
   let unmeasured = 0;
   for (const suite of suites) {
+    if (suite.judges !== undefined) continue;
     const unavailable = unavailableUnits(suite);
     // A suite that maps the diff onto its units itself — the type-check
     // groups and the repository gates do, because only they know what
@@ -252,12 +248,8 @@ export function census(
     );
     for (const unit of suite.units) {
       if (unavailable.has(unit)) continue;
-      // The diff naming the unit outright is the more exact answer, so
-      // it is the reason reported where both hold.
       const reason: SelectionReason | undefined = touched.has(unit)
         ? "changed"
-        : measured.has(`${suite.id}\t${unit}`)
-        ? "coverage-gate"
         : undefined;
       const recorded = inUnit.get(`${suite.id}\t${unit}`);
       if (recorded === undefined) {
@@ -292,7 +284,12 @@ export function census(
       }
     }
   }
-  const present = new Set(entries.map((entry) => testIdentityKey(entry.test)));
+  const gates = gatesOf(suites, [...inUnit.values()].flat(), entries, changed);
+  const present = new Set(
+    [...entries, ...gates.map((gate) => gate.entry)].map((entry) =>
+      testIdentityKey(entry.test)
+    ),
+  );
   return {
     manifest: {
       ...(manifest ?? emptyManifest()),
@@ -323,8 +320,58 @@ export function census(
     },
     mandatory,
     unmeasured,
-    coverage,
+    gates,
   };
+}
+
+/**
+ * Every gate the topology declares, read against a corpus: each gate's own
+ * entry where `recorded` holds one, what choosing it runs, and whether
+ * `changed` reaches it. `recorded` holds the manifest's entries, and
+ * `entries` everything the lanes can run, stand-ins included.
+ *
+ * A gate nothing has recorded is offered at the floor of the score, under
+ * the identity its suite says it records under. A unit of a judging suite
+ * carrying two entries is refused, since a gate is one verdict and two
+ * scores would leave nothing to say which is its own.
+ */
+export function gatesOf(
+  suites: readonly Suite[],
+  recorded: readonly ManifestEntry[],
+  entries: readonly ManifestEntry[],
+  changed: ReadonlySet<string>,
+): GateChoice[] {
+  const own = Map.groupBy(recorded, (entry) => `${entry.suite}\t${entry.unit}`);
+  const inUnit = new Map<string, string[]>();
+  for (const entry of entries) {
+    const key = `${entry.suite}\t${entry.unit}`;
+    inUnit.set(key, [...inUnit.get(key) ?? [], testIdentityKey(entry.test)]);
+  }
+  const gates: GateChoice[] = [];
+  for (const suite of suites) {
+    if (suite.judges === undefined) continue;
+    const reached = new Set(suite.unitsForChange?.(changed) ?? []);
+    for (const [unit, judged] of suite.judges) {
+      const mine = own.get(`${suite.id}\t${unit}`) ?? [];
+      if (mine.length > 1) {
+        throw new Error(
+          `the gate ${suite.id} ${unit} carries ${mine.length} entries, ` +
+            `${mine.map((entry) => testIdentityKey(entry.test)).join(", ")}, ` +
+            `and a gate is one verdict`,
+        );
+      }
+      gates.push({
+        entry: mine[0] ??
+          { ...standIn(suite, unit, []), test: judged.identity },
+        judges: judged.suite,
+        members: judged.units.flatMap((judgedUnit) =>
+          inUnit.get(`${judged.suite}\t${judgedUnit}`) ?? []
+        ),
+        reached: reached.has(unit),
+      });
+    }
+  }
+  return gates;
 }
 
 /**
@@ -357,15 +404,11 @@ export interface PricedCensus extends Census {
 export function pricedForRun(
   seen: Census,
   suites: readonly Suite[],
-  full: boolean,
+  measures: (suite: string) => boolean,
 ): PricedCensus {
   const priced = pricedCalibration(
     seen.manifest.calibration,
-    new Map(
-      suites.map((
-        suite,
-      ) => [suite.id, measuresSuite(seen.coverage, suite.id, full)]),
-    ),
+    new Map(suites.map((suite) => [suite.id, measures(suite.id)])),
   );
   return {
     ...seen,
