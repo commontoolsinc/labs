@@ -2,7 +2,7 @@ import { beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { fromFileUrl, join, resolve, toFileUrl } from "@std/path";
 import { PatternIndexClient } from "@commonfabric/pattern-index/client";
-import { Identity } from "@commonfabric/identity";
+import { Identity, legacySpaceDid } from "@commonfabric/identity";
 import { cfcAtom } from "@commonfabric/api/cfc";
 import { urlToAppView } from "@commonfabric/navigation";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
@@ -2815,6 +2815,34 @@ describe("console/server", () => {
       expect((await response.json()).error).toContain(
         `this session runs in \`${CREATED_SPACE}\``,
       );
+      // A name cannot be checked against a space that has none.
+      const byName = await didServer.handle(jsonRequest("/api/task", {
+        text: "make the headings readable",
+        inputCells: [{
+          name: "pattern_1",
+          ref: "pattern:console-test/bill-inbox",
+        }],
+      }, {}));
+      expect(byName.status).toBe(400);
+      expect((await byName.json()).error).toContain(
+        "has no name to check that against",
+      );
+    });
+
+    it("answers 400 for a piece address naming a space by DID that is not this named console's", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "make the headings readable",
+        inputCells: [{
+          name: "pattern_1",
+          ref: "pattern:did:key:z6MkforeignSpaceForConsoleTest/bill-inbox",
+        }],
+      }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain(
+        "this session runs in `console-test`",
+      );
+      expect((await listSessions()).sessions).toHaveLength(0);
     });
 
     it("answers 400 for a piece address whose slug is malformed", async () => {
@@ -3270,14 +3298,22 @@ describe("console/server", () => {
       expect(resolved.fabricSession.space).toBe(CREATED_SPACE);
     });
 
-    it("throws for a space no piece address can be written for", async () => {
-      await expect(
-        resolveConsoleConfig(
-          ["--fabric-identity", "k", "--fabric-space", "team/lunch"],
+    it("returns the DID a legacy name derives, as the session opens it", async () => {
+      const resolved = await resolveConsoleConfig(
+        ["--fabric-identity", "k", "--fabric-space", "console-test"],
+        {},
+        "/console",
+      );
+      expect(resolved.fabricSpaceDid).toBe(
+        await legacySpaceDid("console-test"),
+      );
+      expect(
+        (await resolveConsoleConfig(
+          ["--fabric-identity", "k", "--fabric-space", CREATED_SPACE],
           {},
           "/console",
-        ),
-      ).rejects.toThrow("cannot be written in a piece's address");
+        )).fabricSpaceDid,
+      ).toBe(CREATED_SPACE);
     });
 
     it("throws naming both ways to supply a fabric session when neither is given", async () => {

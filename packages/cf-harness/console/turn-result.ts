@@ -48,9 +48,8 @@ export interface ConsoleTurnResultPiece {
   slug: string;
 
   /**
-   * Openable URL: the one returned beside the slug, or, for a space configured
-   * by DID, whose model-facing output carries none, the console's own address
-   * for the slug (`pieceUrl`).
+   * Openable URL: the one returned beside the slug, or, where the model was
+   * told none, the piece at the console's space's DID (`pieceUrl`).
    */
   url: string;
 
@@ -145,6 +144,9 @@ export interface ReadConsoleTurnResultOptions {
 
   /** Fabric API URL this console's session runs against. */
   fabricApiUrl: string;
+
+  /** The DID of this console's space, which a person's link names it by. */
+  fabricSpaceDid: string;
 
   /** Durable turn timestamps; absent when only legacy run artifacts are held. */
   timing?: Pick<HarnessChatTurnStatus, "startedAt" | "endedAt">;
@@ -379,7 +381,10 @@ const readTurnRunArtifacts = async (
 /** Copies the openable fields from one successful `assign_slug` output. */
 const pieceFromAssignSlug = (
   message: HarnessTranscriptMessage,
-  options: Pick<ReadConsoleTurnResultOptions, "fabricApiUrl" | "spaceName">,
+  options: Pick<
+    ReadConsoleTurnResultOptions,
+    "fabricApiUrl" | "fabricSpaceDid"
+  >,
 ): ConsoleTurnResultPiece | undefined => {
   if (message.role !== "tool" || message.toolName !== "assign_slug") {
     return undefined;
@@ -397,17 +402,20 @@ const pieceFromAssignSlug = (
   ) {
     return undefined;
   }
-  // The slug and URL are the model-facing `assign_slug` output's. A space
-  // configured by DID gives the model no URL, since its address carries the
-  // DID; the person is shown the address this console's own fabric and space
-  // compose, which is what the URL would have been. Nothing crosses the
-  // console boundary that the result does not already carry.
+  // The slug and URL are the model-facing `assign_slug` output's. The model is
+  // told no URL that would carry a DID: none for a space configured by DID,
+  // and none for a legacy name no address can hold. The person is shown the
+  // piece at the space's DID instead, which every space has and the shell
+  // reads back. Nothing crosses the console boundary that the result does
+  // not already carry.
   if ("url" in output && typeof output.url === "string") {
     return { slug: output.slug, url: output.url };
   }
-  // The console refuses at startup a fabric URL or space no address composes
-  // from (`resolveConsoleConfig`), so a named piece is not left out here.
-  const url = pieceUrl(options.fabricApiUrl, options.spaceName, output.slug);
+  const url = pieceUrl(
+    options.fabricApiUrl,
+    options.fabricSpaceDid,
+    output.slug,
+  );
   return url === undefined ? undefined : { slug: output.slug, url };
 };
 

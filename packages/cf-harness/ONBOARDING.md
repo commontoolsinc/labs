@@ -375,8 +375,8 @@ then **Import CLI Key**, and pick the keyfile from prerequisite 3. This is once
 per browser profile. The piece then renders at either address:
 
 ```text
-<toolshed-api-url>/<space-name>/<slug>
-<shell-origin>/<space-name>/<slug>
+<toolshed-api-url>/<space-did>/<slug>
+<shell-origin>/<space-did>/<slug>
 ```
 
 From the command line, the same piece resolves by slug:
@@ -384,7 +384,7 @@ From the command line, the same piece resolves by slug:
 ```sh
 export CF_API_URL=<toolshed-api-url>
 export CF_IDENTITY=<absolute-path-to-identity-keyfile>
-export CF_SPACE=<space-name>
+export CF_SPACE=<space-did>
 cf cell get /<slug>
 export PIECE_ID=$(cf cell get "/<slug>" --select '@' | \
   jq -r '."$link" | sub("^/of:"; "")')
@@ -445,10 +445,10 @@ The successful result is:
   "pieces": [
     {
       "slug": "reading-list",
-      "url": "<toolshed-api-url>/<space-name>/reading-list"
+      "url": "<toolshed-api-url>/<space-did>/reading-list"
     }
   ],
-  "spaceName": "<space-name>",
+  "spaceName": "<space-did>",
   "finalText": "Created reading-list."
 }
 ```
@@ -523,7 +523,7 @@ Deploy it, keep the printed piece ID, and attach the label:
 cd <labs>
 export CF_API_URL=<toolshed-api-url>
 export CF_IDENTITY=<absolute-path-to-identity-keyfile>
-export CF_SPACE=<space-name>
+export CF_SPACE=<space-did>
 
 cf piece new --slug transaction-data finance-data.tsx
 export INPUT_PIECE_ID=<the-printed-fid1-id>

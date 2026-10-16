@@ -183,7 +183,7 @@ Every environment variable has a flag, and the flag wins:
 | `--port`                      | `CF_HARNESS_CONSOLE_PORT`              | `8100`                                |
 | `--fabric-api-url`            | `CF_HARNESS_FABRIC_API_URL`            | `http://localhost:8000`               |
 | `--fabric-identity`           | `CF_HARNESS_FABRIC_IDENTITY`           | required                              |
-| `--fabric-space`              | `CF_HARNESS_FABRIC_SPACE`              | required, a name                      |
+| `--fabric-space`              | `CF_HARNESS_FABRIC_SPACE`              | required: a DID, or a legacy name     |
 | `--fabric-foreign-spaces`     | `CF_HARNESS_FABRIC_FOREIGN_SPACES`     | no foreign spaces admitted            |
 | `--pattern-index-url`         | `CF_HARNESS_PATTERN_INDEX_URL`         | unset                                 |
 | `--skills-registry-url`       | `CF_HARNESS_SKILLS_REGISTRY_URL`       | unset                                 |
@@ -490,10 +490,11 @@ that turn's run minted. What the model receives is a token and the caller's own
 name for it — never the reference, and never what the cell holds. The reference
 grammar is `--input-cell`'s, so a spelling the CLI refuses is refused here with
 a 400 before any turn starts: a `ref` has to be a link naming an entity
-(`/of:fid1:…/path`, or `computed:`), not a bare hash. A cell that passes the
-grammar and still cannot be minted — one in an unadmitted foreign space, say —
-fails the turn rather than starting it without what the caller attached, and
-that turn is terminal like any other failed one.
+(`/of:fid1:…/path`, or `computed:`), not a bare hash. A reference into a foreign
+space the operator did not admit is refused with a 400 too, as the turn would
+refuse it. A cell that passes those checks and still cannot be minted fails the
+turn rather than starting it without what the caller attached, and that turn is
+terminal like any other failed one.
 
 The operator can admit foreign references at startup with
 `--fabric-foreign-spaces '{"did:key:zForeign":"https://foreign.example/"}'`. The

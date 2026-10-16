@@ -133,11 +133,12 @@ export const parseNamedPieceAddress = (
  * carrying an operator-admitted DID.
  *
  * An address names a space the way the shell's addresses do: a segment that is
- * a DID is the space's DID, and is held to `space`; any other segment is a
- * name, and is held to `spaceName`. A space created with a random key has no
- * name, so its DID is the only way to name it. A legacy space has both, and is
- * named by either. A side that does not know one of the two answers nothing
- * about an address in that form, and leaves it to a side that does.
+ * a DID is the space's DID, held to `space`, and any other segment is a name,
+ * held to `spaceName`. A space created with a random key has no name, so its
+ * DID is the only way to name it, and a name is refused rather than assumed to
+ * mean it. A legacy space has both, and is named by either. A side that knows
+ * only the name refuses the DID form, which it cannot check; a side that knows
+ * neither, such as a parse with no session, decides nothing.
  *
  * @throws Error naming both spaces.
  */
@@ -146,12 +147,23 @@ export const checkNamedPieceAddressSpace = (
   spaceName: string | undefined,
   space?: MemorySpace,
 ): void => {
-  if (address.spaceName === undefined) {
+  if (
+    address.spaceName === undefined ||
+    (spaceName === undefined && space === undefined)
+  ) {
     return;
   }
-  const expected = isDID(address.spaceName) ? space : spaceName;
-  if (expected === undefined || address.spaceName === expected) {
+  const byDid = isDID(address.spaceName);
+  if (address.spaceName === (byDid ? space : spaceName)) {
     return;
+  }
+  // A QUALIFIED ADDRESS IS RESOLVED IN THIS SPACE OR NOT AT ALL: the same slug
+  // in another space is a different piece, and answering with this space's
+  // would hand back a cell nobody asked for.
+  if (!byDid && spaceName === undefined) {
+    throw new Error(
+      `names space \`${address.spaceName}\`, and this session's space has no name to check that against; name the space by its DID, or attach the piece by reference`,
+    );
   }
   throw new Error(
     `piece address names space \`${address.spaceName}\`, and this session runs in \`${
@@ -313,22 +325,6 @@ const resolvedInputCellRef = async (
   if (session.resolvePiece === undefined) {
     throw new Error(
       `--input-cell \`${spec.name}\` names the piece \`${address.slug}\`, which needs a fabric session to resolve; configure --fabric-space`,
-    );
-  }
-  // A QUALIFIED ADDRESS IS RESOLVED IN THIS SPACE OR NOT AT ALL. The
-  // resolution below asks the session, which knows one space, so a space
-  // this side cannot check the name of is one the address cannot be
-  // honoured against: the same slug in another space is a different piece,
-  // and answering with this space's would hand back a cell nobody asked
-  // for. A space created by DID has no name, which is exactly when this
-  // fires; an address naming the space by its DID was held to the DID by
-  // the check every input cell runs before this.
-  if (
-    address.spaceName !== undefined && !isDID(address.spaceName) &&
-    session.spaceName === undefined
-  ) {
-    throw new Error(
-      `--input-cell \`${spec.name}\` names space \`${address.spaceName}\`, and this session's space has no name to check that against; name the space, or attach the piece by reference`,
     );
   }
   let pieceId: string;

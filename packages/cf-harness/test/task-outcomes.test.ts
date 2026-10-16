@@ -143,6 +143,8 @@ describe("task-outcomes", () => {
             continuable: true,
             spaceName: "empty-space",
             fabricApiUrl: "http://localhost:8000",
+            fabricSpaceDid:
+              "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
           }),
         ).toEqual({
           ...taskOutcome,
@@ -568,6 +570,8 @@ describe("task-outcomes", () => {
           continuable: true,
           spaceName: "empty-space",
           fabricApiUrl: "http://localhost:8000",
+          fabricSpaceDid:
+            "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
         }),
       ).toMatchObject({ outcome: "completed", answer, actions });
     } finally {

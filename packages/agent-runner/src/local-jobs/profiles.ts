@@ -418,9 +418,11 @@ export const localJobForeignSpaces = (
  * never assumed to, since a space it does not serve reads as empty and
  * nothing reports it — and every space `foreignSpaces` lists must be one an
  * input names. A piece address names a slug, which resolves only in the
- * profile's own space, so one naming another space is refused, as is one
- * qualified by name under a profile naming its space by DID, since only a
- * session can resolve the name to compare them.
+ * profile's own space, so one naming another space is refused. Its space is
+ * held to the profile's in the form the profile names it: a DID to a DID and a
+ * name to a name. One qualified by name under a profile naming its space by
+ * DID is refused, since only a session can resolve the name to compare them,
+ * and one qualified by DID under a profile naming its space by name likewise.
  */
 const refuseInputs = (
   profile: LocalJobProfile,
@@ -462,7 +464,6 @@ const refuseInputs = (
         spaceOf(ref)
       }\`; pass the origin serving that space in \`foreignSpaces\`.`;
     }
-    let address;
     try {
       checkInputCellSpec(
         { name, ref },
@@ -470,15 +471,11 @@ const refuseInputs = (
         byDid ? undefined : fabric.space,
         routes,
       );
-      address = parseNamedPieceAddress(ref);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return message.includes(`\`${name}\``)
         ? message
         : `Input \`${name}\`: ${message}`;
-    }
-    if (byDid && address?.spaceName !== undefined) {
-      return `Input \`${name}\` names its space by name, and the profile names its space by DID, so it cannot be checked against the profile's space; send the space-relative /of:<id> form.`;
     }
   }
   return undefined;
