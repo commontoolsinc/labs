@@ -1,6 +1,7 @@
 import * as Path from "@std/path";
 
 import { z } from "zod";
+import { parseReleaseTime } from "@commonfabric/runner/pattern-release-time";
 import {
   isLoopbackHostname,
   readHttpOrigin,
@@ -410,6 +411,25 @@ export const EnvSchema = z.object({
   // Source-run build metadata fallback for /api/meta, mirroring the gitSha a
   // compiled binary reads from its baked COMPILED file.
   COMMIT_SHA: z.string().optional(),
+  // When this deployment released what it serves, as an RFC 3339 date-time
+  // (`@commonfabric/runner/pattern-release-time`), read as milliseconds since
+  // the epoch. Set at deploy time to the time of that deploy. The patterns
+  // route sends it beside every identity it advertises, which is what keeps a
+  // piece from being moved to an earlier release of a system pattern. Empty:
+  // identities go out alone, and nothing orders them.
+  TOOLSHED_RELEASED_AT: z.string().default("").transform((value, ctx) => {
+    if (value === "") return undefined;
+    const releasedAt = parseReleaseTime(value);
+    if (releasedAt === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        message: "TOOLSHED_RELEASED_AT must be an RFC 3339 date-time with an " +
+          `offset, such as 2026-10-16T14:03:00Z: \`${value}\``,
+      });
+      return z.NEVER;
+    }
+    return releasedAt;
+  }),
 
   //
   // Sandbox Service

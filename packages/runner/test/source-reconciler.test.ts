@@ -188,11 +188,15 @@ describe("piece source reconciliation", () => {
     return (space) => observer?.(space);
   }
 
-  /** Serves the tracked pattern's route, advertising `identity` for it. */
+  /**
+   * Serves the tracked pattern's route, advertising `identity` for it, and the
+   * release time `releasedAt` returns beside it when that is not `undefined`.
+   */
   function servingFetch(
     identity: () => string,
     contents: () => string,
     record?: (url: URL, init?: RequestInit) => void,
+    releasedAt?: () => string | undefined,
   ): RuntimeFetch {
     return (input, init) => {
       const url = new URL(
@@ -204,10 +208,16 @@ describe("piece source reconciliation", () => {
       );
       record?.(url, init);
       if (url.pathname === PARENT_PATH) {
+        if (!url.searchParams.has("identity")) {
+          return Promise.resolve(new Response(parentSource));
+        }
+        const released = releasedAt?.();
         return Promise.resolve(
-          url.searchParams.has("identity")
-            ? new Response(identity())
-            : new Response(parentSource),
+          new Response(identity(), {
+            headers: released === undefined
+              ? {}
+              : { "CF-Released-At": released },
+          }),
         );
       }
       if (url.pathname === SOURCE_PATH) {
@@ -804,6 +814,205 @@ describe("piece source reconciliation", () => {
       expect(await reconcile(piece)).toBe("unavailable");
       expect(getPatternIdentityRef(piece)).toEqual(originalRef);
       expect(getPieceSourceRevisions(piece)).toEqual([]);
+    });
+
+    describe("ordered by the release time its host sends", () => {
+      // Each case runs one piece through a sequence of offers, as two hosts
+      // serving its space offering different releases would make them, and
+      // reads back where the piece settled.
+
+      const EARLIER = "2026-10-16T14:03:00Z";
+      const LATER = "2026-10-16T15:03:00Z";
+
+      type Offer = { marker: "v1" | "v2"; releasedAt?: string };
+
+      /**
+       * A piece following the tracked pattern's system origin, running v1 with
+       * no release time, and a function that makes its host offer `offer` and
+       * reconciles the piece against it. Each returns the outcome and the
+       * marker of the source the piece then runs.
+       */
+      async function followingPiece() {
+        const identities = {
+          v1: await identityFor(source("v1")),
+          v2: await identityFor(source("v2")),
+        };
+        let served: Offer = { marker: "v1" };
+        const piece = await preparePiece(
+          servingFetch(
+            () => identities[served.marker],
+            () => source(served.marker),
+            undefined,
+            () => served.releasedAt,
+          ),
+        );
+        await stampSource(piece, PARENT_SOURCE);
+        const runningMarker = () => {
+          const running = getPatternIdentityRef(piece)?.identity;
+          return running === identities.v1
+            ? "v1"
+            : running === identities.v2
+            ? "v2"
+            : running;
+        };
+        const offer = async (next: Offer) => {
+          served = next;
+          const outcome = await reconcile(piece);
+          return { outcome, running: runningMarker() };
+        };
+        return { piece, identities, offer };
+      }
+
+      function originUpdates(piece: Cell<unknown>) {
+        return getPieceSourceRevisions(piece).filter((revision) =>
+          revision.operation === "origin-update"
+        );
+      }
+
+      it("records the release time on the revision that adopts a release", async () => {
+        const { piece, offer } = await followingPiece();
+
+        expect(await offer({ marker: "v2", releasedAt: LATER })).toEqual({
+          outcome: "updated",
+          running: "v2",
+        });
+        expect(getPieceSourceRevisions(piece).at(-1)?.releasedAt).toBe(
+          Date.parse(LATER),
+        );
+      });
+
+      it("keeps a later release when its host offers an earlier one", async () => {
+        const { piece, identities, offer } = await followingPiece();
+        await offer({ marker: "v2", releasedAt: LATER });
+
+        expect(await offer({ marker: "v1", releasedAt: EARLIER })).toEqual({
+          outcome: "ahead",
+          running: "v2",
+        });
+        expect(originUpdates(piece)).toHaveLength(1);
+        // The record says the piece follows its origin, and names what that
+        // origin offered.
+        expect(getPieceReconciliation(piece)).toMatchObject({
+          outcome: "followed",
+          offered: { identity: identities.v1, symbol: SYMBOL },
+        });
+      });
+
+      it("settles on the later of two releases its hosts offer in turn", async () => {
+        const { piece, offer } = await followingPiece();
+        const outcomes: string[] = [];
+        for (let round = 0; round < 3; round++) {
+          outcomes.push(
+            (await offer({ marker: "v2", releasedAt: LATER })).outcome,
+            (await offer({ marker: "v1", releasedAt: EARLIER })).outcome,
+          );
+        }
+
+        expect(outcomes).toEqual([
+          "updated",
+          "ahead",
+          "current",
+          "ahead",
+          "current",
+          "ahead",
+        ]);
+        expect(originUpdates(piece)).toHaveLength(1);
+      });
+
+      it("adopts a later release of the source an earlier release replaced", async () => {
+        // Deploying an earlier commit again, to roll a bad release back, is a
+        // later release than the one it rolls back.
+
+        const { offer } = await followingPiece();
+        await offer({ marker: "v2", releasedAt: EARLIER });
+
+        expect(await offer({ marker: "v1", releasedAt: LATER })).toEqual({
+          outcome: "updated",
+          running: "v1",
+        });
+      });
+
+      it("keeps a stated release when its host states no release time", async () => {
+        const { offer } = await followingPiece();
+        await offer({ marker: "v2", releasedAt: LATER });
+
+        expect(await offer({ marker: "v1" })).toEqual({
+          outcome: "ahead",
+          running: "v2",
+        });
+      });
+
+      it("adopts a stated release over source adopted without one, and keeps it", async () => {
+        const { piece, offer } = await followingPiece();
+        expect(await offer({ marker: "v2" })).toEqual({
+          outcome: "updated",
+          running: "v2",
+        });
+        expect(getPieceSourceRevisions(piece).at(-1)?.releasedAt)
+          .toBeUndefined();
+
+        expect(await offer({ marker: "v1", releasedAt: EARLIER })).toEqual({
+          outcome: "updated",
+          running: "v1",
+        });
+        expect(await offer({ marker: "v2" })).toEqual({
+          outcome: "ahead",
+          running: "v1",
+        });
+      });
+
+      it("adopts different source offered at the same release time", async () => {
+        const { offer } = await followingPiece();
+        await offer({ marker: "v2", releasedAt: LATER });
+
+        expect(await offer({ marker: "v1", releasedAt: LATER })).toEqual({
+          outcome: "updated",
+          running: "v1",
+        });
+      });
+
+      it("reports a later release of the running source as current", async () => {
+        const { piece, offer } = await followingPiece();
+        await offer({ marker: "v2", releasedAt: EARLIER });
+
+        expect(await offer({ marker: "v2", releasedAt: LATER })).toEqual({
+          outcome: "current",
+          running: "v2",
+        });
+        expect(originUpdates(piece)).toHaveLength(1);
+      });
+
+      it("adopts an earlier release over a running pattern this space cannot load", async () => {
+        // A piece that cannot start has nothing to keep, so the earlier release
+        // is a rescue rather than a step back.
+
+        const { identities, offer } = await followingPiece();
+        await offer({ marker: "v2", releasedAt: LATER });
+
+        const manager = runtime.patternManager;
+        const load = manager.loadPatternByIdentity.bind(manager);
+        manager.loadPatternByIdentity = (...args: Parameters<typeof load>) =>
+          args[0] === identities.v2 ? Promise.resolve(undefined) : load(...args);
+        try {
+          expect(await offer({ marker: "v1", releasedAt: EARLIER })).toEqual({
+            outcome: "updated",
+            running: "v1",
+          });
+        } finally {
+          manager.loadPatternByIdentity = load;
+        }
+      });
+
+      it("keeps the running source when its host's release time is not a time", async () => {
+        const { piece, offer } = await followingPiece();
+
+        expect(await offer({ marker: "v2", releasedAt: "yesterday" }))
+          .toEqual({ outcome: "unavailable", running: "v1" });
+        expect(getPieceReconciliation(piece)).toMatchObject({
+          outcome: "unreachable",
+          detail: "the origin's release time is not a time: `\"yesterday\"`",
+        });
+      });
     });
   });
 

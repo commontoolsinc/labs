@@ -1788,6 +1788,14 @@ export interface PieceSourceRevision {
 
   operation: PieceSourceRevisionOperation;
   selectedRevisionId?: string;
+
+  /**
+   * When the deployment that served this revision's source released it, in
+   * milliseconds since the epoch (`pattern-release-time.ts`). Carried only by
+   * a revision adopted from a `system:` origin whose host states one; it is
+   * what keeps that piece from being moved to an earlier release.
+   */
+  releasedAt?: number;
 }
 
 export interface PieceSourceSnapshot {
@@ -1859,6 +1867,9 @@ export interface PieceSourceTransition {
 
   expected: PieceSourceSnapshot;
   selectedRevisionId?: string;
+
+  /** The release time the revision records (`PieceSourceRevision`). */
+  releasedAt?: number;
 }
 
 /**
@@ -14879,7 +14890,10 @@ export function getPieceSourceRevisions(
           typeof value.origin !== "string") ||
       value.selectedRevisionId !== undefined &&
         (typeof value.selectedRevisionId !== "string" ||
-          value.selectedRevisionId.length === 0)
+          value.selectedRevisionId.length === 0) ||
+      value.releasedAt !== undefined &&
+        (typeof value.releasedAt !== "number" ||
+          !Number.isFinite(value.releasedAt) || value.releasedAt < 0)
     ) {
       throw new Error("piece source history is invalid");
     }
@@ -14896,6 +14910,9 @@ export function getPieceSourceRevisions(
     }
     if (typeof value.selectedRevisionId === "string") {
       revision.selectedRevisionId = value.selectedRevisionId;
+    }
+    if (typeof value.releasedAt === "number") {
+      revision.releasedAt = value.releasedAt;
     }
     revisionIds.add(revision.revisionId);
     revisions.push(revision);
@@ -15297,6 +15314,9 @@ export function applyPieceSourceTransition(
     ...(transition.selectedRevisionId === undefined
       ? {}
       : { selectedRevisionId: transition.selectedRevisionId }),
+    ...(transition.releasedAt === undefined
+      ? {}
+      : { releasedAt: transition.releasedAt }),
   });
   candidate.setMetaRaw(
     "patternSource",

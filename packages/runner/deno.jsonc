@@ -47,6 +47,7 @@
     "./experimental-posture": "./src/experimental-posture.ts",
     "./deployment-meta": "./src/deployment-meta.ts",
     "./space-host": "./src/space-host.ts",
+    "./pattern-release-time": "./src/pattern-release-time.ts",
     "./fabric-url": "./src/fabric-url.ts",
     "./meta-seam": "./src/meta-seam.ts",
     "./slugs": "./src/slugs.ts",

@@ -25,6 +25,13 @@
  * prove itself — today by not moving the piece's contract at all, which
  * {@link SourceReconciler.reconcile}'s refusal check explains.
  *
+ * A `system:` candidate is still not adopted when it is an earlier release than
+ * the one the piece runs. Two hosts serving one space can offer different
+ * releases at once — a deployment partway through restarting its instances,
+ * two deployments reaching the same memory — and a piece that took whatever
+ * differed would move between them on every open. The release time the host
+ * sends beside its identity orders the two (`pattern-release-time.ts`).
+ *
  * `docs/specs/piece-source-lifecycle.md` is the design of record.
  * `piece-origin-kind.ts` enumerates the origins this dispatches on.
  *
@@ -50,6 +57,7 @@ import { prepareSourceClosureVerification } from "./compilation-cache/cell-cache
 import type { RuntimeProgram } from "./harness/types.ts";
 import { getMetaLink } from "./link-utils.ts";
 import type { PreparedSourceUpdate } from "./pattern-manager.ts";
+import { parseReleaseTime, RELEASED_AT_HEADER } from "./pattern-release-time.ts";
 import {
   classifyPieceOriginString,
   type PieceOriginKind,
@@ -59,6 +67,7 @@ import {
   getPatternIdentityRef,
   getPatternSource,
   getPieceReconciliation,
+  getPieceSourceRevisions,
   getPieceSourceSnapshot,
   type PieceReconciliation,
   type PieceReconciliationOutcome,
@@ -114,6 +123,10 @@ const logger = getLogger("runner.source-reconcile", {
  * - `migrated`: the origin was rewritten into its canonical spelling; the
  *   pattern is unchanged.
  * - `updated`: the piece adopted new source.
+ * - `ahead`: the origin offered a `system:` release earlier than the one the
+ *   piece runs, which the piece keeps. An offer stating no release time is
+ *   earlier than any that states one. A piece whose running pattern cannot
+ *   load takes the earlier release regardless, since it has nothing to keep.
  * - `incompatible`: the origin offered source that cannot replace what the
  *   piece runs, and its owner has not said to take it anyway.
  * - `rejected`: the write that adopts the origin's source was refused for
@@ -133,6 +146,7 @@ export type ReconcileOutcome =
   | "current"
   | "migrated"
   | "updated"
+  | "ahead"
   | "incompatible"
   | "rejected"
   | "unavailable";
@@ -141,9 +155,9 @@ export type ReconcileOutcome =
  * What each reconciliation result becomes on the piece, and which leave
  * nothing behind.
  *
- * The three results that end with the piece running what its origin holds are
- * one state to a reader: how it got there is the revision log's business, not
- * this record's. `detached` and `unusable` are read off the recorded origin
+ * The results that end with the piece running what its origin holds, or a
+ * later release of it, are one state to a reader: how it got there is the
+ * revision log's business, not this record's. `detached` and `unusable` are read off the recorded origin
  * itself, so a record would only restate what the piece already says.
  */
 const RECORDED_OUTCOME: Record<
@@ -154,6 +168,7 @@ const RECORDED_OUTCOME: Record<
   current: { outcome: "followed" },
   migrated: { outcome: "followed" },
   updated: { outcome: "followed" },
+  ahead: { outcome: "followed" },
   unavailable: { outcome: "unreachable" },
   // The reason travels with the result rather than being inferred from the
   // outcome, so a second kind of refusal has to say which one it is instead
@@ -179,6 +194,39 @@ function reconciliationFor(
     ...(recorded.reason === undefined ? {} : { reason: recorded.reason }),
     ...(state.detail === undefined ? {} : { detail: state.detail }),
   };
+}
+
+/**
+ * Whether an offer released at `offered` is an earlier release than the one a
+ * piece runs, released at `running`. Release times are compared only where
+ * the running source records one: a piece adopted from a host stating none
+ * has nothing to order an offer against, and takes it as before. An offer
+ * stating none is earlier than any running release that does, so a host that
+ * states no release time cannot move a piece another host has placed on a
+ * stated one. Two offers stating the same time are not ordered either way.
+ */
+function isEarlierRelease(
+  offered: number | undefined,
+  running: number | undefined,
+): boolean {
+  if (running === undefined) return false;
+  return offered === undefined || offered < running;
+}
+
+/**
+ * The release time the revision that adopted the source `resultCell` runs
+ * records, or `undefined` when that revision records none or the piece's last
+ * revision is not the one that adopted it.
+ */
+function runningReleasedAt(
+  resultCell: Cell<unknown>,
+  running: { identity: string; symbol: string },
+): number | undefined {
+  const last = getPieceSourceRevisions(resultCell).at(-1);
+  return last !== undefined && last.pattern.identity === running.identity &&
+      last.pattern.symbol === running.symbol
+    ? last.releasedAt
+    : undefined;
 }
 
 async function abortable<T>(
@@ -230,6 +278,17 @@ type PieceState = {
 
   /** Why this reconciliation ended as it did, where it can say. */
   detail?: string;
+};
+
+/**
+ * What a `system:` origin's host advertises: the identity it serves, and when
+ * it released it, if it says.
+ */
+type AdvertisedSource = {
+  identity: string;
+
+  /** Milliseconds since the epoch (`pattern-release-time.ts`). */
+  releasedAt?: number;
 };
 
 /** A piece that records an origin, which is every piece following one. */
@@ -849,6 +908,22 @@ export class SourceReconciler {
       advertised === state.running.identity &&
       await this.#loadPattern(state.running, state.space) !== undefined
     ) return "current";
+    if (
+      advertised !== state.running.identity &&
+      isEarlierRelease(
+        answer.releasedAt,
+        runningReleasedAt(resultCell, state.running),
+      ) &&
+      await this.#loadPattern(state.running, state.space) !== undefined
+    ) {
+      logger.debug("reconcile-earlier-release", () => [
+        "not adopting an earlier release than the one this piece runs",
+        state.space,
+        resultCell.sourceURI,
+        offered,
+      ]);
+      return "ahead";
+    }
     if (this.#refusedBefore(resultCell, state, offered)) return "rejected";
 
     const resolved = await this.#runtime.harness.resolve(
@@ -861,7 +936,7 @@ export class SourceReconciler {
       { ...resolved, mainExport: state.running.symbol },
       origin,
       signal,
-      advertised,
+      answer,
       claim,
     );
   }
@@ -873,8 +948,11 @@ export class SourceReconciler {
 
   /**
    * The identity the source at `target` currently compiles to, per the host
-   * serving it, or why that host did not say — which a caller with a piece to
-   * report on records as the reason it is not following its origin.
+   * serving it, with the time the host released it when it states one, or why
+   * that host did not say — which a caller with a piece to report on records
+   * as the reason it is not following its origin. A release time that is not
+   * one is such a reason: the host has said something about which release it
+   * serves, and nothing can tell what.
    *
    * A request that throws rather than answering is the commonest way an origin
    * is out of reach, and it answers here like any other refusal rather than
@@ -890,7 +968,7 @@ export class SourceReconciler {
     fetch: typeof globalThis.fetch,
     signal: AbortSignal,
     sourceRoots: readonly string[] = [],
-  ): Promise<{ identity: string } | { detail: string }> {
+  ): Promise<AdvertisedSource | { detail: string }> {
     const identityUrl = new URL(target);
     identityUrl.searchParams.set("identity", "");
     for (const root of sourceRoots) {
@@ -910,7 +988,17 @@ export class SourceReconciler {
     if (advertised.length === 0) {
       return { detail: "the origin did not say which version it is offering" };
     }
-    return { identity: advertised };
+    const releaseHeader = response.headers.get(RELEASED_AT_HEADER);
+    if (releaseHeader === null) return { identity: advertised };
+    const releasedAt = parseReleaseTime(releaseHeader.trim());
+    if (releasedAt === undefined) {
+      return {
+        detail: debugStr`the origin's release time is not a time: $quote${
+          releaseHeader
+        }`,
+      };
+    }
+    return { identity: advertised, releasedAt };
   }
 
   /** Whether this space can still load a pattern, without throwing to say no. */
@@ -1267,7 +1355,7 @@ export class SourceReconciler {
       { ...program, mainExport: target.symbol },
       origin,
       signal,
-      target.identity,
+      { identity: target.identity },
     );
   }
 
@@ -1275,9 +1363,11 @@ export class SourceReconciler {
    * Compile a resolved candidate, check it may replace what is running, and
    * commit the transition and the swap together.
    *
-   * `advertisedIdentity`, where the origin supplied one, must equal what the
-   * candidate compiles to. A source that does not produce the identity its own
-   * origin advertises is not the source that origin names.
+   * `advertised`, where the origin supplied one, names the identity the
+   * candidate must compile to: a source that does not produce the identity its
+   * own origin advertises is not the source that origin names. The release
+   * time beside it, where there is one, is recorded on the revision that
+   * adopts the candidate.
    *
    * The transition records the origin the piece already follows, as an
    * update to it. A `claim` records a different one instead: the origin a
@@ -1290,7 +1380,7 @@ export class SourceReconciler {
     program: Parameters<Runtime["patternManager"]["compilePattern"]>[0],
     origin: PieceOriginKind,
     signal: AbortSignal,
-    advertisedIdentity?: string,
+    advertised?: AdvertisedSource,
     claim?: OriginClaim,
   ): Promise<ReconcileOutcome> {
     const runtime = this.#runtime;
@@ -1309,13 +1399,13 @@ export class SourceReconciler {
       return "unavailable";
     }
     if (
-      advertisedIdentity !== undefined &&
-      candidateRef.identity !== advertisedIdentity
+      advertised !== undefined &&
+      candidateRef.identity !== advertised.identity
     ) {
       logger.warn("advertised-identity-mismatch", () => [
         "resolved source did not compile to the identity its origin advertises",
         state.space,
-        advertisedIdentity,
+        advertised.identity,
         candidateRef,
       ]);
       state.detail =
@@ -1369,6 +1459,9 @@ export class SourceReconciler {
       operation: claim?.operation ?? "origin-update",
       origin: claim?.origin ?? state.storedSource ?? null,
       expected: state.snapshot,
+      ...(advertised?.releasedAt === undefined
+        ? {}
+        : { releasedAt: advertised.releasedAt }),
     };
     // Setting up the candidate restages the piece's stored argument against
     // its schema, so that document has to be local before the transaction
