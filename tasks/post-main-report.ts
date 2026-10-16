@@ -405,16 +405,24 @@ export async function coverageOfRun(
 export async function firstCoverageAt(
   commit: string,
 ): Promise<{ figures: CoverageFigures; startedAt: string } | undefined> {
-  const params = new URLSearchParams({
-    event: "push",
-    branch: DEFAULT_BRANCH,
-    head_sha: commit,
-    per_page: "100",
-  });
-  const data = await githubGet<{ workflow_runs: WorkflowRun[] }>(
-    `/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?${params}`,
-  );
-  const runs = (data.workflow_runs ?? []).toSorted((a, b) => a.id - b.id);
+  const listed: WorkflowRun[] = [];
+  const perPage = 100;
+  for (let page = 1;; page++) {
+    const params = new URLSearchParams({
+      event: "push",
+      branch: DEFAULT_BRANCH,
+      head_sha: commit,
+      per_page: `${perPage}`,
+      page: `${page}`,
+    });
+    const data = await githubGet<{ workflow_runs: WorkflowRun[] }>(
+      `/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?${params}`,
+    );
+    const found = data.workflow_runs ?? [];
+    for (const run of found) listed.push(run);
+    if (found.length < perPage) break;
+  }
+  const runs = listed.toSorted((a, b) => a.id - b.id);
   for (const run of runs) {
     const artifact = (await fetchArtifactsForRun(run.id))
       .filter((candidate) =>

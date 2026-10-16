@@ -999,6 +999,12 @@ describe("post-main-report", () => {
       return ((input: string | URL | Request) => {
         const url = typeof input === "string" ? input : input.toString();
         asked.push(url);
+        if (
+          url.includes("/workflows/") &&
+          new URL(url).searchParams.get("page") !== "1"
+        ) {
+          return Promise.resolve(Response.json({ workflow_runs: [] }));
+        }
         if (url.includes("/workflows/")) {
           // Newest first, as GitHub lists them: a later push of the same
           // commit, and the run that measured it first.
@@ -1076,6 +1082,60 @@ describe("post-main-report", () => {
       // before it finishes.
       expect(asked[0]).toContain("event=push");
       expect(asked[0]).not.toContain("status=");
+      // Three runs are fewer than a page holds, so one page was read.
+      expect(asked.filter((url) => url.includes("/workflows/"))).toHaveLength(
+        1,
+      );
+    });
+
+    it("reads every page of the runs at a commit", async () => {
+      // A full page of runs that uploaded nothing, and on the next page the
+      // earliest run, which did.
+
+      const zip = await recordsZip(coverageRecords({
+        groups: new Map(),
+        sets: new Map([["workspace-unit/packages/bakery", 4]]),
+        cold: false,
+      }));
+      const original = globalThis.fetch;
+      globalThis.fetch = ((input: string | URL | Request) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.includes("/workflows/")) {
+          const page = new URL(url).searchParams.get("page");
+          const runs = page === "1"
+            ? Array.from({ length: 100 }, (_, at) => ({
+              id: 100 + at,
+              created_at: "2026-09-02T00:00:00Z",
+              status: "completed",
+            }))
+            : page === "2"
+            ? [{ id: 3, created_at: "2026-09-01T00:00:00Z" }]
+            : [];
+          return Promise.resolve(Response.json({ workflow_runs: runs }));
+        }
+        const run = Number(url.match(/runs\/(\d+)\/artifacts/)?.[1]);
+        if (!Number.isNaN(run)) {
+          const artifacts = run === 3
+            ? [{
+              id: 5,
+              name: "test-records-coverage-a1",
+              size_in_bytes: 1,
+              expired: false,
+            }]
+            : [];
+          return Promise.resolve(Response.json({
+            total_count: artifacts.length,
+            artifacts,
+          }));
+        }
+        return Promise.resolve(new Response(zip as BodyInit, { status: 200 }));
+      }) as typeof fetch;
+      try {
+        expect((await firstCoverageAt("abc"))?.startedAt)
+          .toBe("2026-09-01T00:00:00Z");
+      } finally {
+        globalThis.fetch = original;
+      }
     });
 
     it("waits for an earlier run still going rather than read a later one", async () => {
