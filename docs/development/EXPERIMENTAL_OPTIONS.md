@@ -792,8 +792,9 @@ holds the measurements and the conditions for revisiting.
   on; their user-scope counterparts run in both settings.
 - **Status (2026-10-16):** implemented, off by default. On the FabriChat
   room cold load it removes the session writes from a load's commits and
-  changes no count and no wall time, because every commit it empties still
-  carries shared reads and travels for validation
+  spares the three commits a load makes that read nothing shared, while 167
+  of the 168 it empties still carry shared reads and travel for validation;
+  the load's other counts and its wall time stay where they were
   (`docs/history/development/performance/2026-10-16-fabrichat-room-cold-load-local-session-documents.md`).
   The performance case for graduating it needs a load whose session-local
   commits read nothing shared, or a client that settles a read-only commit
