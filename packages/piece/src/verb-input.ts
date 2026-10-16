@@ -320,8 +320,15 @@ function firstValueOutsideOptions(
   schema: JSONSchema | undefined,
   root: JSONSchema,
   position: string,
+  seen: Set<string> = new Set(),
 ): ValueOutsideOptions | undefined {
   if (!isSchemaObject(schema) || isOpaqueReference(value)) return undefined;
+  // `seen` holds the references already followed for this one value, so an
+  // `allOf` that refers back to itself ends rather than recursing without end.
+  if (typeof schema.$ref === "string") {
+    if (seen.has(schema.$ref)) return undefined;
+    seen.add(schema.$ref);
+  }
   const node = localRefTarget(schema, root);
   if (!isSchemaObject(node)) return undefined;
   if (node.anyOf !== undefined || node.oneOf !== undefined) return undefined;
@@ -353,6 +360,7 @@ function firstValueOutsideOptions(
         member as JSONSchema,
         nodeRoot,
         position,
+        seen,
       );
       if (found !== undefined) return found;
     }

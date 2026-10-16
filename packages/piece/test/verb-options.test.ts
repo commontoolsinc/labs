@@ -238,6 +238,21 @@ describe("verb options", () => {
       );
     });
 
+    it("leaves an allOf that refers back to itself to the schema validation", () => {
+      const error = verbInputSchemaError({ ring: "keys" }, {
+        $ref: "#/$defs/Event",
+        $defs: {
+          Event: {
+            type: "object",
+            properties: { ring: { type: "string" } },
+            allOf: [{ $ref: "#/$defs/Event" }],
+          },
+        },
+      });
+
+      expect(error).toBe("recursive schema validation made no progress");
+    });
+
     it("leaves an enum holding an object to the schema validation", () => {
       const error = verbInputSchemaError(
         { ring: { id: "keys" } },
