@@ -3150,6 +3150,14 @@ function trackVisitedDoc(
  * is closure-transitive, so gating at the two places a schema enters a
  * traversal (the selector, a link) covers every interior resolution.
  *
+ * A referrer minted from a value no space has stored
+ * (`mintedFromUnstoredValue`) is the one exception: no query delivers such
+ * a document, and no space holds the closure behind its links' references,
+ * so a document the registry holds is taken from there — unread, untracked,
+ * and not credited to the space — and the verdict for such a referrer is
+ * the registry's. A document the registry lacks is read from the space as
+ * for a stored referrer.
+ *
  * Documents are read in the referrer's space at the canonical `"space"`
  * scope: schema documents are installed space-scoped, so a session- or
  * user-scoped referrer must not redirect the read to its own partition.

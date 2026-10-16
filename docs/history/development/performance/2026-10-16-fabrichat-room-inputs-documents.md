@@ -92,9 +92,9 @@ The profile, by the share each frame has of the worker's busy samples
 | `renderRoot` | 16.8% → 15.1% | 15.5% → 15.0% | 17.0% → 12.4% |
 | `validateAndTransform` | 14.3% → 13.8% | 13.7% → 12.6% | 12.9% → 14.3% |
 
-The mint's share falls by two thirds in every pair, and the hashing under
-it (`#findSnapshot`) by half or more; the render's frames move within their
-noise. Sign-in to the last message rendered, per pair, before then after:
+The mint's share falls by half in two pairs and by four fifths in the
+third, and the hashing under it (`#findSnapshot`) by half or more; the
+render's frames move within their noise. Sign-in to the last message rendered, per pair, before then after:
 38.7 s → 38.5 s, 27.8 s → 27.0 s, 28.0 s → 25.0 s, at a load where the
 same binary spans 25 to 39 s, so the wall times say only that the after arm
 was not slower.

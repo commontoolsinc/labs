@@ -535,11 +535,13 @@ where the pre-sync was no longer the whole cost.
       makes belong in the action's transaction. The pre-sync makes the other
       6,428 in read-only transactions it discards, across three passes over
       the same nodes, and could make each once.
-- [ ] Past the bound on held bindings the pre-sync's earliest bindings are
-      dropped before their instantiation asks for them. The bound is 256 MB
-      of inputs documents and the thirty-row room holds 69 MB, so a room of
-      about a hundred rows is at it: an inputs document carries the schema
-      of every link it holds inline, and averages 22 KB on that room.
+- [ ] Past the bound on held bindings the earliest bindings are dropped
+      before a later plan asks for them. The bound is 256 MB of inputs
+      documents. While a document carried the schema of every link it holds
+      inline, averaging 22 KB, the thirty-row room held 69 MB and a room of
+      about a hundred rows was at the bound; a document now carries each
+      link's schema as a reference, a few hundred characters a link, and
+      the room that reaches the bound is to be measured again.
 - [ ] A plan's inputs document is decoded apart from the value it was
       minted from: once for its sync (`valueFromDataUri` under
       `#syncDataURICell`, `packages/runner/src/storage/v2.ts`) and again for
