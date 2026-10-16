@@ -28,7 +28,7 @@ delivery" and §4), and no activity log, since nothing read it. The plan is
 
 ## What the gate reports
 
-Against sixty-two of the room's sixty-six recorded baselines, the
+Against sixty-three of the room's sixty-seven recorded baselines, the
 pattern-update proof reports `argument.messages[]: ifc changed`: the stored
 messages' write policy named the old handlers, and the new elements' policy
 names the four send handlers, `commitEdit`, `commitDelete`, and
@@ -37,10 +37,10 @@ break `fabrichat-start-reviewed-break.md` records. The proof reports one
 issue per role, so each baseline reports one result the room no longer offers
 beside its argument: `result.recentActivity` for the thirty-five that offered
 the activity log, `result.messageRequests` for seven that offered the per-user
-act outcomes, which the room replaced with the session's `messageRefusal`,
-and `result.closeWindow` for the twenty-four newest, which offered that stream at the
-room's top level, which the proof reports ahead of the outcomes they offered
-too; the room offers no message windows.
+act outcomes, which the room no longer keeps, and `result.closeWindow` for
+the twenty-five newest, which offered that stream at the room's top level,
+which the proof reports ahead of the outcomes they offered too; the room
+offers no message windows.
 
 The placement and the adapter each report `result.$VIEWS.chat.recentActivity`
 against their two baselines, the field they passed through from the room.
