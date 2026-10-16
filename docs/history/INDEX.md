@@ -169,6 +169,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 - [2026-07-28-completed-transaction-retention.md](packages/runner/2026-07-28-completed-transaction-retention.md) — a completed transaction kept the activity of everything it read, and the unbounded document cache that still exhausts a browser tab, July 2026.
 - [2026-08-04-coverage-gate-base-branch-drift.md](development/2026-08-04-coverage-gate-base-branch-drift.md) — why Coverage Check failed `packages/runner` at random: the ratchet graded a pull request merged with a newer `main` against an older `main` baseline, August 2026.
 - [pattern-update-open-argument-investigation.md](plans/pattern-update-open-argument-investigation.md) — why the open-argument update class went unvalidated on the repair path, and the correction of an earlier measurement that named the wrong mechanism, July 2026.
+- [development/performance/2026-10-fabrichat-room-send-30-profile.md](development/performance/2026-10-fabrichat-room-send-30-profile.md) — posting the thirtieth message into a FabriChat room before and after pushed messages (commonfabric/labs#8931): the send halves to 1.2 s and its reads stop growing with the room; a worker CPU profile puts the rest in the runtime's label and codec work and the wait for the write to be watched back, and the cold load's 27 s in 3 976 list-child syncs for the links the room reaches
 
 ## Executed plans and work orders
 
