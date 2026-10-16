@@ -142,6 +142,21 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
       },
       { await: "tab-raced" },
       { assertion: assert(() => countOf(setup.messages, "Once") === 1) },
+      // The first send again, after her other sends that named ids, Bob's,
+      // and the race: the record keeps an id however much else came after,
+      // until the sender has made a hundred newer sends that name one, so it
+      // still adds nothing, and still names the first send's message.
+      {
+        action: room.sendMessage,
+        event: { requestId: "press-1", body: "yes!" },
+        trustedUi: sendGesture,
+      },
+      {
+        assertion: assert(() =>
+          countOf(setup.messages, "yes!") === 4 &&
+          equals(room.sendRequests["press-1"]?.message, setup.messages.key(0))
+        ),
+      },
     ],
   };
 });
