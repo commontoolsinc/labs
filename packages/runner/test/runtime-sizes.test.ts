@@ -358,6 +358,7 @@ describe("runtime-sizes", () => {
             cfc: runtime.getCell(space, "wish").getMetaRaw(cfcMeta),
           },
           storage: runtime.getSizes().storage,
+          experimental: runtime.experimental,
           deno: Deno.version,
         }),
       );
