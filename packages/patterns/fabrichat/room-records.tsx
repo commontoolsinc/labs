@@ -41,6 +41,7 @@ import {
   Writable,
   type WritePolicyAnyOf,
 } from "commonfabric";
+import { profileKeyOf } from "../system/private-inbox.tsx";
 import { isSharedSpaceCatalog } from "../system/shared-space-catalog.ts";
 import {
   isInMain,
@@ -364,31 +365,16 @@ export interface MessageEntry extends ViewItem {
   live: boolean;
 
   /**
-   * The key of the profile the sender sent under, as `profileKeyOf()` names
-   * the link the message stores, which `sendInto()` writes resolved; absent
-   * once obliterated. Two messages have the same author when their keys
-   * agree, and a reader is the author when their resolved profile's key is
-   * this one.
+   * The key of the profile the sender sent under, as Home's `profileKeyOf()`
+   * names the link the message stores, which `sendInto()` writes resolved:
+   * the space of the profile's document and the entity it is, since an
+   * entity's id is minted from its cause and two spaces can hold documents of
+   * one id. Absent once obliterated. Two messages have the same author when
+   * their keys agree, and a reader is the author when their resolved
+   * profile's key is this one.
    */
   authorKey?: string;
 }
-
-/**
- * The key a profile is known by among a room's authors: the space of the
- * profile's own document and the entity that document is, as Home keys a
- * profile (`profileKeyOf()` in `../system/private-inbox.tsx`). An entity's id
- * is minted from its cause, so two spaces can hold documents of one id, and
- * the space is what tells those apart; `profile` is the resolved link to the
- * profile, so the two together name what `equals()` compares. `undefined` for
- * a profile that names no entity or no space.
- */
-export const profileKeyOf = (profile: ProfileCell): string | undefined => {
-  const entity = entityKeyOf(profile);
-  const space = spaceOf(profile);
-  return entity === undefined || space === undefined
-    ? undefined
-    : `${space}/${entity}`;
-};
 
 /** The entries of a room's messages, and every author among them. */
 export interface MessageEntries {

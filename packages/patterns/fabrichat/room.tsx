@@ -46,6 +46,7 @@ import {
   type ParticipantRosterCell,
   rosterProfiles,
 } from "../loom/participants.tsx";
+import { profileKeyOf } from "../system/private-inbox.tsx";
 import { type ShownIn, type ViewPlace, viewPlaces } from "./logic.ts";
 import {
   canActIn,
@@ -70,7 +71,6 @@ import {
   type MessagesValue,
   NO_MESSAGE_RIGHTS,
   ownersMayObliterateIn,
-  profileKeyOf,
   rightsOf,
   type RoomStreamEvent,
   type SetTitleEvent,
@@ -1264,8 +1264,8 @@ export const FabriChatRoomCore = pattern<
   // Every message's rights for the reader, by the rule the handlers admit an
   // act by, derived once for the whole list from each entry's author and
   // whether it is live. The reader is the author of a message whose author's
-  // key is the reader's profile's: both are `profileKeyOf()` of the profile's
-  // resolved link, which is what `equals()` compares.
+  // key is the reader's profile's: both are Home's `profileKeyOf()` of the
+  // profile's resolved link, which is what `equals()` compares.
   const messageRights = computed((): ChatMessageRights[] => {
     const profile = viewerProfileOf(myProfile);
     const readerKey = profile === undefined ? undefined : profileKeyOf(profile);
