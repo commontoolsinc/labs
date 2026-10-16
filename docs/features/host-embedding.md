@@ -95,7 +95,7 @@ the real export, so a rename fails the docs check.)
 
 **Theme.** The look needs no context for token-based styling: a host themes
 what it mounts by setting the `--cf-theme-*` custom properties on an ancestor,
-which components read through inheritance. Behaviour that reads the theme
+which components read through inheritance. Behavior that reads the theme
 object rather than its tokens still wants a `cf-theme` above it: `cf-code-editor`
 consumes `cfThemeContext` to choose CodeMirror's dark chrome, so dark tokens
 alone leave that chrome light. A sandboxed iframe guest inherits nothing from the page, so
