@@ -71,6 +71,7 @@ import type { Runtime } from "./runtime.ts";
 import { schemaRegistryEpoch } from "./schema-registry.ts";
 import { fabricAuthorityMatchesSpaceHost } from "./space-host.ts";
 import type { MemorySpace } from "./storage/interface.ts";
+import { isTerminalRejection } from "./storage/rejection.ts";
 
 /**
  * What went wrong, as a reason a record can carry: a thrown error, or the
@@ -229,6 +230,19 @@ type OriginClaim = {
   origin: string;
 };
 
+/**
+ * Why a write did not commit, as a reason a record can carry, and whether the
+ * store refused it on the data's own merits, so that the same write sent again
+ * is refused again.
+ */
+type CommitFailure = { detail: string; terminal: boolean };
+
+/**
+ * An adoption the store refused on the data's own merits: the piece ran
+ * `running` and the origin offered `candidate`.
+ */
+type RefusedAdoption = { running: string; candidate: string; detail: string };
+
 /** One network pass, so teardown can abort it and wait for it to settle. */
 type SourcePass = {
   abort: AbortController;
@@ -291,6 +305,16 @@ export class SourceReconciler {
   readonly #pending = new Map<string, PendingReconcile>();
   readonly #fabricFollowers = new Map<string, FabricFollower>();
   readonly #stoppedFabricFollowers = new Set<string>();
+
+  /**
+   * The last adoption the store refused for good, by follower key. Preparing
+   * an adoption loads and restages everything the piece holds, and the same
+   * write is refused the same way however often it is sent, so a piece whose
+   * opens re-enter reconciliation would otherwise prepare it for as long as
+   * it is opened. An entry stands until the piece runs something else or its
+   * origin offers something else.
+   */
+  readonly #refusedAdoptions = new Map<string, RefusedAdoption>();
 
   /**
    * The pieces following a system origin, by follower key. A host serves one
@@ -462,6 +486,7 @@ export class SourceReconciler {
     for (const { abort } of this.#passes) abort.abort();
     for (const { cancel } of this.#fabricFollowers.values()) cancel();
     this.#fabricFollowers.clear();
+    this.#refusedAdoptions.clear();
     this.#cancelSessionReplaced?.();
     this.#systemFollowers.clear();
     await this.idle();
@@ -750,6 +775,9 @@ export class SourceReconciler {
       advertised === state.running.identity &&
       await this.#loadPattern(state.running, state.space) !== undefined
     ) return "current";
+    if (this.#refusedBefore(resultCell, state, advertised)) {
+      return "unavailable";
+    }
 
     const resolved = await this.#runtime.harness.resolve(
       new HttpProgramResolver(target.href, fetch),
@@ -1225,6 +1253,9 @@ export class SourceReconciler {
       candidateRef.identity === state.running.identity &&
       candidateRef.symbol === state.running.symbol
     ) return "current";
+    if (this.#refusedBefore(resultCell, state, candidateRef.identity)) {
+      return "unavailable";
+    }
 
     const refusal = origin.kind === "system"
       ? undefined
@@ -1310,9 +1341,39 @@ export class SourceReconciler {
       });
       return true;
     }, sourceUpdate);
-    if (failure === undefined) return "updated";
-    state.detail = failure;
+    const key = this.#followerKey(resultCell);
+    if (failure === undefined) {
+      this.#refusedAdoptions.delete(key);
+      return "updated";
+    }
+    if (failure.terminal) {
+      this.#refusedAdoptions.set(key, {
+        running: state.running.identity,
+        candidate: candidateRef.identity,
+        detail: failure.detail,
+      });
+    }
+    state.detail = failure.detail;
     return "unavailable";
+  }
+
+  /**
+   * Whether the store has already refused, for good, the adoption of
+   * `candidate` over what the piece runs. Says why in `state`, as the refusal
+   * itself did.
+   */
+  #refusedBefore(
+    resultCell: Cell<unknown>,
+    state: PieceState,
+    candidate: string,
+  ): boolean {
+    const refused = this.#refusedAdoptions.get(this.#followerKey(resultCell));
+    if (
+      refused?.running !== state.running.identity ||
+      refused.candidate !== candidate
+    ) return false;
+    state.detail = refused.detail;
+    return true;
   }
 
   /**
@@ -1396,7 +1457,7 @@ export class SourceReconciler {
       },
     );
     if (failure === undefined) return "migrated";
-    state.detail = failure;
+    state.detail = failure.detail;
     return "unavailable";
   }
 
@@ -1407,7 +1468,8 @@ export class SourceReconciler {
    *
    * Returns `undefined` once the write commits, and otherwise why it did not,
    * as a reason a record can carry: the error that stopped the commit, or the
-   * piece having changed under the write.
+   * piece having changed under the write. Only a refusal of the data on its
+   * own merits is terminal.
    */
   async #commit(
     resultCell: Cell<unknown>,
@@ -1415,7 +1477,7 @@ export class SourceReconciler {
     signal: AbortSignal | undefined,
     write: (tx: Parameters<typeof applyPieceSourceTransition>[2]) => boolean,
     sourceUpdate?: PreparedSourceUpdate,
-  ): Promise<string | undefined> {
+  ): Promise<CommitFailure | undefined> {
     const runtime = this.#runtime;
     const result = await runtime.editWithRetry(
       (tx) => {
@@ -1450,18 +1512,24 @@ export class SourceReconciler {
       undefined,
       { sourceUpdate },
     );
-    if (signal?.aborted) return "the reconciliation was stopped";
+    if (signal?.aborted) {
+      return { detail: "the reconciliation was stopped", terminal: false };
+    }
     if (result.error) {
       logger.warn("reconcile-commit-failed", () => [
         "source reconciliation could not commit",
         state.space,
         result.error,
       ]);
-      return reconciliationDetail(result.error);
+      return {
+        detail: reconciliationDetail(result.error),
+        terminal: isTerminalRejection(result.error),
+      };
     }
-    return result.ok === true
-      ? undefined
-      : "the piece changed while its write was being prepared";
+    return result.ok === true ? undefined : {
+      detail: "the piece changed while its write was being prepared",
+      terminal: false,
+    };
   }
 
   /**
