@@ -48,10 +48,8 @@ import {
 } from "../loom/participants.tsx";
 import { isInMain, type ShownIn, viewPlaces } from "./logic.ts";
 import {
-  type ActivityCell,
-  type ActivityCounters,
-  type ActivityCountersCell,
   canActIn,
+  commitComposerSend,
   commitDelete,
   commitDeleteReaction,
   commitEdit,
@@ -59,8 +57,7 @@ import {
   commitSend,
   commitSendReaction,
   commitSetTitle,
-  commitWindow,
-  compareEntries,
+  commitThreadSend,
   type ComposerState,
   entryFor,
   FABRICHAT_POLICY,
@@ -72,23 +69,14 @@ import {
   type MessageRights,
   messageRightsOf,
   type MessagesCell,
-  NO_ACTIVITY,
   NO_MESSAGE_RIGHTS,
-  NUMBERING_KEY,
-  ownersMayObliterateBy,
   ownersMayObliterateIn,
-  type ReactionListsCell,
-  type RequestsCell,
   type RoomStreamEvent,
-  type RoomWindowEvent,
   type SetTitleEvent,
   type StoredAbout,
   tellManagerJoined,
   TITLE_KEY,
   type TitlesCell,
-  type UsedTimesCell,
-  type WindowsCell,
-  type WindowsValue,
 } from "./room-records.tsx";
 import { bodyText, FabriChatMessageRow } from "./message-row.tsx";
 import {
@@ -110,13 +98,11 @@ import {
   type ChatProfile,
   type ChatRequestOutcome,
   type ChatRoomAbout,
-  type ChatRoomActivity,
   type ChatRoomKind,
   type ChatRoomLink,
   type ChatRoomPolicy,
   epochNsec,
   isPrincipalDID,
-  type MessageActOutcome,
   type ProfileCell,
   type SetTitleOutcome,
 } from "./schemas.tsx";
@@ -132,9 +118,7 @@ export const participantsOf = (
 ): ProfileCell[] =>
   [
     ...listed,
-    ...[...entries].sort(compareEntries).map((entry) =>
-      entry.record.authorProfile
-    ),
+    ...entries.map((entry) => entry.record.authorProfile),
   ].reduce<ProfileCell[]>(
     (found, profile) =>
       profile === undefined || found.some((known) => equals(known, profile))
@@ -836,7 +820,7 @@ export interface ChatThreadSummary {
   latestReplyAt: FabricEpochNsec;
 }
 
-/** A room's messages: facts, the newest, and this session's windows. */
+/** A room's messages: facts, the newest, and its threads. */
 export interface ChatMessageList {
   /** How many messages the room holds, obliterated tombstones included. */
   count: number;
@@ -861,15 +845,6 @@ export interface ChatMessageList {
    * of the main conversation that roots none has no entry.
    */
   threads: ChatThreadSummary[];
-
-  /** This session's open windows, by the `windowId` its client chose. */
-  windows: PerSession<WindowsCell>;
-
-  /** Opens a window, or moves one already open. */
-  openWindow: Stream<RoomWindowEvent>;
-
-  /** Closes a window. */
-  closeWindow: Stream<RoomWindowEvent>;
 }
 
 /** Who is reading a room. */
@@ -913,12 +888,6 @@ export interface ChatRoomView {
   /** What the room says about itself. */
   about: ChatRoomAbout;
 
-  /** What the room recorded recently, in `seq` order. */
-  recentActivity: ChatRoomActivity[];
-
-  /** The highest `seq` dropped from `recentActivity` for age; 0 for none. */
-  recentActivityExpiredThrough: number;
-
   /**
    * The room's participants: for a room that is its space's root, those who
    * joined it; for any other, its space's participants as the space's root
@@ -959,15 +928,6 @@ export interface ChatRoomView {
 
   /** The room's messages. */
   messages: ChatMessageList;
-
-  /**
-   * The message list's `openWindow`, here as well for a client that sends only
-   * to a view's own streams, as it reads a thread through a window.
-   */
-  openWindow: Stream<RoomWindowEvent>;
-
-  /** The message list's `closeWindow`, here as well, as `openWindow` is. */
-  closeWindow: Stream<RoomWindowEvent>;
 
   /** Whether this reader can send, edit, delete, and react. */
   canSend: boolean;
@@ -1021,12 +981,6 @@ export interface ChatRoomView {
   addRequests: Record<string, AddMemberOutcome>;
 
   /**
-   * The outcome of each of this reader's message acts, by its `requestId`:
-   * sends, edits, deletions, obliterations, and reactions added or removed.
-   */
-  messageRequests: Record<string, MessageActOutcome>;
-
-  /**
    * Sets the room's title, which every member shares, from a trusted gesture
    * on the rendering's `ChatRetitleSurface`, or from a client's own control
    * through the sanctioned issuing path. Any member who can write in the room
@@ -1066,21 +1020,6 @@ export interface FabriChatRoomCoreInput {
 
   /** The room's messages. */
   messages: MessagesCell;
-
-  /** Every message's reaction list. */
-  reactionLists: ReactionListsCell;
-
-  /** The requests the room has acted on. */
-  requests: RequestsCell;
-
-  /** The times the room has recorded something at. */
-  usedTimes: UsedTimesCell;
-
-  /** The room's recent activity. */
-  activity: ActivityCell;
-
-  /** Where the activity's numbering stands. */
-  counters: ActivityCountersCell;
 
   /**
    * The room's title as a member last set it; absent for a room whose title
@@ -1144,11 +1083,6 @@ export const FabriChatRoomCore = pattern<
     container,
     about,
     messages,
-    reactionLists,
-    requests,
-    usedTimes,
-    activity,
-    counters,
     titles,
     roster,
     addRequests,
@@ -1173,10 +1107,12 @@ export const FabriChatRoomCore = pattern<
     ...FABRICHAT_POLICY,
     ownersMayObliterate: false,
   });
+  const ownersMayObliterate = ownersMayObliterateIn(
+    kind,
+    ownersMayObliterateGiven,
+  );
   const policy = computed((): Cell<ChatRoomPolicy> =>
-    ownersMayObliterateIn(kind, ownersMayObliterateGiven)
-      ? policyWithOwners
-      : policyWithoutOwners
+    ownersMayObliterate ? policyWithOwners : policyWithoutOwners
   );
   // Whether the room is one a manager can take the viewer into. It reads
   // nothing of the manager, whose label the room's space may not admit:
@@ -1186,33 +1122,13 @@ export const FabriChatRoomCore = pattern<
       equals(container?.key("chatRoom").get(), self))) &&
     self !== undefined
   );
-  // The sender's outcomes, which follow them, and only them, across sessions,
-  // and why the session's latest act was refused, which the composer shows.
-  const messageRequests = new Writable.perUser<
-    Record<string, MessageActOutcome>
-  >({});
-  const refusal = new Writable.perSession<string>("");
-  const records = {
-    kind,
-    policy,
-    composer,
-    outcomes: messageRequests,
-    refusal,
-    messages,
-    reactionLists,
-    requests,
-    usedTimes,
-    activity,
-    counters,
-    joined: tellManagerJoined({
-      canJoin,
-      container: ownSpace ? undefined : container,
-      manager,
-      self,
-    }),
-  };
+  const tellJoined = tellManagerJoined({
+    canJoin,
+    container: ownSpace ? undefined : container,
+    manager,
+    self,
+  });
   const alsoToMain = new Writable.perSession(false);
-  const windows = new Writable.perSession<WindowsValue>();
 
   const entries = computed(() => messageEntries(messages));
   // Every message's place in the views, derived once for the whole list. Each
@@ -1223,9 +1139,9 @@ export const FabriChatRoomCore = pattern<
       entries.map(({ key, sentAt, replyTo }) => ({ key, sentAt, replyTo })),
     )
   );
-  const mainEntries = computed(() =>
-    entries.filter(isInMain).sort(compareEntries)
-  );
+  // The views keep the order the room recorded the messages in: a time is
+  // the handler clock's reading, and nothing sorts by it.
+  const mainEntries = computed(() => entries.filter(isInMain));
   const latest = computed(() => ({
     messages: mainEntries.slice(-FABRICHAT_POLICY.maxWindowCount).map((
       entry,
@@ -1245,11 +1161,8 @@ export const FabriChatRoomCore = pattern<
     })
   );
   const count = computed(() => entries.length);
-  const sortedEntries = computed(() => [...entries].sort(compareEntries));
-  const oldestAt = computed(() => sortedEntries[0]?.record.sentAt);
-  const newestAt = computed(() =>
-    sortedEntries[sortedEntries.length - 1]?.record.sentAt
-  );
+  const oldestAt = computed(() => entries[0]?.record.sentAt);
+  const newestAt = computed(() => entries[entries.length - 1]?.record.sentAt);
   // The space's participants as its root lists them, for a room that isn't
   // that root. A root room's `#default` is the room itself, so it reads only
   // its own; a space whose root isn't there yet lists none.
@@ -1301,7 +1214,7 @@ export const FabriChatRoomCore = pattern<
   // act by, derived once for the whole list as `places` is.
   const messageRights = computed((): ChatMessageRights[] => {
     const profile = viewerProfileOf(myProfile);
-    return sortedEntries.map((entry) => ({
+    return entries.map((entry) => ({
       message: entry.cell,
       ...(canSend && profile !== undefined
         ? messageRightsOf(
@@ -1309,7 +1222,7 @@ export const FabriChatRoomCore = pattern<
           profile,
           kind,
           isOwner,
-          ownersMayObliterateBy(policy),
+          ownersMayObliterate,
         )
         : NO_MESSAGE_RIGHTS),
     }));
@@ -1326,10 +1239,6 @@ export const FabriChatRoomCore = pattern<
     // The stored record itself, as a link, so a reader can read its label.
     record: about,
   };
-  const expiredThrough = computed(() =>
-    ((counters.elementById(NUMBERING_KEY).get() ??
-      NO_ACTIVITY) as ActivityCounters).expiredThrough
-  );
   const name = computed(() =>
     title ?? (kind === "direct" ? "Direct chat" : "Chat")
   );
@@ -1346,7 +1255,7 @@ export const FabriChatRoomCore = pattern<
     messages,
     outcomes: titleRequests,
     refusal: titleRefusal,
-    joined: records.joined,
+    joined: tellJoined,
   });
   // Who may retitle differs by viewer, and what came of a retitle by session,
   // so both are hidden by a prop rather than built as a different tree (see
@@ -1391,72 +1300,57 @@ export const FabriChatRoomCore = pattern<
   const isEmpty = computed(() => mainEntries.length === 0);
   // Per session, so hidden by a prop rather than a branch (see
   // `FabriChatMessageRow`).
-  const refusalDisplay = computed((): ChatDisplay =>
-    refusal.get() === "" ? "none" : "block"
-  );
   const threadShownIn = computed((): ShownIn =>
     alsoToMain.get() ? "both" : "thread"
   );
 
-  const sendMessage = commitSend({ myProfile, ...records });
-  const composeSend = commitSend({
+  // Each handler is bound to the cells it uses and no others.
+  const sendMessage = commitSend({ myProfile, messages, joined: tellJoined });
+  const composeSend = commitComposerSend({
     myProfile,
-    ...records,
-    replyFrom: "replyTo",
+    messages,
+    composer,
+    joined: tellJoined,
   });
-  const sendThreadReply = commitSend({
+  const sendThreadReply = commitThreadSend({
     myProfile,
-    ...records,
-    replyFrom: "thread",
+    messages,
+    composer,
     shownIn: threadShownIn,
+    joined: tellJoined,
   });
   const streams = {
     sendMessage,
-    editMessage: commitEdit({
-      myProfile,
-      ...records,
-    }),
-    deleteMessage: commitDelete({
-      myProfile,
-      ...records,
-    }),
+    editMessage: commitEdit({ myProfile, room: messages, composer }),
+    deleteMessage: commitDelete({ myProfile, room: messages }),
     obliterateMessage: commitObliterate({
       myProfile,
-      ...records,
+      room: messages,
+      kind,
+      ownersMayObliterate,
     }),
     sendReaction: commitSendReaction({
       myProfile,
-      ...records,
+      room: messages,
+      joined: tellJoined,
     }),
-    deleteReaction: commitDeleteReaction({
-      myProfile,
-      ...records,
-    }),
+    deleteReaction: commitDeleteReaction({ myProfile, room: messages }),
   };
-  const openWindow = commitWindow({ op: "open", messages, windows });
-  const closeWindow = commitWindow({ op: "close", messages, windows });
   const messageList = {
     count,
     oldestAt,
     newestAt,
     latest,
     threads,
-    windows,
-    openWindow,
-    closeWindow,
   };
   const view = {
     about: aboutView,
-    recentActivity: activity,
-    recentActivityExpiredThrough: expiredThrough,
     participants,
     roster: joined,
     participantEntries,
     participantPrincipals,
     addParticipant: join,
     messages: messageList,
-    openWindow,
-    closeWindow,
     canSend,
     viewer,
     messageRights,
@@ -1464,7 +1358,6 @@ export const FabriChatRoomCore = pattern<
     addMember: addMember.add,
     canAdd: addMember.canAdd,
     addRequests: addMember.outcomes,
-    messageRequests,
     setTitle,
     titleRequests,
   };
@@ -1544,15 +1437,8 @@ export const FabriChatRoomCore = pattern<
               places={places}
               cannotWrite={cannotSend}
               isOwner={isOwner}
-              policy={policy}
+              ownersMayObliterate={ownersMayObliterate}
               messages={messages}
-              reactionLists={reactionLists}
-              requests={requests}
-              usedTimes={usedTimes}
-              activity={activity}
-              counters={counters}
-              outcomes={messageRequests}
-              refusal={refusal}
               canJoin={canJoin}
               container={ownSpace ? undefined : container}
               manager={manager}
@@ -1588,14 +1474,6 @@ export const FabriChatRoomCore = pattern<
             onClick={composeSend}
           />
         </div>
-        <cf-text
-          id="fabrichat-act-refusal"
-          variant="caption"
-          hidden
-          style={{ display: refusalDisplay }}
-        >
-          {refusal}
-        </cf-text>
 
         <cf-vstack
           id="fabrichat-thread"
@@ -1623,15 +1501,8 @@ export const FabriChatRoomCore = pattern<
               places={places}
               cannotWrite={cannotSend}
               isOwner={isOwner}
-              policy={policy}
+              ownersMayObliterate={ownersMayObliterate}
               messages={messages}
-              reactionLists={reactionLists}
-              requests={requests}
-              usedTimes={usedTimes}
-              activity={activity}
-              counters={counters}
-              outcomes={messageRequests}
-              refusal={refusal}
               canJoin={canJoin}
               container={ownSpace ? undefined : container}
               manager={manager}
@@ -1678,21 +1549,6 @@ export interface FabriChatRoomInput {
   /** The room's messages. */
   messages?: MessagesCell;
 
-  /** Every message's reaction list. */
-  reactionLists?: ReactionListsCell;
-
-  /** The requests the room has acted on. */
-  requests?: RequestsCell;
-
-  /** The times the room has recorded something at. */
-  usedTimes?: UsedTimesCell;
-
-  /** The room's recent activity. */
-  activity?: ActivityCell;
-
-  /** Where the activity's numbering stands. */
-  counters?: ActivityCountersCell;
-
   /**
    * The room's title as a member last set it. It changes only through
    * `setTitle`.
@@ -1715,11 +1571,6 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
   ({
     about,
     messages,
-    reactionLists,
-    requests,
-    usedTimes,
-    activity,
-    counters,
     titles,
     participants,
     // The room itself, the link another member's manager lists it by.
@@ -1749,11 +1600,6 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
         container: containerWish.result,
         about,
         messages,
-        reactionLists,
-        requests,
-        usedTimes,
-        activity,
-        counters,
         titles,
         roster: participants,
         addRequests,
@@ -1767,16 +1613,12 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
       [NAME]: room[NAME],
       [VIEWS]: room[VIEWS],
       about: room.about,
-      recentActivity: room.recentActivity,
-      recentActivityExpiredThrough: room.recentActivityExpiredThrough,
       participants: room.participants,
       roster: room.roster,
       participantEntries: room.participantEntries,
       participantPrincipals: room.participantPrincipals,
       addParticipant: room.addParticipant,
       messages: room.messages,
-      openWindow: room.openWindow,
-      closeWindow: room.closeWindow,
       canSend: room.canSend,
       viewer: room.viewer,
       messageRights: room.messageRights,
@@ -1789,7 +1631,6 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
       addMember: room.addMember,
       canAdd: room.canAdd,
       addRequests: room.addRequests,
-      messageRequests: room.messageRequests,
       setTitle: room.setTitle,
       titleRequests: room.titleRequests,
       [UI]: (

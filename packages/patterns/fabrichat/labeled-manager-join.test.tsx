@@ -18,15 +18,7 @@ import {
   Writable,
 } from "commonfabric";
 import type { ParticipantRoster } from "../loom/participants.tsx";
-import {
-  type ActivityCounters,
-  type JoinRoomRequest,
-  type MessagesValue,
-  type ReactionList,
-  type RequestMemo,
-  type SentActivity,
-  type UsedTime,
-} from "./room-records.tsx";
+import { type JoinRoomRequest, type MessagesValue } from "./room-records.tsx";
 import {
   FabriChatRoomCore,
   type OfferRoomRequest,
@@ -98,11 +90,6 @@ function roomLinkOf(room: unknown): unknown {
 /** A room's records, fresh. */
 const records = () => ({
   messages: Writable.of<MessagesValue>([] as MessagesValue),
-  reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
-  requests: Writable.of<RequestMemo[]>([]),
-  usedTimes: Writable.of<UsedTime[]>([]),
-  activity: Writable.of<SentActivity[]>([]),
-  counters: Writable.of<ActivityCounters[]>([]),
   titles: Writable.of<TitleRecord[]>([]),
 });
 
