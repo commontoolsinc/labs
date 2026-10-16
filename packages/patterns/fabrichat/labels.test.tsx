@@ -72,6 +72,15 @@ const reactionsOnFirst = (messages: Cell<MessagesValue>): number => {
   return ((first?.reactions?.get() ?? []) as unknown[]).length;
 };
 
+/** An element of a list whose elements carry no policy. */
+interface PlainNote {
+  body: string;
+}
+
+/** Each of `notes`' bodies, in order. */
+const plainBodies = (notes: Cell<PlainNote[]>): string =>
+  (notes.get() ?? []).map((note) => note?.body).join(" | ");
+
 /** The first message's reaction list, as a cell to write through. */
 const reactionListOfFirst = (
   messages: Cell<MessagesValue>,
@@ -197,6 +206,27 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       { ...current, body: "Bob pushed this" } as SentMessage,
     );
   });
+  // The same three writes on a list whose elements carry no policy, each of
+  // which lands: what refuses them on the room's list is the policy.
+  const plain = Writable.of<PlainNote[]>([]);
+  const plainTarget = Writable.of<PlainNote | undefined>(undefined);
+  const seedPlain = action(() => plain.push({ body: "Plain" }));
+  const replacePlain = action(() => {
+    const current = plain.key(0).get();
+    if (current === undefined) return;
+    plain.key(0).set({ ...current, body: "Bob replaced this" });
+  });
+  const repointPlain = action(() => {
+    const current = plain.key(0).get();
+    if (current === undefined) return;
+    plainTarget.set({ ...current, body: "Bob pointed here" });
+    plain.key(0).set(plainTarget as never);
+  });
+  const pushPlain = action(() => {
+    const current = plain.key(0).get();
+    if (current === undefined) return;
+    plain.push({ ...current, body: "Bob pushed this" });
+  });
 
   return {
     allowRuntimeErrors: true,
@@ -233,6 +263,18 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
           firstBody(setup.messages) === "Hello from Alice" &&
           messageCount(setup.messages) === 1 &&
           principalOf(setup.messages.key(0), "authored-by") !== me.get()
+        ),
+      },
+      { action: seedPlain },
+      { action: replacePlain },
+      {
+        assertion: assert(() => plainBodies(plain) === "Bob replaced this"),
+      },
+      { action: repointPlain },
+      { action: pushPlain },
+      {
+        assertion: assert(() =>
+          plainBodies(plain) === "Bob pointed here | Bob pushed this"
         ),
       },
       { label: "bob-reacted" },
