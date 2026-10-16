@@ -34,6 +34,7 @@ import type {
   IPreconditionFailedError,
   IStorageManager,
   IStorageNotification,
+  IStorageTransaction,
   MemorySpace,
 } from "../storage/interface.ts";
 import {
@@ -2575,7 +2576,7 @@ export async function dispatchQueuedEvent(state: {
       // reaches leaves the run free to dispatch.
       const refused = served === undefined
         ? undefined
-        : refusedReadIn(state.runtime.storageManager, tx);
+        : refusedReadIn(state.runtime.storageManager, tx.tx);
       if (refused !== undefined) {
         if (tx.status().status === "ready") {
           tx.abort(new Error(`served run read a refused document: ${refused}`));
@@ -3305,10 +3306,13 @@ export async function dispatchQueuedEvent(state: {
  * records as a link-resolution probe, which resolving a link through the
  * document makes; and a read it records as ignored for scheduling, which
  * writing into the document makes.
+ *
+ * The reads are the ones `tx`, the storage transaction itself, records
+ * natively; a transaction that records none names no document.
  */
 export function refusedReadIn(
   manager: Pick<IStorageManager, "refusesReadByConstruction">,
-  tx: Pick<IExtendedStorageTransaction, "getReadActivities">,
+  tx: Pick<IStorageTransaction, "getReadActivities">,
 ): string | undefined {
   if (manager.refusesReadByConstruction === undefined) return undefined;
   for (const read of tx.getReadActivities?.() ?? []) {

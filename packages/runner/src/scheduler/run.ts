@@ -1227,7 +1227,11 @@ function finalizeReactiveActionCommit(
   // writes are withdrawn rather than sealed. The read is refused the same way
   // every time, so the run is not retried: it runs again when another of its
   // inputs changes, and withdraws again while it still reads the document.
-  const refused = refusedReadIn(state.runtime.storageManager, args.tx);
+  // Only a serving manager refuses reads by construction, so on any other
+  // runtime the transaction is not inspected at all.
+  const refused = state.runtime.storageManager.servingHomeSpace === undefined
+    ? undefined
+    : refusedReadIn(state.runtime.storageManager, args.tx.tx);
   if (refused !== undefined && args.tx.status().status === "ready") {
     args.tx.abort(
       new Error(`served derivation read a refused document: ${refused}`),
