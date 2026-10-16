@@ -323,7 +323,11 @@ technology. Mirror important state and controls in ordinary HTML:
 </html>
 ```
 
-Use `type="button"`; game controls must never rely on form submission. Pause or
+Use `type="button"`; game controls must never rely on form submission. Style
+the HTML around the game with the ambient theme the iframe receives — its
+elements, `cf-*` classes, and `--cf-theme-*` variables — and spell no color or
+font; see
+[Style with the ambient theme](./iframe-pattern-guide.md#style-with-the-ambient-theme). Pause or
 mute on `visibilitychange` when appropriate. On `pagehide`, cancel every sink,
 destroy the game, remove global listeners, and disconnect the bridge.
 

@@ -82,7 +82,7 @@ export const readValueToolDescriptor: HarnessToolDescriptor = {
   toolId: "read_value",
   title: "Read Value",
   description:
-    "Return the value behind a handle token this run holds, optionally narrowed to a path within it: strings, numbers and every other value as stored, and a position that links to another document as that document's handle token. Run describe_handle on the token first — a token this run has not described is refused. Everything read joins this run's context, and its CFC label stays on the run: whatever the run produces afterwards carries that label. Where the run's policy does not let the value reach you, the refusal names the label that kept it back, and delegate_task can hand the token to a subagent that reads it and returns what the task needs. Read only what the task needs: narrow with select rather than reading a whole piece to find one field.",
+    "Return the value behind a described handle token this run holds, as stored, with a position linking to another document returned as that document's handle token.",
   effectClass: "read",
   inputSchema: {
     type: "object",
@@ -93,8 +93,7 @@ export const readValueToolDescriptor: HarnessToolDescriptor = {
       },
       select: {
         type: "string",
-        description:
-          "A path within the value, segments separated by /, such as items/0/title. Omit it to read the whole value.",
+        description: "A path within the value, such as items/0/title.",
       },
     },
     required: ["token"],

@@ -549,7 +549,7 @@ async function main(): Promise<void> {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${htmlText(config.displayName)}</title>
-  <style>html,body,#root{box-sizing:border-box;width:100%;height:100%;margin:0}body{font-family:system-ui,sans-serif}</style>
+  <style>html,body,#root{box-sizing:border-box;width:100%;height:100%;margin:0}</style>
 </head>
 <body>
   <div id="root"></div>
