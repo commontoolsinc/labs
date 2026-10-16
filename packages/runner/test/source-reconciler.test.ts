@@ -28,6 +28,7 @@ import {
   type RuntimeFetch,
   type RuntimeProgram,
   setPatternSource,
+  setPieceReconciliation,
   systemPatternSource,
 } from "../src/index.ts";
 import { readStoredCfcSchemaHash } from "../src/cfc/metadata.ts";
@@ -1062,6 +1063,86 @@ describe("piece source reconciliation", () => {
             outcome: "current",
             running: "v2",
           });
+          expect(getPieceReconciliation(piece)?.confirmed).toEqual({
+            identity: identities.v2,
+            releasedAt: Date.parse(LATER),
+          });
+        });
+      });
+
+      describe("when another runtime confirms a later release meanwhile", () => {
+        // Another runtime reconciling the same piece can confirm the running
+        // source at a later release while this one is part way through. The
+        // order is read again where this one writes, so it neither adopts the
+        // release that confirmation overtook nor moves the confirmed time
+        // back.
+
+        /** Records, as another runtime would, `identity` confirmed at `at`. */
+        async function confirmElsewhere(
+          piece: Cell<unknown>,
+          identity: string,
+          at: string,
+        ) {
+          const written = await runtime.editWithRetry((tx) => {
+            setPieceReconciliation(piece, tx, {
+              outcome: "followed",
+              at: Date.now(),
+              origin: PARENT_SOURCE,
+              offered: { identity, symbol: SYMBOL },
+              confirmed: { identity, releasedAt: Date.parse(at) },
+            });
+          });
+          expect(written.error).toBeUndefined();
+        }
+
+        it("does not adopt a release that confirmation makes earlier", async () => {
+          const { piece, identities, offer } = await followingPiece();
+          await offer({ marker: "v2", releasedAt: EARLIER });
+          const sync = runtime.runner.syncStoredPieceCells.bind(runtime.runner);
+          using _overtaken = stub(
+            runtime.runner,
+            "syncStoredPieceCells",
+            async (...args: Parameters<typeof sync>) => {
+              await confirmElsewhere(piece, identities.v2, LATER);
+              return sync(...args);
+            },
+          );
+
+          expect(await offer({ marker: "v1", releasedAt: BETWEEN })).toEqual({
+            outcome: "ahead",
+            running: "v2",
+          });
+          expect(originUpdates(piece)).toHaveLength(1);
+          expect(getPieceReconciliation(piece)?.confirmed).toEqual({
+            identity: identities.v2,
+            releasedAt: Date.parse(LATER),
+          });
+        });
+
+        it("keeps that later time when this one confirms the same source earlier", async () => {
+          const { piece, identities, offer } = await followingPiece();
+          await offer({ marker: "v2", releasedAt: EARLIER });
+          const load = runtime.patternManager.loadPatternByIdentity.bind(
+            runtime.patternManager,
+          );
+          let confirmed = false;
+          using _confirming = stub(
+            runtime.patternManager,
+            "loadPatternByIdentity",
+            async (...args: Parameters<typeof load>) => {
+              if (!confirmed) {
+                confirmed = true;
+                await confirmElsewhere(piece, identities.v2, LATER);
+              }
+              return load(...args);
+            },
+          );
+
+          expect(await offer({ marker: "v2", releasedAt: BETWEEN })).toEqual({
+            outcome: "current",
+            running: "v2",
+          });
+          expect(confirmed).toBe(true);
           expect(getPieceReconciliation(piece)?.confirmed).toEqual({
             identity: identities.v2,
             releasedAt: Date.parse(LATER),

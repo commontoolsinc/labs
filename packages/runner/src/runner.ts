@@ -14992,6 +14992,29 @@ export function setPieceReconciliation(
   );
 }
 
+/**
+ * `recorded`, keeping the confirmation `stored` carries where that confirms
+ * the source the piece runs (`running`) at a later release time than
+ * `recorded` does, or where `recorded` confirms nothing. Another runtime can
+ * confirm the running source at a later release while an attempt is under
+ * way, and an attempt that failed, or found nothing to adopt, has learned
+ * nothing that moves that time back. An accepted transition clears the record
+ * it supersedes, so nothing is carried past one.
+ */
+export function keepLaterConfirmation(
+  stored: PieceReconciliation | undefined,
+  recorded: PieceReconciliation,
+  running: string | undefined,
+): PieceReconciliation {
+  const kept = stored?.confirmed;
+  if (kept === undefined || kept.identity !== running) return recorded;
+  const own = recorded.confirmed;
+  return own === undefined ||
+      (own.identity === kept.identity && own.releasedAt < kept.releasedAt)
+    ? { ...recorded, confirmed: kept }
+    : recorded;
+}
+
 /** Whether two recorded outcomes say the same thing, ignoring when. */
 export function samePieceReconciliation(
   left: PieceReconciliation | undefined,

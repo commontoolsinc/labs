@@ -72,6 +72,7 @@ import {
   getPieceReconciliation,
   getPieceSourceRevisions,
   getPieceSourceSnapshot,
+  keepLaterConfirmation,
   type PieceReconciliation,
   type PieceReconciliationOutcome,
   type PieceReconciliationReason,
@@ -799,11 +800,31 @@ export class SourceReconciler {
   ): Promise<void> {
     const recorded = reconciliationFor(state, outcome);
     if (recorded === undefined || signal.aborted || this.#disposed) return;
-    if (samePieceReconciliation(getPieceReconciliation(resultCell), recorded)) {
-      return;
-    }
+    // Another runtime may have confirmed the running source at a later
+    // release while this one reconciled, so the record written keeps the later
+    // time, read again inside the commit.
+    const stored = getPieceReconciliation(resultCell);
+    if (
+      samePieceReconciliation(
+        stored,
+        keepLaterConfirmation(
+          stored,
+          recorded,
+          getPatternIdentityRef(resultCell)?.identity,
+        ),
+      )
+    ) return;
     await this.#commit(resultCell, state, signal, (tx) => {
-      setPieceReconciliation(resultCell, tx, recorded);
+      const view = resultCell.withTx(tx);
+      setPieceReconciliation(
+        resultCell,
+        tx,
+        keepLaterConfirmation(
+          getPieceReconciliation(view),
+          recorded,
+          getPatternIdentityRef(view)?.identity,
+        ),
+      );
       return true;
     });
   }
@@ -1537,8 +1558,29 @@ export class SourceReconciler {
     // loaded replaces the document the store holds, so they are named too,
     // with what the candidate's nodes read, each under its reader's schema.
     await runtime.runner.syncStoredPieceCells(resultCell, candidate);
+    // A `system:` candidate is ordered against the release the piece runs
+    // when the commit lands, not only when this pass began: another runtime
+    // can confirm the running source at a later release while this one
+    // prepares. The order is read again inside the commit, so a confirmation
+    // that lands first makes this commit stale and its retry decline. A piece
+    // whose running pattern will not load takes the candidate as a rescue,
+    // as an earlier offer does.
+    const ordered = origin.kind === "system" &&
+      await this.#loadPattern(state.running, state.space) !== undefined;
+    let overtaken = false;
     const failure = await this.#commit(resultCell, state, signal, (tx) => {
+      overtaken = false;
       if (!argumentUnchanged(resultCell.withTx(tx))) return false;
+      if (
+        ordered &&
+        isEarlierRelease(
+          advertised?.releasedAt,
+          runningReleasedAt(resultCell.withTx(tx), state.running),
+        )
+      ) {
+        overtaken = true;
+        return false;
+      }
       if (sourceUpdate !== undefined) {
         runtime.patternManager.stageSourceUpdate(
           sourceUpdate,
@@ -1566,6 +1608,20 @@ export class SourceReconciler {
       });
       return true;
     }, sourceUpdate);
+    if (overtaken) {
+      // The piece keeps what it runs, as an earlier offer leaves it, and the
+      // record confirms that source at the release time that overtook this
+      // candidate.
+      const confirmedAt = runningReleasedAt(resultCell, state.running);
+      state.offered = { ...state.running };
+      if (confirmedAt !== undefined) {
+        state.confirmed = {
+          identity: state.running.identity,
+          releasedAt: confirmedAt,
+        };
+      }
+      return "ahead";
+    }
     if (failure === undefined) {
       // The adopting revision records the release time; a record confirming
       // the source just displaced would describe a piece no longer running it.
