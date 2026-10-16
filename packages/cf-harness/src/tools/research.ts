@@ -108,7 +108,7 @@ export const researchToolDescriptor: HarnessToolDescriptor = {
   toolId: "research",
   title: "Research Common Fabric",
   description:
-    "Research Common Fabric documentation, skills, indexed pieces, and available data in service of the user goal. Use orient for an initial approach or answer (default) for a question. Both can inspect source and return useful code or invocations. Build on prior findings with followUpTo; ask for what remains unclear instead of commissioning another whole app. Prefer composition of existing pieces and a small reusable addition where needed. Indexed source and the private transcript remain in artifacts. The result names a research handle (a cfh:v: token) holding the findings: name it in a delegate_task goal so a child whose profile carries describe_handle (pattern-author) can read them instead of researching again, or in followUpTo; a child without that tool holds it as an opaque token. This tool does not search the web.",
+    "Research Common Fabric docs, skills, indexed pieces and available data for the user goal: orient for an initial approach, answer (default) for a question; both can inspect source and return code or invocations. Build on prior findings with followUpTo, asking for what remains unclear rather than commissioning another whole app. Prefer composing existing pieces with a small reusable addition. The result names a research handle (a cfh:v: token) holding the findings: name it in followUpTo, or in a delegate_task goal so a child with describe_handle (pattern-author) reads it instead of researching again. Does not search the web.",
   effectClass: "read",
   inputSchema: {
     type: "object",
@@ -118,20 +118,19 @@ export const researchToolDescriptor: HarnessToolDescriptor = {
         minLength: 3,
         maxLength: 20_000,
         description:
-          "The user task to orient to, or the question to investigate. Include the relevant constraints; let research find the simplest supported approach.",
+          "The task to orient to or question to investigate, with its constraints.",
       },
       purpose: {
         type: "string",
         enum: ["orient", "answer"],
-        description:
-          "Initial orientation or follow-up question. Both have the same reading tools; examples are optional.",
+        description: "orient or answer.",
       },
       followUpTo: {
         type: "string",
         minLength: 1,
         maxLength: 500,
         description:
-          "A research handle (cfh:v: token) whose findings this call starts from: its still-held bindings count as described, and its sources count as cited where they read back unchanged. Only unresolved facts need new research.",
+          "A research handle to start from: its held bindings count as described and its unchanged sources as cited.",
       },
     },
     required: ["task"],

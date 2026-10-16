@@ -29,7 +29,7 @@ export const resolvePieceToolDescriptor: HarnessToolDescriptor = {
   toolId: "resolve_piece",
   title: "Resolve Piece",
   description:
-    "Resolve a piece slug supplied by the user to a handle in this session's space. Call this before author delegation or a registry lookup when the user names a piece, including when answering a question in the same conversation. Accepts a bare slug or pattern:<space>/<slug>; this resolves an exact address, not a display name or fuzzy match. Pass the returned resultRef to the pattern-author child to read or revise the piece. A missing or refused address is a reason to ask for the exact slug or an attachment, not to author a name matcher. Returns no source or piece values.",
+    "Resolve a piece slug the user supplied to a handle in this session's space. Call it before author delegation or a registry lookup whenever the user names a piece, including in a question. Takes an exact address, not a display name or fuzzy match. Pass the returned resultRef to the pattern-author child to read or revise the piece. A missing or refused address means asking for the exact slug or an attachment, not authoring a name matcher. Returns no source or piece values.",
   effectClass: "read",
   inputSchema: {
     type: "object",
