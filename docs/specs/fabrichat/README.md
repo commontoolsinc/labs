@@ -347,7 +347,9 @@ design, as below.
   only from that reviewed gesture; without it, its run is refused whole, and
   records no outcome. A start that creates none, `openDirect` finding a direct
   room already shared or a start that is refused, commits without one, and
-  grants no one access. The manager's other acts are performed by
+  grants no one access. Such a start may still offer the room it finds to its
+  counterpart, since the start that created it and granted them access was the
+  gesture, as the add that admitted a member is for `offerRoom`. The manager's other acts are performed by
   `commitManager`, with no gesture. A participant's chip in a room sends its
   click to the viewer's manager's `openDirect` itself, since a reviewed gesture
   does not carry across a `send` from another handler. It names the participant
@@ -393,7 +395,10 @@ design, as below.
   where their manager lists it, and then sends the room to their manager's
   `accept`, with `keepArchived`, which records a direct room in their `direct`.
   The sender adds to the room's participants each member it offers the room to,
-  and queues a notice only for a member offered nothing. A room is offered only
+  and queues a notice only for a member offered nothing. An `openDirect` that
+  names `profile` and finds a direct room with a notice for its counterpart
+  still waiting offers them the room then, unless its roster lists them, and
+  withdraws the notice. A room is offered only
   to someone the request names by profile, when the profile points at an inbox:
   an `openDirect` naming `profile`, a participant's chip, whose click names
   the participant's profile, or a `createGroup` naming `profiles`, as the

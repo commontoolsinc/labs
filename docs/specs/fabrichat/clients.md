@@ -21,7 +21,10 @@ a room to anyone its space doesn't admit.
 - **All of the person's rooms** are the manager's `rooms`.
 - **The conversation with one person** is `openDirect` with that person's
   principal. A client MUST use it, and MUST NOT create a direct room any other
-  way. It is what keeps one person's conversation from splitting.
+  way. It is what keeps one person's conversation from splitting. A client
+  SHOULD name the person's profile too, when it can resolve one: the room is
+  then offered to them, a room it finds included, when that room was offered
+  them nothing.
 - **The conversations a container shows** are the adapters the container holds,
   each linking to a placement of one room, plus the container's own chat when it
   is a social space that has one. A client that wants a `loom` root's own chat

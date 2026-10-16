@@ -76,6 +76,7 @@ interface ChatManagerOutput {
     requestId?: string;
     room: Cell<ChatRoomOutput>;
     container?: Cell<{ chatRoom?: Cell<ChatRoomOutput> }>;
+    messageAct?: boolean;
   }>;
   forget: Stream<{
     requestId: string;
@@ -175,7 +176,7 @@ room's members by principal or by profile itself.
   ([`shared-space-catalog.md`](../../features/shared-space-catalog.md)), as
   stored. A standalone room's catalog `title` is a display hint: the room's
   title as the manager last heard of it, refreshed when it handles `accept` or
-  `joinRoom` for the room. A client reads a room's current title from the
+  `joinRoom` for the room, other than a `joinRoom` marked `messageAct`. A client reads a room's current title from the
   room. Membership checks belong to the manager's Home-space handling. A room
   sends
   [`joinRoom`](#joinroomrequestid-string-room-cellchatroomoutput) after a
@@ -223,8 +224,8 @@ Each stream below is written as a call, with its event's keys as the parameters:
 
 These rules hold for every stream:
 
-- A stream that names a reviewed surface admits an event only as a trusted
-  gesture on that surface (see
+- A stream that names a reviewed surface admits an event that creates a room
+  only as a trusted gesture on that surface (see
   [`clients.md`](clients.md#writing-the-reviewed-gesture-requirement)).
 - A request that is interrupted is resumed by sending the same event again with
   the same `requestId`. It never creates a second room.
@@ -233,8 +234,9 @@ These rules hold for every stream:
 - Every stream changes only this user's own manager, except `openDirect` and
   `createGroup`, which also create a room, grant other people access to it, and
   can offer it to the people the request names by profile, and add them to its
-  participants, and `offerRoom`, which can offer a room to the member it names
-  and add them to its participants.
+  participants, as `openDirect` can for a direct room it finds, and `offerRoom`,
+  which can offer a room to the member it names and add them to its
+  participants.
   `openDirect`, `createGroup`, `accept` and `joinRoom` also add this user to
   the room's participants, which anyone the room's space admits may do.
 
@@ -256,19 +258,30 @@ These rules hold for every stream:
 - `counterpart: string` — The DID of the other person. Must not be this user's
   own.
 - `profile?: Cell<ChatProfile>` — The other person's profile, whose
-  `represents-principal` label must name `counterpart`. A new room is offered
-  to them through the share inbox it points at (see [offers](#offers)).
+  `represents-principal` label must name `counterpart`. A new room, or a found
+  one that was offered them nothing, is offered to them through the share inbox
+  it points at (see [offers](#offers)).
 
 Finds the direct room this user shares with a person, or creates it. This is an
-outward act when it creates a room.
+outward act when it creates a room, or offers one it finds.
 
-- **Admitted:** as a trusted gesture on `ChatStartSurface`.
+- **Admitted:** as a trusted gesture on `ChatStartSurface` when it creates a
+  room. Finding one needs none, and neither does offering a found room to
+  `counterpart`: the start that created it, and granted them access, was that
+  gesture, as the add that admitted a member is for `offerRoom`.
 - **Effect:** if `direct` has an entry for `counterpart`, that entry is the
   outcome, and it is put back in `rooms` if it was forgotten, whatever its
   catalog entry's revision: starting the chat is the person's choice to have it
   listed, so this restore wins over a concurrent forget, from another device,
   say. A room `counterpart` created and offered this user is in `direct` once
-  this user's host has accepted it for them (see [offers](#offers)).
+  this user's host has accepted it for them (see [offers](#offers)). A found
+  room that was offered `counterpart` nothing, since a notice for them of it is
+  still in `outgoingNotices`, is offered them through `profile`'s inbox when
+  there is one, and `profile` is added to the room's participants, as for a new
+  room, and the notice is removed. A room whose roster already lists a profile
+  attesting `counterpart` is one they have joined, and is offered nothing; so is
+  one whose notice has been delivered. Nor is a room offered, and its notice
+  stays, when `requestId` is longer than an offer's `id` may be.
   Otherwise, if a creation for the same `counterpart` is still pending under
   another `requestId`, the manager MUST resume that creation rather than start
   another, and records its outcome under both ids. Otherwise, creates a direct
@@ -424,6 +437,10 @@ matching declaration is refused with `space-own-chat`.
 - `room: Cell<ChatRoomOutput>` — A link to the room this user has joined.
 - `container?: Cell<{ chatRoom?: Cell<ChatRoomOutput> }>` — The root declaring
   a container conversation. Its `chatRoom` must resolve to `room`.
+- `messageAct?: boolean` — Whether the user joined by sending a message or a
+  reaction in the room. A room marks the `joinRoom` it sends with each of
+  those; absent, the join came some other way, a retitle or the user opening
+  the room among them.
 
 Makes a room this user has joined one of their chats. The caller says what
 happened, that the user entered the room, and the manager decides what that
@@ -435,7 +452,9 @@ opening the room's page.
 - **Admitted:** without a reviewed gesture, as for `accept`.
 - **Effect:** for a room this user's chats list already, nothing but to bring
   the title its catalog entry holds up to the room's, where the two differ,
-  leaving the entry's revision and membership as they are. Otherwise what
+  leaving the entry's revision and membership as they are; with `messageAct`,
+  which arrives with every message and reaction and none of which changes the
+  title, not even that, and the room's `about` goes unread. Otherwise what
   `accept` does with no `counterpart` and without `keepArchived`: records an
   entry in `rooms`, putting a forgotten room back, and adds this user's profile
   to the room's participants once it has resolved. One case differs: a direct
@@ -529,7 +548,9 @@ inbox among the member's profiles, after the room is created, and adds the
 first profile it offered the room through to the room's participants, through
 the room's `addParticipant`, without a step of the member's own. A profile that
 points at no inbox is offered nothing. `offerRoom` offers a room someone was
-added to the same way. The offer is the envelope a share inbox takes:
+added to the same way, and so does `openDirect` a direct room it finds whose
+counterpart has a notice of it still waiting, which the offer replaces. The
+offer is the envelope a share inbox takes:
 
 - `kind` — `fabrichat-room`.
 - `id` — the request's `requestId`. The inbox keeps one offer per sender and
