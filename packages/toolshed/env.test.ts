@@ -223,12 +223,12 @@ Deno.test("TOOLSHED_RELEASED_AT is an RFC 3339 date-time, or nothing", () => {
   assertEquals(parse("").data?.TOOLSHED_RELEASED_AT, undefined);
   // Read as milliseconds since the epoch, whatever offset it is written in.
   assertEquals(
-    parse("2026-10-16T14:03:00Z").data?.TOOLSHED_RELEASED_AT,
-    Date.UTC(2026, 9, 16, 14, 3, 0),
+    parse("2024-03-05T14:03:00Z").data?.TOOLSHED_RELEASED_AT,
+    Date.UTC(2024, 2, 5, 14, 3, 0),
   );
   assertEquals(
-    parse("2026-10-16T07:03:00-07:00").data?.TOOLSHED_RELEASED_AT,
-    Date.UTC(2026, 9, 16, 14, 3, 0),
+    parse("2024-03-05T07:03:00-07:00").data?.TOOLSHED_RELEASED_AT,
+    Date.UTC(2024, 2, 5, 14, 3, 0),
   );
   // Anything else fails the parse, which refuses startup, naming the value.
   for (const value of ["2026-10-16", "2026-10-16T14:03:00", "now"]) {
