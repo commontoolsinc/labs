@@ -1284,15 +1284,15 @@ export const FabriChatRoomCore = pattern<
     present: participantPrincipals,
   });
   const cannotSend = computed(() => !canSend);
-  // The composer shows only once the viewer may send, as the retitle control
-  // does, and is hidden by a prop (see `FabriChatMessageRow`). Its `disabled`
-  // has no value until `cannotSend` computes, and reads `true` until the
-  // viewer's profile and access resolve, so a composer shown before then
-  // would show enabled, disable itself, and enable again, dropping what was
-  // typed or clicked meanwhile. Its display and its `disabled` reach the page
-  // in separate updates, in either order, so the composer stays hidden until
-  // `disabled` has settled on `false`: whichever arrives first, it is never
-  // shown enabled and then disabled.
+  // A composer, the conversation's or a thread's, shows only once the viewer
+  // may send, as the retitle control does, and is hidden by a prop (see
+  // `FabriChatMessageRow`). Its `disabled` has no value until `cannotSend`
+  // computes, and reads `true` until the viewer's profile and access resolve,
+  // so a composer shown before then would show enabled, disable itself, and
+  // enable again, dropping what was typed or clicked meanwhile. Its display
+  // and its `disabled` reach the page in separate updates, in either order,
+  // so the composer stays hidden until `disabled` has settled on `false`:
+  // whichever arrives first, it is never shown enabled and then disabled.
   const composerDisplay = computed((): ChatDisplay =>
     cannotSend === false ? "block" : "none"
   );
@@ -1658,6 +1658,8 @@ export const FabriChatRoomCore = pattern<
           <div
             data-ui-pattern={CHAT_SEND_SURFACE}
             data-ui-event-integrity={CHAT_SEND_SURFACE}
+            hidden
+            style={{ display: composerDisplay }}
           >
             <cf-submit-input
               data-ui-action={CHAT_SEND_ACTION}

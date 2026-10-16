@@ -119,14 +119,15 @@ const editorDisplay = (row: unknown): unknown =>
 const composerDisabled = (room: unknown): unknown =>
   propValue(findNodeByProp(room, "inputId", "fabrichat-message"), "disabled");
 
-// The display of a room's main composer, whose surface is shown only to a
-// viewer who may send.
-const composerDisplay = (room: unknown): unknown =>
+// The display of a room's composer whose field is `inputId`, the
+// conversation's or a thread's, whose surface is shown only to a viewer who
+// may send.
+const composerDisplay = (room: unknown, inputId: string): unknown =>
   readValue(
     (propValue(
       findNode(room, (node) =>
         readValue(propsOf(node)?.["data-ui-pattern"]) === CHAT_SEND_SURFACE &&
-        findNodeByProp(node, "inputId", "fabrichat-message") !== undefined),
+        findNodeByProp(node, "inputId", inputId) !== undefined),
       "style",
     ) as { display?: unknown } | undefined)?.display,
   );
@@ -278,7 +279,8 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       {
         assertion: assert(() =>
           room.canSend === true && composerDisabled(room[UI]) === false &&
-          composerDisplay(room[UI]) === "block" &&
+          composerDisplay(room[UI], "fabrichat-message") === "block" &&
+          composerDisplay(room[UI], "fabrichat-thread-message") === "block" &&
           reactingDisabled(room[UI]) === false
         ),
       },
@@ -358,7 +360,8 @@ export const carol = pattern<{ setup: Setup }>(({ setup }) => {
       {
         assertion: assert(() =>
           room.canSend === false && composerDisabled(room[UI]) === true &&
-          composerDisplay(room[UI]) === "none" &&
+          composerDisplay(room[UI], "fabrichat-message") === "none" &&
+          composerDisplay(room[UI], "fabrichat-thread-message") === "none" &&
           reactingDisabled(room[UI]) === true
         ),
       },

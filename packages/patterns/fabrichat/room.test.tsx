@@ -122,20 +122,20 @@ const activitySeqs = (activity: Cell<SentActivity[]>): number[] =>
 const composerDisabled = (root: unknown): unknown =>
   propValue(findNodeByProp(root, "inputId", "fabrichat-message"), "disabled");
 
-// The main composer's surface, which holds its field.
-const composerSurface = (root: unknown): unknown =>
+// The surface holding the composer whose field is `inputId`.
+const composerSurface = (root: unknown, inputId: string): unknown =>
   findNode(
     root,
     (node) =>
       readValue(propsOf(node)?.["data-ui-pattern"]) === CHAT_SEND_SURFACE &&
-      findNodeByProp(node, "inputId", "fabrichat-message") !== undefined,
+      findNodeByProp(node, "inputId", inputId) !== undefined,
   );
 
-// The main composer's display: its surface carries a static `hidden`, which
-// only a computed display outranks, so it is hidden until that display has a
-// value, and is shown only once the viewer may send.
-const composerDisplay = (root: unknown): unknown => {
-  const surface = composerSurface(root);
+// The display of the composer whose field is `inputId`: its surface carries a
+// static `hidden`, which only a computed display outranks, so it is hidden
+// until that display has a value, and is shown only once the viewer may send.
+const composerDisplay = (root: unknown, inputId: string): unknown => {
+  const surface = composerSurface(root, inputId);
   return propValue(surface, "hidden") === true
     ? readValue(
       (propValue(surface, "style") as { display?: unknown } | undefined)
@@ -220,9 +220,20 @@ export default pattern(() => {
       },
       { assertion: assert(() => composerDisabled(pending[UI]) === true) },
       { assertion: assert(() => composerDisabled(alice[UI]) === false) },
-      // Shown only to a viewer who may send.
-      { assertion: assert(() => composerDisplay(pending[UI]) === "none") },
-      { assertion: assert(() => composerDisplay(alice[UI]) === "block") },
+      // The conversation's composer and a thread's, each shown only to a
+      // viewer who may send.
+      {
+        assertion: assert(() =>
+          composerDisplay(pending[UI], "fabrichat-message") === "none" &&
+          composerDisplay(pending[UI], "fabrichat-thread-message") === "none"
+        ),
+      },
+      {
+        assertion: assert(() =>
+          composerDisplay(alice[UI], "fabrichat-message") === "block" &&
+          composerDisplay(alice[UI], "fabrichat-thread-message") === "block"
+        ),
+      },
       {
         assertion: assert(() =>
           alice.canSend === true && pending.canSend === false
