@@ -1948,7 +1948,7 @@ describe("CFC label view helpers", () => {
 
       // The cell's view follows the link: it joins the field's stored labels
       // with the labels of the document the link reaches.
-      const followed = {
+      expect(cfcLabelViewForCell(target)).toEqual({
         version: 1,
         entries: [{
           path: [],
@@ -1966,11 +1966,27 @@ describe("CFC label view helpers", () => {
           path: ["details"],
           label: { confidentiality: ["target-detail"] },
         }],
-      };
-      expect(cfcLabelViewForCell(target)).toEqual(followed);
+      });
 
+      // The resolved handle names the document the link reaches, and carries
+      // the field's restriction without its endorsement.
       const resolvedTarget = target.resolveAsCell();
-      expect(cfcLabelViewForCell(resolvedTarget)).toEqual(followed);
+      expect(cfcLabelViewForCell(resolvedTarget)).toEqual({
+        version: 1,
+        entries: [{
+          path: [],
+          label: {
+            confidentiality: expect.arrayContaining([
+              "personal-space",
+              "shared-space",
+            ]),
+            integrity: ["authored-by-bob"],
+          },
+        }, {
+          path: ["details"],
+          label: { confidentiality: ["target-detail"] },
+        }],
+      });
 
       expect(cfcLabelViewForCell(resolvedTarget.asSchema({
         type: "object",
@@ -1991,10 +2007,7 @@ describe("CFC label view helpers", () => {
               "shared-space",
               "target-detail",
             ]),
-            integrity: expect.arrayContaining([
-              "selected-by-alice",
-              "authored-by-bob",
-            ]),
+            integrity: ["authored-by-bob"],
           },
         }],
       });
@@ -2004,7 +2017,7 @@ describe("CFC label view helpers", () => {
     }
   });
 
-  it("keeps accumulated link labels on cells recovered from query results", async () => {
+  it("carries the target's labels and not the slot's endorsement on cells recovered from query results", async () => {
     const signer = await Identity.fromPassphrase(
       "cfc label view query result to cell",
     );
@@ -2080,10 +2093,7 @@ describe("CFC label view helpers", () => {
         entries: [{
           path: [],
           label: {
-            integrity: expect.arrayContaining([
-              "selected-by-alice",
-              "authored-by-bob",
-            ]),
+            integrity: ["authored-by-bob"],
           },
         }],
       });
@@ -2093,7 +2103,7 @@ describe("CFC label view helpers", () => {
     }
   });
 
-  it("keeps accumulated link labels on schema asCell materialization", async () => {
+  it("carries the target's labels and not the slot's endorsement on schema asCell materialization", async () => {
     const signer = await Identity.fromPassphrase(
       "cfc label view schema asCell",
     );
@@ -2172,10 +2182,7 @@ describe("CFC label view helpers", () => {
         entries: [{
           path: [],
           label: {
-            integrity: expect.arrayContaining([
-              "selected-by-alice",
-              "authored-by-bob",
-            ]),
+            integrity: ["authored-by-bob"],
           },
         }],
       });
@@ -2270,7 +2277,7 @@ describe("CFC label view helpers", () => {
     }
   });
 
-  it("keeps accumulated link labels on default-created asCell values", async () => {
+  it("carries the target's labels and not the slot's endorsement on default-created asCell values", async () => {
     const signer = await Identity.fromPassphrase(
       "cfc label view default asCell",
     );
@@ -2355,10 +2362,7 @@ describe("CFC label view helpers", () => {
         entries: [{
           path: [],
           label: {
-            integrity: expect.arrayContaining([
-              "selected-by-alice",
-              "authored-by-bob",
-            ]),
+            integrity: ["authored-by-bob"],
           },
         }],
       });
@@ -2462,10 +2466,7 @@ describe("CFC label view helpers", () => {
         entries: [{
           path: [],
           label: {
-            integrity: expect.arrayContaining([
-              "selected-first",
-              "authored-first",
-            ]),
+            integrity: ["authored-first"],
           },
         }],
       });
@@ -2474,10 +2475,7 @@ describe("CFC label view helpers", () => {
         entries: [{
           path: [],
           label: {
-            integrity: expect.arrayContaining([
-              "selected-second",
-              "authored-second",
-            ]),
+            integrity: ["authored-second"],
           },
         }],
       });
@@ -2567,10 +2565,7 @@ describe("CFC label view helpers", () => {
         entries: [{
           path: [],
           label: {
-            integrity: expect.arrayContaining([
-              "selected-first",
-              "authored-shared",
-            ]),
+            integrity: ["authored-shared"],
           },
         }],
       });
@@ -2579,10 +2574,7 @@ describe("CFC label view helpers", () => {
         entries: [{
           path: [],
           label: {
-            integrity: expect.arrayContaining([
-              "selected-second",
-              "authored-shared",
-            ]),
+            integrity: ["authored-shared"],
           },
         }],
       });
