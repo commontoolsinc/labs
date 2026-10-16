@@ -28,7 +28,7 @@ delivery" and §4), and no activity log, since nothing read it. The plan is
 
 ## What the gate reports
 
-Against fifty-two of the room's fifty-six recorded baselines, the
+Against fifty-five of the room's fifty-nine recorded baselines, the
 pattern-update proof reports `argument.messages[]: ifc changed`: the stored
 messages' write policy named the old handlers, and the new elements' policy
 names the four send handlers, `commitEdit`, `commitDelete`, and
@@ -38,7 +38,7 @@ issue per role, so each baseline reports one result the room no longer offers
 beside its argument: `result.recentActivity` for the thirty-five that offered
 the activity log, `result.messageRequests` for seven that offered the per-user
 act outcomes, which the room replaced with the session's `messageRefusal`,
-and `result.closeWindow` for the sixteen newest, which offered that stream at the
+and `result.closeWindow` for the nineteen newest, which offered that stream at the
 room's top level, which the proof reports ahead of the outcomes they offered
 too; the room offers no message windows.
 
