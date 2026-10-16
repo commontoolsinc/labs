@@ -443,7 +443,8 @@ export function cellKey(ringId: string, step: number, lane: number): string {
  * of their own cell. A removed note, a value that is not a note, and a note
  * left over from a layout with other rings are not among them. The values are
  * read as anyone with write access to the space may have stored them, so an
- * `authorName` that is not a string is dropped.
+ * `authorName` is bounded as `noteAuthorName()` bounds it, and dropped where it
+ * is not a string.
  */
 export function liveNotes(
   layout: RingLayout,
@@ -804,12 +805,13 @@ function crossedCell(
 
 /**
  * Helper for `liveNotes()`, which reads a stored value as a note, or returns
- * `undefined` where a field of a note is missing or of the wrong type. An
- * `authorName` that is not a string reads as absent.
+ * `undefined` where a field of a note is missing or of the wrong type. The
+ * `authorName` is read in the bounded form `noteAuthorName()` writes, and reads
+ * as absent where it is not a string or nothing of it is left.
  */
 function readNote(value: unknown): PlacedNote | undefined {
   if (!isRecord(value)) return undefined;
-  const { ringId, step, lane, authorId, color, authorName } = value;
+  const { ringId, step, lane, authorId, color } = value;
   if (
     typeof ringId !== "string" || typeof step !== "number" ||
     typeof lane !== "number" || typeof authorId !== "string" ||
@@ -817,13 +819,16 @@ function readNote(value: unknown): PlacedNote | undefined {
   ) {
     return undefined;
   }
+  const authorName = typeof value.authorName === "string"
+    ? normalizePresenceParticipantName(value.authorName)
+    : "";
   return {
     ringId,
     step,
     lane,
     authorId,
     color,
-    ...(typeof authorName === "string" && { authorName }),
+    ...(authorName !== "" && { authorName }),
   };
 }
 

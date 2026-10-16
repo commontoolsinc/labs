@@ -348,6 +348,21 @@ describe("model", () => {
       expect(authorNameOf(live[0].note)).toBe("Someone");
     });
 
+    it("returns a stored note's `authorName` without control characters and cut to 80 code points", () => {
+      const stored = {
+        ...noteAt("bass", 3, 1),
+        authorName: `Agent\u0007 ${"x".repeat(500)}`,
+      };
+      const [{ note }] = liveNotes(layout, { "bass:3:1": stored });
+      expect(note.authorName).toBe(`Agent ${"x".repeat(74)}`);
+    });
+
+    it("returns a stored note whose `authorName` leaves nothing without one", () => {
+      const stored = { ...noteAt("bass", 3, 1), authorName: "\u0007 " };
+      const [{ note }] = liveNotes(layout, { "bass:3:1": stored });
+      expect(Object.hasOwn(note, "authorName")).toBe(false);
+    });
+
     it("omits a stored value that lacks a field of a note", () => {
       const stored = { ringId: "bass", step: 3, lane: 1, color: "#4dabf7" };
       expect(liveNotes(layout, { "bass:3:1": stored, "bass:4:1": "bass" }))
