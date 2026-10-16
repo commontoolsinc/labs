@@ -35,6 +35,7 @@ import {
   getEntityId,
   handler,
   spaceAccess,
+  spaceOf,
   type Stream,
   type TrustedActionWrite,
   Writable,
@@ -626,6 +627,12 @@ export interface ReplyState extends SendState {
 
 /** What an act on one of the room's messages is bound to. */
 export interface MessageActState extends ActState {
+  /**
+   * One of the room's records, which names the room's space: an act takes a
+   * message of that space and no other, and reads nothing of the record.
+   */
+  room: Cell<unknown>;
+
   /** A rendered control's message, the one acted on. */
   message?: MessageCell;
 }
@@ -756,6 +763,15 @@ const emojiOf = (event: RoomStreamEvent, bound: string | undefined): unknown =>
   event?.emoji ?? bound ?? event?.target?.value?.trim();
 
 /**
+ * Whether `target` is one of the room's messages as far as an act on it
+ * goes: a message of the space `room`, any of the room's records, lives in.
+ * An act on a message elsewhere would apply this room's rules, its kind and
+ * its policy, to a message another room's rules govern.
+ */
+const isInRoomOf = (room: Cell<unknown>, target: Cell<unknown>): boolean =>
+  spaceOf(target) === spaceOf(room);
+
+/**
  * Leaves a tombstone of the message at `target`: its time and what it replies
  * to stay, its body becomes the deleted marker, its reactions go, and so does
  * its author unless `keepsAuthor`. The whole message is written, where an
@@ -784,8 +800,9 @@ const leaveTombstone = (target: MessageCell, keepsAuthor: boolean): void => {
  *
  * Every handler here takes the event a rendered control of the room sends,
  * and the controls offer only acts the viewer may take, so a handler checks
- * what the element's write policy does not — whose message it is — and drops
- * anything else without a word.
+ * what the element's write policy does not — whose message it is, and, for
+ * an act on a message, that it is one of the room's — and drops anything
+ * else without a word.
  */
 const sendInto = (
   event: RoomStreamEvent,
@@ -877,13 +894,14 @@ export const commitReply = handler<RoomStreamEvent, ReplyState>(
  * session's composer is editing ends that edit.
  */
 export const commitEdit = handler<RoomStreamEvent, EditState>(
-  (event, { myProfile, message, composer }) => {
+  (event, { myProfile, room, message, composer }) => {
     const target = (event?.message ?? message)?.resolveAsCell();
-    const current = target?.get();
+    if (target === undefined || !isInRoomOf(room, target)) return;
+    const current = target.get();
     const body = textOf(event);
     if (
-      target === undefined || isDeleted(current) ||
-      !isAuthorOf(current, resolvedProfile(myProfile)) || body === ""
+      isDeleted(current) || !isAuthorOf(current, resolvedProfile(myProfile)) ||
+      body === ""
     ) {
       return;
     }
@@ -902,12 +920,12 @@ export const commitEdit = handler<RoomStreamEvent, EditState>(
  * room's policy makes deletion obliteration, under no author.
  */
 export const commitDelete = handler<RoomStreamEvent, MessageActState>(
-  (event, { myProfile, message }) => {
+  (event, { myProfile, room, message }) => {
     const target = (event?.message ?? message)?.resolveAsCell();
-    const current = target?.get();
+    if (target === undefined || !isInRoomOf(room, target)) return;
+    const current = target.get();
     if (
-      target === undefined || isDeleted(current) ||
-      !isAuthorOf(current, resolvedProfile(myProfile))
+      isDeleted(current) || !isAuthorOf(current, resolvedProfile(myProfile))
     ) {
       return;
     }
@@ -921,9 +939,9 @@ export const commitDelete = handler<RoomStreamEvent, MessageActState>(
  * author, labeled with whoever obliterated it.
  */
 export const commitObliterate = handler<RoomStreamEvent, ObliterateState>(
-  (event, { myProfile, message, kind, ownersMayObliterate }) => {
+  (event, { myProfile, room, message, kind, ownersMayObliterate }) => {
     const target = (event?.message ?? message)?.resolveAsCell();
-    if (target === undefined) return;
+    if (target === undefined || !isInRoomOf(room, target)) return;
     const rights = messageRightsOf(
       target.get(),
       resolvedProfile(myProfile),
@@ -956,13 +974,22 @@ const reactionsOf = (target: MessageCell): ReactionsCell | undefined =>
 export const commitSendReaction = handler<RoomStreamEvent, AddReactionState>(
   (
     event,
-    { myProfile, message, emoji: bound, pickerOpen, closesPicker, joined },
+    {
+      myProfile,
+      room,
+      message,
+      emoji: bound,
+      pickerOpen,
+      closesPicker,
+      joined,
+    },
   ) => {
     const profile = resolvedProfile(myProfile);
     const emoji = emojiOf(event, bound);
     const target = (event?.message ?? message)?.resolveAsCell();
-    const current = target?.get();
-    const list = target === undefined ? undefined : reactionsOf(target);
+    if (target === undefined || !isInRoomOf(room, target)) return;
+    const current = target.get();
+    const list = reactionsOf(target);
     if (
       profile === undefined || !isSingleEmoji(emoji) || isDeleted(current) ||
       list === undefined
@@ -993,10 +1020,11 @@ export const commitDeleteReaction = handler<
   RoomStreamEvent,
   DeleteReactionState
 >(
-  (event, { myProfile, message, reaction }) => {
+  (event, { myProfile, room, message, reaction }) => {
     const profile = resolvedProfile(myProfile);
     const target = (event?.message ?? message)?.resolveAsCell();
-    const list = target === undefined ? undefined : reactionsOf(target);
+    if (target === undefined || !isInRoomOf(room, target)) return;
+    const list = reactionsOf(target);
     const removed = (event?.reaction ?? reaction)?.resolveAsCell();
     const record = removed?.get();
     if (

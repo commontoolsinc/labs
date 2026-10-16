@@ -1321,15 +1321,20 @@ export const FabriChatRoomCore = pattern<
   });
   const streams = {
     sendMessage,
-    editMessage: commitEdit({ myProfile, composer }),
-    deleteMessage: commitDelete({ myProfile }),
+    editMessage: commitEdit({ myProfile, room: messages, composer }),
+    deleteMessage: commitDelete({ myProfile, room: messages }),
     obliterateMessage: commitObliterate({
       myProfile,
+      room: messages,
       kind,
       ownersMayObliterate,
     }),
-    sendReaction: commitSendReaction({ myProfile, joined: tellJoined }),
-    deleteReaction: commitDeleteReaction({ myProfile }),
+    sendReaction: commitSendReaction({
+      myProfile,
+      room: messages,
+      joined: tellJoined,
+    }),
+    deleteReaction: commitDeleteReaction({ myProfile, room: messages }),
   };
   const messageList = {
     count,

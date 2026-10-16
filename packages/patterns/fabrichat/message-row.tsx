@@ -329,9 +329,10 @@ export const FabriChatMessageRow = pattern<
   const stopEdit = action(() => composer.key("editing").set(undefined));
 
   // Each handler is bound to the cells it uses and no others; `messages`
-  // takes the replies.
+  // takes the replies, and names the room's space to the acts on a message.
   const sendReaction = commitSendReaction({
     myProfile,
+    room: messages,
     message,
     pickerOpen,
     closesPicker: true,
@@ -339,19 +340,23 @@ export const FabriChatMessageRow = pattern<
   });
   const deleteReaction = commitDeleteReaction({
     myProfile,
+    room: messages,
     message,
   });
   const editMessage = commitEdit({
     myProfile,
+    room: messages,
     message,
     composer,
   });
   const deleteMessage = commitDelete({
     myProfile,
+    room: messages,
     message,
   });
   const obliterateMessage = commitObliterate({
     myProfile,
+    room: messages,
     message,
     kind,
     ownersMayObliterate,
@@ -472,6 +477,7 @@ export const FabriChatMessageRow = pattern<
                       disabled={cannotWrite}
                       onClick={commitSendReaction({
                         myProfile,
+                        room: messages,
                         message,
                         emoji: tally.emoji,
                         joined,
@@ -493,6 +499,7 @@ export const FabriChatMessageRow = pattern<
                       style={{ display: tally.mine ? "inline-flex" : "none" }}
                       onClick={commitDeleteReaction({
                         myProfile,
+                        room: messages,
                         message,
                         reaction: tally.own,
                       })}
@@ -541,6 +548,7 @@ export const FabriChatMessageRow = pattern<
                   disabled={cannotWrite}
                   onClick={commitSendReaction({
                     myProfile,
+                    room: messages,
                     message,
                     emoji,
                     pickerOpen,
