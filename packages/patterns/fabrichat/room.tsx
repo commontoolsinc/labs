@@ -1284,6 +1284,15 @@ export const FabriChatRoomCore = pattern<
     present: participantPrincipals,
   });
   const cannotSend = computed(() => !canSend);
+  // The composer is hidden until `cannotSend` has a value, as an element
+  // hidden by a prop is (see `FabriChatMessageRow`). Before then its
+  // `disabled` has none either, so the composer would show enabled and then
+  // disable itself once the viewer's access is known, dropping what was
+  // typed into it meanwhile. Hidden, it first shows with `disabled` already
+  // decided.
+  const composerDisplay = computed((): ChatDisplay =>
+    cannotSend === undefined ? "none" : "block"
+  );
   const isOwner = computed(() => isOwnerOf(messages));
   const viewer = computed((): ChatRoomViewer => {
     const profile = viewerProfileOf(myProfile);
@@ -1578,6 +1587,8 @@ export const FabriChatRoomCore = pattern<
         <div
           data-ui-pattern={CHAT_SEND_SURFACE}
           data-ui-event-integrity={CHAT_SEND_SURFACE}
+          hidden
+          style={{ display: composerDisplay }}
         >
           <cf-submit-input
             data-ui-action={CHAT_SEND_ACTION}

@@ -14,7 +14,13 @@ import {
   UI,
   Writable,
 } from "commonfabric";
-import { findNodeByProp, propValue } from "../test/vnode-helpers.ts";
+import {
+  findNode,
+  findNodeByProp,
+  propsOf,
+  propValue,
+  readValue,
+} from "../test/vnode-helpers.ts";
 import { FabriChatMessageRow } from "./message-row.tsx";
 import {
   type ActivityCounters,
@@ -116,6 +122,27 @@ const activitySeqs = (activity: Cell<SentActivity[]>): number[] =>
 const composerDisabled = (root: unknown): unknown =>
   propValue(findNodeByProp(root, "inputId", "fabrichat-message"), "disabled");
 
+// The main composer's surface, which holds its field.
+const composerSurface = (root: unknown): unknown =>
+  findNode(
+    root,
+    (node) =>
+      readValue(propsOf(node)?.["data-ui-pattern"]) === CHAT_SEND_SURFACE &&
+      findNodeByProp(node, "inputId", "fabrichat-message") !== undefined,
+  );
+
+// Whether the main composer is hidden until its display has a value, and is
+// shown once it has: a static `hidden`, which only a computed display
+// outranks, so the composer never shows before its `disabled` is decided.
+const composerShownOnceKnown = (root: unknown): boolean => {
+  const surface = composerSurface(root);
+  return propValue(surface, "hidden") === true &&
+    readValue(
+        (propValue(surface, "style") as { display?: unknown } | undefined)
+          ?.display,
+      ) === "block";
+};
+
 export default pattern(() => {
   const messages = Writable.of<MessagesValue>([] as MessagesValue);
   const reactionLists = Writable.of<ReactionList[]>([] as ReactionList[]);
@@ -192,6 +219,9 @@ export default pattern(() => {
       },
       { assertion: assert(() => composerDisabled(pending[UI]) === true) },
       { assertion: assert(() => composerDisabled(alice[UI]) === false) },
+      // Shown, once known, whether or not the viewer may send.
+      { assertion: assert(() => composerShownOnceKnown(pending[UI])) },
+      { assertion: assert(() => composerShownOnceKnown(alice[UI])) },
       {
         assertion: assert(() =>
           alice.canSend === true && pending.canSend === false
