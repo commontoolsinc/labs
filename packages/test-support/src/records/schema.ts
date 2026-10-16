@@ -173,6 +173,19 @@ function isOptionalString(value: unknown): value is string | undefined {
   return value === undefined || typeof value === "string";
 }
 
+/**
+ * Whether a path can name a file of the repository: one relative to its
+ * root, forward-slashed, that never climbs above it. An absolute path,
+ * whether rooted at `/` or at a drive letter, or one that climbs out,
+ * names a file outside the repository, and nothing there is a test of it.
+ * A backslash is refused as well, since a repository path is written with
+ * forward slashes and a backslash can hide either of the other two.
+ */
+export function isRepositoryPath(path: string): boolean {
+  return !path.startsWith("/") && !/^[A-Za-z]:/.test(path) &&
+    !path.includes("\\") && !path.split("/").includes("..");
+}
+
 /** Whether a value is a seed `deno test --shuffle` would take. */
 export function isSeed(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
@@ -212,6 +225,9 @@ export function parseRecordLine(line: string): TestRecord | undefined {
     return undefined;
   }
   if (test.v !== undefined && !isNonEmptyString(test.v)) return undefined;
+  // A pattern test is named by its file, so a name outside the repository
+  // is a fixture some test ran rather than a test of the repository.
+  if (test.k === "pattern" && !isRepositoryPath(test.n)) return undefined;
   if (!OUTCOMES.has(record.outcome as string)) return undefined;
   if (
     typeof record.durationMs !== "number" ||
@@ -220,6 +236,9 @@ export function parseRecordLine(line: string): TestRecord | undefined {
     return undefined;
   }
   if (!isOptionalString(record.file)) return undefined;
+  if (record.file !== undefined && !isRepositoryPath(record.file)) {
+    return undefined;
+  }
   const result: TestRecord = {
     line: "record",
     test: { k: test.k, s: test.s, n: test.n },
