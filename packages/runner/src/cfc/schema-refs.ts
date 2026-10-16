@@ -1,6 +1,7 @@
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import {
   debugStr,
+  deepFreeze,
   fabricAwareEqual,
   type FabricValue,
   hashStringOf,
@@ -515,6 +516,34 @@ export const cfcSchemaWithInheritedDefs = (
   );
 };
 
+// Views `definitionBodyWithDefs()` minted for a deep-frozen definition body
+// under a deep-frozen map, per body per map, whichever document the ref was
+// resolved from. Every document carrying one map then resolves a definition
+// to one object, and interning that object hashes the map it carries once
+// rather than once per document. The map's identity is what a view is keyed
+// by: a view carrying the owning root's exact map opens no new document (see
+// `cfcSchemaResolvedRoot()`), and that holds across documents only where
+// they share the map itself. The view's parts are all frozen, so freezing it
+// costs the root object alone.
+const definitionViews = new WeakMap<object, WeakMap<object, JSONSchema>>();
+
+const memoizedDefinitionView = (
+  body: JSONSchemaObj,
+  definitions: SchemaDefinitions,
+): JSONSchema => {
+  let byMap = definitionViews.get(body);
+  if (byMap === undefined) {
+    byMap = new WeakMap();
+    definitionViews.set(body, byMap);
+  }
+  let view = byMap.get(definitions);
+  if (view === undefined) {
+    view = deepFreeze({ ...body, $defs: definitions });
+    byMap.set(definitions, view);
+  }
+  return view;
+};
+
 // The resolver's form of the same: a resolved definition body carries the
 // document's map when a local ref needs it, frozen or not. Its result is the
 // canonical view of that definition, and `$defs` it does not need would
@@ -524,9 +553,16 @@ const definitionBodyWithDefs = (
   body: JSONSchema,
   documentDefinitions: SchemaDefinitions | undefined,
 ): JSONSchema => {
-  if (!canInheritDefs(body, documentDefinitions)) return body;
+  if (
+    !isObjectNotArray(documentDefinitions) ||
+    !canInheritDefs(body, documentDefinitions)
+  ) {
+    return body;
+  }
   if (hasLocalDefinitionRef(body)) {
-    return { ...body, $defs: documentDefinitions };
+    return isDeepFrozen(body) && isDeepFrozen(documentDefinitions)
+      ? memoizedDefinitionView(body, documentDefinitions)
+      : { ...body, $defs: documentDefinitions };
   }
   if (body.$defs === undefined) return body;
   const { $defs: _inert, ...rest } = body;
