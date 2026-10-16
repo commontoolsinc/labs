@@ -347,7 +347,9 @@ design, as below.
   only from that reviewed gesture; without it, its run is refused whole, and
   records no outcome. A start that creates none, `openDirect` finding a direct
   room already shared or a start that is refused, commits without one, and
-  grants no one access. The manager's other acts are performed by
+  grants no one access. Such a start may still offer the room it finds to its
+  counterpart, since the start that created it and granted them access was the
+  gesture, as the add that admitted a member is for `offerRoom`. The manager's other acts are performed by
   `commitManager`, with no gesture. A participant's chip in a room sends its
   click to the viewer's manager's `openDirect` itself, since a reviewed gesture
   does not carry across a `send` from another handler. It names the participant

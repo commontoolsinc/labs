@@ -507,7 +507,8 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
         ),
       },
       // Naming Alice's profile lists the room the first start created again,
-      // offers it to her, and withdraws her notice.
+      // offers it to her, and withdraws her notice. It takes no gesture: the
+      // start that created the room, and granted her access, was one.
       {
         action: manager.openDirect,
         event: {
@@ -515,7 +516,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
           counterpart: setup.aliceDid,
           profile: aliceProfile,
         },
-        trustedUi: startGesture,
       },
       {
         assertion: assert(() => {

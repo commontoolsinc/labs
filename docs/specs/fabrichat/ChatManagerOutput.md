@@ -223,8 +223,8 @@ Each stream below is written as a call, with its event's keys as the parameters:
 
 These rules hold for every stream:
 
-- A stream that names a reviewed surface admits an event only as a trusted
-  gesture on that surface (see
+- A stream that names a reviewed surface admits an event that creates a room
+  only as a trusted gesture on that surface (see
   [`clients.md`](clients.md#writing-the-reviewed-gesture-requirement)).
 - A request that is interrupted is resumed by sending the same event again with
   the same `requestId`. It never creates a second room.
@@ -264,7 +264,10 @@ These rules hold for every stream:
 Finds the direct room this user shares with a person, or creates it. This is an
 outward act when it creates a room, or offers one it finds.
 
-- **Admitted:** as a trusted gesture on `ChatStartSurface`.
+- **Admitted:** as a trusted gesture on `ChatStartSurface` when it creates a
+  room. Finding one needs none, and neither does offering a found room to
+  `counterpart`: the start that created it, and granted them access, was that
+  gesture, as the add that admitted a member is for `offerRoom`.
 - **Effect:** if `direct` has an entry for `counterpart`, that entry is the
   outcome, and it is put back in `rooms` if it was forgotten, whatever its
   catalog entry's revision: starting the chat is the person's choice to have it

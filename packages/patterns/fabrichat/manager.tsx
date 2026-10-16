@@ -1526,7 +1526,10 @@ const performManagerAct = (
  * Starts a chat, finding or creating a direct room or creating a group room,
  * from a reviewed `ChatStart` on `ChatStartSurface`: a room's `about` record
  * names this handler and that action as its only writer, so a start that
- * creates a room commits only from that gesture.
+ * creates a room commits only from that gesture. A start that finds a direct
+ * room commits without one, and may offer the room to its counterpart, as
+ * `offerRoom` offers a room without one: the start that created the room, and
+ * granted them access, was the gesture.
  */
 export const commitStart = handler<ManagerStreamEvent, ManagerActState>(
   (event, state) => performManagerAct(event, state),
