@@ -960,6 +960,14 @@ Default paths of §7:
     order it came in. A union the checker builds, as `keyof T`, an inferred
     `cond ? "x" : "y"`, or a tuple's positionless items are, is listed this
     way.
+  An object's properties are read from the source the same way. An interface
+  or a class without type parameters lists its own members, a constructor's
+  parameter properties among them, and then each base's properties, base by
+  base in the order its heritage clauses name them. A mapped type lists its
+  properties in the order its key union is written, else, where it maps the
+  properties of another type as `Pick`, `Omit` and `Partial` do, in that
+  type's order, else by their declarations. A mapped type over keys of its
+  own, as `{ [P in "a" | "b"]: T }` is, does not take `T`'s order.
   None of this creates a type: resolving a type's arguments, printing it, or
   reading a generic alias's members anew can, and the expanding recursion
   bound reads how old a type is. The bound also spends one budget across a

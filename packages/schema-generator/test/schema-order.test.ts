@@ -49,6 +49,26 @@ function interfaceSchema(name: string) {
   };
 }
 
+/** The schema of the class `name` declared in `sourceFile`. */
+function classSchema(name: string) {
+  return (
+    generator: SchemaGenerator,
+    checker: ts.TypeChecker,
+    sourceFile: ts.SourceFile,
+  ) => {
+    const declaration = sourceFile.statements.find((
+      statement,
+    ): statement is ts.ClassDeclaration =>
+      ts.isClassDeclaration(statement) && statement.name?.text === name
+    )!;
+    const symbol = checker.getSymbolAtLocation(declaration.name!)!;
+    return generator.generateSchema(
+      checker.getDeclaredTypeOfSymbol(symbol),
+      checker,
+    );
+  };
+}
+
 describe("schema-order", () => {
   describe("a union the source writes", () => {
     it("emits a literal union's values in the order they are written", async () => {
@@ -185,6 +205,31 @@ describe("schema-order", () => {
           "export interface Banana { b: number; }",
           "export interface Row { fruit: Cell<Apple> | Cell<Banana>; }",
           'export interface Wrap { fruit: Row["fruit"]; }',
+        ].join("\n"),
+        interfaceSchema("Wrap"),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+      expect(lazy).toMatchObject({
+        properties: {
+          fruit: {
+            anyOf: [
+              { $ref: "#/$defs/Apple", asCell: ["cell"] },
+              { $ref: "#/$defs/Banana", asCell: ["cell"] },
+            ],
+          },
+        },
+      });
+    });
+
+    it("emits a parenthesized union of wrappers in the order it is written", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          'import type { Cell } from "commonfabric";',
+          "export const early: Cell<Banana> | undefined = undefined;",
+          "export interface Apple { a: string; }",
+          "export interface Banana { b: number; }",
+          "export interface Wrap { fruit: (Cell<Apple> | Cell<Banana>); }",
         ].join("\n"),
         interfaceSchema("Wrap"),
       );
@@ -348,6 +393,25 @@ describe("schema-order", () => {
       ]);
     });
 
+    it("emits an inherited mapped type over keys of its own by those keys, not by its type argument", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          'export type Keyed<T> = { [P in "a" | "b"]: T };',
+          "export interface Wrap extends Keyed<{ b: string; a: string }> {",
+          "  own: number;",
+          "}",
+        ].join("\n"),
+        interfaceSchema("Wrap"),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+      expect((lazy as { required: string[] }).required).toEqual([
+        "own",
+        "a",
+        "b",
+      ]);
+    });
+
     it("emits the properties an interface inherits from an omission in their declaration order", async () => {
       const { lazy, checkedFirst } = await bothReadings(
         [
@@ -367,6 +431,26 @@ describe("schema-order", () => {
         "zeta",
       ]);
       expect(schema.required).toEqual(["own", "alpha", "beta", "zeta"]);
+    });
+  });
+
+  describe("a class's properties", () => {
+    it("emits a constructor's parameter properties before its base's", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          'export class Base { base = ""; }',
+          "export class Derived extends Base {",
+          "  constructor(public own: number) { super(); }",
+          "}",
+        ].join("\n"),
+        classSchema("Derived"),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+      expect((lazy as { required: string[] }).required).toEqual([
+        "own",
+        "base",
+      ]);
     });
   });
 });

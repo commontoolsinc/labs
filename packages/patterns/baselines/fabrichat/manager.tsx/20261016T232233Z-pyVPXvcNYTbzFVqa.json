@@ -258,15 +258,15 @@
             "type": "boolean"
           },
           "keepsHistory": {
-            "description": "Whether an edit or a plain deletion keeps the version it replaces.",
+            "description": "Stated for the policy's shape, and read by nothing: a message keeps no history.",
             "type": "boolean"
           },
           "maxOpenWindows": {
-            "description": "The most message windows a session can have open.",
+            "description": "Stated for the policy's shape, and read by nothing: the room offers no windows.",
             "type": "number"
           },
           "maxWindowCount": {
-            "description": "The most messages a message window holds.",
+            "description": "How many of the newest messages `messages.latest` holds.",
             "type": "number"
           },
           "ownersMayObliterate": {
@@ -274,15 +274,15 @@
             "type": "boolean"
           },
           "proposedTimeMaxAgeNsec": {
-            "description": "How far before the room's clock a proposed time is accepted, in ns.",
+            "description": "Stated for the policy's shape, and read by nothing: a sender proposes no time.",
             "type": "FabricDurationNsec"
           },
           "proposedTimeMaxLeadNsec": {
-            "description": "How far after the room's clock a proposed time is accepted, in ns.",
+            "description": "Stated for the policy's shape, and read by nothing: a sender proposes no time.",
             "type": "FabricDurationNsec"
           },
           "recentActivityWindowNsec": {
-            "description": "How long an entry stays in `recentActivity`, in ns.",
+            "description": "Stated for the policy's shape, and read by nothing: the room keeps no activity log.",
             "type": "FabricDurationNsec"
           }
         },
@@ -629,15 +629,15 @@
             "type": "boolean"
           },
           "keepsHistory": {
-            "description": "Whether an edit or a plain deletion keeps the version it replaces.",
+            "description": "Stated for the policy's shape, and read by nothing: a message keeps no history.",
             "type": "boolean"
           },
           "maxOpenWindows": {
-            "description": "The most message windows a session can have open.",
+            "description": "Stated for the policy's shape, and read by nothing: the room offers no windows.",
             "type": "number"
           },
           "maxWindowCount": {
-            "description": "The most messages a message window holds.",
+            "description": "How many of the newest messages `messages.latest` holds.",
             "type": "number"
           },
           "ownersMayObliterate": {
@@ -645,15 +645,15 @@
             "type": "boolean"
           },
           "proposedTimeMaxAgeNsec": {
-            "description": "How far before the room's clock a proposed time is accepted, in ns.",
+            "description": "Stated for the policy's shape, and read by nothing: a sender proposes no time.",
             "type": "FabricDurationNsec"
           },
           "proposedTimeMaxLeadNsec": {
-            "description": "How far after the room's clock a proposed time is accepted, in ns.",
+            "description": "Stated for the policy's shape, and read by nothing: a sender proposes no time.",
             "type": "FabricDurationNsec"
           },
           "recentActivityWindowNsec": {
-            "description": "How long an entry stays in `recentActivity`, in ns.",
+            "description": "Stated for the policy's shape, and read by nothing: the room keeps no activity log.",
             "type": "FabricDurationNsec"
           }
         },
@@ -826,9 +826,13 @@
             },
             "type": "array"
           },
+          "messageAct": {
+            "description": "Whether a `joinRoom` comes from a message or a reaction the user sent in\nthe room, which leaves the title the catalog lists an already listed room\nunder as it is.",
+            "type": "boolean"
+          },
           "profile": {
             "$ref": "#/$defs/ChatManagerProfile",
-            "description": "A direct room's other member's profile, through whose share inbox a new\nroom is offered to them, or the profile of a member added to a room,\nthrough whose share inbox `offerRoom` offers it."
+            "description": "A direct room's other member's profile, through whose share inbox a new\nroom, or a found one that was offered them nothing, is offered to them, or\nthe profile of a member added to a room, through whose share inbox\n`offerRoom` offers it."
           },
           "profiles": {
             "description": "The profiles of more of a new group room's other members, each naming its\nmember with its `represents-principal` label, through whose share inbox\nthe room is offered to them.",

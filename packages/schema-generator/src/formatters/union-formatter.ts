@@ -163,9 +163,46 @@ export function pairUnionMemberNodes(
 }
 
 /**
+ * The union node `typeNode` stands for, read through parentheses and through
+ * aliases without type parameters, or `undefined` when it stands for none.
+ * A circular alias throws.
+ */
+function readUnionTypeNode(
+  typeNode: ts.TypeNode | undefined,
+  checker: ts.TypeChecker,
+  followed = new Set<ts.TypeAliasDeclaration>(),
+): ts.UnionTypeNode | undefined {
+  if (!typeNode) {
+    return undefined;
+  }
+
+  const unwrapped = unwrapTypeParentheses(typeNode);
+  if (ts.isUnionTypeNode(unwrapped)) {
+    return unwrapped;
+  }
+  if (
+    !ts.isTypeReferenceNode(unwrapped) || unwrapped.typeArguments?.length
+  ) {
+    return undefined;
+  }
+
+  const aliasDeclaration = getTypeAliasDeclaration(unwrapped, checker);
+  if (!aliasDeclaration || aliasDeclaration.typeParameters?.length) {
+    return undefined;
+  }
+  if (followed.has(aliasDeclaration)) {
+    throw new Error(
+      `Circular type alias detected: ${aliasDeclaration.name.text}`,
+    );
+  }
+  followed.add(aliasDeclaration);
+  return readUnionTypeNode(aliasDeclaration.type, checker, followed);
+}
+
+/**
  * The members of `union` in source order (`sourceOrderOfMembers()`), read
- * at `siteNode`, each beside the node a union `siteNode` writes for it,
- * where it writes one.
+ * at `siteNode`, each beside the node written for it in the union
+ * `siteNode` stands for (`readUnionTypeNode()`), where it stands for one.
  */
 export function unionMembersInSourceOrder(
   union: ts.UnionType,
@@ -173,9 +210,9 @@ export function unionMembersInSourceOrder(
   checker: ts.TypeChecker,
 ): Array<{ member: ts.Type; node: ts.TypeNode | undefined }> {
   const members = union.types;
-  const paired = siteNode && ts.isUnionTypeNode(siteNode)
-    ? pairWrittenMemberNodes(members, siteNode.types, checker, () => false)
-    : undefined;
+  const unionNode = readUnionTypeNode(siteNode, checker);
+  const paired = unionNode &&
+    pairWrittenMemberNodes(members, unionNode.types, checker, () => false);
   return sourceOrderOfMembers(union, members, paired, siteNode, checker).map((
     index,
   ) => ({
@@ -402,7 +439,7 @@ export class UnionFormatter implements TypeFormatter {
     type: ts.Type,
     context: GenerationContext,
   ): MutableJSONSchema | undefined {
-    const node = this.#getUnionTypeNode(context.typeNode, context.typeChecker);
+    const node = readUnionTypeNode(context.typeNode, context.typeChecker);
     if (!node) return undefined;
     const members = type.isUnion() ? type.types : [type];
     const paired = pairUnionMemberNodes(
@@ -427,7 +464,7 @@ export class UnionFormatter implements TypeFormatter {
     // is read at those members (`GenerationContext.scopePayloadNodes`), here
     // and nowhere below.
     const { scopePayloadNodes, ...context } = outerContext;
-    const memberNodes = this.#getUnionTypeNode(
+    const memberNodes = readUnionTypeNode(
       context.typeNode,
       context.typeChecker,
     )?.types ??
@@ -819,43 +856,6 @@ export class UnionFormatter implements TypeFormatter {
       return !!elementType && (elementType.flags & ts.TypeFlags.Never) !== 0;
     }
     return false;
-  }
-
-  /**
-   * The union node `typeNode` stands for, read through parentheses and through
-   * aliases without type parameters, or `undefined` when it stands for none.
-   * A circular alias throws.
-   */
-  #getUnionTypeNode(
-    typeNode: ts.TypeNode | undefined,
-    checker: ts.TypeChecker,
-    followed = new Set<ts.TypeAliasDeclaration>(),
-  ): ts.UnionTypeNode | undefined {
-    if (!typeNode) {
-      return undefined;
-    }
-
-    const unwrapped = unwrapTypeParentheses(typeNode);
-    if (ts.isUnionTypeNode(unwrapped)) {
-      return unwrapped;
-    }
-    if (
-      !ts.isTypeReferenceNode(unwrapped) || unwrapped.typeArguments?.length
-    ) {
-      return undefined;
-    }
-
-    const aliasDeclaration = getTypeAliasDeclaration(unwrapped, checker);
-    if (!aliasDeclaration || aliasDeclaration.typeParameters?.length) {
-      return undefined;
-    }
-    if (followed.has(aliasDeclaration)) {
-      throw new Error(
-        `Circular type alias detected: ${aliasDeclaration.name.text}`,
-      );
-    }
-    followed.add(aliasDeclaration);
-    return this.#getUnionTypeNode(aliasDeclaration.type, checker, followed);
   }
 
   #getDefaultUnionEntry(

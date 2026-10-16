@@ -158,8 +158,10 @@ function inheritedSourceOrder(
   };
   const own = new Set<ts.Node>(type.getSymbol()?.declarations ?? []);
   for (const property of properties) {
-    const owner = property.declarations?.[0]?.parent;
-    if (owner !== undefined && own.has(owner)) place(property.getName());
+    const declaration = property.declarations?.[0];
+    if (declaration !== undefined && own.has(memberOwner(declaration))) {
+      place(property.getName());
+    }
   }
   for (const base of bases) {
     const baseProperties = checker.getPropertiesOfType(base);
@@ -179,11 +181,27 @@ function inheritedSourceOrder(
 }
 
 /**
+ * The class or interface declaration that declares the member `declaration`:
+ * its parent, or for a constructor's parameter property the class the
+ * constructor belongs to.
+ */
+function memberOwner(declaration: ts.Declaration): ts.Node {
+  const parent = declaration.parent;
+  return ts.isParameter(declaration) && ts.isConstructorDeclaration(parent)
+    ? parent.parent
+    : parent;
+}
+
+/**
  * The places, by property name, of the properties of the type a mapped type
  * maps, as `Omit<T, K>` and `Pick<T, K>` map `T`, in that type's source
  * order (`propertiesInSourceOrder()`): the first type argument of the alias
- * `type` is read through, where every property of `type` is one of its.
- * Returns `undefined` otherwise.
+ * `type` is read through, where every property of `type` is one of its,
+ * declared where its namesake there is declared. The checker links a
+ * property to the declaration it maps only for a mapped type that maps
+ * another's properties, so a mapped type over keys of its own, as
+ * `{ [P in "a" | "b"]: T }` is, does not qualify. Returns `undefined`
+ * otherwise.
  */
 function mappedSourceOrder(
   type: ts.Type,
@@ -195,10 +213,16 @@ function mappedSourceOrder(
     return undefined;
   }
   const sourceProperties = checker.getPropertiesOfType(source);
-  const names = new Set(sourceProperties.map((property) => property.getName()));
-  if (!properties.every((property) => names.has(property.getName()))) {
-    return undefined;
-  }
+  const declarations = new Map(sourceProperties.map((property) => [
+    property.getName(),
+    property.declarations?.[0],
+  ]));
+  const mapsSource = properties.every((property) => {
+    const declaration = property.declarations?.[0];
+    return declaration !== undefined &&
+      declarations.get(property.getName()) === declaration;
+  });
+  if (!mapsSource) return undefined;
   const places = new Map<string, number>();
   for (
     const property of propertiesInSourceOrder(
