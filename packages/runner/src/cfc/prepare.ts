@@ -850,7 +850,6 @@ const asWitnessEvidence = (entry: LabelMapEntry): LabelMapEntry => {
     };
   }
   const integrity = entry.label.integrity;
-  // SPEC-PENDING https://github.com/commonfabric/specs/pull/69
   if (
     isFlowStageStamp(entry) || integrity === undefined ||
     !integrity.some(isTransformedByAtom)
