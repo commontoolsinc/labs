@@ -3736,7 +3736,7 @@ type OnlyTestStep<Own extends TestStepKey, Fields> =
 export type TestStep =
   | OnlyTestStep<"assertion", { assertion: Reactive<AssertRecord> }>
   | OnlyTestStep<"action", {
-    action: Stream<unknown>;
+    action: Stream<unknown, unknown>;
     event?: unknown;
     trustedUi?: { surface: string; action: string };
   }>
