@@ -231,14 +231,20 @@ Running it more often than that is harmless: a repaired profile is reported as
 
 `cf piece follow --cell <piece> <origin>` adopts the origin’s current pattern
 and records the origin for future updates. It refuses incompatible schemas by
-default. After reviewing the reported changes, pass
-`--dangerously-allow-incompatible-schema` to perform a fresh review and accept
-the candidate reviewed in that invocation. If the origin released between runs,
-this candidate and its incompatibilities can differ from the earlier report. The
-command prints the incompatibility it accepted, pins that candidate during
-confirmation, and revalidates source state and retained inputs. A changed review
-during confirmation is returned to the caller without automatically accepting
-it.
+default, except for a `system:` origin whose source the piece shows it runs: a
+revision since its source last changed took that source from the origin, or,
+with a log that is empty or holds only its creation revision, its entry is that
+origin's file under the patterns route. Such a piece takes the release as an
+automatic update from the origin does, without its schemas compared, since the
+release gate compared them (`docs/specs/piece-source-lifecycle.md`). Its stored
+argument, retained links, and stored CFC envelopes are checked either way. After
+reviewing the reported changes, pass `--dangerously-allow-incompatible-schema`
+to perform a fresh review and accept the candidate reviewed in that invocation.
+If the origin released between runs, this candidate and its incompatibilities
+can differ from the earlier report. The command prints the incompatibility it
+accepted, pins that candidate during confirmation, and revalidates source state
+and retained inputs. A changed review during confirmation is returned to the
+caller without automatically accepting it.
 
 A piece whose current pattern cannot be loaded is reported the same way: the
 candidate cannot be compared with what the piece ran, and that is the
@@ -264,12 +270,12 @@ anything is written, and the command ends with exit status 3, so a script can
 tell that refusal from a failure.
 
 For a detached profile with the legacy inbox descriptor, the manual migration is
-`cf piece follow --cell <profile> system:system/profile-home.tsx
---dangerously-allow-incompatible-schema`
-with the profile owner’s identity and API URL. Inspect the incompatibility
-before accepting it; the new inbox contract uses a piece link. The command
-refuses deployments that serve piece lifecycle verbs, where `follow` is not yet
-served.
+`cf piece follow --cell <profile> system:system/profile-home.tsx` with the
+profile owner’s identity and API URL. A profile that cannot show it runs that
+file's source reports the incompatibility instead; inspect it before passing
+`--dangerously-allow-incompatible-schema`, since the new inbox contract uses a
+piece link. The command refuses deployments that serve piece lifecycle verbs,
+where `follow` is not yet served.
 
 ## Pattern test read costs
 

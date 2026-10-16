@@ -13,6 +13,7 @@ import {
   cellRuntime,
   cellTx,
   cellWithScopedLinkRequiredsRelaxed,
+  classifyPieceOriginString,
   ContextualFlowControl,
   deepEqual,
   extractDefaultValues,
@@ -4341,6 +4342,13 @@ export class PieceController<T = unknown> {
    * that is, which export it selects, and what the revision calls the
    * transition.
    *
+   * Each of those three reviews its candidate before adopting it. A candidate
+   * from a `system:` origin whose source the piece shows it runs is reviewed
+   * without comparing schemas, which the release gate did
+   * ({@link showsSystemRelease}); every other candidate has its schemas
+   * compared with what the piece runs. The piece's stored argument, retained
+   * links, and CFC envelopes are reviewed for every candidate.
+   *
    * `expectedPattern` pins the reference this change may run over. The
    * snapshot read below becomes the transition's precondition, checked
    * again inside the write transaction by `applyPieceSourceTransition`, so
@@ -4497,6 +4505,10 @@ export class PieceController<T = unknown> {
     let candidate: Pattern;
     let prepared: PreparedPieceSourceChange;
     let acceptedReview: PreparedPieceSourceChange["review"];
+    // Whether the candidate is a release of a `system:` origin whose source
+    // the piece runs, which leaves the contract comparison to the release
+    // gate (`showsSystemRelease`).
+    let gatedRelease = false;
     if (confirmed !== undefined) {
       if (confirmed.review === undefined) {
         throw new Error(
@@ -4521,11 +4533,18 @@ export class PieceController<T = unknown> {
       }
       candidate = loaded;
       prepared = confirmed;
+      gatedRelease = await showsSystemRelease(
+        this.#pieces,
+        this.#cell,
+        expected.pattern,
+        confirmed.origin,
+      );
       const currentReview = await pieceSourceCompatibilityReview(
         previous,
         candidate,
         this.#cell,
         this.#pieces,
+        { gatedRelease },
       );
       await this.#refuseUnusableArgument(
         currentReview,
@@ -4676,11 +4695,18 @@ export class PieceController<T = unknown> {
         baseline,
         ...(selectedRevisionId === undefined ? {} : { selectedRevisionId }),
       };
+      gatedRelease = await showsSystemRelease(
+        this.#pieces,
+        this.#cell,
+        expected.pattern,
+        origin,
+      );
       const review = await pieceSourceCompatibilityReview(
         previous,
         candidate,
         this.#cell,
         this.#pieces,
+        { gatedRelease },
       );
       await this.#refuseUnusableArgument(
         review,
@@ -4818,6 +4844,7 @@ export class PieceController<T = unknown> {
           candidate,
           this.#cell,
           this.#pieces,
+          { gatedRelease },
         );
         await this.#refuseUnusableArgument(
           review,
@@ -4865,6 +4892,7 @@ export class PieceController<T = unknown> {
       candidate,
       this.#cell,
       this.#pieces,
+      { gatedRelease: false },
     );
     const compatible = !hasPieceSourceCompatibilityIssues(review.issues);
     return {
@@ -5389,15 +5417,83 @@ function pieceSourceArgumentEvidence(
 }
 
 /**
+ * The revision operations that take the source they record from the origin
+ * they record: a creation from it, an update from it, and pointing the piece
+ * at it. A `baseline` records whatever origin the piece carried when its log
+ * began, which says nothing about where its source came from.
+ */
+const TAKES_SOURCE_FROM_ORIGIN: ReadonlySet<PieceSourceRevision["operation"]> =
+  new Set(["create", "origin-update", "follow", "repoint"]);
+
+/**
+ * Whether `origin` is a `system:` origin and `piece` shows that it runs source
+ * that origin served, which is when a candidate from that origin is reviewed
+ * as an automatic update from a gated origin is: without comparing its
+ * schemas with the piece's.
+ *
+ * The release gate proves each release of a `system:` pattern against every
+ * contract its earlier releases recorded, and names each break it accepts
+ * (`tasks/pattern-compat-accepted-breaks.ts`). That verdict is about a piece
+ * only while the piece runs one of those releases. A piece shows it does in
+ * one of two ways:
+ *
+ * - a revision among the latest ones naming the pattern it runs, `running`,
+ *   took that pattern from `origin` ({@link TAKES_SOURCE_FROM_ORIGIN}); or
+ * - its source log is empty or holds only its creation revision, and the
+ *   source it runs is retained with `origin`'s file under the patterns route
+ *   as its entry: a piece made from that file by a path that records no
+ *   origin, and changed by nothing since.
+ */
+async function showsSystemRelease(
+  pieces: PiecesController,
+  piece: Cell<unknown>,
+  running: { identity: string; symbol: string },
+  origin: string | null,
+): Promise<boolean> {
+  if (origin === null) return false;
+  const system = classifyPieceOriginString(origin);
+  if (system.kind !== "system") return false;
+  const revisions = getPieceSourceRevisions(piece);
+  let first = revisions.length;
+  while (
+    first > 0 &&
+    revisions[first - 1].pattern.identity === running.identity &&
+    revisions[first - 1].pattern.symbol === running.symbol
+  ) first--;
+  const taken = revisions.slice(first).some((revision) => {
+    if (!TAKES_SOURCE_FROM_ORIGIN.has(revision.operation)) return false;
+    if (revision.origin === undefined) return false;
+    const recorded = classifyPieceOriginString(revision.origin);
+    return recorded.kind === "system" && recorded.route === system.route;
+  });
+  if (taken) return true;
+  const unchangedSinceMade = revisions.length === 0 ||
+    (revisions.length === 1 && first === 0 &&
+      revisions[0].operation === "create");
+  if (!unchangedSinceMade) return false;
+  const program = await pieces.runtime.patternManager
+    .getPatternSourceProgramByIdentity(running.identity, pieces.getSpace());
+  return program?.main === system.route;
+}
+
+/**
  * Every reason `candidate` cannot replace what `piece` runs, with the evidence
  * the stored argument was judged on.
  *
+ * `options.gatedRelease` says the candidate comes from a `system:` origin
+ * whose source the piece shows it runs ({@link showsSystemRelease}). The
+ * comparison of the two contracts is then the release gate's, and the review
+ * leaves `schema` out, as an automatic update from that origin does. The
+ * stored argument, the retained links, and the CFC envelopes are this piece's
+ * own data, which no release gate saw, and are reviewed either way.
+ *
  * `previous.pattern` is `undefined` for a piece whose current pattern does not
  * load. Nothing can then say whether the candidate keeps the contract the piece
- * ran under, which is itself an incompatibility: the review reports it under
- * `schema`, naming the pattern by `previous.ref`, and judges retained links
- * against the candidate alone. The stored argument and the CFC envelopes are
- * judged as they always are, since neither consults the current pattern.
+ * ran under, which is itself an incompatibility: outside a gated release the
+ * review reports it under `schema`, naming the pattern by `previous.ref`, and
+ * judges retained links against the candidate alone. The stored argument and
+ * the CFC envelopes are judged as they always are, since neither consults the
+ * current pattern.
  */
 async function pieceSourceCompatibilityReview(
   previous: {
@@ -5407,17 +5503,20 @@ async function pieceSourceCompatibilityReview(
   candidate: Pattern,
   piece: Cell<unknown>,
   pieces: PiecesController,
+  options: { gatedRelease: boolean },
 ): Promise<NonNullable<PreparedPieceSourceChange["review"]>> {
   const issues: PieceSourceCompatibilityIssues = {};
-  if (previous.pattern === undefined) {
-    issues.schema = `the piece's current pattern ` +
-      `\`${previous.ref.identity}#${previous.ref.symbol}\` cannot be loaded, ` +
-      `so the candidate cannot be compared with it`;
-  } else {
-    try {
-      assertPatternSchemasBackwardCompatible(previous.pattern, candidate);
-    } catch (error) {
-      issues.schema = error instanceof Error ? error.message : String(error);
+  if (!options.gatedRelease) {
+    if (previous.pattern === undefined) {
+      issues.schema = `the piece's current pattern ` +
+        `\`${previous.ref.identity}#${previous.ref.symbol}\` cannot be ` +
+        `loaded, so the candidate cannot be compared with it`;
+    } else {
+      try {
+        assertPatternSchemasBackwardCompatible(previous.pattern, candidate);
+      } catch (error) {
+        issues.schema = error instanceof Error ? error.message : String(error);
+      }
     }
   }
 
