@@ -551,6 +551,21 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   ): Cancel;
 
   /**
+   * Observes a space's remote subscription ending with an error, which
+   * `spaceSessionError()` reports from then on: for example a takeover, an
+   * authorization denial, or a client that gives up reconnecting. The space's
+   * documents receive no further updates unless a reopen after an access
+   * change (see `subscribeSpaceAccessChange()`) replaces the session, after
+   * which `spaceSessionError()` returns undefined again. An authorization
+   * denial also reaches `subscribeSpaceAccessLoss()` observers. Ordinary
+   * reconnects, normal closure, and spaces whose reads an authoritative local
+   * store supplies do not emit.
+   */
+  subscribeSpaceSessionError?(
+    observer: (space: MemorySpace, error: Error) => void,
+  ): Cancel;
+
+  /**
    * Register an in-flight commit so the durability barrier
    * (`hasPendingCommits` / `pendingCommitsSettled`) covers it. Called by the
    * transaction layer at `commit()` entry, synchronously with the commit

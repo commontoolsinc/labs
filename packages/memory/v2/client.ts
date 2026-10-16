@@ -1912,7 +1912,7 @@ export class Client {
       return;
     }
     if (isSessionRevoked(message)) {
-      for (const session of this.#spaces) {
+      for (const session of [...this.#spaces]) {
         if (
           session.sessionId === message.sessionId &&
           session.space === message.space
@@ -2090,7 +2090,7 @@ export class Client {
       this.#noteStateChange();
       this.#endHeldMounts(err);
       this.#rejectPending(err);
-      for (const session of this.#spaces) {
+      for (const session of [...this.#spaces]) {
         session.handleConnectionFailure(err);
       }
       return false;
@@ -2162,7 +2162,7 @@ export class SpaceSession {
   #viewIntentVersion = 0;
   #restoreComplete: PromiseWithResolvers<void> | undefined;
   #viewCapabilityLostObservers = new Set<() => void>();
-  #accessLossObservers = new Set<(error: Error) => void>();
+  #terminationObservers = new Set<(error: Error) => void>();
   #watchSpecPositions = new Map<string, number[]>();
   #watchView: WatchView | null = null;
   #precedingWatchSyncs: SessionSync[] = [];
@@ -2208,6 +2208,7 @@ export class SpaceSession {
   #concurrentWatchRefresh = false;
 
   #closed = false;
+  #terminated = false;
   #closeError: Error | null = null;
   #readyOnConnection = true;
   #restoring = false;
@@ -2826,22 +2827,25 @@ export class SpaceSession {
   }
 
   /**
-   * Observes an authoritative loss of this session's access. A permanent
-   * denial is replayed synchronously to late observers; normal closure,
-   * takeover, and transient connection failures do not report access loss.
+   * Observes this session ending with an error, which `closeError` then
+   * holds: a revocation (a takeover or an authorization denial), a permanent
+   * reopen denial, a restore the server cannot base on declared holdings, or
+   * a client that gives up reconnecting. A session that has already ended
+   * that way reports to a late observer synchronously. Normal closure and
+   * ordinary reconnects do not report.
    */
-  subscribeAccessLoss(observer: (error: Error) => void): () => void {
-    if (isPermanentAuthorizationError(this.#closeError)) {
+  subscribeTermination(observer: (error: Error) => void): () => void {
+    if (this.#terminated) {
       try {
         observer(this.#closeError!);
       } catch (cause) {
-        console.error("session-access-loss subscriber threw:", cause);
+        console.error("session-termination subscriber threw:", cause);
       }
       return () => {};
     }
     if (this.#closed) return () => {};
-    this.#accessLossObservers.add(observer);
-    return () => this.#accessLossObservers.delete(observer);
+    this.#terminationObservers.add(observer);
+    return () => this.#terminationObservers.delete(observer);
   }
 
   /**
@@ -3353,7 +3357,7 @@ export class SpaceSession {
     this.#replaceWatchSpecs([]);
     this.#viewInterests = [];
     this.#viewCapabilityLostObservers.clear();
-    this.#accessLossObservers.clear();
+    this.#terminationObservers.clear();
     this.#watchView?.close();
     this.#watchView = null;
   }
@@ -3386,6 +3390,7 @@ export class SpaceSession {
       `${JSON.stringify(this.space)} ended: ${describeError(error)}`,
     ]);
     this.#closed = true;
+    this.#terminated = true;
     this.#closeError = error;
     this.#endHold();
     this.#restoreComplete?.reject(error);
@@ -3403,15 +3408,13 @@ export class SpaceSession {
     this.#watchView?.close();
     this.#watchView = null;
     this.#endPresenceRooms(error);
-    const observers = [...this.#accessLossObservers];
-    this.#accessLossObservers.clear();
-    if (isPermanentAuthorizationError(error)) {
-      for (const observer of observers) {
-        try {
-          observer(error);
-        } catch (cause) {
-          console.error("session-access-loss subscriber threw:", cause);
-        }
+    const observers = [...this.#terminationObservers];
+    this.#terminationObservers.clear();
+    for (const observer of observers) {
+      try {
+        observer(error);
+      } catch (cause) {
+        console.error("session-termination subscriber threw:", cause);
       }
     }
   }
