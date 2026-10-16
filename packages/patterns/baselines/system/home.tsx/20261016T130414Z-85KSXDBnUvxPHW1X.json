@@ -1401,6 +1401,10 @@
             },
             "type": "array"
           },
+          "messageAct": {
+            "description": "Whether a `joinRoom` comes from a message or a reaction the user sent in\nthe room, which leaves the title the catalog lists an already listed room\nunder as it is.",
+            "type": "boolean"
+          },
           "profile": {
             "$ref": "#/$defs/ChatManagerProfile",
             "description": "A direct room's other member's profile, through whose share inbox a new\nroom, or a found one that was offered them nothing, is offered to them, or\nthe profile of a member added to a room, through whose share inbox\n`offerRoom` offers it."
