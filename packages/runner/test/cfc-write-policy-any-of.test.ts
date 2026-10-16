@@ -468,6 +468,32 @@ describe("cfc-write-policy-any-of", () => {
       });
     });
 
+    it("is refused with `CfcCommitRefusalError` after one run where a candidate weakens a stored claim", async () => {
+      // Not a writer policy, but the same refusal by the stored envelope: the
+      // candidate's confidentiality drops the atom the stored one requires.
+
+      const secret: JSONSchemaObj = {
+        type: "string",
+        ifc: { confidentiality: ["secret"] },
+      };
+      const other: JSONSchemaObj = {
+        type: "string",
+        ifc: { confidentiality: ["other"] },
+      };
+      await withFixture(async (f) => {
+        expect(await f.write("send", undefined, { schema: secret }))
+          .toBeUndefined();
+
+        const { runs, error } = await f.writeWithRetry("send", undefined, {
+          schema: other,
+        });
+
+        expect(runs).toBe(1);
+        expect(error?.name).toBe("CfcCommitRefusalError");
+        expect(error?.message).toContain("confidentiality cannot be weakened");
+      });
+    });
+
     it("is refused with the retryable name where the stored envelope does not read back", async () => {
       // The refusal is a verdict only where the stored envelope's document is
       // one the transaction holds, which the verdict confirms by reading the

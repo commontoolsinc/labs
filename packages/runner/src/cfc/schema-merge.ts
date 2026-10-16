@@ -222,6 +222,22 @@ const reconcileWriterClaimStamp = (
   return existingStamped ? existing : candidate;
 };
 
+/**
+ * What the merge throws when a candidate changes or weakens an `ifc` claim the
+ * existing envelope fixes: a set-like claim the candidate drops members of, or
+ * a claim that must stay as it is — `writePolicyAnyOf`, `writeAuthorizedBy`,
+ * `uiContract`, `exactCopyOf` and the rest of that set — and that the
+ * candidate changes. It is a class of its own so that the commit boundary can
+ * tell this refusal from the merge's others.
+ */
+export class CfcEnvelopeStabilityError extends Error {
+  /** Constructs an instance with the merge's own `message`. */
+  constructor(message: string) {
+    super(message);
+    this.name = "CfcEnvelopeStabilityError";
+  }
+}
+
 const mergeSetLikeIfcArray = (
   key: string,
   existing: unknown,
@@ -242,7 +258,9 @@ const mergeSetLikeIfcArray = (
     case "addIntegrity": {
       if (!Array.isArray(existing) || !Array.isArray(candidate)) {
         if (!deepEqual(existing, candidate)) {
-          throw new Error(`${key} must remain stable at ${path || "/"}`);
+          throw new CfcEnvelopeStabilityError(
+            `${key} must remain stable at ${path || "/"}`,
+          );
         }
         return existing;
       }
@@ -278,7 +296,9 @@ const mergeSetLikeIfcArray = (
         ? existingArray.filter((atom) => !isValueStamp(atom))
         : existingArray;
       if (!arraySubsetOf(comparableExisting, candidateArray)) {
-        throw new Error(`${key} cannot be weakened at ${path || "/"}`);
+        throw new CfcEnvelopeStabilityError(
+          `${key} cannot be weakened at ${path || "/"}`,
+        );
       }
       return mergeArraySet(existingArray, candidateArray);
     }
@@ -310,14 +330,18 @@ const mergeSetLikeIfcArray = (
               return reconciled;
             }
           }
-          throw new Error(`${key} must remain stable at ${path || "/"}`);
+          throw new CfcEnvelopeStabilityError(
+            `${key} must remain stable at ${path || "/"}`,
+          );
         }
         return existing;
       }
       const existingArray = existing as readonly unknown[];
       const candidateArray = candidate as readonly unknown[];
       if (!arraySubsetOf(candidateArray, existingArray)) {
-        throw new Error(`${key} cannot be weakened at ${path || "/"}`);
+        throw new CfcEnvelopeStabilityError(
+          `${key} cannot be weakened at ${path || "/"}`,
+        );
       }
       return mergeArraySet(candidateArray);
     }
@@ -328,33 +352,23 @@ const mergeSetLikeIfcArray = (
     case "collection":
     case "ownerPrincipal":
       if (!deepEqual(existing, candidate)) {
-        throw new Error(`${key} must remain stable at ${path || "/"}`);
+        throw new CfcEnvelopeStabilityError(
+          `${key} must remain stable at ${path || "/"}`,
+        );
       }
       return existing;
     case "flowPrecisionClaim":
     case "uiContract":
       if (!deepEqual(existing, candidate)) {
-        throw new Error(`${key} must remain stable at ${path || "/"}`);
+        throw new CfcEnvelopeStabilityError(
+          `${key} must remain stable at ${path || "/"}`,
+        );
       }
       return existing;
     default:
       return candidate;
   }
 };
-
-/**
- * What the merge throws when a candidate changes a stored `writePolicyAnyOf`:
- * a different number of alternatives, or an alternative whose keys, contract,
- * or writer claim differ from the stored one's. It is a class of its own so
- * that the commit boundary can tell this refusal from the merge's others.
- */
-export class WritePolicyUnstableError extends Error {
-  /** Constructs an instance for the policy at `path`. */
-  constructor(path: string) {
-    super(`writePolicyAnyOf must remain stable at ${path || "/"}`);
-    this.name = "WritePolicyUnstableError";
-  }
-}
 
 /**
  * Helper for `mergeSetLikeIfcArray()`, which merges two `writePolicyAnyOf`
@@ -369,7 +383,10 @@ const mergeWritePolicyAnyOf = (
   path: string,
   adoptsStamp?: (claim: unknown) => boolean,
 ): unknown => {
-  const unstable = () => new WritePolicyUnstableError(path);
+  const unstable = () =>
+    new CfcEnvelopeStabilityError(
+      `writePolicyAnyOf must remain stable at ${path || "/"}`,
+    );
   if (
     !Array.isArray(existing) || !Array.isArray(candidate) ||
     existing.length !== candidate.length

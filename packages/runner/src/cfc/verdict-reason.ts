@@ -22,12 +22,12 @@
 // document holds, or on a schema document a source's stored labels name that
 // the transaction could not read.
 //
-// The envelope merge's refusal of a candidate that changes a stored
-// `writePolicyAnyOf` is a verdict of the first kind: it compares the candidate
-// with an envelope loaded whole from a document the transaction holds, and
-// waits on nothing. `storedPolicyVerdict` in `prepare.ts` tags it, and reads
-// that envelope again visibly to reactivity. The merge's other refusals stay
-// untagged.
+// The envelope merge's refusal of a candidate that changes or weakens an
+// `ifc` claim the stored envelope fixes (`CfcEnvelopeStabilityError`) is a
+// verdict of the first kind: it compares the candidate with an envelope loaded
+// whole from a document the transaction holds, and waits on nothing.
+// `storedClaimVerdict` in `prepare.ts` tags it, and reads that envelope again
+// visibly to reactivity. The merge's other refusals stay untagged.
 //
 // Everything else that lands in `reasons` is NOT a verdict, whatever it looks
 // like. Prepare may have been unable to EVALUATE because an input was not

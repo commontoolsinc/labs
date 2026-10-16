@@ -207,13 +207,13 @@ import { createTxCfcModulePolicyResolver } from "./policy-resolver.ts";
 import { cfcSchemaEntries } from "./schema-label-view.ts";
 import { sinkClassOf } from "./sink-inventory.ts";
 import {
+  CfcEnvelopeStabilityError,
   type CfcSchemaMergeIssue,
   cfcSchemaMergeIssue,
   cfcSchemaPoliciesEqual,
   type MergeCfcSchemaEnvelopeOptions,
   mergeCfcSchemaEnvelopes,
   withoutUndefinedMembers,
-  WritePolicyUnstableError,
 } from "./schema-merge.ts";
 import {
   cfcSchemaResolvedRoot,
@@ -255,9 +255,9 @@ const INTERNAL_VERIFIER_META = stableInternalVerifierRead;
 // the link is triggered again when the member lands. The rest of what a floor
 // weighed, stored labels and the values along a linked path, is read this way
 // again where the floor's refusal is a verdict (`holdFloorEvidence`), since
-// nothing else would run the writer again. A stored envelope whose
-// `writePolicyAnyOf` a candidate changed is read this way again too, where
-// that refusal is a verdict (`storedPolicyVerdict`). The reads are commit-time
+// nothing else would run the writer again. A stored envelope whose claim a
+// candidate changed or weakened is read this way again too, where that
+// refusal is a verdict (`storedClaimVerdict`). The reads are commit-time
 // preconditions either way: `ignoreReadForScheduling` gates reactivity
 // alone.
 const FLOOR_EVIDENCE_META = {
@@ -10221,9 +10221,10 @@ const mergeStoredCfcEnvelope = (
     : mergeCfcSchemaEnvelopes(stored, candidate, options);
 
 /**
- * The reason the persist loop records when a candidate changes the
- * `writePolicyAnyOf` a document stores, tagged a verdict where the document
- * whose envelope it was compared against is one this transaction holds.
+ * The reason the persist loop records when a candidate changes or weakens an
+ * `ifc` claim a document's stored envelope fixes (`CfcEnvelopeStabilityError`),
+ * tagged a verdict where the document whose envelope it was compared against
+ * is one this transaction holds.
  *
  * The merge runs only over an envelope `loadStoredCfcEnvelope` loaded whole:
  * the metadata read from the document, and every schema document it names,
@@ -10240,7 +10241,7 @@ const mergeStoredCfcEnvelope = (
  * that does not read back belongs to a document the transaction does not hold,
  * and the reason stays untagged.
  */
-const storedPolicyVerdict = (
+const storedClaimVerdict = (
   tx: IExtendedStorageTransaction,
   target: {
     space: MemorySpace;
@@ -12047,8 +12048,8 @@ export function* prepareBoundaryCommitSteps(
         reasons.push(
           error instanceof CfcSchemaMigrationError
             ? `${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: ${error.message}`
-            : error instanceof WritePolicyUnstableError
-            ? storedPolicyVerdict(tx, { space, id, scope }, error.message)
+            : error instanceof CfcEnvelopeStabilityError
+            ? storedClaimVerdict(tx, { space, id, scope }, error.message)
             : error instanceof Error
             ? error.message
             : `schema merge failed for ${id}`,
