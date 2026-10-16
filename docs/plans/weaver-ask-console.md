@@ -175,17 +175,20 @@ otherwise, is refused with 409 `action_resolved`; 404 `unknown_action` is kept
 for an id the session never issued. Do not promise exactly-once mutation across a lost command
 response.
 
-**Attribution.** A read on the Weaver's reviewed read-only list runs
-automatically and is attributed to the agent; a mutation waits for the person's
-approval tap and is attributed to the user, because the tap is the person's own
-act. The invocation names the approval the console asks for (copied from the
+**Attribution.** The Weaver classifies commands by whether they require
+interactive confirmation, independently of whether they read or mutate. An
+automatic command runs as the agent; a command the person approves runs as the
+user. The Weaver's policy owns which mutations may run automatically. The
+invocation names the approval the console asks for (copied from the
 catalog), the Weaver applies the stricter of that and its own list, and the
 settlement names the approval, actor, and executor actor it applied, so neither
 the executor nor Loom infers it. The Weaver sends Loom `actor: "user"` for an
-approved command and `actor: "agent:cf-harness"` for an automatic read, the
+approved command and `actor: "agent:cf-harness"` for an automatic command, the
 target as `context.loom_id`, and a version precondition as
-`context.expected_version`. The read-only list is a static Weaver-side list,
-since Loom's registry carries no query/action flag.
+`context.expected_version`. The confirmation policy is a static Weaver-side
+list. A console advertises
+`automatic_mutations` when its catalog reader accepts that combination; a host
+uses person approval for mutations on consoles without that feature.
 
 **Loom's actor rules admit the first query.** `loom.inspect` declares neither
 `actors` nor `origins_refused`, so an `agent:<slug>` actor is admitted; nor do
