@@ -143,3 +143,22 @@ Deno.test("cf-keybind ignores a key typed into a cf-input", async () => {
     view.dispose();
   }
 });
+
+Deno.test("cf-keybind fires for a key on a non-editable island inside an editor", () => {
+  const view = arrowRightBinding();
+  const island = document.createElement("button");
+  const wrapper = document.createElement("span");
+  wrapper.contentEditable = "false";
+  wrapper.append(island);
+  const editor = document.createElement("div");
+  editor.contentEditable = "true";
+  editor.append(wrapper);
+  const tree = nestedInShadow(editor);
+  try {
+    pressArrowRight(island);
+    expect(view.fired()).toBe(1);
+  } finally {
+    tree.dispose();
+    view.dispose();
+  }
+});
