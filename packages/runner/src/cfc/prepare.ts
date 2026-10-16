@@ -213,6 +213,7 @@ import {
   type MergeCfcSchemaEnvelopeOptions,
   mergeCfcSchemaEnvelopes,
   withoutUndefinedMembers,
+  WritePolicyUnstableError,
 } from "./schema-merge.ts";
 import {
   cfcSchemaResolvedRoot,
@@ -254,7 +255,9 @@ const INTERNAL_VERIFIER_META = stableInternalVerifierRead;
 // the link is triggered again when the member lands. The rest of what a floor
 // weighed, stored labels and the values along a linked path, is read this way
 // again where the floor's refusal is a verdict (`holdFloorEvidence`), since
-// nothing else would run the writer again. The reads are commit-time
+// nothing else would run the writer again. A stored envelope whose
+// `writePolicyAnyOf` a candidate changed is read this way again too, where
+// that refusal is a verdict (`storedPolicyVerdict`). The reads are commit-time
 // preconditions either way: `ignoreReadForScheduling` gates reactivity
 // alone.
 const FLOOR_EVIDENCE_META = {
@@ -10218,6 +10221,41 @@ const mergeStoredCfcEnvelope = (
     : mergeCfcSchemaEnvelopes(stored, candidate, options);
 
 /**
+ * The reason the persist loop records when a candidate changes the
+ * `writePolicyAnyOf` a document stores, tagged a verdict where the document
+ * whose envelope it was compared against is one this transaction holds.
+ *
+ * The merge runs only over an envelope `loadStoredCfcEnvelope` loaded whole:
+ * the metadata read from the document, and every schema document it names,
+ * content-verified. The refusal turns on that envelope, the candidate this
+ * transaction states, the writers and release modules it records, and, where a
+ * release relaxes the merge beneath a link, the values that same document
+ * holds. None of it waits on a document the replica may not have pulled, so an
+ * immediate re-run states the same candidate against the same envelope and is
+ * refused the same way.
+ *
+ * The envelope was read invisibly to reactivity. Its `["cfc"]` member is read
+ * again here visibly, so a writer this verdict refuses runs again when the
+ * stored envelope changes, as a fresh trigger rather than a retry. A member
+ * that does not read back belongs to a document the transaction does not hold,
+ * and the reason stays untagged.
+ */
+const storedPolicyVerdict = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+  message: string,
+): string =>
+  tx.read({ ...target, type: "application/json", path: ["cfc"] }, {
+      meta: FLOOR_EVIDENCE_META,
+    }).ok === undefined
+    ? message
+    : verdictReason(message);
+
+/**
  * Would a write under `candidate` commit over this stored envelope?
  * `undefined` means yes.
  *
@@ -12009,6 +12047,8 @@ export function* prepareBoundaryCommitSteps(
         reasons.push(
           error instanceof CfcSchemaMigrationError
             ? `${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: ${error.message}`
+            : error instanceof WritePolicyUnstableError
+            ? storedPolicyVerdict(tx, { space, id, scope }, error.message)
             : error instanceof Error
             ? error.message
             : `schema merge failed for ${id}`,

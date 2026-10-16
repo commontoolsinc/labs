@@ -343,6 +343,20 @@ const mergeSetLikeIfcArray = (
 };
 
 /**
+ * What the merge throws when a candidate changes a stored `writePolicyAnyOf`:
+ * a different number of alternatives, or an alternative whose keys, contract,
+ * or writer claim differ from the stored one's. It is a class of its own so
+ * that the commit boundary can tell this refusal from the merge's others.
+ */
+export class WritePolicyUnstableError extends Error {
+  /** Constructs an instance for the policy at `path`. */
+  constructor(path: string) {
+    super(`writePolicyAnyOf must remain stable at ${path || "/"}`);
+    this.name = "WritePolicyUnstableError";
+  }
+}
+
+/**
  * Helper for `mergeSetLikeIfcArray()`, which merges two `writePolicyAnyOf`
  * lists. The alternatives stay as stored — the same ones, in the same order,
  * each with the same contract — so a later schema can neither admit a writer
@@ -355,8 +369,7 @@ const mergeWritePolicyAnyOf = (
   path: string,
   adoptsStamp?: (claim: unknown) => boolean,
 ): unknown => {
-  const unstable = () =>
-    new Error(`writePolicyAnyOf must remain stable at ${path || "/"}`);
+  const unstable = () => new WritePolicyUnstableError(path);
   if (
     !Array.isArray(existing) || !Array.isArray(candidate) ||
     existing.length !== candidate.length
