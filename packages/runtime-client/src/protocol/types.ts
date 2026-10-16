@@ -2488,6 +2488,34 @@ export type CDFPoint = {
 };
 
 /**
+ * One of the slowest measurements of a timed operation. Mirrors the shape
+ * `@commonfabric/utils/logger` uses.
+ */
+export type SlowTiming = {
+  /**
+   * How long it took, in milliseconds.
+   */
+  elapsed: number;
+
+  /**
+   * When it ended, on the worker's `performance.now()` clock.
+   */
+  at: number;
+
+  /**
+   * When it ended, in milliseconds since the epoch.
+   */
+  epochMs: number;
+
+  /**
+   * What the worker named this one measurement with, when it named it: the
+   * label its caller chose, such as the cell a resume loaded or the action a
+   * run executed.
+   */
+  detail?: string;
+};
+
+/**
  * What one timed operation's samples add up to. Two distributions are kept:
  * `cdf` over every sample since the worker started, and `cdfSinceBaseline`
  * over those since the last baseline reset, which is `null` until one has
@@ -2538,6 +2566,11 @@ export type TimingStats = {
    * When that measurement was taken.
    */
   lastTimestamp: number;
+
+  /**
+   * The slowest measurements, longest first, at most five of them.
+   */
+  slowest: SlowTiming[];
 
   /**
    * The distribution over every sample since the worker started.
