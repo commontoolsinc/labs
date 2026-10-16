@@ -45,6 +45,7 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { Pattern } from "./builder/types.ts";
 import type { Cancel } from "./cancel.ts";
 import type { Cell } from "./cell.ts";
+import { readStoredCfcSchemaHash } from "./cfc/metadata.ts";
 import { prepareSourceClosureVerification } from "./compilation-cache/cell-cache.ts";
 import type { RuntimeProgram } from "./harness/types.ts";
 import type { PreparedSourceUpdate } from "./pattern-manager.ts";
@@ -113,6 +114,9 @@ const logger = getLogger("runner.source-reconcile", {
  * - `updated`: the piece adopted new source.
  * - `incompatible`: the origin offered source that cannot replace what the
  *   piece runs, and its owner has not said to take it anyway.
+ * - `mismatched`: what the piece stores refuses the source its origin offered:
+ *   a stored CFC envelope fixes a claim the candidate's schema changes or
+ *   weakens. Nothing overrules that; what is stored has to change first.
  * - `unavailable`: the origin's current source could not be adopted this
  *   time — it could not be reached, the write that adopts it did not commit,
  *   or the piece changed underneath the attempt and the write it was going to
@@ -125,6 +129,7 @@ export type ReconcileOutcome =
   | "migrated"
   | "updated"
   | "incompatible"
+  | "mismatched"
   | "unavailable";
 
 /**
@@ -149,6 +154,7 @@ const RECORDED_OUTCOME: Record<
   // outcome, so a second kind of refusal has to say which one it is instead
   // of inheriting this one.
   incompatible: { outcome: "refused", reason: "incompatible-schema" },
+  mismatched: { outcome: "refused", reason: "argument-mismatch" },
   detached: undefined,
   unusable: undefined,
 };
@@ -234,22 +240,35 @@ type OriginClaim = {
 };
 
 /**
- * Why a write did not commit, as a reason a record can carry, and whether the
- * same write over the same data is refused again however often it is made: the
- * store refused it for standing for more than it admits in one message, or a
- * stored envelope refused its schema.
+ * A refusal the same adoption meets again however often it is made: the store
+ * refused the write for standing for more than it admits in one message, or a
+ * stored envelope refused the write's schema.
  */
-type CommitFailure = { detail: string; repeats: boolean };
+type RepeatingRefusal = "too-large" | "stored-envelope";
+
+/**
+ * Why a write did not commit, as a reason a record can carry, and which
+ * refusal it was where the same write is refused again however often it is
+ * made.
+ */
+type CommitFailure = {
+  detail: string;
+  repeats: RepeatingRefusal | undefined;
+};
 
 /**
  * An adoption refused in a way that repeats: the piece ran `running`, the
- * origin offered `candidate`, and `argumentUnchanged` holds while the piece's
- * stored argument is the one the adoption was prepared over.
+ * origin offered `candidate`, and the reconciliation concluded `outcome` for
+ * `detail`. A refusal by a stored envelope also names the envelopes it was
+ * reached over, `envelopes`, since a change to them can change the answer. A
+ * write the store refused as too large has none: it grows with what the piece
+ * holds, so a change to the piece's data rarely makes it fit.
  */
 type RefusedAdoption = {
   running: { identity: string; symbol: string };
   candidate: { identity: string; symbol: string };
-  argumentUnchanged: (piece: Cell<unknown>) => boolean;
+  envelopes?: string;
+  outcome: ReconcileOutcome;
   detail: string;
 };
 
@@ -320,21 +339,27 @@ export class SourceReconciler {
    * The last adoption refused in a way that repeats, by follower key.
    * Preparing an adoption loads and restages everything the piece holds, so
    * an open that re-enters reconciliation would otherwise prepare it again,
-   * at that cost, only to have it refused again. An entry applies only while
-   * the piece runs what it ran, its origin offers the same candidate, and its
-   * stored argument is the one the adoption was prepared over, since that is
-   * the data the refusal answered for. It is dropped when the piece stops or
-   * its space's memory session is replaced, which is when what the store
-   * admits can have changed.
+   * at that cost, only to have it refused again. An entry applies while the
+   * piece runs what it ran and its origin offers the same candidate, and, for
+   * a refusal by a stored envelope, while the piece's documents store the
+   * envelopes it was refused over: a write under the schema the piece runs
+   * leaves them as they are, and a migration that rewrites them changes
+   * them. An entry is dropped when the piece stops or its space's memory
+   * session is replaced. A replacement can bring a store that admits what the
+   * old one refused, and either event can come with a change the entry does
+   * not see, such as an envelope on a document other than the two it reads;
+   * both are rare enough that one more preparation each costs less than a
+   * refusal kept past such a change.
    */
   readonly #refusedAdoptions = new Map<string, RefusedAdoption>();
 
   /**
-   * How many memory sessions have been replaced, so that an adoption refused
-   * across a replacement is not remembered: the refusal answered for a store
-   * that may no longer be the one serving the space.
+   * How many times each space's memory session has been replaced, so that an
+   * adoption refused across a replacement of its own space's session is not
+   * remembered: the refusal answered for a store that may no longer be the
+   * one serving the space.
    */
-  #sessionsReplaced = 0;
+  readonly #sessionReplacements = new Map<MemorySpace, number>();
 
   /**
    * The pieces following a system origin, by follower key. A host serves one
@@ -560,7 +585,10 @@ export class SourceReconciler {
 
   /** Reconciles each piece following a system origin in `space` again. */
   #followSystemSources(space: MemorySpace): void {
-    this.#sessionsReplaced++;
+    this.#sessionReplacements.set(
+      space,
+      (this.#sessionReplacements.get(space) ?? 0) + 1,
+    );
     for (const key of [...this.#refusedAdoptions.keys()]) {
       if (key.startsWith(`${space}\0`)) this.#refusedAdoptions.delete(key);
     }
@@ -807,8 +835,8 @@ export class SourceReconciler {
       symbol: state.running.symbol,
     });
     if (refused !== undefined) {
-      state.detail = refused;
-      return "unavailable";
+      state.detail = refused.detail;
+      return refused.outcome;
     }
 
     const resolved = await this.#runtime.harness.resolve(
@@ -1210,8 +1238,8 @@ export class SourceReconciler {
     ) return "current";
     const refused = this.#refusedBefore(resultCell, state, target);
     if (refused !== undefined) {
-      state.detail = refused;
-      return "unavailable";
+      state.detail = refused.detail;
+      return refused.outcome;
     }
 
     // Awaited directly rather than through the abort signal. The lookup
@@ -1259,7 +1287,7 @@ export class SourceReconciler {
   ): Promise<ReconcileOutcome> {
     const runtime = this.#runtime;
     if (signal.aborted) return "unavailable";
-    const sessionsReplaced = this.#sessionsReplaced;
+    const replacements = this.#sessionReplacements.get(state.space) ?? 0;
     const candidate = await runtime.patternManager.compilePattern(program, {
       space: state.space,
     });
@@ -1381,35 +1409,68 @@ export class SourceReconciler {
       this.#refusedAdoptions.delete(key);
       return "updated";
     }
-    if (failure.repeats && sessionsReplaced === this.#sessionsReplaced) {
+    const outcome = failure.repeats === "stored-envelope"
+      ? "mismatched"
+      : "unavailable";
+    if (
+      failure.repeats !== undefined &&
+      replacements === (this.#sessionReplacements.get(state.space) ?? 0)
+    ) {
       this.#refusedAdoptions.set(key, {
         running: { ...state.running },
         candidate: candidateRef,
-        argumentUnchanged,
+        ...(failure.repeats === "stored-envelope"
+          ? { envelopes: this.#storedEnvelopes(resultCell) }
+          : {}),
+        outcome,
         detail: failure.detail,
       });
     }
     state.detail = failure.detail;
-    return "unavailable";
+    return outcome;
   }
 
   /**
-   * Why adopting `candidate` over what the piece runs, and over the stored
-   * argument it holds now, was refused in a way that repeats, if it was.
+   * The refusal adopting `candidate` over what the piece runs met, if it
+   * repeats and nothing it answered for has changed since.
    */
   #refusedBefore(
     resultCell: Cell<unknown>,
     state: PieceState,
     candidate: { identity: string; symbol: string },
-  ): string | undefined {
+  ): RefusedAdoption | undefined {
     const refused = this.#refusedAdoptions.get(this.#followerKey(resultCell));
     return refused?.running.identity === state.running.identity &&
         refused.running.symbol === state.running.symbol &&
         refused.candidate.identity === candidate.identity &&
         refused.candidate.symbol === candidate.symbol &&
-        refused.argumentUnchanged(resultCell)
-      ? refused.detail
+        (refused.envelopes === undefined ||
+          refused.envelopes === this.#storedEnvelopes(resultCell))
+      ? refused
       : undefined;
+  }
+
+  /**
+   * The envelopes the piece's argument and result documents store, as one
+   * key: each one's schema hash, `none` where it stores none, and
+   * `unreadable` where it could not be read. Only the envelope's own record is
+   * read, never the schema it names, which grows with the piece's releases.
+   */
+  #storedEnvelopes(resultCell: Cell<unknown>): string {
+    const tx = this.#runtime.edit();
+    try {
+      return [resultCell.getArgumentCell(), resultCell].map((cell) => {
+        if (cell === undefined) return "none";
+        const { space, id, scope } = cell.getAsNormalizedFullLink();
+        try {
+          return readStoredCfcSchemaHash(tx, { space, id, scope }) ?? "none";
+        } catch {
+          return "unreadable";
+        }
+      }).join("\0");
+    } finally {
+      tx.abort();
+    }
   }
 
   /**
@@ -1548,7 +1609,7 @@ export class SourceReconciler {
       { sourceUpdate },
     );
     if (signal?.aborted) {
-      return { detail: "the reconciliation was stopped", repeats: false };
+      return { detail: "the reconciliation was stopped", repeats: undefined };
     }
     if (result.error) {
       const { error } = result;
@@ -1569,13 +1630,16 @@ export class SourceReconciler {
       ]);
       return {
         detail: reconciliationDetail(error),
-        repeats: isOversizedRejection(error) ||
-          isEnvelopeStabilityRefusal(error),
+        repeats: isOversizedRejection(error)
+          ? "too-large"
+          : isEnvelopeStabilityRefusal(error)
+          ? "stored-envelope"
+          : undefined,
       };
     }
     return result.ok === true ? undefined : {
       detail: "the piece changed while its write was being prepared",
-      repeats: false,
+      repeats: undefined,
     };
   }
 

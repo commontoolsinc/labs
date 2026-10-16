@@ -104,8 +104,9 @@ export function isOversizedRejection(
 /**
  * The CFC boundary refused the commit because its schema changes or weakens a
  * claim a stored envelope fixes (`cfc/envelope-stability-reason.ts`). The
- * stored envelope and the write's schema decide it, so the same write is
- * refused again while both stay as they are. Read off the refusal's `reasons`,
+ * stored envelope, the write's schema, and the transaction's writers and
+ * release decide it, so the same write is refused again while they stay as
+ * they are. Read off the refusal's `reasons`,
  * where prepare puts the class at the front of the reason it records; only a
  * terminal refusal carries them.
  */

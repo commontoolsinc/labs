@@ -30,6 +30,7 @@ import {
   systemPatternSource,
 } from "../src/index.ts";
 import { envelopeStabilityReason } from "../src/cfc/envelope-stability-reason.ts";
+import { readStoredCfcSchemaHash } from "../src/cfc/metadata.ts";
 import { PatternsRoute } from "../src/harness/patterns-route.deno.ts";
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
@@ -278,6 +279,45 @@ describe("piece source reconciliation", () => {
   async function changeStoredArgument(piece: Cell<unknown>, value: unknown) {
     const result = await runtime.editWithRetry((tx) => {
       piece.withTx(tx).getArgumentCell()!.setRaw(value);
+    });
+    expect(result.error).toBeUndefined();
+  }
+
+  /** The schema hash of the envelope the piece's argument document stores. */
+  function argumentEnvelope(piece: Cell<unknown>): string | undefined {
+    const tx = runtime.edit();
+    try {
+      const { space, id, scope } = piece.getArgumentCell()!
+        .getAsNormalizedFullLink();
+      return readStoredCfcSchemaHash(tx, { space, id, scope });
+    } finally {
+      tx.abort();
+    }
+  }
+
+  /**
+   * Commits `value` as the piece's stored argument under a schema that labels
+   * it, which stores an envelope for the argument document.
+   */
+  async function labelStoredArgument(piece: Cell<unknown>, value: unknown) {
+    const result = await runtime.editWithRetry((tx) => {
+      const argument = piece.withTx(tx).getArgumentCell()!;
+      runtime.getCellFromLink(
+        {
+          ...argument.getAsNormalizedFullLink(),
+          schema: {
+            type: "object",
+            properties: {
+              optional: {
+                type: "string",
+                ifc: { confidentiality: ["migrated"] },
+              },
+            },
+          },
+        },
+        undefined,
+        tx,
+      ).set(value);
     });
     expect(result.error).toBeUndefined();
   }
@@ -1130,9 +1170,9 @@ describe("piece source reconciliation", () => {
         expect(getPatternIdentityRef(piece)?.identity).toBe(v2Identity);
       });
 
-      it("prepares the adoption again once the piece's stored argument changed", async () => {
-        // What the write carries is the piece's data, so the refusal answered
-        // for the data it was prepared over.
+      it("keeps the refusal across a change to the piece's stored argument", async () => {
+        // The write grows with what the piece holds, so a room taking a
+        // message does not make it fit.
 
         const v2Identity = await identityFor(source("v2"));
         const piece = await preparePiece(
@@ -1142,13 +1182,45 @@ describe("piece source reconciliation", () => {
         using _refused = refuseAdoption(piece, TOO_LARGE);
         using prepared = spy(runtime.runner, "syncStoredPieceCells");
         expect(await reconcile(piece)).toBe("unavailable");
-        expect(await reconcile(piece)).toBe("unavailable");
-        expect(prepared.calls).toHaveLength(1);
 
         await changeStoredArgument(piece, { note: "changed" });
         expect(await reconcile(piece)).toBe("unavailable");
 
-        expect(prepared.calls).toHaveLength(2);
+        expect(prepared.calls).toHaveLength(1);
+      });
+
+      it("remembers a refusal when another space's session is replaced while it is prepared", async () => {
+        // A replacement stands for the store of its own space only.
+
+        const replace = captureSessionReplaced();
+        const v2Identity = await identityFor(source("v2"));
+        const piece = await preparePiece(
+          servingFetch(() => v2Identity, () => source("v2")),
+        );
+        await stampSource(piece, PARENT_SOURCE);
+        using _refused = refuseAdoption(piece, TOO_LARGE);
+        const preparing = defer<void>();
+        const proceed = defer<void>();
+        const sync = runtime.runner.syncStoredPieceCells.bind(runtime.runner);
+        using prepared = stub(
+          runtime.runner,
+          "syncStoredPieceCells",
+          async (...args: Parameters<typeof sync>) => {
+            preparing.resolve();
+            await proceed.promise;
+            return sync(...args);
+          },
+        );
+
+        const first = reconcile(piece);
+        await preparing.promise;
+        const other = await Identity.fromPassphrase("another space");
+        replace(other.did());
+        proceed.resolve();
+        expect(await first).toBe("unavailable");
+        expect(await reconcile(piece)).toBe("unavailable");
+
+        expect(prepared.calls).toHaveLength(1);
       });
 
       it("logs the refusal once, as one line naming it, and not the write it refused", async () => {
@@ -1181,7 +1253,7 @@ describe("piece source reconciliation", () => {
     });
 
     describe("when a stored envelope refuses the adopting write", () => {
-      it("returns unavailable again without preparing the same adoption a second time", async () => {
+      it("records the refusal, and does not prepare the same adoption a second time", async () => {
         const v2Identity = await identityFor(source("v2"));
         const piece = await preparePiece(
           servingFetch(() => v2Identity, () => source("v2")),
@@ -1191,9 +1263,9 @@ describe("piece source reconciliation", () => {
         using resolved = spy(runtime.harness, "resolve");
         using prepared = spy(runtime.runner, "syncStoredPieceCells");
 
-        expect(await reconcile(piece)).toBe("unavailable");
-        expect(await reconcile(piece)).toBe("unavailable");
-        expect(await reconcile(piece)).toBe("unavailable");
+        expect(await reconcile(piece)).toBe("mismatched");
+        expect(await reconcile(piece)).toBe("mismatched");
+        expect(await reconcile(piece)).toBe("mismatched");
 
         expect(resolved.calls).toHaveLength(1);
         expect(prepared.calls).toHaveLength(1);
@@ -1201,15 +1273,35 @@ describe("piece source reconciliation", () => {
           await identityFor(source("v1")),
         );
         expect(getPieceReconciliation(piece)).toMatchObject({
-          outcome: "unreachable",
+          outcome: "refused",
+          reason: "argument-mismatch",
           offered: { identity: v2Identity, symbol: SYMBOL },
           detail: UNSTABLE.message,
         });
       });
 
-      it("prepares the adoption again once the piece's stored argument changed", async () => {
-        // Data the stored envelope no longer covers, a migrated room's, is
-        // what lets the same candidate commit.
+      it("keeps the refusal across a change to the piece's stored argument", async () => {
+        // A room taking a message writes under the schema it runs, which
+        // leaves the envelope that refused the release as it was.
+
+        const v2Identity = await identityFor(source("v2"));
+        const piece = await preparePiece(
+          servingFetch(() => v2Identity, () => source("v2")),
+        );
+        await stampSource(piece, PARENT_SOURCE);
+        using _refused = refuseAdoption(piece, UNSTABLE);
+        using prepared = spy(runtime.runner, "syncStoredPieceCells");
+        expect(await reconcile(piece)).toBe("mismatched");
+
+        await changeStoredArgument(piece, { note: "posted" });
+        expect(await reconcile(piece)).toBe("mismatched");
+
+        expect(prepared.calls).toHaveLength(1);
+      });
+
+      it("prepares the adoption again once the envelope the piece stores changed", async () => {
+        // A migration that rewrites what the piece stores is what can change
+        // the answer.
 
         const v2 = sourceWithChangedContract("v2");
         const v2Identity = await identityFor(v2);
@@ -1217,19 +1309,16 @@ describe("piece source reconciliation", () => {
           servingFetch(() => v2Identity, () => v2),
         );
         await stampSource(piece, PARENT_SOURCE);
+        using _refused = refuseAdoption(piece, UNSTABLE);
         using prepared = spy(runtime.runner, "syncStoredPieceCells");
-        {
-          using _refused = refuseAdoption(piece, UNSTABLE);
-          expect(await reconcile(piece)).toBe("unavailable");
-          expect(await reconcile(piece)).toBe("unavailable");
-          expect(prepared.calls).toHaveLength(1);
-        }
+        expect(await reconcile(piece)).toBe("mismatched");
+        const before = argumentEnvelope(piece);
 
-        await changeStoredArgument(piece, { optional: "migrated" });
-        expect(await reconcile(piece)).toBe("updated");
+        await labelStoredArgument(piece, { optional: "migrated" });
+        expect(argumentEnvelope(piece)).not.toBe(before);
+        expect(await reconcile(piece)).toBe("mismatched");
 
         expect(prepared.calls).toHaveLength(2);
-        expect(getPatternIdentityRef(piece)?.identity).toBe(v2Identity);
       });
 
       it("prepares the adoption again after a refusal whose reasons only say so in prose", async () => {

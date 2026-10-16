@@ -12012,10 +12012,10 @@ export function* prepareBoundaryCommitSteps(
         // message as before.
         //
         // A claim the stored envelope fixes, changed or weakened by this
-        // write's schema, is a verdict: the merge reads only the loaded stored
-        // envelope and the schema, so a re-run refuses it again. Its token
-        // tells a caller that only another schema or other stored data can
-        // change the answer.
+        // write's schema, is a verdict: the merge reads the stored envelope,
+        // the schema, and this transaction's writers and release, and a
+        // re-run reads the same, so it refuses again. Its token tells a caller
+        // which refusal this is.
         reasons.push(
           error instanceof CfcSchemaMigrationError
             ? `${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: ${error.message}`

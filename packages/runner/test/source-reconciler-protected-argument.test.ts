@@ -9,6 +9,7 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { spy } from "@std/testing/mock";
 
 import { Identity } from "@commonfabric/identity";
 
@@ -550,6 +551,43 @@ describe("source-reconciler-protected-argument", () => {
           expect(recorded?.detail).toContain("at /badge");
           expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
           expect(room.get().badge).toEqual({ text: "hi" });
+        },
+      );
+    });
+
+    it("refuses a release that changes a field's trusted action as a refusal of the stored data, and does not prepare it again", async () => {
+      // The envelope `about` stores fixes the reviewed action that may write
+      // it. The release's own differs, so the merge refuses it as a verdict
+      // naming the stored envelope, and the room keeps that refusal across a
+      // write under the schema it runs.
+
+      const current = CONTRACT_SOURCE.replace(
+        '      typeof describeRoom,\n      "Describe",',
+        '      typeof describeRoom,\n      "Rename",',
+      );
+      expect(current).not.toBe(CONTRACT_SOURCE);
+      await reconcileRelease(
+        "contract-action-release",
+        CONTRACT_SOURCE,
+        current,
+        prime,
+        async ({ outcome, room, recorded, previousIdentity, runtime }) => {
+          expect(outcome).toBe("mismatched");
+          expect(recorded).toMatchObject({
+            outcome: "refused",
+            reason: "argument-mismatch",
+          });
+          expect(recorded?.detail).toContain("must remain stable at /about");
+          expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
+
+          await send(runtime, room, "pin", trustedEvent("Pin", { text: "yo" }));
+          using prepared = spy(runtime.runner, "syncStoredPieceCells");
+          expect(await runtime.sourceReconciler.reconcile(room)).toBe(
+            "mismatched",
+          );
+
+          expect(prepared.calls).toHaveLength(0);
+          expect(room.get().badge).toEqual({ text: "yo" });
         },
       );
     });

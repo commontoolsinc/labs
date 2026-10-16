@@ -5,8 +5,10 @@
 // fixes a claim (`writeAuthorizedBy`, `writePolicyAnyOf`, a confidentiality
 // floor and the rest of the set-like IFC keys), and a candidate schema that
 // changes or weakens it is refused by the merge in `schema-merge.ts` however
-// often it is presented. Nothing a grant does moves either side; a different
-// candidate, or different stored data, does.
+// often it is presented. The merge reads the stored envelope, the schema, and
+// the transaction's writers and release, and a re-run of the same write reads
+// the same; a different candidate, or a different stored envelope, can change
+// the answer.
 //
 // The class is carried as a token at the front of the prepare `reason`, as
 // `CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON` is (`migration-reason.ts` says
