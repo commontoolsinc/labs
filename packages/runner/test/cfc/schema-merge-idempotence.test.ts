@@ -137,6 +137,14 @@ const unreachableDefinitions = (schema: JSONSchema): string[] => {
   return Object.keys(definitions).filter((name) => !reached.has(name));
 };
 
+/**
+ * The definitions the merge minted, `__cfc_<tag>_<n>_<name>`, that no
+ * reference from the root of `schema` reaches. An authored definition is
+ * kept whether or not anything reaches it.
+ */
+const unreachableMintedDefinitions = (schema: JSONSchema): string[] =>
+  unreachableDefinitions(schema).filter((name) => name.startsWith("__cfc_"));
+
 /** The label entries of `schema`, each written as one comparable string. */
 const labelEntries = (schema: JSONSchema): string[] =>
   cfcSchemaEntries(schema).map((entry) =>
@@ -175,8 +183,8 @@ describe("schema-merge-idempotence", () => {
       expect(mergedRounds().map(nestedDefinitionMaps)).toStrictEqual([0, 0, 0]);
     });
 
-    it("stores no definition its root does not reach", () => {
-      expect(mergedRounds().map(unreachableDefinitions)).toStrictEqual([
+    it("stores no minted definition its root does not reach", () => {
+      expect(mergedRounds().map(unreachableMintedDefinitions)).toStrictEqual([
         [],
         [],
         [],
@@ -280,7 +288,7 @@ describe("schema-merge-idempotence", () => {
       expect(slotsOf(bloated)).toBeGreaterThan(1_000_000);
       expect(slotsOf(mergedOnce())).toBeLessThan(20_000);
       expect(nestedDefinitionMaps(mergedOnce())).toBe(0);
-      expect(unreachableDefinitions(mergedOnce())).toStrictEqual([]);
+      expect(unreachableMintedDefinitions(mergedOnce())).toStrictEqual([]);
     });
 
     it("merges into an envelope that unfolds alike to it", () => {

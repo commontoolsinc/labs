@@ -15076,7 +15076,8 @@ function initializePieceSourceHistory(
   }], rawMetaWriteAuthorization);
 }
 
-function samePieceSourceSnapshot(
+/** Whether two snapshots name the same source state of a piece. */
+export function samePieceSourceSnapshot(
   left: PieceSourceSnapshot,
   right: PieceSourceSnapshot,
 ): boolean {

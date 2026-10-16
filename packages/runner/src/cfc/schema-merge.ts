@@ -26,13 +26,14 @@ import {
   bindCurrentPrincipalToStoredClauses,
   isCurrentPrincipalUserClause,
 } from "./current-principal-confidentiality.ts";
+import { CfcEnvelopeStabilityError } from "./envelope-stability-reason.ts";
 import { CfcSchemaMigrationError } from "./migration-reason.ts";
 import { isValueStamp } from "./minted-integrity.ts";
 import {
+  canonicalizeCfcSchemaDocument,
   cfcSchemaResolvedRoot,
   hoistCfcSchemaDefs,
   localDefinitionName,
-  pruneCfcSchemaDefinitions,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
 } from "./schema-refs.ts";
@@ -243,7 +244,9 @@ const mergeSetLikeIfcArray = (
     case "addIntegrity": {
       if (!Array.isArray(existing) || !Array.isArray(candidate)) {
         if (!deepEqual(existing, candidate)) {
-          throw new Error(`${key} must remain stable at ${path || "/"}`);
+          throw new CfcEnvelopeStabilityError(
+            `${key} must remain stable at ${path || "/"}`,
+          );
         }
         return existing;
       }
@@ -279,7 +282,9 @@ const mergeSetLikeIfcArray = (
         ? existingArray.filter((atom) => !isValueStamp(atom))
         : existingArray;
       if (!arraySubsetOf(comparableExisting, candidateArray)) {
-        throw new Error(`${key} cannot be weakened at ${path || "/"}`);
+        throw new CfcEnvelopeStabilityError(
+          `${key} cannot be weakened at ${path || "/"}`,
+        );
       }
       return mergeArraySet(existingArray, candidateArray);
     }
@@ -311,14 +316,18 @@ const mergeSetLikeIfcArray = (
               return reconciled;
             }
           }
-          throw new Error(`${key} must remain stable at ${path || "/"}`);
+          throw new CfcEnvelopeStabilityError(
+            `${key} must remain stable at ${path || "/"}`,
+          );
         }
         return existing;
       }
       const existingArray = existing as readonly unknown[];
       const candidateArray = candidate as readonly unknown[];
       if (!arraySubsetOf(candidateArray, existingArray)) {
-        throw new Error(`${key} cannot be weakened at ${path || "/"}`);
+        throw new CfcEnvelopeStabilityError(
+          `${key} cannot be weakened at ${path || "/"}`,
+        );
       }
       return mergeArraySet(candidateArray);
     }
@@ -329,13 +338,17 @@ const mergeSetLikeIfcArray = (
     case "collection":
     case "ownerPrincipal":
       if (!deepEqual(existing, candidate)) {
-        throw new Error(`${key} must remain stable at ${path || "/"}`);
+        throw new CfcEnvelopeStabilityError(
+          `${key} must remain stable at ${path || "/"}`,
+        );
       }
       return existing;
     case "flowPrecisionClaim":
     case "uiContract":
       if (!deepEqual(existing, candidate)) {
-        throw new Error(`${key} must remain stable at ${path || "/"}`);
+        throw new CfcEnvelopeStabilityError(
+          `${key} must remain stable at ${path || "/"}`,
+        );
       }
       return existing;
     default:
@@ -357,7 +370,9 @@ const mergeWritePolicyAnyOf = (
   adoptsStamp?: (claim: unknown) => boolean,
 ): unknown => {
   const unstable = () =>
-    new Error(`writePolicyAnyOf must remain stable at ${path || "/"}`);
+    new CfcEnvelopeStabilityError(
+      `writePolicyAnyOf must remain stable at ${path || "/"}`,
+    );
   if (
     !Array.isArray(existing) || !Array.isArray(candidate) ||
     existing.length !== candidate.length
@@ -1512,15 +1527,17 @@ export const mergeCfcSchemaEnvelopes = (
       ? { definitions: definitions ?? {}, active: new Set() }
       : undefined,
   );
-  // Every local ref below the merged root binds to the root's map, so a
-  // `$defs` a resolved view carries below the root is inert, and a definition
-  // no ref reaches, such as one whose name the candidate's replaced, names
-  // nothing. The stored envelope carries neither.
-  return internSchema(pruneCfcSchemaDefinitions(
-    definitions !== undefined && isObjectOrArray(merged)
-      ? { ...merged, $defs: definitions }
-      : merged,
-  ));
+  // The merged document is persisted and hashed as it is returned, so it
+  // leaves here in canonical form: one root map, every authored definition,
+  // one minted definition per meaning those do not carry, nothing minted
+  // that the document does not reach.
+  return internSchema(
+    canonicalizeCfcSchemaDocument(
+      definitions !== undefined && isObjectOrArray(merged)
+        ? { ...merged, $defs: definitions }
+        : merged,
+    ),
+  );
 };
 
 /** Why a stored envelope and a candidate envelope cannot be merged. */
