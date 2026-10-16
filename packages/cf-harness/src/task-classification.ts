@@ -65,7 +65,7 @@ const AUTHOR =
 const DEICTIC =
   /\b(?:it|this|these)\b(?!\s+(?:week|weekend|month|year|loom)\b)/;
 /** A request to work a held piece through one of its verbs. */
-const VERB = /\bverbs?\b/;
+const VERB = /\b(?:use|call|run|invoke)\b.*\bverbs?\b/;
 /** A request to add something to a thing, other than a loom. */
 const ADD_TO = /\badd\b.*\bto (?:the|this)\b(?!\s+loom\b)/;
 /** The action verbs {@link ACT} and {@link WEB_ACT} read, standing alone. */
@@ -101,8 +101,9 @@ const mentionsHeldPiece = (
  * Tags a task by keyword alone, or answers `undefined` when no rule applies.
  * A task naming a held piece, or pointing at one, is about that piece: a
  * listing or question it asks is answered from the piece rather than looked
- * up elsewhere, unless it says to search. A task asking for a verb, or to
- * add something to a thing, while the run holds pieces, acts on a held piece.
+ * up elsewhere, unless it says to search. A task asking to use a verb, or to
+ * add something to a thing other than a loom, while the run holds pieces,
+ * acts on a held piece.
  * An attached pattern or an explicit marker adds `pieces` without taking
  * anything away.
  */

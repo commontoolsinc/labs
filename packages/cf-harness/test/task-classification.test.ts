@@ -257,6 +257,14 @@ describe("task-classification", () => {
       });
     }
 
+    it("does not return act for a question about a held piece's verbs", () => {
+      expect(
+        tagsOf(
+          classifyTaskByRule("what verbs does the music have?", ringLoops),
+        ),
+      ).not.toContain("act");
+    });
+
     it("does not read adding to something as acting on a piece when the run holds none", () => {
       expect(classifyTaskByRule("add a basic hihat loop to the music", {}))
         .toBeUndefined();
