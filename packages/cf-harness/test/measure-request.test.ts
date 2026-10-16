@@ -105,13 +105,17 @@ describe("measure-request", () => {
 
   it("prints the rows as JSON and exits 0 given one directory", async () => {
     const printed: string[] = [];
-    expect(await main([dir], (line) => printed.push(line))).toBe(0);
+    expect(await main([dir], (line) => printed.push(line), () => {})).toBe(0);
     expect(JSON.parse(printed[0]).rows).toHaveLength(6);
   });
 
-  it("prints its usage and exits 2 given no directory", async () => {
+  it("prints its usage as an error and exits 2 given no directory", async () => {
     const printed: string[] = [];
-    expect(await main([], (line) => printed.push(line))).toBe(2);
-    expect(printed[0]).toContain("usage:");
+    const errors: string[] = [];
+    expect(
+      await main([], (line) => printed.push(line), (line) => errors.push(line)),
+    ).toBe(2);
+    expect(printed).toEqual([]);
+    expect(errors[0]).toContain("usage:");
   });
 });

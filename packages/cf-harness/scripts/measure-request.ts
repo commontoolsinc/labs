@@ -213,18 +213,22 @@ export const measureRequest = async (
 
 /**
  * The command line: measures the run recorded in the one directory `args`
- * names and prints the rows as JSON. Returns the exit code.
+ * names and prints the rows as JSON, or its usage to `printError`. Returns
+ * the exit code.
  */
 export const main = async (
   args: readonly string[],
   print: (line: string) => void,
+  printError: (line: string) => void,
 ): Promise<number> => {
   if (args.length !== 1) {
-    print("usage: measure-request.ts <recorded-artifact-dir>");
+    printError("usage: measure-request.ts <recorded-artifact-dir>");
     return 2;
   }
   print(JSON.stringify(await measureRequest(args[0]), null, 1));
   return 0;
 };
 
-if (import.meta.main) Deno.exit(await main(Deno.args, console.log));
+if (import.meta.main) {
+  Deno.exit(await main(Deno.args, console.log, console.error));
+}
