@@ -32,28 +32,14 @@ export interface HarnessTaskClassification {
   tags: HarnessTaskTag[];
 
   /**
-   * What chose the tags: the keyword rule, one cheap model call when the rule
-   * had no answer, or the fallback of every tag when neither did.
+   * What chose the tags: the keyword rule, the assumption made when no rule
+   * applies, or the fallback of every tag when the classifier failed.
    */
-  path: "rule" | "model" | "fallback";
+  path: "rule" | "assumed" | "fallback";
 
-  /** Wall time the classification took, model call included. */
+  /** Wall time the classification took. */
   durationMs: number;
-
-  /**
-   * Why a fallback was taken: no model to ask, a model answer naming no tag,
-   * a failed model call, or a model call that did not answer within
-   * {@link TASK_CLASSIFICATION_MODEL_BOUND_MS}. Absent on the other paths.
-   */
-  fallbackReason?: "no-model" | "no-tag" | "model-error" | "timeout";
 }
-
-/**
- * How long the model path may take before the task gets every tag. Tags only
- * narrow the orientation a run starts with, so waiting longer than this for
- * them costs the run more than starting with all of it does.
- */
-export const TASK_CLASSIFICATION_MODEL_BOUND_MS = 5_000;
 
 /** What the classifier reads about a run besides the task text. */
 export type TaskClassificationContext =
@@ -78,6 +64,13 @@ const AUTHOR =
   /\b(?:make|build|write|create|author|code|design|generate)\b(?:\s+(?:me|us))?\s+(?:a|an|new|some)\b(?!\s+(?:new\s+)?(?:note|loom|reservation|booking|appointment|payment|call)\b)/;
 const DEICTIC =
   /\b(?:it|this|these)\b(?!\s+(?:week|weekend|month|year|loom)\b)/;
+/** A request to work a held piece through one of its verbs. */
+const VERB = /\bverbs?\b/;
+/** A request to add something to a thing, other than a loom. */
+const ADD_TO = /\badd\b.*\bto (?:the|this)\b(?!\s+loom\b)/;
+/** The action verbs {@link ACT} and {@link WEB_ACT} read, standing alone. */
+const ACTION_VERB =
+  /\b(?:deploy|add|move|buy|order|book|purchase|reserve|sign up|fill|check ?out|browse)\b/;
 const CONVERSATIONAL =
   /^(?:hi|hey|hello|thanks|thank you|ok|okay|cool|great|nice|yes|no|sure|got it)\b/;
 
@@ -108,8 +101,10 @@ const mentionsHeldPiece = (
  * Tags a task by keyword alone, or answers `undefined` when no rule applies.
  * A task naming a held piece, or pointing at one, is about that piece: a
  * listing or question it asks is answered from the piece rather than looked
- * up elsewhere, unless it says to search. An attached pattern or an explicit
- * marker adds `pieces` without taking anything away.
+ * up elsewhere, unless it says to search. A task asking for a verb, or to
+ * add something to a thing, while the run holds pieces, acts on a held piece.
+ * An attached pattern or an explicit marker adds `pieces` without taking
+ * anything away.
  */
 export const classifyTaskByRule = (
   task: string,
@@ -120,9 +115,14 @@ export const classifyTaskByRule = (
   const holdsPieces = (context.inputCells?.length ?? 0) > 0;
   const pointsAtHeldPiece = holdsPieces &&
     (DEICTIC.test(text) || mentionsHeldPiece(text, context.inputCells));
-  if (pointsAtHeldPiece || isClosedResearchTask(task, context)) {
+  const worksHeldPiece = holdsPieces &&
+    (VERB.test(text) || ADD_TO.test(text));
+  if (
+    pointsAtHeldPiece || worksHeldPiece || isClosedResearchTask(task, context)
+  ) {
     tags.add("pieces");
   }
+  if (worksHeldPiece) tags.add("act");
   if (NAVIGATE.test(text)) {
     tags.add("act");
     tags.add("find");
@@ -171,7 +171,8 @@ const modelPrompt = (task: string, context: TaskClassificationContext) => {
 
 /**
  * Tags a task by one call to a cheap model, or answers `undefined` when the
- * answer names no tag. A failed call rejects.
+ * answer names no tag. A failed call rejects. A run never asks it; the
+ * classification eval scores it against the rule.
  */
 export const classifyTaskByModel = async (
   task: string,
@@ -188,66 +189,49 @@ export const classifyTaskByModel = async (
 };
 
 /**
- * Tags a root task: by rule when one applies, otherwise by one cheap model
- * call, otherwise with every tag, which gives the run all the orientation it
- * would have had without classification. A model failure, or a model call
- * still unanswered at `modelBoundMs`, is a fallback, not a run failure; the
- * call is then cancelled through the signal `askModel` was given.
+ * The tags a task gets when no rule applies: a lookup, about the held pieces
+ * when the run holds any, and an action when the run has a browser and the
+ * task names an action. A task the assumption misreads still reaches what it
+ * needs, since the tool allow-list does not narrow; it only takes longer.
  */
-export const classifyTask = async (
+const assumedTags = (
   task: string,
   context: TaskClassificationContext,
-  options: {
-    askModel?: (prompt: string, signal: AbortSignal) => Promise<string>;
-    modelBoundMs?: number;
-  } = {},
-): Promise<HarnessTaskClassification> => {
+): Set<HarnessTaskTag> => {
+  const tags = new Set<HarnessTaskTag>(["find"]);
+  if ((context.inputCells?.length ?? 0) > 0) tags.add("pieces");
+  if (context.browserHost && ACTION_VERB.test(task.toLowerCase())) {
+    tags.add("act");
+  }
+  return tags;
+};
+
+/**
+ * Tags a root task: by rule when one applies, otherwise by assumption. A
+ * classifier that throws gives the task every tag, which is all the
+ * orientation the run would have had without classification.
+ */
+export const classifyTask = (
+  task: string,
+  context: TaskClassificationContext,
+): HarnessTaskClassification => {
   const started = performance.now();
   const classified = (
     tags: ReadonlySet<HarnessTaskTag>,
     path: HarnessTaskClassification["path"],
-    fallbackReason?: HarnessTaskClassification["fallbackReason"],
   ): HarnessTaskClassification => ({
     type: "cf-harness.task-classification",
     version: 1,
     tags: HARNESS_TASK_TAGS.filter((tag) => tags.has(tag)),
     path,
     durationMs: Math.round(performance.now() - started),
-    ...(fallbackReason !== undefined ? { fallbackReason } : {}),
   });
-  const everyTag = new Set(HARNESS_TASK_TAGS);
-  const byRule = classifyTaskByRule(task, context);
-  if (byRule !== undefined) return classified(byRule, "rule");
-  const { askModel } = options;
-  if (askModel === undefined) {
-    return classified(everyTag, "fallback", "no-model");
-  }
-  const bound = new AbortController();
-  const timedOut = new Promise<never>((_resolve, reject) => {
-    bound.signal.addEventListener("abort", () => reject(bound.signal.reason));
-  });
-  const timer = setTimeout(
-    () => bound.abort(new DOMException("classification bound", "TimeoutError")),
-    options.modelBoundMs ?? TASK_CLASSIFICATION_MODEL_BOUND_MS,
-  );
   try {
-    const byModel = await classifyTaskByModel(task, context, (prompt) => {
-      const answer = askModel(prompt, bound.signal);
-      // The bound settles the race when the call ignores cancellation, and
-      // whatever the call does afterwards is no longer awaited.
-      answer.catch(() => {});
-      return Promise.race([answer, timedOut]);
-    });
-    return byModel === undefined
-      ? classified(everyTag, "fallback", "no-tag")
-      : classified(byModel, "model");
+    const byRule = classifyTaskByRule(task, context);
+    return byRule === undefined
+      ? classified(assumedTags(task, context), "assumed")
+      : classified(byRule, "rule");
   } catch {
-    return classified(
-      everyTag,
-      "fallback",
-      bound.signal.aborted ? "timeout" : "model-error",
-    );
-  } finally {
-    clearTimeout(timer);
+    return classified(new Set(HARNESS_TASK_TAGS), "fallback");
   }
 };
