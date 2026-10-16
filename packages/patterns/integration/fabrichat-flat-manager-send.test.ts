@@ -370,20 +370,7 @@ describe("FabriChat flat manager sends", () => {
         expect((await roomTx.commit().settled).error).toBeUndefined();
         await runtime.idle();
         await room.pull();
-        // Root-private setup can refuse one manager-derived computation. This
-        // send guard bounds that known debt and permits no additional refusal.
-        expect(refusals.length).toBeLessThanOrEqual(labeled ? 1 : 0);
-        for (const refusal of refusals) {
-          expect(refusal.terminal).toBe(true);
-          expect(refusal.reasons.length).toBeGreaterThan(0);
-          expect(
-            refusal.reasons.every((reason) =>
-              reason.includes("writer-fit confidentiality misfit") &&
-              reason.includes("PersonalSpace")
-            ),
-          ).toBe(true);
-        }
-        const refusedBeforeSend = refusals.length;
+        expect(refusals).toEqual([]);
         const click = {
           type: "click",
           requestId: "flat-manager-send",
@@ -405,7 +392,7 @@ describe("FabriChat flat manager sends", () => {
             "body",
           ).pull(),
         ).toBe("A shared message");
-        expect(refusals.length).toBe(refusedBeforeSend);
+        expect(refusals).toEqual([]);
       });
     }
   }
