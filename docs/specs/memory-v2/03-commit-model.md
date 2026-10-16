@@ -62,9 +62,10 @@ A transaction MUST contain operations, reads, or preconditions, unless it is a
 server wave carrying outbound appends. A validation-only transaction
 checks its reads and records a commit verdict without creating document revisions.
 With `localSessionDocuments` enabled, a client-executed commit whose writes
-are all session documents settles on the client without a transaction,
-whatever it read; it uses this form when it carries a precondition on a
-shared document. Validation of all reads happens
+are all documents of the client's own session instance settles on the client
+without a transaction, whatever it read; it uses this form when it carries a
+precondition on a shared document. Writes to an explicitly named foreign
+session instance are admitted by the server like any other shared write. Validation of all reads happens
 before any writes are applied. Enabling local session storage requires
 servers that admit validation-only commits.
 
