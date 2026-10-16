@@ -31,12 +31,15 @@ the operation: runs, proxy accesses, link resolutions.
 | 30: send | 2.5 s (2.5 … 2.5) | 1.2 s (1.1 … 1.2) |
 | 30: send reads | 69 runs, 1 254 accesses, 804 hops | 68 runs, 757 accesses, 836 hops |
 
-A send into a thirty-message room halves, and its reads stop growing with the
-room: on `main` a send's accesses grew from 750 to 1 254 between ten and
-thirty messages, with pushed messages from 477 to 757, most of that the new
-row's own render. The cold load at thirty is the same on both sides, and the
-halving at ten is one run each side and is not explained by the change; treat
-it as noise until repeated.
+A send into a thirty-message room halves, and its reads grow less with the
+room: on `main` a send's accesses grew by 504 between ten and thirty messages
+(750 to 1 254), with pushed messages by 280 (477 to 757). The growth that
+remains is in what re-runs when the list changes, the room's derivations over
+its entries and the new row's render; the send's own handler reads a flat
+amount, as the plan's scratch measurement found (49 traversals per send at
+any size). The cold load at thirty is the same on both sides, and the halving
+at ten is one run each side and is not explained by the change; treat it as
+noise until repeated.
 
 ## Where a send's 1.2 s goes
 
