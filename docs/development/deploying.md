@@ -50,9 +50,9 @@ for selection and reconciliation rules.
 The coordinator dispatches `rapids-release.yml` on Labs `main` with the single
 required string input `infra_sha`. The run is named `Deploy Rapids <infra_sha>`.
 The `rapids-release-deploy` concurrency group serializes runs without canceling
-an in-progress deployment. The remote command has a 45-minute limit inside a
-60-minute job, leaving time for runner-side validation and receipt upload. The
-receiver performs these steps in order:
+an in-progress deployment. The job has a 60-minute total limit covering setup,
+validation, deployment, and receipt upload. Within that budget, the remote
+command has a 45-minute limit. The receiver performs these steps in order:
 
 1. Require a 40-character lowercase hexadecimal SHA and ask GitHub whether it
    is an ancestor of infra `main`, before checking out or executing infra code.
