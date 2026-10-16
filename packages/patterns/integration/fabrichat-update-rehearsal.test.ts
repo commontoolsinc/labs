@@ -499,7 +499,15 @@ describe("FabriChat update rehearsal", () => {
         expected: resolved[index],
       });
     }
-    after = await snapshot();
+    // The personal API projection can start cold Home reads. Keep it
+    // demanded until those reads and their computations have settled.
+    const stopOutcomes = room.key("addRequests").sink(() => {});
+    try {
+      await runtime.settled();
+      after = await snapshot();
+    } finally {
+      stopOutcomes();
+    }
   });
 
   afterAll(async () => {

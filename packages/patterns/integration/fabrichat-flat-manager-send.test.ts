@@ -33,6 +33,7 @@ import {
   EmulatedStorageManager,
   newLoopbackServer,
 } from "@commonfabric/runner/storage/cache.deno";
+import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 
 const owner = await Identity.fromPassphrase("fabrichat-manager-roles");
 const PATTERNS = fromFileUrl(new URL("..", import.meta.url));
@@ -115,8 +116,11 @@ describe("FabriChat flat manager sends", () => {
   let runtime: Runtime;
   let observation: AbortController;
   let refusals: Refusal[];
+  let staleBefore: number;
 
   beforeEach(() => {
+    staleBefore = getLoggerCountsBreakdown()["storage.v2.multi-space-commit"]
+      ?.["multi-space-commit-stale"]?.total ?? 0;
     server = newLoopbackServer();
     storage = EmulatedStorageManager.connectTo(server, { as: owner });
     runtime = new Runtime({
@@ -136,10 +140,14 @@ describe("FabriChat flat manager sends", () => {
   afterEach(async () => {
     await runtime?.idle();
     await storage?.synced();
+    const staleAfter =
+      getLoggerCountsBreakdown()["storage.v2.multi-space-commit"]
+        ?.["multi-space-commit-stale"]?.total ?? 0;
     observation?.abort();
     await runtime?.dispose();
     await storage?.close();
     await server?.close();
+    expect(staleAfter).toBe(staleBefore);
   });
 
   /** Writes a profile named `name`, under `cause`, in a space of its own. */
@@ -233,7 +241,7 @@ describe("FabriChat flat manager sends", () => {
     );
     runtime.prepareTxForCommit(tx);
     expect((await tx.commit().settled).error).toBeUndefined();
-    return { wrapper, offerRoom };
+    return { wrapper, offerRoom, homeRoot, manager };
   };
 
   /**
@@ -425,7 +433,7 @@ describe("FabriChat flat manager sends", () => {
   });
 
   it("offers a room to a member added through a root-private manager's discovered flat bindings", async () => {
-    const { space, bobProfile, offers, acl } = await addBob(true);
+    const { space, offers, addRequests, acl } = await addBob(true);
 
     expect(acl).toMatchObject({ [BOB]: "OWNER" });
     expect(offers).toHaveLength(1);
@@ -435,49 +443,60 @@ describe("FabriChat flat manager sends", () => {
       room: { "/": { "link@1": { space } } },
     });
 
-    // Root-private setup refuses what the room's space would store of the
-    // manager's data: the picker's list of the people `candidates` reads from
-    // the manager, once on the rendering before the add and once on the one
-    // after it, and the `outcomes` that merge the manager's verdicts into
-    // `addRequests`, a document of the viewer's own, once. This add guard
-    // bounds that known debt and permits no other refusal.
-    const listsBob = (input: Refusal["refusals"][number]["inputs"][number]) => {
-      const people = runtime.getCellFromLink(
-        { ...input.read, path: [] } as Parameters<
-          typeof runtime.getCellFromLink
-        >[0],
-        { type: "array", items: { asCell: ["cell"] } },
-      ).get() as Cell<unknown>[];
-      return people.length === 1 && people[0].equalLinks(bobProfile);
-    };
-    const isPicker = ({ reasons, refusals: details }: Refusal) =>
-      reasons.every((reason) =>
-        /^writer-fit confidentiality misfit for of:\S+ at \/\S* .*PersonalSpace/
-          .test(reason)
-      ) &&
-      details.length > 0 &&
-      details.every(({ target, inputs }) =>
-        target?.space === space && target.scope === "session" &&
-        inputs.length > 0 &&
-        inputs.every((input) =>
-          input.read.space === space && input.read.scope === "session" &&
-          listsBob(input)
-        )
-      );
-    const isOutcomes = ({ reasons, refusals: details }: Refusal) =>
-      reasons.every((reason) =>
-        /^writer-fit confidentiality misfit for computed:\S+ at \/add-bob\S* .*PersonalSpace/
-          .test(reason)
-      ) &&
-      details.length > 0 &&
-      details.every(({ target }) =>
-        target?.space === space && target.scope === "user"
-      );
-    for (const refusal of refusals) expect(refusal.terminal).toBe(true);
+    expect(addRequests).toEqual({ "add-bob": { status: "done" } });
+    expect(refusals).toEqual([]);
+  });
+
+  it("projects a private manager's verdict when its Home role arrives after the room opens", async () => {
+    const profile = await writeProfile("late viewer", "Viewer");
+    const { wrapper, offerRoom, homeRoot, manager } = await writeHome(
+      true,
+      profile,
+      {},
+    );
+    const hide = runtime.edit();
+    homeRoot.withTx(hide).key("chatManager").set(undefined);
+    runtime.prepareTxForCommit(hide);
+    expect((await hide.commit().settled).error).toBeUndefined();
+    runtime.scheduler.addEventHandler(
+      () => {},
+      offerRoom.getAsNormalizedFullLink(),
+    );
+    const room = await createGroup(profile);
+    const space = room.getAsNormalizedFullLink().space;
     expect(
-      refusals.filter((refusal) => !isPicker(refusal) && !isOutcomes(refusal)),
-    ).toEqual([]);
-    expect(refusals.filter(isPicker).length).toBeLessThanOrEqual(2);
-    expect(refusals.filter(isOutcomes).length).toBeLessThanOrEqual(1);
+      await room.key("canAdd").asSchema<boolean>({ type: "boolean" }).pull(),
+    ).toBe(true);
+    await runtime.idle();
+
+    const arrival = runtime.edit();
+    homeRoot.withTx(arrival).key("chatManager").set(wrapper);
+    manager.withTx(arrival).key("requests").set({
+      [addMemberOfferId(space, "late-add")]: {
+        status: "done",
+        delivery: "noticed",
+      },
+    });
+    runtime.prepareTxForCommit(arrival);
+    expect((await arrival.commit().settled).error).toBeUndefined();
+    await runtime.idle();
+    const add = runtime.edit();
+    room.withTx(add).key("addMember").send(trustedClick(ADD_MEMBER_ACTION, {
+      requestId: "late-add",
+      target: { value: BOB },
+    }));
+    runtime.prepareTxForCommit(add);
+    expect((await add.commit().settled).error).toBeUndefined();
+    await runtime.idle();
+    await render(room);
+    await runtime.idle();
+
+    expect(
+      await room.key("addRequests").asSchema({
+        type: "object",
+        additionalProperties: true,
+      }).pull(),
+    ).toEqual({ "late-add": { status: "done", delivery: "noticed" } });
+    expect(refusals).toEqual([]);
   });
 });

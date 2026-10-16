@@ -26,9 +26,11 @@ import {
   type FabricEpochNsec,
   grantSpaceAccess,
   handler,
+  lift,
   NAME,
   pattern,
   type PerSession,
+  type PerUser,
   principalOf,
   SELF,
   spaceAccess,
@@ -72,6 +74,7 @@ import {
   type MessageRights,
   messageRightsOf,
   type MessagesCell,
+  type MessagesValue,
   NO_ACTIVITY,
   NO_MESSAGE_RIGHTS,
   NUMBERING_KEY,
@@ -302,7 +305,10 @@ export interface AddMemberEvent {
   readonly profile?: Cell<ChatProfile>;
 
   /** The control, holding the new member's chat address. */
-  readonly target?: { readonly value?: string };
+  readonly target?: {
+    readonly value?: string;
+    readonly name?: Cell<ChatProfile>;
+  };
 }
 
 /**
@@ -455,12 +461,6 @@ interface AddMemberState {
    * room's space doesn't admit.
    */
   offer: Stream<AddedMemberEvent>;
-
-  /**
-   * A rendered picker's person, by their profile, which an event's own
-   * outranks.
-   */
-  picked?: Cell<ChatProfile>;
 }
 
 /** The part of the viewer's manager `offerAddedMember` reaches. */
@@ -535,6 +535,21 @@ const offerAddedMember = handler<AddedMemberEvent, OfferAddedMemberState>(
   },
 );
 
+/** A supplied Home root, distinct from a standalone core with no Home lookup. */
+interface MemberHome {
+  root?: Cell<Record<never, never>>;
+  ready: boolean;
+}
+
+/** A Home reference is ready once it resolves out of the room's own slots. */
+const homeSpaceOf = (
+  root: Cell<Record<never, never>> | undefined,
+  room: Cell<MessagesValue>,
+): string | undefined => {
+  const space = spaceOf(root);
+  return space !== spaceOf(room) ? space : undefined;
+};
+
 /**
  * Admits a person to the room's space, with OWNER, so that they too may add
  * others, from a trusted gesture on `ChatAddMemberSurface`, and has the
@@ -557,7 +572,6 @@ const commitAddMember = handler<AddMemberEvent, AddMemberState>(
       requests,
       latest,
       offer,
-      picked,
     },
   ) => {
     const requestId = event?.requestId ?? eventKey();
@@ -584,7 +598,7 @@ const commitAddMember = handler<AddMemberEvent, AddMemberState>(
     }
     // A profile names the person its `represents-principal` label attests, so
     // one attesting no one names no one.
-    const profile = event?.profile ?? picked;
+    const profile = event?.profile ?? event?.target?.name;
     const attested = profile === undefined
       ? undefined
       : principalOf(profile, "represents-principal");
@@ -654,7 +668,10 @@ export interface AddMemberInput {
    * The viewer's manager; absent while the viewer has none, or theirs hasn't
    * resolved.
    */
-  manager?: RoomManager;
+  manager?: Cell<RoomManager>;
+
+  /** The viewer's Home root; omitted by standalone cores. */
+  home?: MemberHome;
 
   /** The principals of those already in the room, whom the picker leaves out. */
   present: PerSession<string[]>;
@@ -684,43 +701,114 @@ export interface AddMemberOutput {
   canAdd: boolean;
 }
 
+/** The personal control's read handles and the room command it invokes. */
+interface AddMemberDisplayInput {
+  room: Cell<MessagesValue>;
+  manager?: Cell<RoomManager>;
+  requests?: Cell<Record<string, AddMemberOutcome>>;
+  latest: PerSession<Writable<LatestAdd | undefined>>;
+  present: PerSession<Cell<string[]>>;
+  ownSpace: Cell<boolean>;
+  kind: Cell<ChatRoomKind>;
+  profileDisplay: PerSession<Cell<ChatDisplay>>;
+  add: Stream<AddMemberEvent>;
+}
+
+/** The viewer's rendering and invitation-delivery projection. */
+interface AddMemberDisplayOutput {
+  [UI]: PerSession<VNode>;
+  outcomes: PerUser<Record<string, AddMemberOutcome>>;
+  canAdd: PerUser<boolean>;
+}
+
 /**
- * Offers an OWNER of a group room's space a way to admit someone else to it,
- * by their chat address, or by picking them from the people the viewer's
- * manager lists who aren't in the room yet.
+ * Binds the canonical public profile to the room command's native button.
+ * Resolving it inside this lift gives `h()` the public cell when it builds
+ * the binding; a mapped element's slot belongs to the private candidate list.
  */
-export const AddMember = pattern<AddMemberInput, AddMemberOutput>(
+const memberCandidate = lift<
+  { profile: ProfileCell; add: Stream<AddMemberEvent> },
+  VNode
+>(({ profile, add }) => {
+  const person = profile.resolveAsCell();
+  return (
+    <cf-hstack
+      gap="2"
+      align="center"
+      data-ui-pattern={CHAT_ADD_MEMBER_SURFACE}
+      data-ui-event-integrity={CHAT_ADD_MEMBER_SURFACE}
+    >
+      <cf-profile-badge variant="chip" $profile={person} />
+      <cf-button
+        data-ui-action={CHAT_ADD_MEMBER_ACTION}
+        size="sm"
+        variant="ghost"
+        $name={person}
+        onClick={add}
+      >
+        Add
+      </cf-button>
+    </cf-hstack>
+  ) as VNode;
+});
+
+/** Keeps the room controls opaque beside the live manager reference. */
+interface AddMemberDisplayHostInput {
+  controls: AddMemberDisplayInput;
+  canReadManager: boolean;
+  useHomeManager: boolean;
+}
+
+/** Owns the private candidate display and delivery projection in Home. */
+const AddMemberDisplay = pattern<
+  AddMemberDisplayHostInput,
+  AddMemberDisplayOutput
+>(
   (
     {
-      room,
-      myProfile,
-      ownSpace,
-      kind,
-      requests,
-      self,
-      manager,
-      present,
+      controls: {
+        room,
+        manager,
+        requests,
+        latest,
+        present,
+        ownSpace,
+        kind,
+        profileDisplay,
+        add,
+      },
+      canReadManager,
+      useHomeManager,
     },
   ) => {
-    const latest = new Writable.perSession<LatestAdd | undefined>(undefined);
-    const offer = offerAddedMember({ room, requests, latest, self, manager });
-    const bindings = { room, ownSpace, kind, requests, latest, offer };
-    const add = commitAddMember(bindings);
+    const homeManager = wish<Cell<RoomManager>>({
+      query: "/defaultPattern/chatManager",
+      scope: ["."],
+      headless: true,
+      preview: false,
+    });
     const canAdd = computed(() =>
-      ownSpace && kind !== "direct" && spaceAccess(room) === "OWNER"
+      ownSpace.get() && kind.get() !== "direct" && spaceAccess(room) === "OWNER"
     );
     // Who may add differs by viewer, and what came of an add by session, so
     // both are hidden by a prop rather than built as a different tree (see
     // `FabriChatMessageRow`).
-    const addDisplay = computed((): ChatDisplay =>
-      canAdd && myProfile?.get() !== undefined ? "flex" : "none"
+    const addDisplay = computed((): PerSession<ChatDisplay> =>
+      canAdd && profileDisplay.get() !== "none" ? "flex" : "none"
     );
-    const outcomes = computed((): Record<string, AddMemberOutcome> =>
-      withDeliveries(requests?.get() ?? {}, spaceOf(room), manager?.requests)
-    );
+    const outcomes = computed((): PerUser<Record<string, AddMemberOutcome>> => {
+      return withDeliveries(
+        requests?.get() ?? {},
+        spaceOf(room),
+        canReadManager
+          ? (useHomeManager ? homeManager.result : manager)?.key("requests")
+            .get()
+          : undefined,
+      );
+    });
     // What the session's latest add came to: how the person was told of the
     // room, once that is decided, and what to do where they weren't.
-    const shown = computed((): string => {
+    const shown = computed((): PerSession<string> => {
       const add = latest.get();
       if (add === undefined) return "";
       if (add.refusal !== undefined) return add.refusal;
@@ -737,20 +825,26 @@ export const AddMember = pattern<AddMemberInput, AddMemberOutput>(
         ? `Added ${add.member}, who couldn't be told of this chat: ${done.deliveryRefusal} Send them its link.`
         : `Added ${add.member}. Send them this chat's link.`;
     });
-    const outcomeDisplay = computed((): ChatDisplay =>
+    const outcomeDisplay = computed((): PerSession<ChatDisplay> =>
       shown === "" ? "none" : "block"
     );
     // Each person the manager lists who isn't in the room, by the first
     // profile attesting them, per session, as the manager's people are.
     const candidates = computed((): PerSession<ProfileCell[]> =>
-      Object.entries(manager?.people ?? {}).flatMap(
-        ([principal, profiles]): ProfileCell[] =>
-          present.includes(principal) || profiles[0] === undefined
-            ? []
-            : [profiles[0]],
+      Object.entries(
+        canReadManager
+          ? (useHomeManager ? homeManager.result : manager)?.key("people")
+            .get() ?? {}
+          : {},
       )
+        .flatMap(
+          ([principal, profiles]): ProfileCell[] =>
+            present.get().includes(principal) || profiles[0] === undefined
+              ? []
+              : [profiles[0]],
+        )
     );
-    const candidatesDisplay = computed((): ChatDisplay =>
+    const candidatesDisplay = computed((): PerSession<ChatDisplay> =>
       candidates.length === 0 ? "none" : "block"
     );
 
@@ -783,24 +877,7 @@ export const AddMember = pattern<AddMemberInput, AddMemberOutput>(
               <cf-text variant="caption">
                 Or add people from your chats:
               </cf-text>
-              {candidates.map((profile) => (
-                <cf-hstack
-                  gap="2"
-                  align="center"
-                  data-ui-pattern={CHAT_ADD_MEMBER_SURFACE}
-                  data-ui-event-integrity={CHAT_ADD_MEMBER_SURFACE}
-                >
-                  <cf-profile-badge variant="chip" $profile={profile} />
-                  <cf-button
-                    data-ui-action={CHAT_ADD_MEMBER_ACTION}
-                    size="sm"
-                    variant="ghost"
-                    onClick={commitAddMember({ ...bindings, picked: profile })}
-                  >
-                    Add
-                  </cf-button>
-                </cf-hstack>
-              ))}
+              {candidates.map((profile) => memberCandidate({ profile, add }))}
             </cf-vstack>
           </div>
           <div
@@ -812,9 +889,83 @@ export const AddMember = pattern<AddMemberInput, AddMemberOutput>(
           </div>
         </cf-vstack>
       ),
-      add,
       outcomes,
       canAdd,
+    };
+  },
+);
+
+/** The runtime result of a composed display, preserved as a cell reference. */
+function memberDisplayOf(value: unknown): Cell<AddMemberDisplayOutput>;
+function memberDisplayOf(value: unknown): unknown {
+  return value;
+}
+
+/** Only references cross from the Home display into the room's result. */
+interface MemberDisplayReference {
+  view?: Cell<AddMemberDisplayOutput>;
+}
+
+// The controls stay opaque so placing the host reads no session state.
+// The result also stays a reference; private display values belong to Home.
+const personalMemberDisplay = lift<
+  AddMemberDisplayInput & { home?: MemberHome },
+  PerUser<MemberDisplayReference>
+>((input): PerUser<MemberDisplayReference> => {
+  const knownHome = input.home?.ready === true
+    ? homeSpaceOf(input.home.root, input.room)
+    : undefined;
+  const canReadManager = input.home === undefined || knownHome !== undefined;
+  const anchor = knownHome ??
+    (canReadManager ? spaceOf(input.manager) : undefined);
+  const display = anchor === undefined
+    ? AddMemberDisplay
+    : AddMemberDisplay.inSpace(anchor);
+  const view = memberDisplayOf(
+    display.asScope("user")({
+      controls: input,
+      canReadManager,
+      useHomeManager: input.home !== undefined,
+    }),
+  );
+  return { view };
+});
+
+/** Keeps admission in the room and private presentation in Home. */
+export const AddMember = pattern<AddMemberInput, AddMemberOutput>(
+  (
+    { room, myProfile, ownSpace, kind, requests, self, manager, home, present },
+  ) => {
+    const latest = new Writable.perSession<LatestAdd | undefined>(undefined);
+    const offer = offerAddedMember({ room, requests, latest, self, manager });
+    const add = commitAddMember({
+      room,
+      ownSpace,
+      kind,
+      requests,
+      latest,
+      offer,
+    });
+    const profileDisplay = computed((): PerSession<ChatDisplay> =>
+      myProfile?.get() === undefined ? "none" : "block"
+    );
+    const display = personalMemberDisplay({
+      room,
+      manager,
+      home,
+      requests,
+      latest,
+      present,
+      ownSpace,
+      kind,
+      profileDisplay,
+      add,
+    });
+    return {
+      [UI]: display.view!.key(UI),
+      add,
+      outcomes: display.view!.key("outcomes"),
+      canAdd: display.view!.key("canAdd"),
     };
   },
 );
@@ -1107,7 +1258,10 @@ export interface FabriChatRoomCoreInput {
    * The viewer's manager, which tells someone they add of the room; absent
    * while the viewer has none, or theirs hasn't resolved.
    */
-  manager?: RoomManager;
+  manager?: Cell<RoomManager>;
+
+  /** The viewer's Home root; omitted by standalone cores. */
+  home?: MemberHome;
 
   /**
    * Whether the room's policy lets an OWNER of its space obliterate its
@@ -1155,6 +1309,7 @@ export const FabriChatRoomCore = pattern<
     startDirect,
     self,
     manager,
+    home,
     ownersMayObliterate: ownersMayObliterateGiven,
   } = input;
   const composer = new Writable.perSession<ComposerState>({});
@@ -1281,6 +1436,7 @@ export const FabriChatRoomCore = pattern<
     requests: addRequests,
     self,
     manager,
+    home,
     present: participantPrincipals,
   });
   const cannotSend = computed(() => !canSend);
@@ -1735,9 +1891,22 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
     // The viewer's manager, which starts a direct chat with a participant,
     // makes this room one of the viewer's chats once they join it, and tells
     // someone the viewer adds of it.
+    const homeWish = wish<Cell<Record<never, never>>>({
+      query: "/",
+      scope: ["~"],
+      headless: true,
+      preview: false,
+    });
+    // The result's cell slot has an address before the wish resolves. Its
+    // candidate count makes readiness an ordinary reactive value.
+    const homeReady = computed((): PerUser<boolean> =>
+      (homeWish.candidates?.length ?? 0) > 0
+    );
+    const home = { root: homeWish.result, ready: homeReady };
     const managerWish = wish<
-      RoomManager & { openDirect: Stream<StartDirectEvent> }
-    >({ query: "#chatManager" });
+      Cell<RoomManager & { openDirect: Stream<StartDirectEvent> }>
+    >({ query: "#chatManager", headless: true, preview: false });
+    const manager = managerWish.result;
     // Hidden by a prop rather than a branch, and `hidden` until the prop has a
     // value, as `FabriChatMessageRow` says.
     const setupDisplay = computed((): ChatDisplay =>
@@ -1757,9 +1926,10 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
         titles,
         roster: participants,
         addRequests,
-        startDirect: managerWish.result?.openDirect,
+        startDirect: manager?.key("openDirect"),
         self,
-        manager: managerWish.result,
+        manager,
+        home,
       },
     );
 

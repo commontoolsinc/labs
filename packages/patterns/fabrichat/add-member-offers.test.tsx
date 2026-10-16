@@ -521,10 +521,11 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
             );
         }),
       },
-      // Carol, named by a profile pointing at no inbox, gets a notice.
+      // Carol, named by the picker's bound profile, gets a notice because
+      // her profile points at no inbox.
       {
         action: room.addMember,
-        event: { requestId: "add-carol", profile: carolPlain },
+        event: { requestId: "add-carol", target: { name: carolPlain } },
         trustedUi: addGesture,
       },
       {
@@ -544,7 +545,7 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
         event: {
           requestId: "add-mismatch",
           profile: carolPlain,
-          target: { value: setup.aliceDid },
+          target: { value: setup.aliceDid, name: aliceProfile },
         },
         trustedUi: addGesture,
       },

@@ -92,7 +92,7 @@ interface ChatRoomOutput {
    */
   addMember: Stream<{
     requestId: string;
-    target?: { value: string };
+    target?: { value?: string; name?: Cell<ChatProfile> };
     profile?: Cell<ChatProfile>;
   }>;
 
@@ -695,7 +695,9 @@ Removes the sender's reaction to a message.
 A client never toggles: it sends whichever of the two the person asked for, so a
 repeated or delayed event can't undo what the person meant.
 
-### `addMember(requestId: string, target?: { value: string }, profile?: Cell<ChatProfile>)`
+<a id="addmemberrequestid-string-target--value-string--profile-cellchatprofile"></a>
+
+### `addMember(requestId: string, target?: { value?: string, name?: Cell<ChatProfile> }, profile?: Cell<ChatProfile>)`
 
 - `requestId: string` — Chosen by the sender, and unique among its adds. The
   outcome is recorded under it in `addRequests`, and sending the same event
@@ -703,10 +705,13 @@ repeated or delayed event can't undo what the person meant.
   and is given one of its own.
 - `target.value?: string` — The chat address of the person to admit: a
   principal's DID, as the room's add control holds it.
+- `target.name?: Cell<ChatProfile>` — The picked person's public profile, bound
+  to the button's native `name`. Its attested principal names whom to admit.
 - `profile?: Cell<ChatProfile>` — The person's profile, whose
   `represents-principal` label names them, as the reader's manager lists it in
   its `people`. Given with `target.value`, the two must name the same person;
-  given alone, the label names whom to admit.
+  given alone, the label names whom to admit. Takes precedence over
+  `target.name` when both are supplied.
 
 Admits someone to a room's space, and has the reader's chat manager
 ([`ChatManagerOutput`](ChatManagerOutput.md)) tell them of the room. Unlike the
@@ -760,6 +765,15 @@ with them.
   receives, so every add that is done gets a `delivery` eventually, either at
   once or when the verdict lands, and an absent one always means the verdict
   is still coming.
+
+The people picker and delivery projection run in the viewer's Home space,
+where private manager data may be read and stored. The room retains the
+admission command and the session's latest-add reference. The Home display
+binds its buttons directly to admission and carries the canonical public
+profile as `target.name`, so admission reads no private candidate list.
+Only cell references to the personal rendering and outcomes return to the
+room. The rendering and click feedback belong to the session; invitation
+verdicts belong to the viewer across sessions.
 
 ### `addParticipant(profile: Cell<ChatProfile>)`
 

@@ -96,6 +96,23 @@ handler reads the manager binding and sends `joinRoom` in a separate event,
 so the transaction that stores shared messages and reactions reads neither
 the manager nor its private catalog.
 
+The add-member control keeps admission and the session's latest-add reference
+in the room. Its personal display runs in Home at user scope, where it reads
+the manager's private people and delivery verdicts. The selected public profile
+is resolved before it is bound to the native button's `name`; the button sends
+the room's admission stream directly. Only cell references to the personal
+rendering and outcomes return to the room, so no room computation stores
+copies of those private values.
+
+The manager wish retains an opaque cell reference and disables its preview,
+so discovering the handle reads no private preview data. Room commands bind
+its streams through that reference, and the private display discovers the live
+manager from Home itself. The Home wish's candidate count signals when its
+root reference is ready for placement; a standalone core uses its supplied
+manager's location. The room keeps the public profile visibility check, so
+choosing the private host reads no session-selected profile or other session
+controls.
+
 Every handler in the table but `commitSetTitle` first checks its event's sender
 and `requestId` against a keyed collection of the requests the room has acted
 on, and does nothing for one it finds. It records the request there in the same
