@@ -3,6 +3,7 @@ import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
 import { keyboardRouterContext } from "../keyboard-context.ts";
 import type { KeyboardRouter, ShortcutSpec } from "../keyboard-router.ts";
+import { targetsTextEntry } from "../text-entry.ts";
 
 /**
  * What a `cf-keybind` event carries: the matched key and modifiers, as plain
@@ -41,27 +42,6 @@ export function keybindDetail(
     shift: e.shiftKey,
     repeat: e.repeat,
   };
-}
-
-/**
- * Whether the key event is aimed at somewhere the user is entering text.
- * Editors such as `cf-code-editor` and `cf-input` keep their editable element
- * in a shadow root, and an event that crosses a shadow boundary reports the
- * shadow host as its target, so the composed path is what names the element
- * holding focus.
- */
-function targetsTextEntry(e: KeyboardEvent): boolean {
-  for (const node of e.composedPath()) {
-    if (!(node instanceof HTMLElement)) continue;
-    if (node.isContentEditable) return true;
-    switch (node.localName) {
-      case "input":
-      case "textarea":
-      case "select":
-        return true;
-    }
-  }
-  return false;
 }
 
 /**

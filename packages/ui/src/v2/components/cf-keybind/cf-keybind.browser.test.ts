@@ -7,9 +7,11 @@
  */
 
 import { expect } from "@std/expect";
+import type { LitElement } from "lit";
 import type { CFKeybind } from "./index.ts";
-// The entrypoint registers cf-keybind in the browser.
+// The entrypoints register cf-keybind and cf-input in the browser.
 import "./index.ts";
+import "../cf-input/index.ts";
 
 /** A connected `cf-keybind` for ArrowRight that counts its matches. */
 function arrowRightBinding() {
@@ -122,6 +124,22 @@ Deno.test("cf-keybind with ignore-editable off fires inside a shadow-rooted edit
     expect(view.fired()).toBe(1);
   } finally {
     tree.dispose();
+    view.dispose();
+  }
+});
+
+Deno.test("cf-keybind ignores a key typed into a cf-input", async () => {
+  const view = arrowRightBinding();
+  const field = document.createElement("cf-input") as LitElement;
+  document.body.append(field);
+  try {
+    await field.updateComplete;
+    const input = field.shadowRoot?.querySelector("input");
+    if (!input) throw new Error("cf-input rendered no input.");
+    pressArrowRight(input);
+    expect(view.fired()).toBe(0);
+  } finally {
+    field.remove();
     view.dispose();
   }
 });
