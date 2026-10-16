@@ -115,8 +115,12 @@ Exit: a number per stage that a pull request can quote.
       immutable cell keeps each link's schema as the reference the caller
       held, and a read through it resolves the linked value
       (`packages/runner/test/runtime.test.ts`).
-- [ ] The field check: `getImmutableCell` gone from the hashing frames of
-      the room's cold load profile.
+- [x] The field check, three interleaved pairs on the thirty-message room's
+      reload: `getImmutableCell` from 3.5–6.2% of the worker's busy samples
+      to 1.1–2.6%, the hashing under it (`#findSnapshot`) from 2.1–3.6% to
+      0.9–1.3%, and the pre-sync frame from 7.5–11.3% to 3.8–7.3%, the
+      rendering unchanged. The record is
+      [`../history/development/performance/2026-10-16-fabrichat-room-inputs-documents.md`](../history/development/performance/2026-10-16-fabrichat-room-inputs-documents.md).
 
 Exit: a plan's inputs document is hashed over its links, not its schemas.
 
@@ -505,7 +509,10 @@ where the pre-sync was no longer the whole cost.
       had taken the binding, and 18 missed on the pattern object. A node
       planned after its instantiation, and a node planned under two
       pattern objects of one identity, each bind once
-      (`packages/runner/test/resume-presync-plan-count.test.ts`).
+      (`packages/runner/test/resume-presync-plan-count.test.ts`). The
+      reload now computes 1,618 bindings and mints 1,618 documents: the
+      1,614 pairs, and the four stand-in instances bound once more at their
+      instantiation, which the memo never holds (the record above).
 - [x] A runtime keeps the ids of the derived internal cells it has hashed
       most recently, 65,536 of them (`DerivedInternalCellIds`,
       `packages/runner/src/derived-internal-cell-ids.ts`). Every action
