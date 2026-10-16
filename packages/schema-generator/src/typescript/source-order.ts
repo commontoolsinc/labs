@@ -84,7 +84,9 @@ export function inSourceOrder<T>(
  * order: a base can be a mapped type, as an `Omit<…>` is, whose checker
  * order is its key union's (`inheritedSourceOrder()`). Any other type keeps
  * the checker's order between declarations and orders each run of
- * consecutive properties declared in one place by their declarations.
+ * consecutive properties declared in one place by their declarations, as
+ * does a type met again while its own order is being read, as
+ * `interface Wrap extends Empty<Wrap>` meets `Wrap`.
  */
 export function propertiesInSourceOrder(
   type: ts.Type,
@@ -92,18 +94,39 @@ export function propertiesInSourceOrder(
   node: ts.TypeNode | undefined,
   checker: ts.TypeChecker,
 ): readonly ts.Symbol[] {
+  return orderProperties(type, properties, node, checker, new Set());
+}
+
+/**
+ * `propertiesInSourceOrder()`, `entered` holding the types whose order is
+ * being read further up, which are not followed into again.
+ */
+function orderProperties(
+  type: ts.Type,
+  properties: readonly ts.Symbol[],
+  node: ts.TypeNode | undefined,
+  checker: ts.TypeChecker,
+  entered: ReadonlySet<ts.Type>,
+): readonly ts.Symbol[] {
+  if (properties.length <= 1) return properties;
+  const reentered = entered.has(type);
+  const inside = new Set(entered).add(type);
   const mapped = (type.flags & ts.TypeFlags.Object) !== 0 &&
     ((type as ts.ObjectType).objectFlags & ts.ObjectFlags.Mapped) !== 0;
   if (mapped) {
     const keys = writtenMappedKeys(node, checker) ??
-      mappedSourceOrder(type, properties, checker);
+      (reentered
+        ? undefined
+        : mappedSourceOrder(type, properties, checker, inside));
     const rankOf = (property: ts.Symbol) =>
       keys?.get(property.getName()) ?? Number.POSITIVE_INFINITY;
     return [...properties].sort((left, right) =>
       rankOf(left) - rankOf(right) || compareByDeclaration(left, right)
     );
   }
-  const inherited = inheritedSourceOrder(type, properties, checker);
+  const inherited = reentered
+    ? undefined
+    : inheritedSourceOrder(type, properties, checker, inside);
   if (inherited !== undefined) return inherited;
   const ordered: ts.Symbol[] = [];
   let run: ts.Symbol[] = [];
@@ -128,7 +151,8 @@ export function propertiesInSourceOrder(
  * The properties of `type`, an interface or a class without type
  * parameters, in source order: its own members as the checker lists them,
  * then each base type's properties in turn, in the base's own source order,
- * a property already placed not placed again. Returns `undefined` for any
+ * a property already placed not placed again, each base read past the
+ * types in `entered` (`orderProperties()`). Returns `undefined` for any
  * other type. Base types are read only once the checker has resolved them,
  * as it has for a type whose properties it listed, so nothing is created.
  */
@@ -136,6 +160,7 @@ function inheritedSourceOrder(
   type: ts.Type,
   properties: readonly ts.Symbol[],
   checker: ts.TypeChecker,
+  entered: ReadonlySet<ts.Type>,
 ): readonly ts.Symbol[] | undefined {
   if (
     !type.isClassOrInterface() ||
@@ -166,11 +191,12 @@ function inheritedSourceOrder(
   for (const base of bases) {
     const baseProperties = checker.getPropertiesOfType(base);
     for (
-      const property of propertiesInSourceOrder(
+      const property of orderProperties(
         base,
         baseProperties,
         undefined,
         checker,
+        entered,
       )
     ) {
       place(property.getName());
@@ -195,9 +221,10 @@ function memberOwner(declaration: ts.Declaration): ts.Node {
 /**
  * The places, by property name, of the properties of the type a mapped type
  * maps, as `Omit<T, K>` and `Pick<T, K>` map `T`, in that type's source
- * order (`propertiesInSourceOrder()`): the first type argument of the alias
- * `type` is read through, where every property of `type` is one of its,
- * declared where its namesake there is declared. The checker links a
+ * order (`orderProperties()`, past the types in `entered`): the first type
+ * argument of the alias `type` is read through, where `type` has properties
+ * and every one is one of its, declared where its namesake there is
+ * declared. The checker links a
  * property to the declaration it maps only for a mapped type that maps
  * another's properties, so a mapped type over keys of its own, as
  * `{ [P in "a" | "b"]: T }` is, does not qualify. Returns `undefined`
@@ -207,9 +234,13 @@ function mappedSourceOrder(
   type: ts.Type,
   properties: readonly ts.Symbol[],
   checker: ts.TypeChecker,
+  entered: ReadonlySet<ts.Type>,
 ): Map<string, number> | undefined {
   const source = type.aliasTypeArguments?.[0];
-  if (source === undefined || (source.flags & ts.TypeFlags.Object) === 0) {
+  if (
+    properties.length === 0 || source === undefined ||
+    (source.flags & ts.TypeFlags.Object) === 0
+  ) {
     return undefined;
   }
   const sourceProperties = checker.getPropertiesOfType(source);
@@ -225,11 +256,12 @@ function mappedSourceOrder(
   if (!mapsSource) return undefined;
   const places = new Map<string, number>();
   for (
-    const property of propertiesInSourceOrder(
+    const property of orderProperties(
       source,
       sourceProperties,
       undefined,
       checker,
+      entered,
     )
   ) {
     places.set(property.getName(), places.size);

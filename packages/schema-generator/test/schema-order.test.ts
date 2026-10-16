@@ -434,6 +434,54 @@ describe("schema-order", () => {
     });
   });
 
+  describe("an interface whose mapped base maps over the interface itself", () => {
+    it("emits the interface when the base maps keys of its own", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          'type WithChild<T> = { [K in "child"]: T };',
+          "export interface Wrap extends WithChild<Wrap> {",
+          "  value: string;",
+          "}",
+        ].join("\n"),
+        interfaceSchema("Wrap"),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+      expect(lazy).toEqual({
+        $ref: "#/$defs/Wrap",
+        $defs: {
+          Wrap: {
+            type: "object",
+            properties: {
+              value: { type: "string" },
+              child: { $ref: "#/$defs/Wrap" },
+            },
+            required: ["value", "child"],
+          },
+        },
+      });
+    });
+
+    it("emits the interface when the base maps no keys", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          "type Empty<T> = { [K in never]: T };",
+          "export interface Wrap extends Empty<Wrap> {",
+          "  value: string;",
+          "}",
+        ].join("\n"),
+        interfaceSchema("Wrap"),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+      expect(lazy).toMatchObject({
+        type: "object",
+        properties: { value: { type: "string" } },
+        required: ["value"],
+      });
+    });
+  });
+
   describe("a class's properties", () => {
     it("emits a constructor's parameter properties before its base's", async () => {
       const { lazy, checkedFirst } = await bothReadings(
