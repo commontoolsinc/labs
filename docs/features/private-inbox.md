@@ -269,7 +269,10 @@ checks the pointer again in the transaction that writes it: `ifUnset` from
 such as a loom daemon pointing the profile at a share inbox it has minted, is
 kept, and the profile goes on advertising it. Two senders racing to point the
 same unpointed profile both read it unset, and the one that commits second
-finds its commit stale, runs again, and leaves the first one's pointer.
+finds its commit stale, runs again, and leaves the first one's pointer. A
+profile still running a `setInbox` that predates the conditions ignores them
+and sets the pointer as sent, so on such a profile a pointer set in between is
+still replaced, until the profile runs the current handler.
 
 A profile whose stored `inbox` is not an object holding a link, as a writer
 bypassing `setInbox` can leave it, is repaired: the typed read takes it for no
