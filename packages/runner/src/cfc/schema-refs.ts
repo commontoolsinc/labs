@@ -453,6 +453,9 @@ const hasLocalDefinitionRef = (schema: JSONSchema): boolean =>
 // Views `cfcSchemaWithInheritedDefs()` minted for a deep-frozen fragment, per
 // fragment per definition map. A fragment read repeatedly under one document
 // then keeps one identity, which downstream identity-keyed caches depend on.
+// A view whose map is deep-frozen too is deep-frozen itself: its parts are
+// then all frozen, so freezing costs the root object alone, and the memos
+// keyed on a resolution's root hold for a resolution rooted at the view.
 const inheritedDefsViews = new WeakMap<object, WeakMap<object, JSONSchema>>();
 
 const memoizedInheritedDefsView = (
@@ -468,10 +471,36 @@ const memoizedInheritedDefsView = (
   }
   let view = byMap.get(key);
   if (view === undefined) {
-    view = mint();
+    view = isDeepFrozen(key) ? deepFreeze(mint()) : mint();
     byMap.set(key, view);
   }
   return view;
+};
+
+// The document `cfcSchemaDocumentOf()` minted for a deep-frozen definition
+// map, and the one it hands out for no map at all.
+const definitionDocuments = new WeakMap<object, JSONSchemaObj>();
+const EMPTY_DEFINITION_DOCUMENT: JSONSchemaObj = deepFreeze({});
+
+/**
+ * Return the document whose `$defs` is `definitions`, for resolving a local
+ * ref against a map held apart from the schema that declared it. A
+ * deep-frozen map gets one deep-frozen document, kept per map, so the memos
+ * keyed on a resolution's root hold across every resolution against that
+ * map; no map at all gets one shared empty document. A map that is not
+ * deep-frozen is never a memo key, so its document is minted fresh.
+ */
+export const cfcSchemaDocumentOf = (
+  definitions: SchemaDefinitions | undefined,
+): JSONSchemaObj => {
+  if (definitions === undefined) return EMPTY_DEFINITION_DOCUMENT;
+  if (!isDeepFrozen(definitions)) return { $defs: definitions };
+  let document = definitionDocuments.get(definitions);
+  if (document === undefined) {
+    document = deepFreeze({ $defs: definitions });
+    definitionDocuments.set(definitions, document);
+  }
+  return document;
 };
 
 /**
@@ -491,11 +520,13 @@ const memoizedInheritedDefsView = (
  * the same object when it has none — its refs are all embedded or external,
  * which resolve against their own documents — so identity-keyed caches keep
  * hitting; a view minted for a deep-frozen fragment is memoized per map for
- * the same reason. The scan memoizes by identity, which is what makes it
- * cheap there. A fragment that is not deep-frozen gets the definitions
- * without the scan: unmemoized, the scan walks the whole subtree on every
- * call, and an unfrozen object is never a cache key, so nothing is lost by
- * attaching definitions the fragment turns out not to need.
+ * the same reason, and is deep-frozen when the map is, so a resolution
+ * rooted at it is memoized too. The scan memoizes by identity, which is
+ * what makes it cheap there. A fragment that is not deep-frozen gets the
+ * definitions without the scan: unmemoized, the scan walks the whole
+ * subtree on every call, and an unfrozen object is never a cache key, so
+ * nothing is lost by attaching definitions the fragment turns out not to
+ * need.
  */
 export const cfcSchemaWithInheritedDefs = (
   schema: JSONSchema,

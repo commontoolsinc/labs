@@ -22,6 +22,7 @@ import { BranchListWalk, REACHED_AGAIN } from "./cfc/branch-list-walk.ts";
 import type { CfcConfClause } from "./cfc/clause.ts";
 import { uniqueCfcAtoms } from "./cfc/observation.ts";
 import {
+  cfcSchemaDocumentOf,
   cfcSchemaIsFalse,
   cfcSchemaIsInternalKey,
   cfcSchemaIsTrue,
@@ -687,10 +688,11 @@ export class ContextualFlowControl {
     ) {
       // If the cursor is a $ref, get the target location
       if (isObjectOrArray(cursor) && "$ref" in cursor) {
-        // Follow the reference
+        // Follow the reference, against the one document kept for the map
+        // in effect: the resolver's memo is keyed on the root it is given.
         cursor = ContextualFlowControl.resolveSchemaRefsOrThrow(
           cursor,
-          { $defs: defs },
+          cfcSchemaDocumentOf(defs),
         );
         // The resolved view carries the definitions its local refs need.
         // A view without a map must also clear the referrer's definitions.
