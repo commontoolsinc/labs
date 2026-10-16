@@ -47,10 +47,18 @@ A worker CPU profile of one send at thirty messages (sampling every 0.5 ms,
 `CdpWorkerProfiler`), with the worker's logger rows differenced against the
 load that preceded it:
 
-- The worker is sampled for 1.8 s, of which 42% is idle: waiting on the main
-  thread and storage. The logger agrees: `storage.v2/watchRefresh/watchAddSync`
-  takes 1.75 s over nine calls after the write, `runner.loop/workerLag` 1.5 s
-  over four, `runtime:idle` 1.1 s over five.
+- The worker is sampled for 1.8 s, of which 42% is idle. Nine
+  `storage.v2/watchRefresh/watchAddSync` calls run during the send, 1.75 s of
+  elapsed time in all, but nothing on the send path awaits them: a storage
+  `pull()` is awaited only by `cell.sync()` callers, which are piece start and
+  resume and a handler's input presync, and the measurement's own wait is the
+  page's `viewSettled()`, which waits for the worker's plain `idle()` and the
+  view's updates, never for a commit's confirmation. Those refreshes are
+  background loads whose round trips overlap the send. The idle share is the
+  worker waiting on the main thread, which the IPC rows show: four
+  `runner.loop/workerLag` spans of 1.5 s together, five `runtime:idle`
+  handles of 1.1 s, and main-to-worker deliveries queued behind the worker's
+  own work.
 - The scheduler runs 68 actions in 0.52 s, commits in 0.18 s. No pattern frame
   reaches 1 ms of self time; the CPU is the runtime's: CFC label work
   (`canonicalizeCfcLogicalPath`, `mergeCfcLabelViews`, `mergeLabel`,
@@ -61,8 +69,9 @@ load that preceded it:
   13 `cell:getCfcLabel`.
 
 So the pattern's share of a send is gone; what remains is the runtime's cost
-per run and the wait for the write to be watched back, which is where a
-further cut would come from.
+per run, the main thread's render of the new row and the IPC around it, and
+the `joined` follow-up event's own run, which is where a further cut would
+come from.
 
 ## Where a cold load's 27 s goes
 
