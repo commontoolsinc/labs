@@ -244,6 +244,35 @@ describe("score", () => {
       expect(back.failures.get("k a")?.length).toBe(1);
     });
 
+    it("keeps a failure the default branch explained as explained", () => {
+      const context = emptyContext();
+      context.failures.set("k", [
+        { day: "2026-08-20", source: "a", brokenOnMain: true },
+        { day: "2026-08-20", source: "b" },
+      ]);
+      const back = parseContext(serializeContext(context));
+      expect(back.failures.get("k")).toEqual([
+        { day: "2026-08-20", source: "a", brokenOnMain: true },
+        { day: "2026-08-20", source: "b" },
+      ]);
+    });
+
+    it("reads a mark it does not recognize as no mark", () => {
+      // A failure read as explained when it was not would take a source
+      // away from the environmental rule, so only `true` is believed.
+      const back = parseContext({
+        outcomesAtCommit: [],
+        mainAtCommit: [],
+        credited: [],
+        failures: [["k", [
+          { day: "2026-08-20", source: "a", brokenOnMain: "yes" },
+        ]]],
+      });
+      expect(back.failures.get("k")).toEqual([
+        { day: "2026-08-20", source: "a" },
+      ]);
+    });
+
     it("drops a whole entry when nothing in it survives", () => {
       const back = parseContext({
         outcomesAtCommit: [],
@@ -1554,6 +1583,121 @@ describe("a failure seen from many places at once", () => {
     expect(state.failuresByDay["2026-08-20"]).toBe(3);
     // Four sources in all, but never four at once, so each is a catch.
     expect(state.prCatches).toBe(4);
+  });
+});
+
+describe("a failure the default branch was already failing", () => {
+  /**
+   * The default branch passing at `c0` and later at `c2`, failing at
+   * `c1` between them, and a pull request failing at a commit of its own
+   * from each of `explained` while it was failing and from each of
+   * `independent` before it broke.
+   */
+  function breakage(
+    explained: readonly string[],
+    independent: readonly string[],
+  ): Observation[] {
+    let minute = 0;
+    const at = () => `2026-08-20T00:${String(minute++).padStart(2, "0")}:00Z`;
+    const onBranch = (source: string) =>
+      saw("fail", {
+        source,
+        place: "pr",
+        commit: `c-${source}`,
+        startedAt: at(),
+      });
+    return [
+      saw("pass", { commit: "c0", startedAt: at() }),
+      ...independent.map(onBranch),
+      saw("fail", { commit: "c1", startedAt: at() }),
+      ...explained.map(onBranch),
+      saw("pass", { commit: "c2", startedAt: at() }),
+    ];
+  }
+
+  it("does not count the pull requests that carried it as sources", () => {
+    // A pull request's run tests its merge into the default branch, so
+    // while that branch is red every pull request running the test fails
+    // it. Counted, those five sources would read the default branch's
+    // own escape as the environment breaking.
+    const state = foldObservations(breakage(["a", "b"], ["c", "d"])).get(
+      KEY,
+    )!;
+    expect(state.mainCatches).toBe(1);
+    expect(state.prCatches).toBe(2);
+    expect(state.failuresByDay["2026-08-20"]).toBe(5);
+  });
+
+  it("still reads a failure on enough other branches as environmental", () => {
+    // The default branch and four branches it does not explain are five
+    // sources, which is the environment however many pull requests the
+    // default branch's breakage also reached.
+    const state = foldObservations(
+      breakage(["a", "b"], ["c", "d", "e", "f"]),
+    ).get(KEY)!;
+    expect(state.mainCatches).toBe(0);
+    expect(state.prCatches).toBe(0);
+  });
+
+  it("credits once an outage the default branch saw first", () => {
+    // Nothing tells a failure the default branch's code caused from one
+    // its environment did while that branch is the one failing, so the
+    // branches it reaches meanwhile say nothing either way, and the
+    // breakage is the default branch's one catch.
+    const state = foldObservations(
+      breakage(["a", "b", "c", "d", "e", "f"], []),
+    ).get(KEY)!;
+    expect(state.mainCatches).toBe(1);
+    expect(state.prCatches).toBe(0);
+  });
+
+  it("keeps what it marked for the batches after it", () => {
+    // Batch two's three branches failing on their own, with the default
+    // branch, are four sources. Read without the marks batch one left,
+    // the two branches that carried the default branch's breakage would
+    // make them six.
+    const context = emptyContext();
+    const first = foldObservations(breakage(["a", "b"], []), { context });
+    const carried = parseContext(serializeContext(context));
+    const second = foldObservations(
+      ["c", "d", "e"].map((source) =>
+        saw("fail", {
+          source,
+          place: "pr",
+          commit: `c-${source}`,
+          startedAt: "2026-08-20T01:00:00Z",
+        })
+      ),
+      { context: carried, prior: first },
+    );
+    const state = second.get(KEY)!;
+    expect(state.mainCatches).toBe(1);
+    expect(state.prCatches).toBe(3);
+  });
+
+  it("goes on counting the default branch's own failures", () => {
+    // The default branch failed from the 16th to the 19th, so its failure
+    // on the 19th is inside the window of the four branches failing on
+    // the 20th, and makes five sources.
+    const day = (date: string, minute = 0) => ({
+      day: date,
+      startedAt: `${date}T00:${String(minute).padStart(2, "0")}:00Z`,
+    });
+    const state = foldObservations([
+      saw("pass", { commit: "c0", ...day("2026-08-16") }),
+      saw("fail", { commit: "c1", ...day("2026-08-16", 1) }),
+      saw("fail", { commit: "c2", ...day("2026-08-19") }),
+      saw("pass", { commit: "c3", ...day("2026-08-19", 1) }),
+      ...["c", "d", "e", "f"].map((source) =>
+        saw("fail", {
+          source,
+          place: "pr",
+          commit: `c-${source}`,
+          ...day("2026-08-20"),
+        })
+      ),
+    ]).get(KEY)!;
+    expect(state.prCatches).toBe(0);
   });
 });
 

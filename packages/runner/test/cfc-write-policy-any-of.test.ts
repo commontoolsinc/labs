@@ -55,7 +55,7 @@ const SCHEMA: JSONSchemaObj = {
   ifc: { writePolicyAnyOf: [policy("send", "Send"), policy("edit", "Edit")] },
 };
 
-/** How {@link fixture} writes the protected cell. */
+/** How a fixture's write is made, beyond the writer and its action. */
 type WriteOptions = {
   schema?: JSONSchema;
   module?: string;
@@ -77,6 +77,8 @@ function fixture() {
     storageManager,
     cfcEnforcementMode: "enforce-explicit",
   });
+
+  /** Stages the write into `tx`. */
   const stage = (
     tx: IExtendedStorageTransaction,
     writer: string,
@@ -135,33 +137,36 @@ function fixture() {
       });
     }
   };
+
   return {
-    async write(
-      writer: string,
-      action?: string,
-      options: WriteOptions = {},
-    ) {
+    runtime,
+    async write(writer: string, action?: string, options: WriteOptions = {}) {
       const tx = runtime.edit();
       stage(tx, writer, action, options);
       tx.prepareCfc();
       return (await tx.commit().settled).error?.message;
     },
+
     /**
-     * The same write through `editWithRetry`, and how many times it staged
-     * the write before the runtime settled on an answer.
+     * Makes the write through `editWithRetry`, and returns its error with
+     * how many times the write was staged. `amend` sees each attempt's
+     * transaction first.
      */
-    async writeRetrying(
+    async writeWithRetry(
       writer: string,
       action?: string,
       options: WriteOptions = {},
+      amend?: (tx: IExtendedStorageTransaction) => void,
     ) {
-      let attempts = 0;
-      const { error } = await runtime.editWithRetry((tx) => {
-        attempts++;
+      let runs = 0;
+      const result = await runtime.editWithRetry((tx) => {
+        runs++;
+        amend?.(tx);
         stage(tx, writer, action, options);
       });
-      return { error, attempts };
+      return { runs, error: result.error };
     },
+
     async dispose() {
       await runtime.dispose();
       await storageManager.close();
@@ -434,72 +439,144 @@ describe("cfc-write-policy-any-of", () => {
     });
   });
 
-  describe("a later schema that moves the stored policy", () => {
-    // The stored envelope fixes which writers the position admits, so a
-    // schema that adds an alternative, or names another lone writer, is
-    // refused however often it is presented, and the refusal says so.
+  describe("a candidate that changes the stored policy", () => {
+    // `SCHEMA` with a third alternative, which the merge refuses over the two
+    // the document stores.
 
-    const grown: JSONSchemaObj = {
+    const widened: JSONSchemaObj = {
       type: "string",
       ifc: {
         writePolicyAnyOf: [
           ...SCHEMA.ifc!.writePolicyAnyOf!,
-          policy("rogue", "Send"),
+          policy("tidy", "Send"),
         ],
       },
     };
-    const lone = (writer: string): JSONSchemaObj => ({
-      type: "string",
-      ifc: {
-        writeAuthorizedBy: writerClaim(writer),
-        uiContract: contract("Send"),
-      },
-    });
 
-    it("refuses a grown list once, naming the stored envelope", async () => {
+    it("is refused with `CfcCommitRefusalError` after one run of the write", async () => {
       await withFixture(async (f) => {
         expect(await f.write("send", "Send")).toBeUndefined();
 
-        const { error, attempts } = await f.writeRetrying("send", "Send", {
-          schema: grown,
+        const { runs, error } = await f.writeWithRetry("send", "Send", {
+          schema: widened,
         });
 
+        expect(runs).toBe(1);
         expect(error?.name).toBe("CfcCommitRefusalError");
         expect(isEnvelopeStabilityRefusal(error)).toBe(true);
+        // The token that classifies the refusal stays out of the message,
+        // which is what a person sees, the source panel included.
+        expect(error?.message).not.toContain("cfc-envelope-stability");
         expect(error?.message).toContain(
-          "writePolicyAnyOf must remain stable at /",
+          "writePolicyAnyOf must remain stable",
         );
-        expect(attempts).toBe(1);
       });
     });
 
-    it("refuses another lone writer once, naming the stored envelope", async () => {
+    it("is refused with `CfcCommitRefusalError` after one run where a candidate weakens a stored claim", async () => {
+      // Not a writer policy, but the same refusal by the stored envelope: the
+      // candidate's confidentiality drops the atom the stored one requires.
+
+      const secret: JSONSchemaObj = {
+        type: "string",
+        ifc: { confidentiality: ["secret"] },
+      };
+      const other: JSONSchemaObj = {
+        type: "string",
+        ifc: { confidentiality: ["other"] },
+      };
+      await withFixture(async (f) => {
+        expect(await f.write("send", undefined, { schema: secret }))
+          .toBeUndefined();
+
+        const { runs, error } = await f.writeWithRetry("send", undefined, {
+          schema: other,
+        });
+
+        expect(runs).toBe(1);
+        expect(error?.name).toBe("CfcCommitRefusalError");
+        expect(isEnvelopeStabilityRefusal(error)).toBe(true);
+        // The token that classifies the refusal stays out of the message,
+        // which is what a person sees, the source panel included.
+        expect(error?.message).not.toContain("cfc-envelope-stability");
+        expect(error?.message).toContain("confidentiality cannot be weakened");
+      });
+    });
+
+    it("is refused with the retryable name where the stored envelope does not read back", async () => {
+      // The refusal is a verdict only where the stored envelope's document is
+      // one the transaction holds, which the verdict confirms by reading the
+      // envelope again. Each attempt here fails that read, as it fails for a
+      // document absent from the transaction's view.
+
+      await withFixture(async (f) => {
+        expect(await f.write("send", "Send")).toBeUndefined();
+
+        const { runs, error } = await f.writeWithRetry(
+          "send",
+          "Send",
+          { schema: widened },
+          (tx) => {
+            const read = tx.read.bind(tx);
+            tx.read = (address, options) =>
+              address.path[0] === "cfc"
+                ? { error: new Error("not held") } as ReturnType<typeof read>
+                : read(address, options);
+          },
+        );
+
+        expect(runs).toBeGreaterThan(1);
+        expect(error?.name).toBe("StorageTransactionAborted");
+        expect(isEnvelopeStabilityRefusal(error)).toBe(false);
+        expect(error?.message).toContain(
+          "writePolicyAnyOf must remain stable",
+        );
+      });
+    });
+
+    it("is refused with `CfcCommitRefusalError` after one run where a candidate names another lone writer", async () => {
+      const lone = (writer: string): JSONSchemaObj => ({
+        type: "string",
+        ifc: {
+          writeAuthorizedBy: writerClaim(writer),
+          uiContract: contract("Send"),
+        },
+      });
       await withFixture(async (f) => {
         expect(await f.write("send", "Send", { schema: lone("send") }))
           .toBeUndefined();
 
-        const { error, attempts } = await f.writeRetrying("edit", "Send", {
+        const { runs, error } = await f.writeWithRetry("edit", "Send", {
           schema: lone("edit"),
         });
 
+        expect(runs).toBe(1);
         expect(error?.name).toBe("CfcCommitRefusalError");
         expect(isEnvelopeStabilityRefusal(error)).toBe(true);
         expect(error?.message).toContain(
           "writeAuthorizedBy must remain stable at /",
         );
-        expect(attempts).toBe(1);
       });
     });
 
-    it("does not name the stored envelope for a merge it refuses on other grounds", async () => {
+    it("is not recognized as a stored envelope's refusal where the merge refuses on other grounds", async () => {
       // Moving between a lone writer and a list is refused by the merge too,
       // but not as a claim the stored envelope fixes.
 
       await withFixture(async (f) => {
-        expect(await f.write("send", "Send", { schema: lone("send") }))
-          .toBeUndefined();
+        expect(
+          await f.write("send", "Send", {
+            schema: {
+              type: "string",
+              ifc: {
+                writeAuthorizedBy: writerClaim("send"),
+                uiContract: contract("Send"),
+              },
+            },
+          }),
+        ).toBeUndefined();
 
-        const { error } = await f.writeRetrying("send", "Send");
+        const { error } = await f.writeWithRetry("send", "Send");
 
         expect(error?.message).toContain("writePolicyAnyOf cannot join");
         expect(isEnvelopeStabilityRefusal(error)).toBe(false);

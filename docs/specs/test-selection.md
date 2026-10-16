@@ -63,7 +63,19 @@ something about a change or something about the test. A failure is a
   one.
 - The identity failed across at least `ENVIRONMENTAL_MIN_SOURCES` distinct
   sources within `CATCH_BREADTH_WINDOW_DAYS`. That is the environment or a
-  dependency, not any one change.
+  dependency, not any one change. A failure away from the default branch
+  while that branch was already failing the identity, as the first rule
+  reads it, is left out of that count, though another failure from the
+  same source can still count that source. A pull request's run tests the
+  pull request merged into the default branch, and a workstation runs a
+  change on top of one of that branch's commits, so while the branch fails
+  a test, every pull request and workstation that runs the test fails it
+  too. Those failures are the default branch's one breakage, and the
+  default branch is already one of the sources. While the default branch
+  is failing a test, nothing tells a failure its code caused from one its
+  environment caused. So a breakage of the environment is credited to the
+  default branch as one catch when that branch fails the test before
+  enough other sources do to reach `ENVIRONMENTAL_MIN_SOURCES`.
 - The run that saw it newly broke at least `MASS_FAILURE_MIN_IDENTITIES`
   identities. That is the run, or the change as a whole, and not any one
   test.

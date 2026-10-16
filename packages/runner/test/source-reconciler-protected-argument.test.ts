@@ -555,7 +555,7 @@ describe("source-reconciler-protected-argument", () => {
       );
     });
 
-    it("refuses a release that changes a field's trusted action as a refusal of the stored data, and does not prepare it again", async () => {
+    it("records a release that changes a field's trusted action as refused for good, and does not prepare it again", async () => {
       // The envelope `about` stores fixes the reviewed action that may write
       // it. The release's own differs, so the merge refuses it as a verdict
       // naming the stored envelope, and the room keeps that refusal across a
@@ -572,10 +572,10 @@ describe("source-reconciler-protected-argument", () => {
         current,
         prime,
         async ({ outcome, room, recorded, previousIdentity, runtime }) => {
-          expect(outcome).toBe("mismatched");
+          expect(outcome).toBe("rejected");
           expect(recorded).toMatchObject({
             outcome: "refused",
-            reason: "argument-mismatch",
+            reason: "apply-failed",
           });
           expect(recorded?.detail).toContain("must remain stable at /about");
           expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
@@ -583,7 +583,7 @@ describe("source-reconciler-protected-argument", () => {
           await send(runtime, room, "pin", trustedEvent("Pin", { text: "yo" }));
           using prepared = spy(runtime.runner, "syncStoredPieceCells");
           expect(await runtime.sourceReconciler.reconcile(room)).toBe(
-            "mismatched",
+            "rejected",
           );
 
           expect(prepared.calls).toHaveLength(0);

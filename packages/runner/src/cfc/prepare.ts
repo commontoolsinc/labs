@@ -219,6 +219,7 @@ import {
   withoutUndefinedMembers,
 } from "./schema-merge.ts";
 import {
+  canonicalizeCfcSchemaDocument,
   cfcSchemaResolvedRoot,
   hoistCfcSchemaDefs,
   resolveCfcSchemaRefRoot,
@@ -258,7 +259,9 @@ const INTERNAL_VERIFIER_META = stableInternalVerifierRead;
 // the link is triggered again when the member lands. The rest of what a floor
 // weighed, stored labels and the values along a linked path, is read this way
 // again where the floor's refusal is a verdict (`holdFloorEvidence`), since
-// nothing else would run the writer again. The reads are commit-time
+// nothing else would run the writer again. A stored envelope whose claim a
+// candidate changed or weakened is read this way again too, where that
+// refusal is a verdict (`storedClaimVerdict`). The reads are commit-time
 // preconditions either way: `ignoreReadForScheduling` gates reactivity
 // alone.
 const FLOOR_EVIDENCE_META = {
@@ -10218,8 +10221,49 @@ const mergeStoredCfcEnvelope = (
   options: MergeCfcSchemaEnvelopeOptions,
 ): JSONSchema =>
   storedEnvelopeUnchangedByCandidate(stored, candidate)
-    ? stored
+    // An envelope stored before merges left documents in canonical form
+    // is rewritten in that form by the first authorized write that leaves
+    // its labels unchanged: the canonical document hashes differently, so
+    // the idempotence check below does not skip the write. One already in
+    // canonical form hashes the same and is kept as it is.
+    ? canonicalizeCfcSchemaDocument(stored)
     : mergeCfcSchemaEnvelopes(stored, candidate, options);
+
+/**
+ * The reason the persist loop records when a candidate changes or weakens an
+ * `ifc` claim a document's stored envelope fixes (`CfcEnvelopeStabilityError`),
+ * marked as that class of refusal and tagged a verdict where the document
+ * whose envelope it was compared against is one this transaction holds.
+ *
+ * The merge runs only over an envelope `loadStoredCfcEnvelope` loaded whole:
+ * the metadata read from the document, and every schema document it names,
+ * content-verified. The refusal turns on that envelope, the candidate this
+ * transaction states, the writers and release modules it records, and, where a
+ * release relaxes the merge beneath a link, the values that same document
+ * holds. None of it waits on a document the replica may not have pulled, so an
+ * immediate re-run states the same candidate against the same envelope and is
+ * refused the same way.
+ *
+ * The envelope was read invisibly to reactivity. Its `["cfc"]` member is read
+ * again here visibly, so a writer this verdict refuses runs again when the
+ * stored envelope changes, as a fresh trigger rather than a retry. A member
+ * that does not read back belongs to a document the transaction does not hold,
+ * and the reason stays untagged.
+ */
+const storedClaimVerdict = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+  message: string,
+): string =>
+  tx.read({ ...target, type: "application/json", path: ["cfc"] }, {
+      meta: FLOOR_EVIDENCE_META,
+    }).ok === undefined
+    ? message
+    : verdictReason(envelopeStabilityReason(message));
 
 /**
  * Would a write under `candidate` commit over this stored envelope?
@@ -12010,17 +12054,11 @@ export function* prepareBoundaryCommitSteps(
         // message is preserved verbatim after the token. Schema-LOAD failures
         // are handled above by the shared gatherer and record their bare
         // message as before.
-        //
-        // A claim the stored envelope fixes, changed or weakened by this
-        // write's schema, is a verdict: the merge reads the stored envelope,
-        // the schema, and this transaction's writers and release, and a
-        // re-run reads the same, so it refuses again. Its token tells a caller
-        // which refusal this is.
         reasons.push(
           error instanceof CfcSchemaMigrationError
             ? `${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: ${error.message}`
             : error instanceof CfcEnvelopeStabilityError
-            ? verdictReason(envelopeStabilityReason(error.message))
+            ? storedClaimVerdict(tx, { space, id, scope }, error.message)
             : error instanceof Error
             ? error.message
             : `schema merge failed for ${id}`,

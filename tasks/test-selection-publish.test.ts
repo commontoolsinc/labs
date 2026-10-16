@@ -186,6 +186,15 @@ describe("test-selection-publish", () => {
       expect(parseArgs(["--days"])).toBeUndefined();
       expect(parseArgs(["--concurrency", "x"])).toBeUndefined();
       expect(parseArgs(["--out"])).toBeUndefined();
+      expect(parseArgs(["--create"])).toBeUndefined();
+    });
+
+    it("takes a directory to create from, and nothing beside it", () => {
+      expect(parseArgs(["--create", "/tmp/out"])?.create).toBe("/tmp/out");
+      expect(parseArgs(["--create", "/tmp/out", "--bootstrap"]))
+        .toBeUndefined();
+      expect(parseArgs(["--dry-run", "--create", "/tmp/out"]))
+        .toBeUndefined();
     });
   });
 
@@ -1213,6 +1222,90 @@ describe("publish()", () => {
     );
     expect(created.size).toBe(0);
     expect(code).toBe(0);
+  });
+
+  describe("--create", () => {
+    /** A directory a dry run of a bootstrap wrote, and what it wrote. */
+    async function staged() {
+      const dir = await Deno.makeTempDir();
+      const { store, created } = fakeStore(seed());
+      const code = await publish(
+        ["--bootstrap", "--days", "1", "--dry-run", "--out", dir],
+        store,
+        NOW,
+        suites,
+        noPrevious,
+      );
+      expect(code).toBe(0);
+      expect(created.size).toBe(0);
+      return {
+        dir,
+        manifest: await Deno.readTextFile(join(dir, "manifest.json")),
+        state: await Deno.readTextFile(join(dir, "state.json")),
+      };
+    }
+
+    it("creates the manifest and the state a dry run wrote", async () => {
+      const { dir, manifest, state } = await staged();
+      const { store, created } = fakeStore({});
+      try {
+        expect(await publish(["--create", dir], store)).toBe(0);
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+      const names = [...created.keys()];
+      expect(names.length).toBe(2);
+      // The two share the identifier that pairs a manifest with the
+      // aggregate it was built from, and the state is filed under the day
+      // the manifest was generated.
+      const id = names[0]!.match(/-([0-9A-Z]{26})\.json\.gz$/)?.[1];
+      expect(id).toBeDefined();
+      expect(names[0]).toContain(
+        `/manifest-${NOW.toISOString()}-${id}.json.gz`,
+      );
+      expect(names[1]).toBe(stateObjectName("2026-08-20", id!));
+      // Compared as written rather than as parsed, so a field the parse
+      // would drop is one this notices.
+      expect(JSON.parse(await gunzipToText(created.get(names[0]!)!)))
+        .toEqual(JSON.parse(manifest));
+      expect(await gunzipToText(created.get(names[1]!)!)).toBe(state);
+    });
+
+    it("creates nothing from a directory it did not write", async () => {
+      const { dir } = await staged();
+      const { store, created } = fakeStore({});
+      try {
+        await Deno.writeTextFile(join(dir, "manifest.json"), "{}");
+        expect(await publish(["--create", dir], store)).toBe(1);
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+      expect(created.size).toBe(0);
+    });
+
+    it("creates nothing from an aggregate it cannot read", async () => {
+      const { dir } = await staged();
+      const { store, created } = fakeStore({});
+      try {
+        await Deno.writeTextFile(join(dir, "state.json"), "[]");
+        expect(await publish(["--create", dir], store)).toBe(1);
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+      expect(created.size).toBe(0);
+    });
+
+    it("creates nothing without a credential", async () => {
+      const { dir } = await staged();
+      const { store, created } = fakeStore({});
+      const anonymous: StoreAccess = { ...store, token: () => undefined };
+      try {
+        expect(await publish(["--create", dir], anonymous)).toBe(0);
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+      expect(created.size).toBe(0);
+    });
   });
 
   it("reports a malformed command line rather than publishing", async () => {

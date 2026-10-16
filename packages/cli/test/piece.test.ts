@@ -73,7 +73,7 @@ import {
   withRuntimeCleanupOnFailure,
 } from "../lib/piece.ts";
 import { safeStringify } from "../lib/render.ts";
-import { cf, checkStderr, stripAnsi } from "./utils.ts";
+import { argv, cf, checkStderr, stripAnsi } from "./utils.ts";
 import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
@@ -1532,7 +1532,7 @@ describe("cli piece parsing", () => {
   });
 
   it("shows recreate-root as a space-scoped command", async () => {
-    const { code, stdout, stderr } = await cf("space recreate-root --help");
+    const { code, stdout, stderr } = await cf(argv`space recreate-root --help`);
     checkStderr(stderr);
     const output = stripAnsi(stdout.join("\n"));
     expect(output).toContain(
@@ -1543,7 +1543,7 @@ describe("cli piece parsing", () => {
   });
 
   it("shows search as a registered-piece command with JSON output", async () => {
-    const { code, stdout, stderr } = await cf("piece search --help");
+    const { code, stdout, stderr } = await cf(argv`piece search --help`);
     checkStderr(stderr);
     const output = stripAnsi(stdout.join("\n"));
     expect(output).toContain(
@@ -1558,11 +1558,11 @@ describe("cli piece parsing", () => {
   it("describes listing and mapping as registry-backed", async () => {
     const commands = [
       {
-        args: "piece ls --help",
+        args: argv`piece ls --help`,
         description: "List pieces registered in the space.",
       },
       {
-        args: "piece map --help",
+        args: argv`piece map --help`,
         description: "Show registered pieces and the connections between them",
       },
     ];
@@ -1577,7 +1577,7 @@ describe("cli piece parsing", () => {
   });
 
   it("documents the piece registry in link help", async () => {
-    const { code, stdout, stderr } = await cf("piece link --help");
+    const { code, stdout, stderr } = await cf(argv`piece link --help`);
     checkStderr(stderr);
     const output = stripAnsi(stdout.join("\n"));
     expect(code).toBe(0);
@@ -1710,9 +1710,9 @@ describe("cli piece parsing", () => {
     });
 
     const options = () =>
-      `--identity ${identityPath} --api-url ${API_URL} --space ${SPACE}`;
+      argv`--identity ${identityPath} --api-url ${API_URL} --space ${SPACE}`;
 
-    const spaceRefusal = async (command: string) => {
+    const spaceRefusal = async (command: readonly string[]) => {
       const { code, stderr } = await cf(command);
       expect(code).toBe(1);
       return stripAnsi(stderr.join("\n"));
@@ -1721,8 +1721,8 @@ describe("cli piece parsing", () => {
     it("refuses a link whose source names another space", async () => {
       expect(
         await spaceRefusal(
-          `piece link ${options()} ` +
-            `/@${SPACE_DID}/${LLM_HANDLE}/notes ${LLM_HANDLE}/inbox`,
+          argv`piece link ${options()}
+            /@${SPACE_DID}/${LLM_HANDLE}/notes ${LLM_HANDLE}/inbox`,
         ),
       ).toContain(`Reference names space "${SPACE_DID}"`);
     });
@@ -1730,8 +1730,8 @@ describe("cli piece parsing", () => {
     it("refuses a link whose target names another space", async () => {
       expect(
         await spaceRefusal(
-          `piece link ${options()} ` +
-            `${LLM_HANDLE}/notes /@${SPACE_DID}/${LLM_HANDLE}/inbox`,
+          argv`piece link ${options()}
+            ${LLM_HANDLE}/notes /@${SPACE_DID}/${LLM_HANDLE}/inbox`,
         ),
       ).toContain(`Reference names space "${SPACE_DID}"`);
     });
@@ -1739,8 +1739,8 @@ describe("cli piece parsing", () => {
     it("refuses a sqlite link whose target names another space", async () => {
       expect(
         await spaceRefusal(
-          `piece link ${options()} ` +
-            `sqlite:/tmp/reference-data.db /@${SPACE_DID}/${LLM_HANDLE}/refDb`,
+          argv`piece link ${options()}
+            sqlite:/tmp/reference-data.db /@${SPACE_DID}/${LLM_HANDLE}/refDb`,
         ),
       ).toContain(`Reference names space "${SPACE_DID}"`);
     });
@@ -1748,8 +1748,8 @@ describe("cli piece parsing", () => {
     it("refuses a slug whose source names another space", async () => {
       expect(
         await spaceRefusal(
-          `piece set-slug ${options()} ` +
-            `project-notes /@${SPACE_DID}/${LLM_HANDLE}/notes`,
+          argv`piece set-slug ${options()}
+            project-notes /@${SPACE_DID}/${LLM_HANDLE}/notes`,
         ),
       ).toContain(`Reference names space "${SPACE_DID}"`);
     });
@@ -1759,7 +1759,7 @@ describe("cli piece parsing", () => {
       // canonical endpoint was parsed rather than refused as unrecognized.
       expect(
         await spaceRefusal(
-          `piece link ${options()} ${LLM_HANDLE}/notes /${LLM_HANDLE}`,
+          argv`piece link ${options()} ${LLM_HANDLE}/notes /${LLM_HANDLE}`,
         ),
       ).toContain("Target reference must include a path.");
     });
@@ -1798,7 +1798,7 @@ describe("cli piece parsing", () => {
 
   it("refuses `--json` on a moved command rather than ignoring it", async () => {
     const { code, stdout, stderr } = await cf(
-      "space recreate-root --json -i ./k.key -s s -a http://localhost:8000",
+      argv`space recreate-root --json -i ./k.key -s s -a http://localhost:8000`,
     );
     expect(code).not.toBe(0);
     expect(stdout).toEqual([]);
@@ -1854,12 +1854,13 @@ describe("cli piece parsing", () => {
       expect(names(noun, false)).not.toContain("set-home");
     }
     for (
-      const line of [
-        "space set-home -i ./k.key -a http://localhost:8000 --reset",
-        "piece set-home -i ./k.key -a http://localhost:8000 ./my-home.tsx",
+      const args of [
+        argv`space set-home -i ./k.key -a http://localhost:8000 --reset`,
+        argv`piece set-home -i ./k.key -a http://localhost:8000 ./my-home.tsx`,
       ]
     ) {
-      const { code, stdout, stderr } = await cf(line);
+      const line = args.join(" ");
+      const { code, stdout, stderr } = await cf(args);
       expect(code, line).not.toBe(0);
       // The refusal prints the help page as context, as every refusal here
       // does, and that page is where the replacement is written out.
@@ -1870,7 +1871,7 @@ describe("cli piece parsing", () => {
       expect(said, line).toContain("cf piece setsrc --cell <home-root>");
       expect(said, line).toContain("stops answering after 2026-10-21");
     }
-    const { code, stdout } = await cf("space set-home --help");
+    const { code, stdout } = await cf(argv`space set-home --help`);
     expect(code).toBe(0);
     expect(stripAnsi(stdout.join("\n"))).toContain("Retired.");
   });
@@ -1937,10 +1938,10 @@ describe("cli piece parsing", () => {
 
   it("refuses a piece get command that names both projection flags", async () => {
     const { code, stderr } = await cf(
-      "get " +
-        "--identity ./definitely-missing-piece-get-review.key " +
-        "--api-url https://cf.dev --space common-knowledge " +
-        `--piece ${PIECE} --select id --schema id`,
+      argv`get
+        --identity ./definitely-missing-piece-get-review.key
+        --api-url https://cf.dev --space common-knowledge
+        --piece ${PIECE} --select id --schema id`,
     );
     expect(code).not.toBe(0);
     expect(stripAnsi(stderr.join("\n"))).toContain(
@@ -1950,10 +1951,10 @@ describe("cli piece parsing", () => {
 
   it("passes a --select projection through the piece get command action", async () => {
     const { code, stderr } = await cf(
-      "get " +
-        "--identity ./definitely-missing-piece-get-review.key " +
-        "--api-url https://cf.dev --space common-knowledge " +
-        `--piece ${PIECE} --select id,title`,
+      argv`get
+        --identity ./definitely-missing-piece-get-review.key
+        --api-url https://cf.dev --space common-knowledge
+        --piece ${PIECE} --select id,title`,
     );
     expect(code).toBe(1);
     expect(stderr.join("\n")).toContain(
@@ -1963,10 +1964,10 @@ describe("cli piece parsing", () => {
 
   it("passes a parsed selection through the piece get command action", async () => {
     const { code, stderr } = await cf(
-      "get " +
-        "--identity ./definitely-missing-piece-get-review.key " +
-        "--api-url https://cf.dev --space common-knowledge " +
-        `--piece ${PIECE} --filter .active --schema id`,
+      argv`get
+        --identity ./definitely-missing-piece-get-review.key
+        --api-url https://cf.dev --space common-knowledge
+        --piece ${PIECE} --filter .active --schema id`,
     );
     expect(code).toBe(1);
     expect(stderr.join("\n")).toContain(
@@ -5602,7 +5603,7 @@ describe("cli piece parsing", () => {
   });
 
   it("shows set-slug command options", async () => {
-    const { code, stdout, stderr } = await cf("piece set-slug --help");
+    const { code, stdout, stderr } = await cf(argv`piece set-slug --help`);
     checkStderr(stderr);
     const output = stripAnsi(stdout.join("\n"));
     expect(code).toBe(0);
