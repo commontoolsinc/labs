@@ -257,8 +257,9 @@ These rules hold for every stream:
 - `counterpart: string` — The DID of the other person. Must not be this user's
   own.
 - `profile?: Cell<ChatProfile>` — The other person's profile, whose
-  `represents-principal` label must name `counterpart`. A new room is offered
-  to them through the share inbox it points at (see [offers](#offers)).
+  `represents-principal` label must name `counterpart`. A new room, or a found
+  one that was offered them nothing, is offered to them through the share inbox
+  it points at (see [offers](#offers)).
 
 Finds the direct room this user shares with a person, or creates it. This is an
 outward act when it creates a room, or offers one it finds.

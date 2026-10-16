@@ -5,14 +5,14 @@
  * notice for each. Once a later start with Alice names her profile, which
  * points at her private inbox, the room is offered there, she is added to its
  * participants, the notice for her is withdrawn, and the start's outcome is
- * the room found. A start before that whose id is too long to key an offer by
- * sends none. A start after that sends no second offer, and neither does
- * one from another manager whose notice for her a client reported delivered,
- * though she hasn't joined its room. Carol has joined her room before Bob
- * names her profile, so she is offered nothing, and Dave's profile points at
- * no inbox, so he is offered nothing either; both keep their notices. Each
- * person writes their own profile here, so its label names them, as a Fabric
- * profile's does.
+ * the room found, listed again though Bob had forgotten it. A start before
+ * that whose id is too long to key an offer by sends none. A start after that
+ * sends no second offer, and neither does one from another manager whose
+ * notice for her a client reported delivered, though she hasn't joined its
+ * room. Carol has joined her room before Bob names her profile, so she is
+ * offered nothing, and Dave's profile points at no inbox, so he is offered
+ * nothing either; both keep their notices. Each person writes their own
+ * profile here, so its label names them, as a Fabric profile's does.
  */
 import {
   action,
@@ -24,12 +24,16 @@ import {
   multiUserTest,
   pattern,
   type RepresentsCurrentUser,
+  spaceOf,
   type Stream,
   TESTS,
   type TrustedActionWrite,
   Writable,
 } from "commonfabric";
-import type { SharedSpaceCatalogStorage } from "../system/shared-space-catalog.ts";
+import {
+  readSharedSpaceCatalog,
+  type SharedSpaceCatalogStorage,
+} from "../system/shared-space-catalog.ts";
 import PrivateInbox, {
   type Offer,
   OFFER_ID_MAX_LENGTH,
@@ -384,9 +388,10 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
   const writeProfile = writeOwnProfile({ profile, name: "Bob" });
   const requests = Writable.of<Record<string, ChatRequestOutcome>>({});
   const notices = Writable.of<ChatManagerNotice[]>([]);
+  const catalog = emptyCatalog();
   const manager = FabriChatManagerCore({
     myProfile: profile,
-    sharedSpaceCatalog: emptyCatalog(),
+    sharedSpaceCatalog: catalog,
     direct: Writable.of<Record<string, ChatIndexEntry>>({}),
     requests,
     outgoingNotices: notices,
@@ -426,6 +431,14 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
     )
   );
   const aliceRoom = Writable.of<{ room?: Cell<HeldRoom> }>({});
+  const action_forget_alice = action(() =>
+    manager.forget.send({
+      requestId: "forget-alice",
+      room: aliceRoom.key("room").resolveAsCell(),
+      revision: readSharedSpaceCatalog(catalog)
+        .entries[spaceOf(aliceRoom.key("room")) ?? ""]?.revision,
+    })
+  );
   const action_hold = action(() => {
     aliceRoom.key("room").set(
       requests.key("d-alice").key("entry").key("room").resolveAsCell(),
@@ -485,8 +498,16 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
           noticeIdsFor(notices, setup.aliceDid).length === 1
         ),
       },
-      // Naming Alice's profile offers her the room the first start created,
-      // and withdraws her notice.
+      // Bob forgets the room, which leaves it in `direct`.
+      { action: action_forget_alice },
+      {
+        assertion: assert(() =>
+          requests.get()["forget-alice"]?.status === "done" &&
+          manager.rooms.length === 2
+        ),
+      },
+      // Naming Alice's profile lists the room the first start created again,
+      // offers it to her, and withdraws her notice.
       {
         action: manager.openDirect,
         event: {

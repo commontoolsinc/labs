@@ -208,8 +208,9 @@ export interface ManagerStreamEvent {
 
   /**
    * A direct room's other member's profile, through whose share inbox a new
-   * room is offered to them, or the profile of a member added to a room,
-   * through whose share inbox `offerRoom` offers it.
+   * room, or a found one that was offered them nothing, is offered to them, or
+   * the profile of a member added to a room, through whose share inbox
+   * `offerRoom` offers it.
    */
   // `Cell<…>` is written out rather than reached through an alias: the
   // event's schema marks a reference position only where the wrapper is
