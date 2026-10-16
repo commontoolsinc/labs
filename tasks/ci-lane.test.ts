@@ -42,7 +42,6 @@ import {
   describePlan,
   describeWithheld,
   type Execution,
-  fullLanes,
   type LaneDeps,
   type LaneOptions,
   lanePlan,
@@ -55,10 +54,12 @@ import {
   parseLaneArgs,
   PATTERN_COVERAGE_DIR,
   planOver,
+  requestedRun,
   rerunFailures,
   runBatch,
   runInvocation,
   runLane,
+  runLanes,
   spoolRecords,
   unitsForRun,
 } from "./ci-lane.ts";
@@ -97,12 +98,13 @@ import {
   type ManifestEntry,
 } from "./test-selection/manifest.ts";
 import {
+  DISCRETIONARY_SECONDS,
   FULL_LANE_BOUND_SECONDS,
   FULL_LANE_BUDGET_SECONDS,
-  FULL_LANES_MAX,
   LANE_BOUND_SECONDS,
   LANE_BUDGET_SECONDS,
   LANE_PROLOGUE_SECONDS,
+  LANES_MAX,
   RERUN_BUDGET_SECONDS,
   RERUN_EXECUTIONS,
   UNMEASURED_COST_SECONDS,
@@ -116,6 +118,12 @@ import { duration } from "./test-selection/duration.ts";
  * directory, and the paths the topology reads are the repository's.
  */
 const REPOSITORY = dirname(dirname(fromFileUrl(import.meta.url)));
+
+/** How many lanes `runLanes` counts for a run. */
+async function lanesOf(options: LaneOptions, deps: LaneDeps): Promise<number> {
+  return (await runLanes(options, deps)).of;
+}
+
 /** A suite holding exactly what a case describes. */
 function suite(partial: Partial<Suite> & { id: string }): Suite {
   return {
@@ -257,10 +265,40 @@ describe("reading the lane's command line", () => {
     expect(parseLaneArgs(["--lane", "0", "--of", "5"])).toBeUndefined();
   });
 
-  it("refuses to count lanes for a run that is not the full one", () => {
-    // Only `main` works its lane count out; a pull request's is a dial.
-    expect(parseLaneArgs(["--lane-count"])).toBeUndefined();
+  it("counts the lanes of a pull request's run as well as a full one", () => {
+    expect(parseLaneArgs(["--lane-count"])?.laneCount).toBe(true);
     expect(parseLaneArgs(["--full", "--lane-count"])?.laneCount).toBe(true);
+  });
+
+  it("leaves the lane count to the plan where none is named", () => {
+    expect(parseLaneArgs(["--lane", "7"])?.of).toBeUndefined();
+    expect(parseLaneArgs(["--lane", "7", "--of", "9"])?.of).toBe(9);
+  });
+
+  it("takes a non-negative scale for a run that is not the full one", () => {
+    expect(parseLaneArgs(["--scale", "2.5"])?.scale).toBe(2.5);
+    expect(parseLaneArgs(["--scale", "0"])?.scale).toBe(0);
+    expect(parseLaneArgs([])?.scale).toBeUndefined();
+    for (const scale of ["-1", "", "two", "Infinity"]) {
+      expect(parseLaneArgs(["--scale", scale])).toBeUndefined();
+    }
+    // A full run chooses nothing by score, so nothing would honor it.
+    expect(parseLaneArgs(["--full", "--scale", "2"])).toBeUndefined();
+  });
+
+  it("takes labels only for a count, and only where they decide the run", () => {
+    expect(
+      parseLaneArgs(["--lane-count", "--label", "ci: 2x", "--label", "bug"])
+        ?.labels,
+    ).toEqual(["ci: 2x", "bug"]);
+    // A lane is handed what the labels decided, never the labels.
+    expect(parseLaneArgs(["--label", "ci: 2x"])).toBeUndefined();
+    // The labels say what `--full` and `--scale` would.
+    expect(parseLaneArgs(["--lane-count", "--full", "--label", "bug"]))
+      .toBeUndefined();
+    expect(
+      parseLaneArgs(["--lane-count", "--scale", "2", "--label", "bug"]),
+    ).toBeUndefined();
   });
 
   it("refuses a flag it does not know", () => {
@@ -272,6 +310,73 @@ describe("reading the lane's command line", () => {
     expect(parseLaneArgs(["--dry-run"])?.described).toBeUndefined();
     // A dry run does nothing but describe.
     expect(parseLaneArgs(["--described", "--dry-run"])).toBeUndefined();
+  });
+});
+
+describe("what a pull request's labels ask of its run", () => {
+  it("asks for the default where no label says otherwise", () => {
+    expect(requestedRun([])).toEqual({ ok: true, full: false, scale: 1 });
+    expect(requestedRun(["bug", "dependencies"]))
+      .toEqual({ ok: true, full: false, scale: 1 });
+  });
+
+  it("asks for everything under `ci: full`", () => {
+    expect(requestedRun(["bug", "ci: full"]))
+      .toEqual({ ok: true, full: true, scale: 1 });
+  });
+
+  it("multiplies the tests chosen by score by any non-negative decimal", () => {
+    for (
+      const [label, scale] of [
+        ["ci: 2.2x", 2.2],
+        ["ci: 10x", 10],
+        ["ci: 0.1x", 0.1],
+        ["ci: .5x", 0.5],
+        ["ci: 0x", 0],
+        ["ci: 1x", 1],
+      ] as const
+    ) {
+      expect(requestedRun([label])).toEqual({ ok: true, full: false, scale });
+    }
+  });
+
+  it("refuses a label in its namespace it cannot read", () => {
+    for (
+      const label of [
+        "ci: 2",
+        "ci: x",
+        "ci: -1x",
+        "ci: 2X",
+        "ci:2x",
+        "CI: 2x",
+        "ci: 1.x",
+        "ci: 1e3x",
+        "ci: fast",
+      ]
+    ) {
+      expect(requestedRun([label])).toEqual({
+        ok: false,
+        problem: expect.stringContaining(`\`${label}\``),
+      });
+    }
+  });
+
+  it("refuses two labels saying how much to run, even where they agree", () => {
+    for (
+      const labels of [
+        ["ci: 2x", "ci: full"],
+        ["ci: 2x", "ci: 3x"],
+        ["ci: 2x", "ci: 2.0x"],
+        ["ci: 2x", "ci: two"],
+      ]
+    ) {
+      for (const label of labels) {
+        expect(requestedRun(labels)).toEqual({
+          ok: false,
+          problem: expect.stringContaining(`\`${label}\``),
+        });
+      }
+    }
   });
 });
 
@@ -358,7 +463,7 @@ describe("the moment a lane resolves its manifest at", () => {
     it("asks the store for the manifest of the commit's moment", async () => {
       const root = await repository("2026-09-01T10:41:59-07:00");
       const { asked, deps } = recorded();
-      expect(await fullLanes({ ...count, root }, deps)).toBe(1);
+      expect(await lanesOf({ ...count, root }, deps)).toBe(1);
       expect(asked).toEqual(["2026-09-01T17:41:59.000Z"]);
     });
 
@@ -366,7 +471,7 @@ describe("the moment a lane resolves its manifest at", () => {
       const root = await Deno.makeTempDir({ prefix: "ci-lane-nogit-" });
       roots.push(root);
       const { asked, deps } = recorded();
-      await expect(fullLanes({ ...count, root }, deps)).rejects.toThrow(
+      await expect(lanesOf({ ...count, root }, deps)).rejects.toThrow(
         "cannot read the date of the commit",
       );
       expect(asked).toEqual([]);
@@ -843,7 +948,7 @@ describe("running everything", () => {
   });
 });
 
-describe("how many lanes the full run asks for", () => {
+describe("how many lanes a run asks for", () => {
   const options = {
     lane: 1,
     of: 1,
@@ -871,21 +976,122 @@ describe("how many lanes the full run asks for", () => {
   }
 
   it("asks for one lane for work that fits in one", async () => {
-    expect(await fullLanes(options, corpus(10, 1))).toBe(1);
+    expect(await lanesOf(options, corpus(10, 1))).toBe(1);
+  });
+
+  describe("for a pull request", () => {
+    // Nothing the change touched, so nothing is mandatory and the lanes
+    // hold what the scale asks for and no more.
+    const change = { ...options, full: false, base: "HEAD" };
+
+    it("asks for as many lanes as its tests chosen by score need", async () => {
+      const deps = corpus(LANE_BUDGET_SECONDS * 20, 1);
+      const lanes = (scale: number) => lanesOf({ ...change, scale }, deps);
+      const unscaled = Math.ceil(DISCRETIONARY_SECONDS / LANE_BUDGET_SECONDS);
+      expect(await lanesOf(change, deps)).toBe(unscaled);
+      expect(await lanes(1)).toBe(unscaled);
+      expect(await lanes(2)).toBe(
+        Math.ceil(2 * DISCRETIONARY_SECONDS / LANE_BUDGET_SECONDS),
+      );
+      // A lane however little there is to run.
+      expect(await lanes(0)).toBe(1);
+    });
+
+    it("says what its tests chosen by score lose where the cap binds", async () => {
+      const deps = corpus(LANE_BUDGET_SECONDS * (LANES_MAX + 10), 1);
+      const error = console.error;
+      const said: string[] = [];
+      console.error = (line: string) => said.push(line);
+      let lanes: number;
+      try {
+        lanes = await lanesOf({ ...change, scale: 100 }, deps);
+      } finally {
+        console.error = error;
+      }
+      expect(lanes).toBe(LANES_MAX);
+      const told = said.join("\n");
+      expect(told).toContain(`needs more than ${LANES_MAX} lanes`);
+      expect(told).toContain("its tests chosen by score get");
+      expect(told).not.toContain("a lane may run past its budget");
+    });
+
+    it("hands the lanes its base and its scale", async () => {
+      expect(await runLanes({ ...change, scale: 2.5 }, corpus(10, 1)))
+        .toEqual({ of: 1, args: ["--base", "HEAD", "--scale", "2.5"] });
+      expect(await runLanes(change, corpus(10, 1)))
+        .toEqual({ of: 1, args: ["--base", "HEAD", "--scale", "1"] });
+    });
+
+    /** What `main` printed and returned, and whether it read the store. */
+    async function counted(...labels: string[]) {
+      const out: string[] = [];
+      const err: string[] = [];
+      const log = console.log;
+      const error = console.error;
+      console.log = (line: string) => out.push(line);
+      console.error = (line: string) => err.push(line);
+      let asked = false;
+      const deps = corpus(LANE_BUDGET_SECONDS * 20, 1);
+      try {
+        const status = await main(
+          [
+            "--lane-count",
+            "--base",
+            "HEAD",
+            ...labels.flatMap((label) => ["--label", label]),
+          ],
+          REPOSITORY,
+          {
+            ...deps,
+            manifest: () => {
+              asked = true;
+              return deps.manifest();
+            },
+          },
+        );
+        return { status, out, err: err.join("\n"), asked };
+      } finally {
+        console.log = log;
+        console.error = error;
+      }
+    }
+
+    it("runs what its labels ask for", async () => {
+      const doubled = await counted("ci: 2x", "bug");
+      expect(doubled.status).toBe(0);
+      expect(doubled.out.map((line) => JSON.parse(line))).toEqual([{
+        of: Math.ceil(2 * DISCRETIONARY_SECONDS / LANE_BUDGET_SECONDS),
+        args: ["--base", "HEAD", "--scale", "2"],
+      }]);
+      const full = await counted("ci: full");
+      expect(full.status).toBe(0);
+      expect(JSON.parse(full.out[0]!).args).toEqual(["--full"]);
+    });
+
+    it("stops before reading anything at a label it cannot read", async () => {
+      for (const labels of [["ci: two"], ["ci: 2x", "ci: full"]]) {
+        const refused = await counted(...labels);
+        expect(refused.status).toBe(1);
+        expect(refused.out).toEqual([]);
+        expect(refused.err).toMatch(/^::error::/);
+        expect(refused.err).toContain(`\`${labels[0]}\``);
+        expect(refused.asked).toBe(false);
+      }
+    });
   });
 
   it("asks for enough lanes that none of them runs long", async () => {
     const deps = corpus(FULL_LANE_BUDGET_SECONDS * 4, 1);
-    expect(await fullLanes(options, deps)).toBe(4);
+    expect(await lanesOf(options, deps)).toBe(4);
   });
 
-  /** What `fullLanes` answers, and what it said on the error stream. */
+  /** What `lanesOf` answers, and what it said on the error stream. */
   async function saying(deps: LaneDeps) {
     const error = console.error;
     const said: string[] = [];
     console.error = (line: string) => said.push(line);
     try {
-      return { lanes: await fullLanes(options, deps), said: said.join("\n") };
+      return { lanes: await lanesOf(options, deps), said: said.join("\n") };
     } finally {
       console.error = error;
     }
@@ -894,17 +1100,17 @@ describe("how many lanes the full run asks for", () => {
   it("says when the cap holds back a measured run", async () => {
     // Two tests to a lane, and two lanes more than the cap allows.
     const capped = await saying(
-      corpus((FULL_LANES_MAX + 2) * 2, FULL_LANE_BUDGET_SECONDS * 0.45),
+      corpus((LANES_MAX + 2) * 2, FULL_LANE_BUDGET_SECONDS * 0.45),
     );
-    expect(capped.lanes).toBe(FULL_LANES_MAX);
+    expect(capped.lanes).toBe(LANES_MAX);
     expect(capped.said).toContain(
-      `needs more than ${FULL_LANES_MAX} lanes and takes ${FULL_LANES_MAX}`,
+      `needs more than ${LANES_MAX} lanes and takes ${LANES_MAX}`,
     );
     // And says nothing of the cap where the run fits under it.
     const fits = await saying(
-      corpus(FULL_LANES_MAX * 2, FULL_LANE_BUDGET_SECONDS * 0.45),
+      corpus(LANES_MAX * 2, FULL_LANE_BUDGET_SECONDS * 0.45),
     );
-    expect(fits.lanes).toBe(FULL_LANES_MAX);
+    expect(fits.lanes).toBe(LANES_MAX);
     expect(fits.said).not.toContain("needs more than");
   });
 
@@ -965,7 +1171,7 @@ describe("how many lanes the full run asks for", () => {
     // placed exactly once is the property that matters: what the full
     // run does not run, nothing runs.
     const deps = awkward();
-    const lanes = await fullLanes(options, deps);
+    const lanes = await lanesOf(options, deps);
     const seen = census(
       deps.suites,
       (await deps.manifest()).manifest,
@@ -998,7 +1204,7 @@ describe("how many lanes the full run asks for", () => {
     // The same property down the fallback path, where the count comes
     // from the shape of the topology rather than from a cost model.
     const deps = awkward();
-    const lanes = await fullLanes(options, {
+    const lanes = await lanesOf(options, {
       topology: deps.topology,
       manifest: () =>
         Promise.resolve({ absent: "the store holds no manifest" }),
@@ -1033,7 +1239,7 @@ describe("how many lanes the full run asks for", () => {
     console.error = (line: string) => errors.push(line);
     let lanes: number;
     try {
-      lanes = await fullLanes(options, {
+      lanes = await lanesOf(options, {
         topology: () => Promise.resolve(suites),
         manifest: () =>
           Promise.resolve({
@@ -1064,7 +1270,7 @@ describe("how many lanes the full run asks for", () => {
         ),
       })
     );
-    const lanes = await fullLanes(options, {
+    const lanes = await lanesOf(options, {
       topology: () => Promise.resolve(suites),
       manifest: () =>
         Promise.resolve({ absent: "the store holds no manifest" }),
@@ -1073,20 +1279,20 @@ describe("how many lanes the full run asks for", () => {
     expect(lanes).toBe(Math.ceil((perLane + 40) * 2 / perLane));
   });
 
-  it("takes no more lanes than FULL_LANES_MAX however many it needs", async () => {
+  it("takes no more lanes than LANES_MAX however many it needs", async () => {
     // A lane per suite is the floor with nothing measured, and a tree with
     // more suites than the cap would otherwise ask for a runner apiece.
     const suites = Array.from(
-      { length: FULL_LANES_MAX + 10 },
+      { length: LANES_MAX + 10 },
       (_, i) => suite({ id: `suite-${i}`, units: [`s${i}/one.test.ts`] }),
     );
     const { lanes, said } = await saying({
       topology: () => Promise.resolve(suites),
       manifest: () => Promise.resolve({ absent: "the store is gone" }),
     });
-    expect(lanes).toBe(FULL_LANES_MAX);
+    expect(lanes).toBe(LANES_MAX);
     expect(said).toContain(
-      `needs more than ${FULL_LANES_MAX} lanes and takes ${FULL_LANES_MAX}`,
+      `needs more than ${LANES_MAX} lanes and takes ${LANES_MAX}`,
     );
   });
 
@@ -1106,7 +1312,7 @@ describe("how many lanes the full run asks for", () => {
         cost: 40,
       })),
     );
-    const lanes = await fullLanes(options, {
+    const lanes = await lanesOf(options, {
       topology: () => Promise.resolve(suites),
       manifest: () =>
         Promise.resolve({ manifest: renamed, objectName: "m.json.gz" }),
@@ -1143,7 +1349,7 @@ describe("how many lanes the full run asks for", () => {
     console.error = (line: string) => errors.push(line);
     let lanes: number;
     try {
-      lanes = await fullLanes(options, {
+      lanes = await lanesOf(options, {
         topology: () => Promise.resolve(suites),
         manifest: () =>
           Promise.resolve({ absent: "the store holds no manifest" }),
@@ -1157,7 +1363,7 @@ describe("how many lanes the full run asks for", () => {
     expect(errors.join("\n")).toContain("measured");
   });
 
-  it("answers with an integer on its own, and exits zero", async () => {
+  it("answers with the count and the lanes' arguments, and exits zero", async () => {
     const lines: string[] = [];
     const log = console.log;
     console.log = (line: string) => lines.push(line);
@@ -1172,7 +1378,7 @@ describe("how many lanes the full run asks for", () => {
       console.log = log;
     }
     expect(status).toBe(0);
-    expect(lines).toEqual(["1"]);
+    expect(lines).toEqual([JSON.stringify({ of: 1, args: ["--full"] })]);
   });
 
   it("says what each lane it asks for is projected to take, off the answer", async () => {
@@ -1203,8 +1409,8 @@ describe("how many lanes the full run asks for", () => {
     await Deno.remove(summary);
     expect(status).toBe(0);
     expect(out).toHaveLength(1);
-    expect(out[0]).toMatch(/^\d+$/);
-    const lanes = Number(out[0]);
+    const lanes = JSON.parse(out[0]!).of;
+    expect(Number.isInteger(lanes)).toBe(true);
 
     const seen = pricedForRun(
       census(deps.suites, (await deps.manifest()).manifest, new Set()),
@@ -1240,12 +1446,12 @@ describe("how many lanes the full run asks for", () => {
     ]);
     const longest = maxOf(laid.lanes.map((l) => l.projectedSeconds));
     const told = err.join("\n");
-    expect(told).toContain(`## The full run's ${lanes} lane(s)`);
+    expect(told).toContain(`## The run's ${lanes} lane(s)`);
     expect(told).toContain(
       `The longest is projected to take ${duration(longest + prologue)}`,
     );
     // The summary renders Markdown, so it holds the table undrawn.
-    expect(held).toContain(`## The full run's ${lanes} lane(s)`);
+    expect(held).toContain(`## The run's ${lanes} lane(s)`);
     for (const row of expected) {
       expect(held).toContain(`| ${row.join(" | ")} |`);
     }
@@ -1261,7 +1467,7 @@ describe("how many lanes the full run asks for", () => {
     console.error = (text: string) => err.push(text);
     let lanes: number;
     try {
-      lanes = await fullLanes(options, {
+      lanes = await lanesOf(options, {
         topology: deps.topology,
         manifest: () =>
           Promise.resolve({ absent: "the store holds no manifest" }),

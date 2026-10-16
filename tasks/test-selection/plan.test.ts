@@ -7,8 +7,8 @@ import {
   crowdingLine,
   fixedCharges,
   foldWholeUnits,
-  fullLaneCount,
   type GateChoice,
+  laneCount,
   placedOnlyMandatory,
   plan,
   type PlanInput,
@@ -26,11 +26,13 @@ import {
   FULL_LANE_BOUND_SECONDS,
   FULL_LANE_BUDGET_SECONDS,
   LANE_BUDGET_SECONDS,
-  LANES,
 } from "./policy.ts";
 
 const NO_CAPABILITIES = new Map<string, readonly string[]>();
 const NO_WHOLE_UNITS: ReadonlySet<string> = new Set();
+
+/** How many lanes the plans below are packed into unless they say. */
+const LANES = 5;
 
 /** `count` identities of one suite, each in its own invocation unit. */
 function entries(
@@ -56,6 +58,7 @@ function run(
     mandatory: new Map(),
     capabilities: NO_CAPABILITIES,
     wholeUnits: NO_WHOLE_UNITS,
+    lanes: LANES,
     ...overrides,
   });
 }
@@ -1448,7 +1451,13 @@ describe("plan", () => {
           prologue: 0,
         },
       });
-      const result = run(manifest, { boundSeconds: 300, budgetSeconds: 230 });
+      // A target as large as the lanes, so that the lanes are what limit
+      // how many run.
+      const result = run(manifest, {
+        boundSeconds: 300,
+        budgetSeconds: 230,
+        discretionarySeconds: 230 * LANES,
+      });
       expect(result.crowding).toEqual([{
         suite: "workspace-unit",
         fixed: 250,
@@ -2656,10 +2665,12 @@ describe("how many lanes the full run needs", () => {
     overrides: Partial<PlanInput> = {},
     most?: number,
   ) {
-    return fullLaneCount({
+    return laneCount({
       manifest,
+      mandatory: new Map(),
       capabilities,
       wholeUnits: NO_WHOLE_UNITS,
+      policy: "everything",
       ...overrides,
     }, most);
   }
@@ -2951,5 +2962,129 @@ describe("how many lanes the full run needs", () => {
 
   it("takes one lane for a corpus of nothing", () => {
     expect(count(sampleManifest({ entries: [] }))).toBe(1);
+  });
+});
+
+describe("how many lanes a pull request needs", () => {
+  /**
+   * A thousand one-second tests in lanes of a hundred seconds, the first
+   * 250 of which the change makes mandatory.
+   */
+  function change(overrides: Partial<PlanInput> = {}) {
+    const manifest = sampleManifest({
+      entries: entries(1000, () => ({ cost: 1 })),
+    });
+    const mandatory = new Map(
+      manifest.entries.slice(0, 250).map((entry) => [
+        testIdentityKey(entry.test),
+        "changed" as const,
+      ]),
+    );
+    return {
+      manifest,
+      mandatory,
+      capabilities: NO_CAPABILITIES,
+      wholeUnits: NO_WHOLE_UNITS,
+      budgetSeconds: 100,
+      ...overrides,
+    };
+  }
+
+  /** Seconds a plan placed by score, rather than because it must run. */
+  function chosenSeconds(laid: ReturnType<typeof plan>): number {
+    return selected(laid).filter((selection) => selection.reason !== "changed")
+      .length;
+  }
+
+  it("takes the fewest lanes that hold its mandatory work and its target", () => {
+    const input = change({ discretionarySeconds: 300 });
+    expect(laneCount(input)).toEqual({ lanes: 6, capped: false });
+    expect(plan({ ...input, lanes: 6 }).discretionarySeconds).toBe(300);
+    expect(plan({ ...input, lanes: 5 }).discretionarySeconds).toBe(250);
+  });
+
+  it("takes more lanes for a larger target", () => {
+    expect(laneCount(change({ discretionarySeconds: 600 })).lanes).toBe(9);
+    expect(laneCount(change({ discretionarySeconds: 150 })).lanes).toBe(4);
+  });
+
+  it("runs the mandatory work and nothing else under a target of nothing", () => {
+    const input = change({ discretionarySeconds: 0 });
+    expect(laneCount(input)).toEqual({ lanes: 3, capped: false });
+    const laid = plan(input);
+    expect(placedOnlyMandatory(laid)).toBe(true);
+    expect(selected(laid).length).toBe(250);
+    expect(placedOnlyMandatory(plan(change({ discretionarySeconds: 1 }))))
+      .toBe(false);
+  });
+
+  it("spends its target and no more, however many lanes it has", () => {
+    const input = change({ discretionarySeconds: 300 });
+    expect(chosenSeconds(plan({ ...input, lanes: 20 }))).toBe(300);
+    expect(chosenSeconds(plan({ ...input, lanes: 6 }))).toBe(300);
+    expect(chosenSeconds(plan({ ...input, lanes: 5 }))).toBe(250);
+  });
+
+  it("gives tests chosen by score the room left where the cap binds", () => {
+    const input = change({ discretionarySeconds: 10_000 });
+    expect(laneCount(input, 8)).toEqual({ lanes: 8, capped: true });
+    expect(plan({ ...input, lanes: 8 }).discretionarySeconds).toBe(550);
+  });
+
+  it("asks for no more room than everything it could choose would take", () => {
+    // 750 one-second tests to choose from, against a target of far more.
+    const input = change({ discretionarySeconds: 1_000_000 });
+    expect(laneCount(input)).toEqual({ lanes: 10, capped: false });
+    expect(selected(plan({ ...input, lanes: 10 })).length).toBe(1000);
+    expect(selected(plan({ ...input, lanes: 9 })).length).toBeLessThan(1000);
+  });
+
+  it("counts its own lanes where it is given none", () => {
+    const input = change({ discretionarySeconds: 300 });
+    expect(plan(input).lanes.length).toBe(6);
+  });
+
+  it("opens no lane its tests chosen by score could not fill", () => {
+    // Each lane holding any of these pays the suite's twenty seconds, so
+    // charging each test as though it ran alone would ask for a lane per
+    // twenty or so of them.
+    const manifest = sampleManifest({
+      entries: entries(1000, () => ({ cost: 1 })),
+      calibration: {
+        setupCost: {},
+        suites: {
+          "workspace-unit": { overhead: 20, correction: 1, unitOverhead: 0 },
+        },
+        prologue: 0,
+      },
+    });
+    const input = {
+      manifest,
+      mandatory: new Map(),
+      capabilities: NO_CAPABILITIES,
+      wholeUnits: NO_WHOLE_UNITS,
+      budgetSeconds: 230,
+      discretionarySeconds: 10_000,
+    };
+    expect(laneCount(input)).toEqual({ lanes: 5, capped: false });
+    const laid = plan({ ...input, lanes: 5 });
+    expect(selected(laid).length).toBe(1000);
+    expect(laid.lanes.every((lane) => lane.selections.length > 0)).toBe(true);
+  });
+
+  it("chooses nothing by score in a full run, whatever its target", () => {
+    const input = {
+      ...change({ policy: "everything", discretionarySeconds: 300 }),
+      mandatory: new Map(),
+    };
+    expect(laneCount(input).lanes).toBe(10);
+    const laid = plan({ ...input, lanes: 20 });
+    expect(laid.discretionarySeconds).toBe(0);
+    expect(laid.discretionaryTargetSeconds).toBe(0);
+    // A budgeted plan given the same room spends its target.
+    expect(
+      plan({ ...input, policy: "budgeted", lanes: 20 }).discretionarySeconds,
+    )
+      .toBe(300);
   });
 });

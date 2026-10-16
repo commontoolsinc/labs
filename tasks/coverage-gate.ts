@@ -14,8 +14,9 @@
  * fails the gate, unless the pull request's description accepts it.
  *
  * Which gates were chosen is worked out here by packing the plan the lanes
- * packed, from the same tree and the same manifest, rather than read out
- * of what a lane reported. Two answers to that question would let a lane
+ * packed, from the same tree, the same manifest, and the lane count and
+ * scale the job counting the lanes handed them, rather than read out of
+ * what a lane reported. Two answers to that question would let a lane
  * talk this into judging something it did not measure, or into skipping
  * something it did.
  *
@@ -28,9 +29,9 @@
  * with, which the Pull Request Comments workflow posts: a fork's pull
  * request gets a read-only token here, and cannot be commented on.
  *
- *   deno run -A tasks/coverage-gate.ts --base origin/main --reports artifacts \
- *     [--full] [--comment coverage-comment.json --pr 123]
- *   deno run -A tasks/coverage-gate.ts --full --default-branch \
+ *   deno run -A tasks/coverage-gate.ts --base origin/main --scale 1 --of 5 \
+ *     --reports artifacts [--comment coverage-comment.json --pr 123]
+ *   deno run -A tasks/coverage-gate.ts --full --default-branch --of 30 \
  *     --reports artifacts
  */
 
@@ -73,7 +74,6 @@ import {
 import type { CoverageGateSelection } from "./test-selection/coverage.ts";
 import { fetchManifest, type ManifestFetch } from "./test-selection/store.ts";
 import type { CoverageBaseline } from "./test-selection/manifest.ts";
-import { LANES } from "./test-selection/policy.ts";
 
 /** What the command line asked for. */
 export interface GateOptions {
@@ -90,6 +90,18 @@ export interface GateOptions {
    * branch's run does, and so does a pull request that asks for it.
    */
   full: boolean;
+
+  /**
+   * What multiplies a budgeted run's tests chosen by score, as the job
+   * counting the lanes decided. One where not given.
+   */
+  scale?: number;
+
+  /**
+   * How many lanes the run had, as the job counting them decided. Where
+   * it is not given, the plan counts them itself, the same way.
+   */
+  of?: number;
 
   /**
    * Whether the run is the default branch's, which has no change for a
@@ -169,6 +181,18 @@ export function parseGateArgs(
         if (!/^[1-9][0-9]*$/.test(value)) return undefined;
         prNumber = Number(value);
         break;
+      case "--of":
+        if (!/^[1-9][0-9]*$/.test(value)) return undefined;
+        options.of = Number(value);
+        break;
+      case "--scale": {
+        const scale = Number(value);
+        if (value.trim() === "" || !Number.isFinite(scale) || scale < 0) {
+          return undefined;
+        }
+        options.scale = scale;
+        break;
+      }
       default:
         return undefined;
     }
@@ -178,6 +202,9 @@ export function parseGateArgs(
   // other shape is a workflow that lost a flag.
   if (options.defaultBranch !== (options.base === undefined)) return undefined;
   if (options.defaultBranch && !options.full) return undefined;
+  // A full run chooses nothing by score, so a scale beside it would be one
+  // nothing honored.
+  if (options.full && options.scale !== undefined) return undefined;
   if (commentPath === undefined && prNumber === undefined) return options;
   // A comment with no pull request has nowhere to go, and a pull request
   // with no comment file would be told nothing; either is a workflow that
@@ -857,10 +884,11 @@ export async function main(
   const options = parseGateArgs(args, root);
   if (options === undefined) {
     console.error(
-      "usage: coverage-gate.ts --base <ref> [--full] [--reports <dir>] " +
-        "[--body <text>] [--tests-failed] [--comment <path> --pr <number>]\n" +
-        "       coverage-gate.ts --full --default-branch [--reports <dir>] " +
-        "[--body <text>] [--tests-failed]",
+      "usage: coverage-gate.ts --base <ref> [--full | --scale <n>] " +
+        "[--of <lanes>] [--reports <dir>] [--body <text>] [--tests-failed] " +
+        "[--comment <path> --pr <number>]\n" +
+        "       coverage-gate.ts --full --default-branch [--of <lanes>] " +
+        "[--reports <dir>] [--body <text>] [--tests-failed]",
     );
     return 2;
   }
@@ -884,7 +912,8 @@ export async function main(
     manifest: fetched.manifest,
     changed,
     full: options.full,
-    lanes: LANES,
+    ...(options.scale === undefined ? {} : { scale: options.scale }),
+    ...(options.of === undefined ? {} : { lanes: options.of }),
   });
   let accepted: ReadonlyMap<string, number> = new Map();
   try {

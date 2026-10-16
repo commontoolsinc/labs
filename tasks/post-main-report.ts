@@ -91,7 +91,6 @@ import {
   reachedSets,
 } from "./test-topology/coverage-gates.ts";
 import { placedOnlyMandatory } from "./test-selection/plan.ts";
-import { LANES } from "./test-selection/policy.ts";
 import { fetchManifest, type ManifestFetch } from "./test-selection/store.ts";
 import type { Manifest, WithheldReason } from "./test-selection/manifest.ts";
 import {
@@ -575,14 +574,8 @@ export function manifestView(
   suites: readonly Suite[],
   changed: ReadonlySet<string>,
 ): Omit<PullRequestView, "ran"> {
-  // A pull request's run is packed into `LANES` lanes.
-  const packed = planOver({
-    suites,
-    manifest,
-    changed,
-    full: false,
-    lanes: LANES,
-  }).laid;
+  // A pull request's run, packed into as many lanes as it would take.
+  const packed = planOver({ suites, manifest, changed, full: false }).laid;
   const selected = new Set<string>();
   for (const lane of packed.lanes) {
     for (const selection of lane.selections) {

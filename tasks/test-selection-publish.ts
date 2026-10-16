@@ -117,7 +117,6 @@ import { gatesOf } from "./test-selection/census.ts";
 import {
   COST_WINDOW_DAYS,
   LANE_BUDGET_SECONDS,
-  LANES,
 } from "./test-selection/policy.ts";
 
 /**
@@ -1242,7 +1241,8 @@ function summarize(
   if (times.length > 0) {
     const spread = maxOf(times) - minOf(times);
     console.log(
-      `test selection: ${LANES} lanes, spread ${duration(spread)}`,
+      `test selection: ${reference.lanes.length} lanes, spread ` +
+        duration(spread),
     );
   }
   const selected = reference.lanes.reduce(

@@ -762,6 +762,55 @@ spends more than its batches' average.
 - A batch that does not say how many passes it made, or whether coverage
   was on for it, is not read.
 
+### How many lanes a run takes
+
+The job matrix has to be known before any lane starts, so one job counts a
+run's lanes, and it hands them the count and the arguments every lane takes
+besides its own number. Each lane then packs the same plan over the same
+reading at that count, so what a lane runs passes through no job output.
+A later attempt of the lanes alone is handed what the count of the
+attempt it repeats decided. A later attempt of the whole run counts again
+from the same commit, change, labels and manifest, and so comes to the
+same answer.
+
+A pull request's plan has a discretionary target: `DISCRETIONARY_SECONDS`
+times the run's scale, which is the seconds the value, density and
+exploration passes are to fill between them. The full run's target is zero,
+since it chooses nothing. A run takes the fewest lanes, up to `LANES_MAX`,
+whose plan holds it. A plan holds a run where:
+
+- no mandatory identity overflows, which is to say each one either fits
+  inside a lane's budget or runs alone in a lane of its own; and
+- the room the mandatory pass leaves below the lanes' budgets, added up
+  over the lanes, is at least the target, or at least what one lane
+  holding every identity the passes could choose would be charged where
+  that is less.
+
+The count is found by bisection between one lane and `LANES_MAX`. It
+takes an added lane to leave nothing overflowing that did not before, and
+no less room. Where that fails the count may be more lanes than the run
+needs, never fewer. A run whose plan holds it at no count up to
+`LANES_MAX` takes `LANES_MAX` lanes: its passes fill what room is left,
+and its mandatory work may put a lane past its budget. Where nothing in the
+tree has a measured cost, the count is the larger of the number of suites
+with anything to run and what the packing of the stand-ins asks for.
+
+A pull request's scale is one unless a label says otherwise. Every label
+whose name begins `ci:`, in any spelling or capitalization, says how much
+the pull request runs, and each must be one of two forms:
+
+- `FULL_RUN_LABEL`, `ci: full`, which makes the run the full one;
+- `ci: <n>x`, where `<n>` is a non-negative decimal written as digits
+  with an optional fraction or as a fraction alone, which makes the scale
+  `n`. At a scale of zero the run holds its mandatory work and nothing
+  chosen by score, in as few lanes as that takes, which is one where
+  nothing is mandatory.
+
+A label in that namespace in neither form, or more than one such label,
+stops the count before it reads anything, and with it the run: no lane
+starts, and the count says which labels it could not reconcile. Running the
+default instead would run something the labels did not ask for.
+
 ### How lanes are filled
 
 The mandatory identities are placed first, the costliest first, with the
@@ -771,17 +820,17 @@ One that fits nowhere even once goes in the lane it leaves shortest. This
 is the only pass that may put a lane past its bound, or past its budget
 with more than one identity in it.
 
-Three passes then spend what is left of the whole run's budget, each up to
+Three passes then spend the run's discretionary target, or what the
+mandatory pass left of the lanes' budgets where that is less, each up to
 its share of it. `FILL_VALUE_SHARE` is spent in descending score.
 `FILL_DENSITY_SHARE` is spent in descending score per second of what each
 identity would add to the lane it went in, recomputed as placements make
 other identities cheaper. `FILL_EXPLORATION_SHARE` is spent on what
 neither chose, never-run identities first and then the longest unrun,
 with an order shuffled by the manifest's seed breaking ties. A share left
-unspent is available to the passes after it. The shares are of what the
-mandatory pass left rather than of the whole budget, so a change that
-forces in a great deal of work is not given a full budget of
-discretionary work on top of it.
+unspent is available to the passes after it. The passes spend the target
+and no more however many lanes the run has, and a change that forces in a
+great deal of work takes more lanes rather than leaving them no room.
 
 In these passes an identity goes in the cheapest lane that can hold it
 inside its budget, and the emptier lane wins a tie. A lane holding

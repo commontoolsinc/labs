@@ -14,9 +14,6 @@
  * file, which is why `DIALS` says which each one is.
  */
 
-/** How many jobs a pull request's tests are packed into. */
-export const LANES = 5;
-
 /**
  * What a pull-request lane is packed to finish inside, setup included. The
  * workflow's step and job timeouts sit above it and only stop a lane that
@@ -60,16 +57,30 @@ export const FULL_LANE_BUDGET_SECONDS = FULL_LANE_BOUND_SECONDS -
   LANE_PROLOGUE_SECONDS - LANE_SAFETY_SECONDS;
 
 /**
- * The most lanes the full run is split into. Half the sixty runners GitHub
- * gives the organization at once, so that one push's full run leaves room
- * for the lanes of whatever runs beside it; `tasks/ci-workflow.test.ts`
- * holds the first wave of a run to the same half. A run needing more takes
- * no more lanes, and a lane may run past its budget instead: the full
- * run's packer places every test, running a repeated one fewer times where
- * its runs fit in no lane, and putting one that fits nowhere even once in
- * the lane it leaves shortest.
+ * Seconds of tests chosen by score that a pull request runs beside the work
+ * its change makes mandatory: what the value, density and exploration
+ * passes share between them. A pull request takes the fewest lanes that
+ * hold its mandatory work and this much more, so a change that forces a
+ * great deal of work in takes more lanes rather than running nothing chosen
+ * by score. Set so that a pull request whose mandatory work fits in five
+ * lanes with room to spare most often takes five, under the cost model the
+ * manifests carry; a change with nothing mandatory takes three. A pull
+ * request labelled `ci: <n>x` runs `n` times this.
  */
-export const FULL_LANES_MAX = 30;
+export const DISCRETIONARY_SECONDS = 575;
+
+/**
+ * The most lanes any run is split into. Half the sixty runners GitHub
+ * gives the organization at once, so that one run leaves room for the
+ * lanes of whatever runs beside it; `tasks/ci-workflow.test.ts` holds the
+ * first wave of a run to the same half. A run needing more takes no more
+ * lanes. A pull request's tests chosen by score then get what room is
+ * left, and a full run's lanes may run past their budget: the full run's
+ * packer places every test, running a repeated one fewer times where its
+ * runs fit in no lane, and putting one that fits nowhere even once in the
+ * lane it leaves shortest.
+ */
+export const LANES_MAX = 30;
 
 /** The label that runs everything on a pull request. */
 export const FULL_RUN_LABEL = "ci: full";
@@ -426,7 +437,8 @@ const exclusions: readonly Exclusion[] = [
   {
     member: "packages/runner",
     kind: "size",
-    reason: "Its whole set is past what all five lanes hold together.",
+    reason: "Its whole set is past what the most lanes a run may take " +
+      "hold together.",
   },
   {
     member: "packages/cli",
@@ -494,15 +506,6 @@ export interface Dial {
  */
 export const DIALS: readonly Dial[] = [
   {
-    name: "LANES",
-    value: LANES,
-    unit: "lanes",
-    setBy: "chosen",
-    why:
-      "Up when pull-request feedback is too thin and runner capacity allows " +
-      "more; down when the wave crowds other workflows off the shared runners.",
-  },
-  {
     name: "LANE_BOUND_SECONDS",
     value: LANE_BOUND_SECONDS,
     unit: "seconds",
@@ -559,15 +562,27 @@ export const DIALS: readonly Dial[] = [
       "runner.",
   },
   {
-    name: "FULL_LANES_MAX",
-    value: FULL_LANES_MAX,
+    name: "DISCRETIONARY_SECONDS",
+    value: DISCRETIONARY_SECONDS,
+    unit: "seconds",
+    setBy: "chosen",
+    why: "Up when regressions reach the default branch past pull requests " +
+      "that did not run the test chosen by score that would have caught " +
+      "them; down when pull requests take more lanes than runner minutes " +
+      "allow. A pull request whose mandatory work fits in five lanes with " +
+      "room to spare most often takes five at this figure. The label " +
+      "`ci: <n>x` multiplies it by n for one pull request.",
+  },
+  {
+    name: "LANES_MAX",
+    value: LANES_MAX,
     unit: "lanes",
     setBy: "chosen",
-    why: "Up when the lane-count job says the full run needs more lanes " +
-      "than this, and the organization's runner limit has room; down when " +
-      "a push's full run crowds out the pull requests behind it. A full " +
-      "run needing more lanes than this takes this many, and a lane may " +
-      "then run past its budget.",
+    why: "Up when the lane-count job says a run needs more lanes than " +
+      "this, and the organization's runner limit has room; down when one " +
+      "run crowds out the runs behind it. A run needing more lanes than " +
+      "this takes this many: a pull request then runs fewer tests chosen " +
+      "by score, and a full run's lanes may run past their budget.",
   },
   {
     name: "FULL_RUN_LABEL",
