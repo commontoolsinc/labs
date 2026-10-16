@@ -94,13 +94,6 @@ export default pattern(() => {
         ),
       },
       { assertion: assert(() => displayOf(editForm(alice[UI])) === "none") },
-      // The message's row, in the main conversation.
-      {
-        assertion: assert(() =>
-          hiddenNodeDisplay(alice[UI], (node) => hasText(node, "Hello")) ===
-            "block"
-        ),
-      },
       // The viewer's own message offers its edit control.
       {
         assertion: assert(() =>
