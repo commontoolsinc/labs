@@ -82,8 +82,9 @@ By the outermost frame, of the 12,665 busy samples:
    interning and hashing a pattern does when it is made).
 4. Commit finalization, 1,028 samples, a twelfth, 86% of it
    `prepareBoundaryCommitSteps` inside `#prepareCfc`.
-5. The pre-sync, about 900 samples, a fourteenth: planning 535, the list
-   children 150, the family cells 370.
+5. The pre-sync, 910 samples, a fourteenth, of which planning is 535 and
+   the list children 352; and beside it, under its own frame, the resume
+   wave's family-cell syncs, 377 samples.
 
 Two costs cut across those: hashing, 1,747 samples, three quarters of it
 `cachedFrozenObjectHashElseUndefined` computing a frozen object's hash
