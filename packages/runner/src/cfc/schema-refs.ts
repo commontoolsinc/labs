@@ -684,10 +684,13 @@ const canonicalizeCfcSchemaDocumentUncached = (
     schema,
     Object.fromEntries(root),
   );
-  let marker = "\u0000";
-  while ([...referenced].some((name) => name.startsWith(marker))) {
-    marker += "\u0000";
+  let leadingNuls = 0;
+  for (const name of referenced) {
+    let count = 0;
+    while (count < name.length && name.charCodeAt(count) === 0) count++;
+    if (count > leadingNuls) leadingNuls = count;
   }
+  const marker = "\u0000".repeat(leadingNuls + 1);
 
   // Partition refinement: one class, split by content until stable.
   let classOf = new Map<string, number>(names.map((name) => [name, 0]));
