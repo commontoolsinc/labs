@@ -1035,8 +1035,7 @@ describe("piece source reconciliation", () => {
     const policyChanged = {
       name: "CfcCommitRefusalError",
       message: "CFC enforcement rejected commit: relevant transaction was " +
-        "not prepared: cfc-envelope-stability: writePolicyAnyOf must remain " +
-        "stable at /messages/*",
+        "not prepared: writePolicyAnyOf must remain stable at /messages/*",
       reasons: [
         "cfc-envelope-stability: writePolicyAnyOf must remain stable at " +
         "/messages/*",

@@ -43,3 +43,14 @@ export const envelopeStabilityReason = (message: string): string =>
 /** Whether a reason was tagged by {@link envelopeStabilityReason}. */
 export const isEnvelopeStabilityReason = (reason: string): boolean =>
   reason.startsWith(`${CFC_ENVELOPE_STABILITY_REASON}: `);
+
+/**
+ * `reason` without a leading {@link CFC_ENVELOPE_STABILITY_REASON}, for text a
+ * person reads. The token is a classification channel for the refusal's
+ * `reasons`, which is where a consumer reads it, and has no business in a
+ * rejection message or anything shown from one.
+ */
+export const withoutEnvelopeStabilityToken = (reason: string): string =>
+  isEnvelopeStabilityReason(reason)
+    ? reason.slice(CFC_ENVELOPE_STABILITY_REASON.length + 2)
+    : reason;

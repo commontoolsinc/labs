@@ -464,6 +464,9 @@ describe("cfc-write-policy-any-of", () => {
         expect(runs).toBe(1);
         expect(error?.name).toBe("CfcCommitRefusalError");
         expect(isEnvelopeStabilityRefusal(error)).toBe(true);
+        // The token that classifies the refusal stays out of the message,
+        // which is what a person sees, the source panel included.
+        expect(error?.message).not.toContain("cfc-envelope-stability");
         expect(error?.message).toContain(
           "writePolicyAnyOf must remain stable",
         );
@@ -493,6 +496,9 @@ describe("cfc-write-policy-any-of", () => {
         expect(runs).toBe(1);
         expect(error?.name).toBe("CfcCommitRefusalError");
         expect(isEnvelopeStabilityRefusal(error)).toBe(true);
+        // The token that classifies the refusal stays out of the message,
+        // which is what a person sees, the source panel included.
+        expect(error?.message).not.toContain("cfc-envelope-stability");
         expect(error?.message).toContain("confidentiality cannot be weakened");
       });
     });
