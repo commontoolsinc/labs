@@ -12,9 +12,7 @@
  * send writes, or a counter every send advances, still converges at a small
  * size, by conflicting and retrying; at a room's real size the retries run out
  * and messages are lost. So the test asks, as well, what each refused send was
- * refused over, and holds it to none of the room's shared records. The
- * runtime's own read of the room's whole argument document is the one stale
- * read it leaves out, as the comment where it does so says.
+ * refused over, and holds it to none of the room's shared records.
  *
  * Each member is a harness session with a Home stand-in, the
  * `fabrichat-add-offer` fixture, which holds a profile and a FabriChat manager
@@ -139,39 +137,13 @@ describe("fabrichat: members sending at once", () => {
     await harness.settle();
 
     // Every send refused over a stale read, by the documents it was stale
-    // on. A send's commit also carries a read of the room's whole argument
-    // document, which holds the room's lists and so changes with every
-    // other member's addition to them. The room's handlers ask for no such
-    // read: it is the runtime's, and is left out here, by what the document
-    // holds. Any other stale document is one the room shares between sends.
-    const holdsLists = new Map<string, boolean>();
-    const isRoomArgument = async (id: string): Promise<boolean> => {
-      if (!holdsLists.has(id)) {
-        const held = await starter.rawRead({
-          id,
-          space: room.space,
-          path: ["value"],
-        });
-        const value = held.value as Record<string, unknown> | undefined;
-        holdsLists.set(
-          id,
-          Array.isArray(value?.messages) && Array.isArray(value?.activity),
-        );
-      }
-      return holdsLists.get(id)!;
-    };
+    // on. Each is a document the room shares between sends.
     const refused: string[] = [];
     for (const member of members) {
       for (const rejection of await member.rejections()) {
         if (!rejection.writes.some((id) => id.startsWith("of:"))) continue;
         for (const [, id] of rejection.message.matchAll(/read: (of:\S+)/g)) {
           const reads = rejection.reads.filter((read) => read.startsWith(id));
-          if (
-            await isRoomArgument(id) &&
-            reads.every((read) => read === `${id}/value`)
-          ) {
-            continue;
-          }
           refused.push(
             `  ${member.label}: stale on ${id}, reading ${reads.join(", ")}`,
           );
