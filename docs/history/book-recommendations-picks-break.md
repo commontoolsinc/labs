@@ -8,9 +8,11 @@ reason: "Record of the deliberate contract break taken when book-recommendations
 # Book recommendations: a pick is a new book, not a finished one
 
 `book-recommendations/main.tsx`'s result schema required each of the five
-`picks` to carry `book`, a read-only link to a cell the run held. The only
-cells the run holds are the reader's finished books, so every valid result
-recommended five books the reader had already read. Measured live on Estuary,
+`picks` to carry `book`, a read-only link to a cell the run held whose value
+has a `title` and an `author`. The run holds the `finishedBooks` list, the
+`favoriteAuthors` list, and one cell per finished book, and only the last
+match that shape, so every valid result recommended five books the reader had
+already read. Measured live on Estuary,
 2026-10-16, with the seeded demo: all five picks were rereads, each `why`
 opening "A reread pick" or "Revisit".
 
