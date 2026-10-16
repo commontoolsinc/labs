@@ -48,10 +48,13 @@ const view = recommendation.pending
   labeled data into the text puts that label on the request. Pass the cell
   under `inputs` instead.
 - `inputs` are cells, keyed by the names the run sees them under. Each
-  reaches the run as a handle, which the run looks at with `describe_handle`
-  and reads with `read_value`; nothing here is copied into the request. Every
-  run has those two tools, whatever `tools` selects, so a cell granted here is
-  one the run can read, within its ceiling.
+  reaches the run as a handle; nothing here is copied into the request. The
+  run looks at a handle with `describe_handle`, which reports its shape and
+  never its value, and reads one `describe_handle` has described with
+  `read_value`. A read is measured against the run's read ceiling before it is
+  released, and the label of what was read joins the run's context, so
+  everything the model writes afterwards carries it. Every run has those two
+  tools, whatever `tools` selects.
 - `resultSchema` is the schema the run's structured result is validated
   against before it is written.
 - `maxConfidentiality` (optional) bounds what the run may observe. Declared,
@@ -60,13 +63,12 @@ const view = recommendation.pending
   ceiling is the deployment's; a deployment whose `agent` sink ceiling is
   `[]` refuses every labeled read in the request, references included, whether
   or not this is declared (see below).
-- `tools` (optional) names the retrieval tools the run may use, from the
-  list the deployment publishes (`AGENT_TOOL_NAMES` in
-  `packages/runner/src/builtins/agent-schemas.ts`). It narrows what the run
-  reaches beyond its inputs; `describe_handle` and `read_value` come with
-  every run and need not be named. A name the user's registered runner does
-  not offer fails the request with `INVALID_INPUT` before it is staged; with
-  no runner registered the request queues.
+- `tools` (optional) names the tools the run may use, from the list the
+  deployment publishes (`AGENT_TOOL_NAMES` in
+  `packages/runner/src/builtins/agent-schemas.ts`); `describe_handle` and
+  `read_value` come with every run and need not be named. A name the user's
+  registered runner does not offer fails the request with `INVALID_INPUT`
+  before it is staged; with no runner registered the request queues.
 
 ## Reading the result
 
