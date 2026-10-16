@@ -8209,25 +8209,26 @@ const isRuntimeMintedIntegrityAtom = (atom: unknown): boolean =>
   (typeof atom === "string" && SYSTEM_STRING_ATOMS.has(atom));
 
 /**
- * Drops runtime-minted evidence atoms from a persisted label's integrity unless
- * the write was authored by a trusted builtin (the sanitizer, compile cache,
- * and link/provenance minting all run as builtins). Verified pattern code and
- * unattributed writes may not mint evidence (audit S4).
+ * Drops runtime-minted evidence atoms from a schema-derived label's integrity
+ * unless the write was authored by a trusted builtin (the sanitizer, compile
+ * cache, and link/provenance minting all run as builtins). Verified pattern
+ * code and unattributed writes may not mint evidence (audit S4). A
+ * `TransformedBy` is dropped whatever the author: the flow stage mints it for
+ * one attempt, from the identity that ran and the witnesses it consumed, and
+ * a schema declaration names no attempt (CFC §15.4).
  */
 const gateRuntimeMintedIntegrity = (
   label: IFCLabel,
   authoringIdentity: ImplementationIdentity | undefined,
 ): IFCLabel => {
-  if (authoringIdentity?.kind === "builtin") {
-    return label;
-  }
   const integrity = label.integrity;
   if (integrity === undefined || integrity.length === 0) {
     return label;
   }
-  const filtered = integrity.filter((atom) =>
-    !isRuntimeMintedIntegrityAtom(atom)
-  );
+  // SPEC-PENDING https://github.com/commonfabric/specs/pull/70
+  const filtered = authoringIdentity?.kind === "builtin"
+    ? integrity.filter((atom) => !isTransformedByAtom(atom))
+    : integrity.filter((atom) => !isRuntimeMintedIntegrityAtom(atom));
   if (filtered.length === integrity.length) {
     return label;
   }

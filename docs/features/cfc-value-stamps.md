@@ -134,4 +134,7 @@ mints an atom, covers the references beneath it.
 
 An envelope can hold a stamp's atoms in a `declared` entry. Nothing tells such
 an entry apart from a claim, so it keeps the declared component's discipline.
-The runtime writes a stamp to the `minted` component only.
+The runtime writes a stamp to the `minted` component only. One atom is never
+declared or minted through a schema: `TransformedBy`, which the flow stage
+mints for one attempt and which `gateRuntimeMintedIntegrity` strips from every
+schema-derived label, whatever the author (CFC §15.4).

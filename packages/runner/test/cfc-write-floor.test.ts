@@ -243,6 +243,70 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
       });
     }
 
+    it("persists no `TransformedBy` a builtin's schema declares, in the declared or the minted component", async () => {
+      // `TransformedBy` names an attempt, and the runtime mints it for one;
+      // a declaration names none, so the gate strips the atom from a schema
+      // whatever its author, where it keeps the other runtime-minted atoms
+      // for a builtin (CFC §15.4).
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({ storageManager });
+      try {
+        const declared = {
+          type: CFC_ATOM_TYPE.TransformedBy,
+          identity: { kind: "builtin", builtinId: "floor-test" },
+        };
+        const schema = {
+          type: "object",
+          properties: {
+            out: {
+              type: "string",
+              ifc: {
+                integrity: [declared],
+                addIntegrity: [declared, LLM_DERIVED_ATOM],
+              },
+            },
+          },
+        } as const satisfies JSONSchema;
+        const tx = runtime.edit();
+        setCfcImplementationIdentity(tx, {
+          kind: "builtin",
+          builtinId: "floor-test",
+        });
+        const sink = runtime.getCell(
+          signer.did(),
+          "declared-transformed-by",
+          schema,
+          tx,
+        );
+        sink.set({ out: "authored value" });
+        setCfcImplementationIdentity(tx, undefined);
+        tx.prepareCfc();
+        expect((await tx.commit().settled).error).toBeUndefined();
+        const read = runtime.edit();
+        const stored = readStoredCfcMetadata(
+          read,
+          sink.getAsNormalizedFullLink(),
+        );
+        read.abort();
+        const atoms = (stored?.labelMap.entries ?? [])
+          .filter((entry) =>
+            entry.origin === "declared" || entry.origin === "minted"
+          )
+          .flatMap((entry) => entry.label.integrity ?? []);
+        // The builtin's `LlmDerived` stamp pins the minted component, so the
+        // absent atom is the claim.
+        expect(atoms).toContainEqual(LLM_DERIVED_ATOM);
+        expect(
+          atoms.some((atom) =>
+            (atom as { type?: unknown }).type === CFC_ATOM_TYPE.TransformedBy
+          ),
+        ).toBe(false);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
     it("admits a value of another branch where the floor's own branch names the stamp, and stamps nothing", async () => {
       // The floor applies whichever branch the written value takes, so a
       // branch that both requires and stamps an atom is met by a write
