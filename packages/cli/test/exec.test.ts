@@ -23,7 +23,7 @@ import {
 import { writeMountState } from "../lib/fuse.ts";
 import type { SpaceConfig } from "../lib/piece.ts";
 import { externalizeSchema } from "../../runner/src/link-utils.ts";
-import { cf, relevantStderr, sendThroughStandIn } from "./utils.ts";
+import { argv, cf, relevantStderr, sendThroughStandIn } from "./utils.ts";
 import { createTransactionCommitReceipt } from "../../runner/src/storage/commit-receipt.ts";
 
 function makeSpec(
@@ -2013,7 +2013,7 @@ describe("exec command user-facing errors", () => {
 
   it("prints readable errors without a raw stack trace", async () => {
     const missingPath = join(tmpDir, "missing.handler");
-    const { code, stdout, stderr } = await cf(`exec ${missingPath}`);
+    const { code, stdout, stderr } = await cf(argv`exec ${missingPath}`);
 
     expect(code).toBe(1);
     expect(stdout).toEqual([]);

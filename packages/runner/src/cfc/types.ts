@@ -1205,6 +1205,11 @@ export type CfcTxState = {
   // current-principal claim or owner binding may resolve to unless a run is
   // stamped as acting for that identity.
   servingIdentity?: string;
+  // The client runtime's own identity, set once by the Runtime at tx creation
+  // off the serving posture and absent on it: the principal its storage
+  // session authenticates as, which the memory server keys every `user` and
+  // `session` instance the client writes by.
+  clientIdentity?: string;
   // Addresses of writes to a document's ["cfc"] label-map path made OUTSIDE the
   // runtime's privileged persistence scope (audit S18). The runtime's own label
   // writes in prepareBoundaryCommit run privileged and never land here; anything

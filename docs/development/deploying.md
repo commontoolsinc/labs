@@ -79,6 +79,31 @@ That playbook is `ansible/playbooks/toolshed_binary_deploy.yml` in the
 `/opt/cf/deploy.sh` wrapper described above. Making the download replace what
 it finds, rather than skip it, is a change in that repository.
 
+## A deploy states when it happened
+
+A toolshed orders the releases of the system patterns it serves by
+`TOOLSHED_RELEASED_AT` ([configuration](CONFIGURATION.md#build-info)). Its
+patterns route sends that time beside every identity it advertises, and a piece
+that adopted one release is not moved to an earlier one. The value describes
+the deploy rather than the commit, so it is the time a deploy happens, and every
+deploy sets it again — a deploy of a commit already deployed included, since
+rolling a bad release back that way makes it the latest release there is.
+
+Every instance a deploy restarts has to read the same value, and to read it
+alongside the binary it starts. A host restarts its instances one after another,
+so for a while some serve the release being replaced and some the one replacing
+it; the time is what tells a piece which of the two to keep. A value kept with
+the release the instances run from gives that pairing by construction. A
+toolshed whose environment does not set the time advertises identities alone,
+and a piece it serves then follows whichever identity it was offered last.
+
+The time has to be the deploy's own. A time from the future would stamp every
+release a piece adopts from that deploy, and every correct release after it
+would read as earlier, so pieces would stay where they are until a deploy stated
+a later time still. A toolshed therefore refuses to start with a time more than
+five minutes ahead of its own clock, which allows for skew between the host that
+deploys and the hosts that run.
+
 ## The wrapper is owned by another repository
 
 `/opt/cf/deploy.sh` is not in this repository. The

@@ -24,14 +24,7 @@ import {
   readValue,
   textContent,
 } from "../test/vnode-helpers.ts";
-import {
-  type ActivityCounters,
-  type MessagesValue,
-  type ReactionList,
-  type RequestMemo,
-  type SentActivity,
-  type UsedTime,
-} from "./room-records.tsx";
+import { type MessagesValue } from "./room-records.tsx";
 import { FabriChatRoomCore } from "./room.tsx";
 import {
   CHAT_RETITLE_ACTION,
@@ -92,11 +85,6 @@ const shownRefusal = (root: unknown): string =>
 /** A room's records, with none of them holding anything yet. */
 const freshRecords = () => ({
   messages: Writable.of<MessagesValue>([] as MessagesValue),
-  reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
-  requests: Writable.of<RequestMemo[]>([]),
-  usedTimes: Writable.of<UsedTime[]>([]),
-  activity: Writable.of<SentActivity[]>([]),
-  counters: Writable.of<ActivityCounters[]>([]),
   titles: Writable.of<TitleRecord[]>([]),
 });
 

@@ -166,7 +166,8 @@ ordered **default first, then by MRU, then list order**:
 // Shown at module scope.
 wish({ query: "#profile" }) // the single current profile; see [UI] below
 wish({ query: "#profileName" }) // default profile's initialNameApplied
-wish({ query: "#profileAvatar" }) // default profile's avatar
+wish({ query: "#profileAvatar" }) // default profile's avatar text
+wish({ query: "#profilePicture" }) // default profile's picture, as image bytes
 wish({ query: "#profileBio" }) // default profile's bio (free-text description)
 wish({ query: "#profileSpace" }) // default profile's space cell
 ```
@@ -354,7 +355,8 @@ The `scope` parameter can redirect or fan the others out across other spaces.
 | `#chatManager`      | User's FabriChat manager: their chat rooms (home space) |
 | `#profile`          | User's current profile piece                            |
 | `#profileName`      | User's profile display name                             |
-| `#profileAvatar`    | User's profile avatar                                   |
+| `#profileAvatar`    | User's profile avatar text                              |
+| `#profilePicture`   | User's profile picture, as image bytes                  |
 | `#profileSpace`     | User's profile space cell                               |
 
 The `#profile*` targets are detailed under

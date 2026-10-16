@@ -416,6 +416,7 @@ export {
   uniqueCfcAtoms,
 } from "./observation.ts";
 export {
+  canonicalizeCfcSchemaDocument,
   cfcSchemaIsFalse,
   cfcSchemaIsInternalKey,
   cfcSchemaIsTrue,

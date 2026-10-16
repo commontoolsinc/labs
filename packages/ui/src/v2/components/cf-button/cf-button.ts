@@ -1,3 +1,4 @@
+import { getLogger } from "@commonfabric/utils/logger";
 import { html, type PropertyValues } from "lit";
 import { property } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
@@ -37,6 +38,8 @@ const buttonVariants = ["solid", "outline", "ghost"] as const;
 const buttonColors = ["neutral", "primary", "accent", "danger"] as const;
 const buttonSizes = ["xs", "sm", "md", "lg", "xl", "icon"] as const;
 const buttonTypes = ["button", "submit", "reset"] as const;
+
+const logger = getLogger("cf-button", { enabled: false, level: "debug" });
 
 //
 // Accessibility strategy
@@ -97,11 +100,18 @@ export class CFButton extends BaseElement {
 
     // Suppress click events on the host element when disabled.
     // JSX attaches onClick handlers to the host element, but click events
-    // cross the shadow boundary and would fire even when disabled.
+    // cross the shadow boundary and would fire even when disabled. The drop
+    // is otherwise silent, so it is counted and, with the logger enabled,
+    // logged.
     this.addEventListener(
       "click",
       (e) => {
         if (this.disabled) {
+          logger.debug("dropped", () => [
+            `cf-button dropped a click while disabled (${
+              JSON.stringify(this.textContent?.trim() ?? "")
+            })`,
+          ]);
           e.stopImmediatePropagation();
         }
       },

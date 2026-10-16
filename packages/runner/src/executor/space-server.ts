@@ -4194,6 +4194,11 @@ export class SpaceServer implements TransactionSealDestination {
         const durableCheckpoint = this.#deliveryCheckpoints.get(
           entry.eventId,
         ) ?? entry.deliveryDeferral;
+        // Whether this entry is a head retried after a commit-preparation
+        // failure, which is the last entry its pass queues (below), and
+        // whether an input wake is what retried it.
+        let retriedAfterCommitPreparation = false;
+        let retryWokenByInput = false;
         if (
           this.#deliveryCheckpointWriteBlocked.has(entry.eventId) ||
           this.#attentionSealWriteBlocked.has(entry.eventId)
@@ -4292,6 +4297,9 @@ export class SpaceServer implements TransactionSealDestination {
           } else if (cleanRetry) {
             this.#deliveryCleanAttempts.add(entry.eventId);
           }
+          retriedAfterCommitPreparation =
+            checkpoint.phase === "commit-preparation";
+          retryWokenByInput = inputRetry;
         }
         // The in-flight guard (stage C tuning; #5969's (β), drain-own
         // copies only): an entry whose earlier drain copy is still
@@ -4305,6 +4313,14 @@ export class SpaceServer implements TransactionSealDestination {
         if (this.#drainInFlight.has(entry.eventId)) {
           this.#options.stats.events.drainInFlightSkips += 1;
           this.#options.onDrainInFlightSkip?.(entry.eventId);
+          if (retriedAfterCommitPreparation) {
+            // An earlier retry of this head is still in flight, so it holds
+            // the events behind it as a retry queued here would (below), and
+            // the input wake this pass took is owed to the attempt after it.
+            if (retryWokenByInput) this.#deliveryInputWakes.add(entry.eventId);
+            this.#loadParkDeferredInPass = true;
+            break;
+          }
           continue;
         }
         const link: NormalizedFullLink = {
@@ -4551,6 +4567,12 @@ export class SpaceServer implements TransactionSealDestination {
           );
           queued += 1;
           this.#preQueueDeferralStreaks.delete(`queue\0${entry.eventId}`);
+          // A retried head runs alone in its pass. Queued beside it, a later
+          // arrival is swept behind a head that fails again
+          // (`deferLaterSameSpaceServedEvents`) and waits for the backstop
+          // rescan; left in the drain, it is queued by the pass the head's
+          // outcome arms (events.md §2's arrival order).
+          if (retriedAfterCommitPreparation) break;
         } catch (drainError) {
           // Nothing was queued: release the guard (a throw between the
           // add and the queue must not strand the entry until park).

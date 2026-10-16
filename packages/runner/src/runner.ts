@@ -139,6 +139,7 @@ import {
 import {
   nodeBindingInputsWeight,
   NodeBindingMemo,
+  type NodeBindingSubjectMember,
 } from "./node-binding-memo.ts";
 import { hasInlineCellScheme } from "./immutable-cell.ts";
 import { runtimeOwnedStoreOwnerKey } from "./cfc/runtime-owned-stores.ts";
@@ -311,12 +312,13 @@ const triggerFlowLogger = getLogger("runner.trigger-flow", {
 const RESULT_SHORTCUT_LIMIT = 4096;
 
 /**
- * How many node bindings of each kind one runner holds for instantiation.
- * A resume pre-sync plans every node of a piece's tree before any of them
- * is instantiated, and its bindings are held until each node's
- * instantiation takes its own; the bound is sized for a tree of several
- * hundred nested instances. Past it the least recently used binding is
- * dropped, and computed again by whichever plan asks for it next.
+ * How many node bindings of each kind one runner holds. A resume pre-sync
+ * plans every node of a piece's tree before any of them is instantiated,
+ * and a binding is held from the first plan of its node for every later
+ * plan of it, across a load and past it; the bound is sized for a tree of
+ * several hundred nested instances. Past it the least recently used
+ * binding is dropped, and computed again by whichever plan asks for it
+ * next.
  */
 const NODE_BINDING_LIMIT = 65_536;
 
@@ -324,9 +326,8 @@ const NODE_BINDING_LIMIT = 65_536;
  * The most weight the held node bindings of one kind have between them, in
  * characters: those of each binding's key, and of its inputs document or,
  * for a pattern node, {@link BOUND_CHILD_NODE_WEIGHT} for each node of its
- * bound child. An inputs document carries a schema inline for every link it
- * holds, and runs to tens of thousands of characters, so this bound is the
- * one a large tree reaches first.
+ * bound child. An inputs document carries a link, its schema as a
+ * reference, for every input it holds.
  */
 const NODE_BINDING_WEIGHT_LIMIT = 256 * 1024 * 1024;
 
@@ -1191,24 +1192,35 @@ function samePatternRef(
 }
 
 /**
+ * Whether `link`, a cell an instance in a piece's tree owns, is owed a
+ * default: it declares one at a scope narrower than that of its owning
+ * instance's result cell, `ownerScope`, which a start's preparation seeds
+ * when the cell holds no value.
+ */
+function ownedCellOwesSeed(
+  link: NormalizedFullLink,
+  ownerScope: CellScope,
+): boolean {
+  return isObjectOrArray(link.schema) &&
+    link.schema.default !== undefined &&
+    scopeRank(link.scope) > scopeRank(ownerScope);
+}
+
+/**
  * Whether the gate before the start of a piece a resume pre-sync has named
  * takes the record of `link`, a cell an instance in the piece's tree owns,
  * for the cell; the owning instance's result cell is at `ownerScope`. It does
  * for a derived cell (`computed:`), which holds a value only once its
  * computation has produced one: after the pre-sync has asked the store for
  * it, a record holding no value is what the store holds. It does not for a
- * cell owed a default at a scope narrower than its owner's result, which a
- * start's preparation seeds when the cell holds no value.
+ * cell owed a default (`ownedCellOwesSeed`).
  */
 function ownedCellRecordSuffices(
   link: NormalizedFullLink,
   ownerScope: CellScope,
 ): boolean {
-  if (entityKindOfIdString(link.id) !== "computed") return false;
-  const owesSeed = isObjectOrArray(link.schema) &&
-    link.schema.default !== undefined &&
-    scopeRank(link.scope) > scopeRank(ownerScope);
-  return !owesSeed;
+  return entityKindOfIdString(link.id) === "computed" &&
+    !ownedCellOwesSeed(link, ownerScope);
 }
 
 /**
@@ -1777,6 +1789,14 @@ export interface PieceSourceRevision {
 
   operation: PieceSourceRevisionOperation;
   selectedRevisionId?: string;
+
+  /**
+   * When the deployment that served this revision's source released it, in
+   * milliseconds since the epoch (`pattern-release-time.ts`). Carried only by
+   * a revision adopted from a `system:` origin whose host states one; it is
+   * what keeps that piece from being moved to an earlier release.
+   */
+  releasedAt?: number;
 }
 
 export interface PieceSourceSnapshot {
@@ -1831,6 +1851,17 @@ export interface PieceReconciliation {
 
   /** What the attempt reported, in its own words. */
   detail?: string;
+
+  /**
+   * The source the piece runs, with the latest release time at which its
+   * `system:` origin has offered that source since the piece adopted it, in
+   * milliseconds since the epoch (`pattern-release-time.ts`). A later deploy
+   * of unchanged source moves it forward without adopting anything, which is
+   * what keeps the piece from being moved to a release between the one it
+   * adopted and the one that confirmed it. It never moves backward, and an
+   * accepted transition clears it with the rest of the record.
+   */
+  confirmed?: { identity: string; releasedAt: number };
 }
 
 export type PieceSourceTransitionBaseline =
@@ -1848,6 +1879,9 @@ export interface PieceSourceTransition {
 
   expected: PieceSourceSnapshot;
   selectedRevisionId?: string;
+
+  /** The release time the revision records (`PieceSourceRevision`). */
+  releasedAt?: number;
 }
 
 /**
@@ -1926,9 +1960,9 @@ type BoundNodeIO = {
 /**
  * What binding a javascript, passthrough or raw node produces before
  * anything is read through a transaction. `Runner.#nodeIOBindings` holds the
- * one a pre-sync computes for a node, result cell and argument link until
- * the node's instantiation takes it, and every plan made meanwhile takes its
- * members from that one, so no holder changes them.
+ * one the first plan of a node, result cell and argument link computes, and
+ * every later plan takes its members from that one, so no holder changes
+ * them.
  */
 type NodeIOBinding = {
   inputs: FabricExecValue;
@@ -2398,6 +2432,22 @@ function dedupeNormalizedLinks(
 }
 
 /**
+ * Each of `links` at every scope: a write to a document whose instance scope
+ * is decided only when it is written, declared so that a write surface keyed
+ * by scope covers whichever instance it turns out to be.
+ */
+function atEveryScope(
+  links: readonly NormalizedFullLink[],
+): NormalizedFullLink[] {
+  return links.flatMap((link) =>
+    (["space", "user", "session"] as const).map((scope) => ({
+      ...link,
+      scope,
+    }))
+  );
+}
+
+/**
  * A started piece's registration: the cancel that retires it, carrying
  * whether the pattern graph it was installed with is still there. The
  * registration outlives that graph — a refused instantiation commit retires
@@ -2738,9 +2788,8 @@ export class Runner {
     | undefined;
 
   /**
-   * The bindings of the javascript, passthrough and raw nodes a resume
-   * pre-sync of this runner has planned and no instantiation has taken yet,
-   * weighed by their inputs documents.
+   * The bindings of the javascript, passthrough and raw nodes this runner
+   * has planned, weighed by their inputs documents.
    */
   readonly #nodeIOBindings = new NodeBindingMemo<NodeIOBinding>({
     capacity: NODE_BINDING_LIMIT,
@@ -2750,9 +2799,8 @@ export class Runner {
   });
 
   /**
-   * The bindings of the pattern nodes a resume pre-sync of this runner has
-   * planned and no instantiation has taken yet, weighed by the node count of
-   * their bound children.
+   * The bindings of the pattern nodes this runner has planned, weighed by
+   * the node count of their bound children.
    */
   readonly #patternNodeBindings = new NodeBindingMemo<PatternNodeBindingCore>({
     capacity: NODE_BINDING_LIMIT,
@@ -6680,7 +6728,12 @@ export class Runner {
       const rootSyncStart = performance.now();
       return rootCell.sync().then(() => {
         if (!this.#isStartAttemptCurrent(attempt)) return false;
-        logger.time(rootSyncStart, "start", "rootCellSync");
+        logger.timeDetailed(
+          () => rootCell.getAsNormalizedFullLink().id,
+          rootSyncStart,
+          "start",
+          "rootCellSync",
+        );
         if (rootCell.getRaw() === undefined) {
           return Promise.reject(new Error("No data at cell"));
         } else {
@@ -6836,7 +6889,12 @@ export class Runner {
           if (!this.#isStartAttemptCurrent(attempt)) return false;
           // Resume-boot decomposition: source-doc fetch + module load/eval for
           // a pattern this runtime has never instantiated.
-          logger.time(loadStart, "start", "loadPatternByIdentity");
+          logger.timeDetailed(
+            () => `${identityRef.identity}#${identityRef.symbol}`,
+            loadStart,
+            "start",
+            "loadPatternByIdentity",
+          );
           if (loaded) {
             return this.#doStart(rootCell, seenCells, attempt);
           } else {
@@ -6948,7 +7006,12 @@ export class Runner {
       } finally {
         // Synchronous instantiation cost of the resumed piece (pattern
         // setup, node wiring), distinct from the syncs around it.
-        logger.time(startCoreStart, "start", "startCoreResume");
+        logger.timeDetailed(
+          () => rootCell.getAsNormalizedFullLink().id,
+          startCoreStart,
+          "start",
+          "startCoreResume",
+        );
       }
 
       return true;
@@ -7396,7 +7459,15 @@ export class Runner {
    * owns is likewise here once its record is, unless a seed is owed to it
    * (`ownedCellRecordSuffices`): the pre-sync's waves have landed, so a
    * record holding no value is what the store holds, and a name-sync would
-   * deliver it again.
+   * deliver it again. Any other owned cell of such a family that is absent
+   * holds the run only while the replica has not examined the document
+   * (`IStorageProvider.unexaminedAbsences`): the pre-sync asked the store
+   * for every cell the family owns, so an absence it was told of is what
+   * the store holds, and the session's own instance of a session-scoped
+   * cell, which no store holds before the session writes it, the replica
+   * counts as examined without asking. A cell owed a default
+   * (`ownedCellOwesSeed`) holds the run whatever the replica examined: the
+   * hold's preparation is what seeds it.
    */
   #familyAbsent(
     pattern: Pattern,
@@ -7478,6 +7549,11 @@ export class Runner {
       readTx,
       instances,
     );
+    // The owned cells of a named family read absent are weighed together
+    // once every probe has run: what decides the hold is whether any of
+    // them is an absence the replica has yet to examine, which the probes'
+    // own reads through `readTx` are what the replica answers from.
+    const absent: NormalizedFullLink[] = [];
     for (const { pattern: owner, resultCell: ownerCell } of instances) {
       const ownerScope = ownerCell.getAsNormalizedFullLink().scope;
       for (const descriptor of owner.derivedInternalCells ?? []) {
@@ -7485,10 +7561,54 @@ export class Runner {
           .getAsNormalizedFullLink();
         const record = presyncNamed &&
           ownedCellRecordSuffices(link, ownerScope);
-        if (!present(link, record)) return hold("an owned cell");
+        if (present(link, record)) continue;
+        if (
+          !presyncNamed || budgetSpent ||
+          ownedCellOwesSeed(link, ownerScope)
+        ) {
+          return hold("an owned cell");
+        }
+        absent.push(link);
       }
     }
-    return false;
+    return absent.length > 0 && this.#absenceUnexamined(readTx, absent)
+      ? hold("an owned cell")
+      : false;
+  }
+
+  /**
+   * Whether any of `links`, documents the probes of a named family's gate
+   * read as absent through `readTx`, is one this replica never examined: no
+   * record of it, under the instance `readTx`'s identity resolves. A
+   * document the pre-sync asked the store for and was told nothing of has
+   * its record, and the session's own instance of a session-scoped document
+   * is counted examined without one, since no store holds it before the
+   * session writes it. A provider that cannot say, or an instance the
+   * identity cannot resolve, leaves the absence unexamined, as holding the
+   * run costs a name-sync and a wrong verdict costs a conflicting commit.
+   */
+  #absenceUnexamined(
+    readTx: IExtendedStorageTransaction,
+    links: readonly NormalizedFullLink[],
+  ): boolean {
+    const identity = readTx.tx.scopeKeyIdentity;
+    if (
+      identity !== undefined &&
+      links.some((link) => !canResolveScopeKey(link.scope, identity))
+    ) {
+      return true;
+    }
+    const unexamined = new Set<string>();
+    for (const space of new Set(links.map((link) => link.space))) {
+      const provider = this.#runtime.storageManager.open(space);
+      if (provider.unexaminedAbsences === undefined) return true;
+      for (const absence of provider.unexaminedAbsences(readTx.tx)) {
+        unexamined.add(`${absence.space}\0${absence.id}\0${absence.scope}`);
+      }
+    }
+    return links.some((link) =>
+      unexamined.has(`${link.space}\0${link.id}\0${link.scope}`)
+    );
   }
 
   /**
@@ -9552,7 +9672,12 @@ export class Runner {
         // the runner timing stats (they record even when the logger is
         // disabled) so load summaries can attribute slow storage-resume
         // boots.
-        logger.time(syncStart, "start", "syncCellsForRunningPattern");
+        logger.timeDetailed(
+          () => resultCell.getAsNormalizedFullLink().id,
+          syncStart,
+          "start",
+          "syncCellsForRunningPattern",
+        );
       }
     };
     const syncer = this.#dependencySyncer;
@@ -9696,7 +9821,12 @@ export class Runner {
     await this.#kickResumeWave(cells, (c) => {
       const cellSyncStart = performance.now();
       const synced = this.#syncFamilyCell(c, identity).finally(() =>
-        logger.time(cellSyncStart, "start", "resumeCellSync")
+        logger.timeDetailed(
+          () => c.getAsNormalizedFullLink().id,
+          cellSyncStart,
+          "start",
+          "resumeCellSync",
+        )
       );
       // A start that writes nothing carrying the policy needs no manifest,
       // and one that does reads it as absent and fails its commit loudly, so
@@ -11011,7 +11141,7 @@ export class Runner {
     pattern: Pattern,
     schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
   ) {
-    const plan = this.#nodePlan(tx, node, resultCell, pattern, undefined, true);
+    const plan = this.#nodePlan(tx, node, resultCell, pattern);
     if (plan === undefined) return;
     switch (plan.kind) {
       case "javascript":
@@ -11072,11 +11202,10 @@ export class Runner {
    * machinery-read boundary).
    *
    * A plan has two parts. The bindings read nothing through a transaction,
-   * and the runner holds the ones a pre-sync computes until the node's
-   * instantiation plans it: a plan made with `forInstantiation` takes the
-   * bindings held and leaves none behind, since the node it starts keeps
-   * its own (`#nodeIOBinding()`, `#bindPatternNode()`). What the bound
-   * outputs redirect to is read through `tx` on every call, so each
+   * and the runner holds the ones the first plan of a node computes for
+   * every later plan of it — a pre-sync's, a name-sync's, the node's
+   * instantiation's (`#nodeIOBinding()`, `#bindPatternNode()`). What the
+   * bound outputs redirect to is read through `tx` on every call, so each
    * caller's transaction records the reads its plan rests on, and a plan
    * follows a redirect written since the last one.
    */
@@ -11086,7 +11215,6 @@ export class Runner {
     resultCell: Cell<any>,
     pattern: Pattern,
     argumentLink?: NormalizedFullLink,
-    forInstantiation = false,
   ): NodePlan | undefined {
     const nodeModule = node.module;
     if (!isModule(nodeModule)) {
@@ -11123,7 +11251,6 @@ export class Runner {
             resolved.type,
             moduleRefName,
             argumentLink ?? getMetaLink(resultCell, "argument")!,
-            forInstantiation,
           );
           return {
             kind: resolved.type as "javascript" | "passthrough",
@@ -11149,7 +11276,6 @@ export class Runner {
             pattern,
             moduleRefName,
             argumentLink,
-            forInstantiation,
           ),
         }));
       case "pattern":
@@ -11163,7 +11289,6 @@ export class Runner {
             resultCell,
             pattern,
             argumentLink,
-            forInstantiation,
           ),
         }));
       default:
@@ -11176,8 +11301,7 @@ export class Runner {
    * raw node of `pattern`, on `resultCell` against `argumentCellLink`, or
    * returns the binding held for them. `moduleType` is the type of the
    * module the node resolved to and `moduleRefName` the registry name it
-   * resolved from, when it resolved from one. With `take`, a binding held
-   * is given up to the caller and a binding computed is not held.
+   * resolved from, when it resolved from one.
    *
    * The binding reads nothing through a transaction: it is a function of
    * the node, the pattern's manifest and argument schema, and the two
@@ -11196,7 +11320,6 @@ export class Runner {
     moduleType: Module["type"],
     moduleRefName: string | undefined,
     argumentCellLink: NormalizedFullLink | undefined,
-    take = false,
   ): NodeIOBinding {
     const bind = (): NodeIOBinding => {
       this.#nodeBindingRecorder?.(
@@ -11263,16 +11386,43 @@ export class Runner {
       return { inputs, outputs, inputsCell };
     };
     if (isStandInArgument(argumentCellLink)) return bind();
-    const subject = {
-      node,
-      pattern,
+    return this.#nodeIOBindings.bindingFor({
+      ...this.#bindingSubjectMembers(node, pattern),
       resultLink: resultCell.getAsNormalizedFullLink(),
       argumentLink: argumentCellLink,
       variant: bindingVariant(moduleType, moduleRefName),
-    };
-    return take
-      ? this.#nodeIOBindings.takeBindingFor(subject, bind)
-      : this.#nodeIOBindings.bindingFor(subject, bind);
+    }, bind);
+  }
+
+  /**
+   * How a binding's subject names `node` and `pattern`
+   * (`NodeBindingSubjectMember`): the pattern by its content identity when
+   * it has one, and the node by its position among the pattern's nodes,
+   * since every pattern object of one identity — the one embedded in a
+   * parent's graph, the one loaded by identity for the instance's own start
+   * — holds the same nodes at the same positions; both by object identity
+   * otherwise.
+   */
+  #bindingSubjectMembers(
+    node: Node,
+    pattern: Pattern,
+  ): { node: NodeBindingSubjectMember; pattern: NodeBindingSubjectMember } {
+    const identity = this.#patternSubjectMember(pattern);
+    const position = typeof identity === "string"
+      ? pattern.nodes.indexOf(node)
+      : -1;
+    return position === -1
+      ? { node, pattern }
+      : { node: position, pattern: identity };
+  }
+
+  /**
+   * How a binding's subject names `pattern`: by its content identity when
+   * it has one, and by the object otherwise.
+   */
+  #patternSubjectMember(pattern: Pattern): NodeBindingSubjectMember {
+    const ref = this.#runtime.patternManager.getArtifactEntryRef(pattern);
+    return ref === undefined ? pattern : patternIdentityKey(ref);
   }
 
   #collectStaticRedirectWriteTargets(
@@ -13646,7 +13796,6 @@ export class Runner {
       resultCell,
       "argument",
     )!,
-    take = false,
   ): RawNodeInputs {
     const {
       inputs: mappedInputBindings,
@@ -13659,7 +13808,6 @@ export class Runner {
       "raw",
       moduleRefName,
       argumentCellLink,
-      take,
     );
 
     // outputCells tracks the static write surface for dependency ordering and
@@ -13865,6 +14013,9 @@ export class Runner {
     const builtinOnActionRegistered = isRawBuiltinResult(builtinResult)
       ? builtinResult.onActionRegistered
       : undefined;
+    const builtinStoreWrites = isRawBuiltinResult(builtinResult)
+      ? builtinResult.storeWrites ?? []
+      : [];
 
     // Name the raw action for debugging - use implementation name or fallback to "raw"
     const impl = module.implementation as ((...args: unknown[]) => Action) & {
@@ -13928,9 +14079,15 @@ export class Runner {
       ...outputCells,
       ...staticRedirectWriteTargets,
     ]);
+    // isEffect can come from module options or from the builtin result
+    const isEffect = module.isEffect ?? builtinIsEffect;
     Object.assign(action, builtinAction, {
       reads: inputCells,
-      writes: schedulingWrites,
+      // An effect takes no write surface, so its stores are not declared.
+      writes: isEffect ? schedulingWrites : dedupeNormalizedLinks([
+        ...schedulingWrites,
+        ...atEveryScope(builtinStoreWrites),
+      ]),
       ...(module.materializerWriteEnvelopes
         ? { materializerWriteEnvelopes: module.materializerWriteEnvelopes }
         : {}),
@@ -13938,8 +14095,6 @@ export class Runner {
       pattern,
     });
 
-    // isEffect can come from module options or from the builtin result
-    const isEffect = module.isEffect ?? builtinIsEffect;
     const debounce = module.debounce ?? builtinDebounce;
     const noDebounce = module.noDebounce ?? builtinNoDebounce;
     const throttle = module.throttle ?? builtinThrottle;
@@ -14015,7 +14170,6 @@ export class Runner {
     resultCell: Cell<any>,
     pattern: Pattern,
     argumentLink?: NormalizedFullLink,
-    take = false,
   ): PatternNodeBinding {
     // May be undefined: the owned-cell walk plans before setup writes the
     // meta on a fresh first run, and a child result cell is not synced yet
@@ -14136,26 +14290,21 @@ export class Runner {
       };
     };
     // The child bound here is the pattern object the child's own nodes are
-    // held under, so a plan that takes this binding hands its instantiation
-    // the child the pre-sync planned, and the child's nodes find theirs.
-    let binding: PatternNodeBindingCore;
-    if (isStandInArgument(argumentCellLink)) {
-      binding = bind();
-    } else {
-      const subject = {
-        node,
-        pattern,
+    // held under, so a plan that finds this binding hands its instantiation
+    // the child the first plan bound, and the child's nodes find theirs.
+    const binding = isStandInArgument(argumentCellLink)
+      ? bind()
+      : this.#patternNodeBindings.bindingFor({
+        ...this.#bindingSubjectMembers(node, pattern),
         // A node whose module is a registry reference keeps its identity
-        // when the registry puts another pattern under the name.
-        implementation,
+        // when the registry puts another pattern under the name. The
+        // pattern it holds is named by content identity when it has one,
+        // like the pattern holding the node.
+        implementation: this.#patternSubjectMember(implementation),
         resultLink: resultCell.getAsNormalizedFullLink(),
         argumentLink: argumentCellLink,
         variant: bindingVariant("pattern", undefined),
-      };
-      binding = take
-        ? this.#patternNodeBindings.takeBindingFor(subject, bind)
-        : this.#patternNodeBindings.bindingFor(subject, bind);
-    }
+      }, bind);
     const { child, inputs, outputs, instanceName } = binding;
     const io = {
       child,
@@ -14763,7 +14912,10 @@ export function getPieceSourceRevisions(
           typeof value.origin !== "string") ||
       value.selectedRevisionId !== undefined &&
         (typeof value.selectedRevisionId !== "string" ||
-          value.selectedRevisionId.length === 0)
+          value.selectedRevisionId.length === 0) ||
+      value.releasedAt !== undefined &&
+        (typeof value.releasedAt !== "number" ||
+          !Number.isFinite(value.releasedAt) || value.releasedAt < 0)
     ) {
       throw new Error("piece source history is invalid");
     }
@@ -14780,6 +14932,9 @@ export function getPieceSourceRevisions(
     }
     if (typeof value.selectedRevisionId === "string") {
       revision.selectedRevisionId = value.selectedRevisionId;
+    }
+    if (typeof value.releasedAt === "number") {
+      revision.releasedAt = value.releasedAt;
     }
     revisionIds.add(revision.revisionId);
     revisions.push(revision);
@@ -14801,7 +14956,7 @@ export function getPieceReconciliation(
     meta: ignoreReadForScheduling,
   });
   if (!isObjectOrArray(raw)) return undefined;
-  const { outcome, at, origin, offered, reason, detail } = raw;
+  const { outcome, at, origin, offered, reason, detail, confirmed } = raw;
   if (
     !isPieceReconciliationOutcome(outcome) ||
     typeof at !== "number" || !Number.isFinite(at) || at < 0 ||
@@ -14817,6 +14972,18 @@ export function getPieceReconciliation(
     ...(offeredRef === undefined ? {} : { offered: offeredRef }),
     ...(isPieceReconciliationReason(reason) ? { reason } : {}),
     ...(typeof detail === "string" && detail.length > 0 ? { detail } : {}),
+    ...(isObjectNotArray(confirmed) &&
+        typeof confirmed.identity === "string" &&
+        confirmed.identity.length > 0 &&
+        typeof confirmed.releasedAt === "number" &&
+        Number.isFinite(confirmed.releasedAt) && confirmed.releasedAt >= 0
+      ? {
+        confirmed: {
+          identity: confirmed.identity,
+          releasedAt: confirmed.releasedAt,
+        },
+      }
+      : {}),
   };
 }
 
@@ -14836,6 +15003,29 @@ export function setPieceReconciliation(
   );
 }
 
+/**
+ * `recorded`, keeping the confirmation `stored` carries where that confirms
+ * the source the piece runs (`running`) at a later release time than
+ * `recorded` does, or where `recorded` confirms nothing. Another runtime can
+ * confirm the running source at a later release while an attempt is under
+ * way, and an attempt that failed, or found nothing to adopt, has learned
+ * nothing that moves that time back. An accepted transition clears the record
+ * it supersedes, so nothing is carried past one.
+ */
+export function keepLaterConfirmation(
+  stored: PieceReconciliation | undefined,
+  recorded: PieceReconciliation,
+  running: string | undefined,
+): PieceReconciliation {
+  const kept = stored?.confirmed;
+  if (kept === undefined || kept.identity !== running) return recorded;
+  const own = recorded.confirmed;
+  return own === undefined ||
+      (own.identity === kept.identity && own.releasedAt < kept.releasedAt)
+    ? { ...recorded, confirmed: kept }
+    : recorded;
+}
+
 /** Whether two recorded outcomes say the same thing, ignoring when. */
 export function samePieceReconciliation(
   left: PieceReconciliation | undefined,
@@ -14844,6 +15034,8 @@ export function samePieceReconciliation(
   if (left === undefined || right === undefined) return left === right;
   return left.outcome === right.outcome && left.origin === right.origin &&
     left.reason === right.reason && left.detail === right.detail &&
+    left.confirmed?.identity === right.confirmed?.identity &&
+    left.confirmed?.releasedAt === right.confirmed?.releasedAt &&
     (left.offered === undefined || right.offered === undefined
       ? left.offered === right.offered
       : patternIdentityKey(left.offered) === patternIdentityKey(right.offered));
@@ -14960,7 +15152,8 @@ function initializePieceSourceHistory(
   }], rawMetaWriteAuthorization);
 }
 
-function samePieceSourceSnapshot(
+/** Whether two snapshots name the same source state of a piece. */
+export function samePieceSourceSnapshot(
   left: PieceSourceSnapshot,
   right: PieceSourceSnapshot,
 ): boolean {
@@ -15180,6 +15373,9 @@ export function applyPieceSourceTransition(
     ...(transition.selectedRevisionId === undefined
       ? {}
       : { selectedRevisionId: transition.selectedRevisionId }),
+    ...(transition.releasedAt === undefined
+      ? {}
+      : { releasedAt: transition.releasedAt }),
   });
   candidate.setMetaRaw(
     "patternSource",

@@ -1,7 +1,14 @@
+---
+status: historical
+created: 2026-09-29
+archived: 2026-10-15
+reason: "Superseded design; the room no longer keeps an activity log, and a client follows a room through its messages."
+---
+
 # ChatRoomActivity
 
 One entry in a room's log of recent activity: something the room recorded, and
-when. A room ([`ChatRoomOutput`](ChatRoomOutput.md)) offers its recent activity,
+when. A room ([`ChatRoomOutput`](../../../specs/fabrichat/ChatRoomOutput.md)) offers its recent activity,
 in `seq` order, as `recentActivity`.
 
 ```ts
@@ -30,7 +37,7 @@ that thing afresh.
 
 It also tells a client something the messages can't: which message a send
 produced. The room may record a message at a time other than the one its sender
-proposed (see [recorded times](ChatRoomOutput.md#recorded-times)), so a sender
+proposed (see [recorded times](../../../specs/fabrichat/ChatRoomOutput.md#recorded-times)), so a sender
 can't find its message by its proposal among the messages. It can in
 `recentActivity`, where the send's entry pairs its `requestId` with the message.
 
@@ -40,7 +47,7 @@ can't find its message by its proposal among the messages. It can in
   it made the record, never a sender's proposal. For a send, that can be later
   than the message's `sentAt`, which may be the sender's proposed time. Every
   `at` is unique in the room, like every time a room records (see [unique
-  times](ChatMessage.md#unique-times)), so it identifies its entry. Entries
+  times](../../../specs/fabrichat/ChatMessage.md#unique-times)), so it identifies its entry. Entries
   expire by `at`, but are ordered by `seq` (see [catching up](#catching-up)).
 - **`requestId`** is the `requestId` of the event the entry records.
 - **`what`** links the message the event changed or added:
@@ -71,7 +78,7 @@ the order of `at`, since a delayed event can carry an old `at` with a new `seq`.
 A client remembers the highest `seq` it has seen. When it reads the room again,
 it reads the entries after that one. It can do that as long as the room still
 has them: the room says, in `recentActivityExpiredThrough`, the highest `seq` it
-has dropped for age (see [`ChatRoomOutput`](ChatRoomOutput.md#facts)). If that
+has dropped for age (see [`ChatRoomOutput`](../../../specs/fabrichat/ChatRoomOutput.md#facts)). If that
 is past the highest `seq` the client has seen, the client has missed entries,
 and it reopens its windows instead of catching up.
 
@@ -84,13 +91,13 @@ catches up by reopening its windows. It never silently misses a change.
 ## Recent
 
 `recentActivity` holds entries recorded no longer ago than the room's
-`recentActivityWindowNsec` (see [`ChatRoomPolicy`](ChatRoomPolicy.md)), by their
+`recentActivityWindowNsec` (see [`ChatRoomPolicy`](../../../specs/fabrichat/ChatRoomPolicy.md)), by their
 `at`. A room drops older entries, and advances `recentActivityExpiredThrough` as
 it does. The window MUST be at least `proposedTimeMaxAgeNsec`: an accepted
 send's entry is recorded no more than that after its proposal, and lives for the
 window after that, so a client that finds no entry for a send whose proposal is
 older than `proposedTimeMaxAgeNsec` can conclude it wasn't sent (see
-[`clients.md`](clients.md)), unless it sees a gap.
+[`clients.md`](../../../specs/fabrichat/clients.md)), unless it sees a gap.
 
 ## Obliteration
 

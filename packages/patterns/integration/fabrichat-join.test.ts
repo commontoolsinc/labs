@@ -259,11 +259,13 @@ describe("fabrichat-join", () => {
     await fillCfInput(added, "#fabrichat-message", "Hello from Grace");
     await clickTrustedAction(added, SEND_ACTION);
     await waitForText(added, "#fabrichat-messages", "Hello from Grace");
+    await waitForSettledText(adder, "cf-profile-badge", "Grace Hopper");
 
     // The adder creates a second group, of their own alone, and opens it. Its
     // add control offers the person from their chats.
     const secondTitle = "Added team";
     await openChatManager(firstShell, adderIdentity);
+    await waitForSettledText(adder, "#fabrichat-group-people", "Grace Hopper");
     await fillCfInput(adder, "#fabrichat-group-title", secondTitle);
     await clickButtonWithExactText(adder, "Create group");
     await waitForSettledText(adder, "#fabrichat-rooms", secondTitle);

@@ -216,7 +216,10 @@ no stamp at a position holding a reference; a stamp at a container the write
 persists covers the references beneath it. In that evidence the source's
 stored integrity stands as stored, and only the link schema's integrity and
 a schema the transaction writes the source under are gated against
-runtime-minted atoms. A handle's carried view is the reference restrictions
+runtime-minted atoms. A refusal the floor reaches from documents the
+transaction holds is terminal, and the refused run then depends on what the
+floor read there, the source's envelope among it, so a writer runs again when
+that evidence changes. A handle's carried view is the reference restrictions
 of the slots its resolution left (`cfcAcquisitionViewForDereferenceTraces`
 in `cfc/label-view-state.ts`, `referenceRestrictionsOf` for the schema
 traversal's crossings), confidentiality alone, and nothing of the document

@@ -96,7 +96,9 @@ import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import type {
   PendingCommitContext,
   SpaceStorageDiagnostic,
+  SpaceStorageSizes,
   StorageDiagnostics,
+  StorageSizes,
 } from "./diagnostics.ts";
 
 export type {
@@ -554,6 +556,9 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
 
   /** Snapshot pending work without waiting for durability or starting I/O. */
   getDiagnostics?(): StorageDiagnostics;
+
+  /** The sizes of the structures held across every open space. */
+  getSizes?(): StorageSizes;
 
   /**
    * Whether any registered commit is still unconfirmed. Every write flows
@@ -1413,6 +1418,16 @@ export interface IStorageTransaction {
    * over, and reverts the write to any other.
    */
   derivedWrites?: boolean;
+
+  /**
+   * The first user- or session-scoped instance, as `<space>/<scope>/<id>`,
+   * that this transaction read through a link while the instance was missing
+   * and another derivation registered in the same runtime writes the
+   * document. Set by link resolution on a serving runtime only, where such an
+   * instance is one the serving loop has not produced yet, and read by the
+   * reactive action's commit, which a run that read one does not make.
+   */
+  unproducedScopedInstance?: string;
 
   /**
    * The scope INSTANCE identity this transaction's scoped reads and writes
@@ -3218,6 +3233,9 @@ export interface ViewInterestLease {
 export interface ISpaceReplica extends ISpace {
   /** Existing session progress without starting I/O or awaiting commits. */
   getDiagnostics?(): SpaceStorageDiagnostic;
+
+  /** The sizes of the structures this replica holds. */
+  getSizes?(): SpaceStorageSizes;
 
   /**
    * Return a state for the requested entry or returns `undefined` if replica

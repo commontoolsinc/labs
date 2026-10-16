@@ -295,7 +295,9 @@ commonfabric.logger["runtime-client"].timeStats
 
 // Stats for a specific key path
 commonfabric.logger["runtime-client"].getTimeStats("ipc/CellGet")
-// { count, min, max, average, p50, p95, lastTime, lastTimestamp, cdf, ... }
+// { count, min, max, average, p50, p95, lastTime, lastTimestamp, slowest, ... }
+// `slowest`: the longest few, longest first, each as
+// { elapsed, at, epochMs, detail? } — `at` on the `performance.now()` clock
 
 // Reset all timing stats
 commonfabric.resetAllTimingStats()
@@ -353,8 +355,24 @@ and most runtime code runs in a web worker, so its loggers are in a separate
 
 ```javascript
 // Shown inside a pattern body.
-// Fetch worker counts, timing, and flags
+// Fetch worker counts, timing, flags, CFC counters, compile-cache counters,
+// and structure sizes
 await commonfabric.rt.getLoggerCounts()
+// .compileCache = { hits, misses, byIdentityHits }; the `pattern-manager`
+// timing rows `compile-cache/load-by-identity/<outcome>` (hit, entry-absent,
+// entry-unverified, closure-refused, coverage-missing, eval-failed,
+// no-version) and `compile-cache/cold-load/<outcome>` (compiled,
+// source-unavailable, compile-failed, eval-failed) name the pattern in each
+// row's `slowest` details
+
+// Counts of the worker's live structures right now: scheduler nodes and
+// queues, storage documents and subscriptions (`storage` is `null`, not zeros,
+// for a storage manager that reports no sizes), compiled-code caches, the
+// worker's own subscription and mount tables, and cumulative CFC commit
+// refusals by reason. Take two readings apart to see which tracked collection
+// is growing; growth in what the entries hold, or in a structure not counted
+// here, does not show.
+(await commonfabric.rt.getLoggerCounts()).sizes
 
 // Control worker loggers
 await commonfabric.rt.setLoggerLevel("debug")         // all loggers
@@ -689,7 +707,7 @@ await commonfabric.watchWrites([])
 | `commonfabric.rt` | RuntimeClient for worker IPC |
 | `commonfabric.rt.setLoggerLevel(lvl, name?)` | Set worker logger level |
 | `commonfabric.rt.setLoggerEnabled(on, name?)` | Enable/disable worker logger |
-| `commonfabric.rt.getLoggerCounts()` | Get worker logger counts/timing/flags |
+| `commonfabric.rt.getLoggerCounts()` | Get worker logger counts/timing/flags/CFC counters/structure sizes |
 | `commonfabric.rt.setSettleStatsEnabled(on)` | Enable/disable worker settle stats |
 | `commonfabric.rt.getSettleStats()` | Get the last worker settle stats payload |
 | `commonfabric.rt.getSettleStatsHistory()` | Get recent worker settle stats history |

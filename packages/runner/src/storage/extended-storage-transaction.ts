@@ -87,6 +87,7 @@ import {
   type TrustSnapshot,
   type WritePolicyInput,
 } from "../cfc/mod.ts";
+import { withoutEnvelopeStabilityToken } from "../cfc/envelope-stability-reason.ts";
 import { prepareBoundaryCommitSteps } from "../cfc/prepare.ts";
 import { CFC_POLICY_MANIFEST_ID_PREFIX } from "../cfc/policy.ts";
 import {
@@ -337,6 +338,14 @@ export type CfcInstrumentationHooks = {
     refusals: readonly CfcRefusalDetail[];
     terminal: boolean;
   }): void;
+
+  /**
+   * The commit boundary refused this transaction before it reached storage.
+   * `reasons` are the plain reason texts that refused it; a refusal the
+   * boundary decides on its own — a relevant transaction that never
+   * prepared, a prepared digest that changed — names that one cause.
+   */
+  onCommitRejected?(reasons: readonly string[]): void;
 
   onDigestInvalidation?(reason: string): void;
   onOutboxFlush?(effect: PostCommitSideEffect): void;
@@ -738,6 +747,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    * runtime's.
    */
   #cfcServingIdentityPinned = false;
+
+  /**
+   * Write-once pin for the client identity, set on the first call (the
+   * `Runtime`'s, in `edit()`) whatever its value, so that code holding the
+   * transaction cannot name another principal as the one its scoped writes
+   * are keyed by.
+   */
+  #cfcClientIdentityPinned = false;
 
   #cfcModuleDelegationsPinned = false;
 
@@ -1403,6 +1420,17 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (this.#cfcServingIdentityPinned) return;
     this.#cfcServingIdentityPinned = true;
     this.#cfcState.servingIdentity = identity;
+  }
+
+  /**
+   * Sets the client runtime's own identity: the principal its storage session
+   * authenticates as. `undefined` on the serving posture. Write-once, like the
+   * serving identity.
+   */
+  setCfcClientIdentity(identity: string | undefined): void {
+    if (this.#cfcClientIdentityPinned) return;
+    this.#cfcClientIdentityPinned = true;
+    this.#cfcState.clientIdentity = identity;
   }
 
   /**
@@ -4151,6 +4179,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         this.#cfcState.prepare.status !== "prepared"
       ) {
         if (this.#commitPreparationCrash !== undefined) {
+          this.#cfcInstrumentation.onCommitRejected?.([
+            `CFC commit preparation crashed: ${this.#commitPreparationCrash}`,
+          ]);
           return this.#rejectCommitBeforeStorage({
             error: {
               name: "CommitPreparationError",
@@ -4172,7 +4203,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         const reasons = this.#cfcState.prepare.status === "invalidated"
           ? this.#cfcState.prepare.reasons
           : [];
-        const detail = reasons.length > 0 ? `: ${plainReason(reasons[0])}` : "";
+        // The message is for a person, so it carries neither the verdict tag
+        // nor the envelope-stability token; `reasons` below keeps the token,
+        // which is where a consumer classifies the refusal.
+        const detail = reasons.length > 0
+          ? `: ${withoutEnvelopeStabilityToken(plainReason(reasons[0]))}`
+          : "";
         const plainReasons = reasons.map(plainReason);
         // Pair each detail to a reason that actually refused. A gate records
         // its detail when it decides, which is also how it records an
@@ -4198,6 +4234,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             }),
           );
         }
+        this.#cfcInstrumentation.onCommitRejected?.(
+          plainReasons.length > 0
+            ? plainReasons
+            : ["relevant transaction was not prepared"],
+        );
         const message =
           `${CFC_ENFORCEMENT_REJECTION_PREFIX}: relevant transaction was not prepared${detail}`;
         // WATCH(cfc-verdict): a refusal is terminal only when EVERY reason is
@@ -4240,6 +4281,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
                 dials: this.#cfcDials(),
               }),
             );
+            this.#cfcInstrumentation.onCommitRejected?.([
+              "prepared digest changed",
+            ]);
             return this.#rejectCommitBeforeStorage({
               error: {
                 name: "StorageTransactionAborted",
