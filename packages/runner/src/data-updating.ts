@@ -44,11 +44,7 @@ import {
   type CfcCellLinkRefPayload,
   linkCfcLabelView,
 } from "./cfc/link-label-view.ts";
-import {
-  readStoredCfcMetadata,
-  storedCfcMetadataAppliesToPath,
-  StoredCfcMetadataError,
-} from "./cfc/metadata.ts";
+import { storedCfcMetadataAppliesToPath } from "./cfc/metadata.ts";
 import { cfcSchemaEntries } from "./cfc/schema-label-view.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
@@ -282,6 +278,55 @@ export const writeAuthorizationCoversPath = (
   );
 };
 
+// Whether each schema declares any ifc policy, by schema object. Only
+// deep-frozen schemas are cached, as for `writeAuthorizationPathsCache`.
+let linkSchemaPolicyCache = new WeakMap<object, boolean>();
+
+onSchemaRegistryClear(() => {
+  linkSchemaPolicyCache = new WeakMap();
+});
+
+/**
+ * Helper for {@link linkSchemaDeclaresPolicy}, which reports whether one
+ * `ifc` declaration holds anything: a label atom, or a policy field of any
+ * other name. An `ifc` that is empty, or whose label lists are, declares
+ * nothing, and neither does `observes` alone, which only says which reads a
+ * declared label answers to. A field besides those counts whatever it holds,
+ * since an empty `maxConfidentiality` is still a ceiling.
+ */
+const ifcHoldsPolicy = (ifc: Readonly<Record<string, unknown>>): boolean =>
+  Object.entries(ifc).some(([field, value]) =>
+    field === "confidentiality" || field === "integrity"
+      ? Array.isArray(value) && value.length > 0
+      : field !== "observes" && value !== undefined
+  );
+
+/**
+ * Whether a link's schema declares any ifc policy anywhere in it, references
+ * resolved: a label at its root is the reference's own restriction, and a
+ * claim or a floor anywhere in it binds the document the reference places.
+ * A link schema that arrives as a bare `$ref` to a registered schema is
+ * resolved the same way, which a walk over the written object alone misses.
+ * A declaration that holds nothing does not count ({@link ifcHoldsPolicy}).
+ */
+const linkSchemaDeclaresPolicy = (schema: JSONSchema | undefined): boolean => {
+  if (!isObjectOrArray(schema)) return false;
+  let declares = linkSchemaPolicyCache.get(schema);
+  if (declares === undefined) {
+    const missesBefore = externalResolutionMissCount();
+    declares = cfcSchemaEntries(schema).some((entry) =>
+      isObjectOrArray(entry.schema) && isObjectOrArray(entry.schema.ifc) &&
+      ifcHoldsPolicy(entry.schema.ifc as Readonly<Record<string, unknown>>)
+    );
+    if (
+      isDeepFrozen(schema) && externalResolutionMissCount() === missesBefore
+    ) {
+      linkSchemaPolicyCache.set(schema, declares);
+    }
+  }
+  return declares;
+};
+
 /**
  * Helper for {@link recordLinkWritePolicyInput}, which reports whether a
  * write authorization arriving with this transaction covers `target`. A claim
@@ -303,17 +348,22 @@ const hasPendingWriteAuthorization = (
   );
 };
 
+/**
+ * Whether a schema policy input arriving with this transaction declares a
+ * label at or around `target`, so that the slot the link lands in is one
+ * policy applies to before anything is stored there.
+ */
 const hasPendingSchemaPolicyInput = (
   tx: IExtendedStorageTransaction,
-  source: NormalizedFullLink,
+  target: NormalizedFullLink,
 ): boolean => {
-  const sourcePath = canonicalizeLogicalPath(source.path);
-  return tx.getCfcSchemaPolicyInputs(source.space, source.id).some((input) =>
-    pathsOverlap(canonicalizeLogicalPath(input.target.path), sourcePath) &&
+  const targetPath = canonicalizeLogicalPath(target.path);
+  return tx.getCfcSchemaPolicyInputs(target.space, target.id).some((input) =>
+    pathsOverlap(canonicalizeLogicalPath(input.target.path), targetPath) &&
     schemaIfcOverlapsPath(
       input.schema,
       canonicalizeLogicalPath(input.target.path),
-      sourcePath,
+      targetPath,
     )
   );
 };
@@ -327,49 +377,58 @@ const recordLinkWritePolicyInput = (
   if (tx.getCfcState().enforcementMode === "disabled") {
     return;
   }
+  const carriedCfcLabelView = cloneCfcLabelView(cfcLabelView);
+  // The slot's label is the reference's own (CFC §8.2.3): the link schema's
+  // declarations and the handle's carried restriction, in one link entry,
+  // beside which the persist loop stamps the creating attempt's flow join as
+  // a `structure` entry of its own where flow labels persist. The source's
+  // labels stay with the source, so what the source stores decides nothing
+  // here, and this write takes no dependency on the source's envelope. Every
+  // link write is recorded, so that a floor or a claim the receiving slot's
+  // schema declares, whenever that schema arrives in this transaction, is
+  // checked against the reference.
+  //
+  // What the write does not do on its own is make the transaction one the
+  // boundary prepares. Preparing is what the reference's own restriction,
+  // or policy at the slot, calls for: a link schema that declares a label
+  // or a claim, a handle carrying a restriction, a stored envelope or an
+  // arriving claim at the target. A bare pointer to a document, written by a
+  // transaction nothing else makes relevant, is the ordinary case of a list
+  // reconcile, and preparing it would both cost the time and seal the
+  // transaction against the reads an action still bound to it takes after
+  // its own commit was prepared. Where the attempt read labeled data, the
+  // flow-label probe marks the transaction relevant and the slot then
+  // carries the attempt's join.
+  const referenceRelevant = linkSchemaDeclaresPolicy(source.schema) ||
+    cfcLabelViewHasValues(carriedCfcLabelView);
   // A content-addressed document is a runtime surface outside labeling:
-  // immutable, named by its own content, and never given an envelope —
-  // the write-policy and flow-read passes exclude `cid:` ids on the same
-  // ground. A link to one carries nothing a label could describe, so it
-  // records no policy input; recording one would demand source metadata
-  // the document can never carry.
-  if (source.id.startsWith("cid:")) {
+  // immutable, named by its own content, and never given an envelope — the
+  // write-policy and flow-read passes exclude `cid:` ids on the same ground.
+  // The reference is labeled all the same: a handle to one acquired under a
+  // restriction, or written under a link schema that declares one, carries
+  // that at its slot, and is recorded for it. A bare pointer to one has
+  // nothing to persist and records nothing. A claim or a floor at the
+  // receiving slot still meets the write: the write-policy pass reads the
+  // transaction's attempted writes, and a link no record names is a plain
+  // value written at its path.
+  if (source.id.startsWith("cid:") && !referenceRelevant) {
     return;
   }
-  const carriedCfcLabelView = cloneCfcLabelView(cfcLabelView);
-  let sourceMetadata: ReturnType<typeof readStoredCfcMetadata>;
-  let sourceEnvelopeUninterpretable = false;
-  try {
-    sourceMetadata = readStoredCfcMetadata(tx, source);
-  } catch (error) {
-    // A source envelope this build cannot produce labels from still makes
-    // the link CFC-relevant (fail closed): recording the policy input
-    // routes the write to prepare, where the unreadable envelope rejects
-    // it in enforcing modes instead of the labels silently not carrying.
-    if (!(error instanceof StoredCfcMetadataError)) throw error;
-    sourceEnvelopeUninterpretable = true;
-  }
-  const sourceRelevant = schemaIfcOverlapsPath(source.schema, [], []) ||
-    sourceMetadata !== undefined || sourceEnvelopeUninterpretable ||
-    hasPendingSchemaPolicyInput(tx, source) ||
-    cfcLabelViewHasValues(carriedCfcLabelView);
   // A link stored below a document's root under a write authorization that
-  // arrives with this write is held to the same source check as one stored
-  // under the claim once a commit has persisted it: otherwise the write that
-  // creates a protected list admits a first entry every later one is refused.
-  // A link AT the root is excluded — the document then aliases its source and
-  // stores no entry of its own. The stored labels that the pointer this write
-  // replaces brought to the slot do not count: they leave with it (see
-  // `storedCfcMetadataAppliesToPath`).
-  const targetRelevant =
+  // arrives with this write is held to the same check as one stored under
+  // the claim once a commit has persisted it: otherwise the write that
+  // creates a protected list admits a first entry every later one is
+  // refused. A link AT the root is excluded — the document then aliases its
+  // source and stores no entry of its own. The stored labels that the pointer
+  // this write replaces brought to the slot do not count: they leave with it
+  // (see `storedCfcMetadataAppliesToPath`).
+  const relevant = referenceRelevant ||
     storedCfcMetadataAppliesToPath(tx, target, { replacingLink: true }) ||
     hasPendingSchemaPolicyInput(tx, target) ||
     (target.path.length > 0 && hasPendingWriteAuthorization(tx, target));
-  if (!sourceRelevant && !targetRelevant) {
-    return;
+  if (relevant) {
+    tx.markCfcRelevant(`link-write:${target.id}`);
   }
-
-  tx.markCfcRelevant(`link-write:${target.id}`);
   tx.recordCfcWritePolicyInput({
     kind: "link-write",
     target: cfcAddressFromLink(target),

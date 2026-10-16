@@ -105,9 +105,7 @@ builtin checks `maxConfidentiality`. Under max enforcement, a reference to a
 labeled cell is refused. A per-request sink ceiling is separate follow-up work.
 
 The book fixture declares the reader's `User` confidentiality label on each book
-cell. The result writer requires stored source-label metadata and refuses a link
-target whose metadata is absent; creating an unlabeled cell is not evidence that
-its public metadata is stored.
+cell.
 
 Loom deviation 10 also remains unchanged: a row without `ifc` inherits the label
 of its query. This can under-label a row, including admitting it as public on a
