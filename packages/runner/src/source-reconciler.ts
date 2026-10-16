@@ -57,7 +57,10 @@ import { prepareSourceClosureVerification } from "./compilation-cache/cell-cache
 import type { RuntimeProgram } from "./harness/types.ts";
 import { getMetaLink } from "./link-utils.ts";
 import type { PreparedSourceUpdate } from "./pattern-manager.ts";
-import { parseReleaseTime, RELEASED_AT_HEADER } from "./pattern-release-time.ts";
+import {
+  parseReleaseTime,
+  RELEASED_AT_HEADER,
+} from "./pattern-release-time.ts";
 import {
   classifyPieceOriginString,
   type PieceOriginKind,
@@ -124,9 +127,10 @@ const logger = getLogger("runner.source-reconcile", {
  *   pattern is unchanged.
  * - `updated`: the piece adopted new source.
  * - `ahead`: the origin offered a `system:` release earlier than the one the
- *   piece runs, which the piece keeps. An offer stating no release time is
- *   earlier than any that states one. A piece whose running pattern cannot
- *   load takes the earlier release regardless, since it has nothing to keep.
+ *   piece runs, which the piece keeps. Against a running release that records
+ *   a release time, an offer stating none is the earlier one. A piece whose
+ *   running pattern cannot load takes the earlier release regardless, since it
+ *   has nothing to keep.
  * - `incompatible`: the origin offered source that cannot replace what the
  *   piece runs, and its owner has not said to take it anyway.
  * - `rejected`: the write that adopts the origin's source was refused for
@@ -157,8 +161,9 @@ export type ReconcileOutcome =
  *
  * The results that end with the piece running what its origin holds, or a
  * later release of it, are one state to a reader: how it got there is the
- * revision log's business, not this record's. `detached` and `unusable` are read off the recorded origin
- * itself, so a record would only restate what the piece already says.
+ * revision log's business, not this record's. `detached` and `unusable` are
+ * read off the recorded origin itself, so a record would only restate what the
+ * piece already says.
  */
 const RECORDED_OUTCOME: Record<
   ReconcileOutcome,
@@ -201,9 +206,10 @@ function reconciliationFor(
  * piece runs, released at `running`. Release times are compared only where
  * the running source records one: a piece adopted from a host stating none
  * has nothing to order an offer against, and takes it as before. An offer
- * stating none is earlier than any running release that does, so a host that
- * states no release time cannot move a piece another host has placed on a
- * stated one. Two offers stating the same time are not ordered either way.
+ * stating none is earlier than any running release that records one, so a
+ * host that states no release time cannot move a piece another host has
+ * placed on a stated one. An offer stating the same time as the running
+ * release is not earlier.
  */
 function isEarlierRelease(
   offered: number | undefined,
@@ -993,9 +999,8 @@ export class SourceReconciler {
     const releasedAt = parseReleaseTime(releaseHeader.trim());
     if (releasedAt === undefined) {
       return {
-        detail: debugStr`the origin's release time is not a time: $quote${
-          releaseHeader
-        }`,
+        detail:
+          debugStr`the origin's release time is not a time: $quote${releaseHeader}`,
       };
     }
     return { identity: advertised, releasedAt };

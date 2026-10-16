@@ -992,7 +992,9 @@ describe("piece source reconciliation", () => {
         const manager = runtime.patternManager;
         const load = manager.loadPatternByIdentity.bind(manager);
         manager.loadPatternByIdentity = (...args: Parameters<typeof load>) =>
-          args[0] === identities.v2 ? Promise.resolve(undefined) : load(...args);
+          args[0] === identities.v2
+            ? Promise.resolve(undefined)
+            : load(...args);
         try {
           expect(await offer({ marker: "v1", releasedAt: EARLIER })).toEqual({
             outcome: "updated",
@@ -1010,7 +1012,7 @@ describe("piece source reconciliation", () => {
           .toEqual({ outcome: "unavailable", running: "v1" });
         expect(getPieceReconciliation(piece)).toMatchObject({
           outcome: "unreachable",
-          detail: "the origin's release time is not a time: `\"yesterday\"`",
+          detail: 'the origin\'s release time is not a time: `"yesterday"`',
         });
       });
     });

@@ -247,6 +247,7 @@ Off by default; flip `OTEL_ENABLED=true` to start exporting.
 | Var | Default | Notes |
 |---|---|---|
 | `TOOLSHED_GIT_SHA` | _(unset)_ | Explicit toolshed commit override, surfaced via `lib/build-info.ts`. Takes priority over the build-baked SHA for `/api/meta`. |
+| `TOOLSHED_RELEASED_AT` | _(unset)_ | When this deployment released what it serves, as an RFC 3339 date-time with an offset, such as `2026-10-16T14:03:00Z`; anything else refuses startup. Set by each deploy to the time of that deploy, a deploy of a commit already deployed included, and the same on every instance a deploy restarts ([Deploying a commit](deploying.md#a-deploy-states-when-it-happened)). The patterns route sends it beside every identity it advertises, in a `CF-Released-At` header, and `/api/meta` publishes it as `releasedAt`. A piece following a `system:` origin records it with the revision that adopts that source, and is then not moved to an earlier release. Unset: identities go out alone, and pieces follow them by identity without any order. |
 | `COMMIT_SHA` | _(unset)_ | Source-run build metadata fallback. It lets `/api/meta` present the same `gitSha` field that a compiled toolshed obtains from baked metadata. On a compiled toolshed, baked metadata takes priority. The system-pattern updater does not consult this value. |
 
 Set `COMMIT_SHA` to the Labs revision that describes a source checkout when you
@@ -542,5 +543,6 @@ gateway candidate for the `default` alias.
 ```bash
 ENV=production
 TOOLSHED_GIT_SHA=<deploy-sha>
+TOOLSHED_RELEASED_AT=<time of this deploy, e.g. 2026-10-16T14:03:00Z>
 # Provider keys, OAuth secrets, MEMORY_URL, etc. as appropriate.
 ```

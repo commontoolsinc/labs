@@ -241,8 +241,8 @@ export class PatternsRoute {
         const identity = await this.identity(filename, options.sourceRoots);
         const releasedAt = this.#releasedAt;
         // The release time is part of the answer, so it is part of the
-        // validator: a redeploy of unchanged source answers 200 with the new
-        // time rather than 304 over a cached one.
+        // validator: revalidating after a redeploy of unchanged source gets a
+        // 200 carrying the new time rather than a 304 over a cached one.
         return patternResponse(
           identity,
           "text/plain; charset=utf-8",

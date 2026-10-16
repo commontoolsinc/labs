@@ -211,3 +211,36 @@ Deno.test("API_INTERNAL_URL is `self`, an HTTP or HTTPS origin, or nothing, besi
     );
   }
 });
+
+Deno.test("TOOLSHED_RELEASED_AT is an RFC 3339 date-time, or nothing", () => {
+  const parse = (value: string | undefined) =>
+    EnvSchema.safeParse(
+      value === undefined ? {} : { TOOLSHED_RELEASED_AT: value },
+    );
+
+  // Unset or empty: the patterns route advertises identities alone.
+  assertEquals(parse(undefined).data?.TOOLSHED_RELEASED_AT, undefined);
+  assertEquals(parse("").data?.TOOLSHED_RELEASED_AT, undefined);
+  // Read as milliseconds since the epoch, whatever offset it is written in.
+  assertEquals(
+    parse("2026-10-16T14:03:00Z").data?.TOOLSHED_RELEASED_AT,
+    Date.UTC(2026, 9, 16, 14, 3, 0),
+  );
+  assertEquals(
+    parse("2026-10-16T07:03:00-07:00").data?.TOOLSHED_RELEASED_AT,
+    Date.UTC(2026, 9, 16, 14, 3, 0),
+  );
+  // Anything else fails the parse, which refuses startup, naming the value.
+  for (const value of ["2026-10-16", "2026-10-16T14:03:00", "now"]) {
+    const result = parse(value);
+    assert(!result.success, value);
+    const issue = result.error.issues.find((issue) =>
+      issue.path[0] === "TOOLSHED_RELEASED_AT"
+    );
+    assertEquals(
+      issue?.message,
+      "TOOLSHED_RELEASED_AT must be an RFC 3339 date-time with an offset, " +
+        `such as 2026-10-16T14:03:00Z: \`${value}\``,
+    );
+  }
+});
