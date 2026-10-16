@@ -14,23 +14,42 @@
  * returns what the task needs. Where it is released, the label of what was
  * read travels on the output, and the prompt loop joins it into the run's
  * model context, so everything the model writes afterwards carries it.
+ *
+ * A piece's derived fields live in documents its run writes, so a read that
+ * lands in one no run has written runs the piece first, as `call_verb` does,
+ * where the run is authorized for side effects.
+ * "Holds nothing at that path" is then a statement about the path rather than
+ * about a piece nobody ran.
  */
 
 import type { JSONSchema } from "@commonfabric/api";
 import {
+  type Cell,
+  getPatternIdentityRef,
+  type MemorySpace,
+  type NormalizedFullLink,
+  type Runtime,
+} from "@commonfabric/runner";
+import {
+  cfcLabelViewForCellFailClosedWithStatus,
   CfcReadCeilingError,
   collectConsumedLabel,
   describeSinkReleaseRefusal,
   type IFCLabel,
 } from "@commonfabric/runner/cfc";
+import { entityKindOfIdString } from "@commonfabric/runner/entity-kind";
 import {
   createLLMFriendlyLink,
   parseLLMFriendlyLink,
 } from "@commonfabric/runner/shared";
+import { disclosedCfcLabels } from "../cfc-label-disclosure.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import { errorMessage } from "../error-message.ts";
 import { scrubBareFabricIdentifiers } from "../fabric-identifier-scrub.ts";
-import { admitsFabricReference } from "../foreign-spaces.ts";
+import {
+  admitsFabricReference,
+  type HarnessForeignSpaces,
+} from "../foreign-spaces.ts";
 import { resolveHandleRef, resolveHandleToken } from "../handle-table.ts";
 import { replacedAt, storedLinkPaths } from "./call-verb.ts";
 import { sessionPieces } from "./piece-source.ts";
@@ -78,11 +97,65 @@ export type ReadValueToolOutput =
 /** The sink a read value is released to, named in a release refusal. */
 const READ_VALUE_SINK = "read_value";
 
+/**
+ * Whether the position `select` names under `link` lands in a derived
+ * document no run has derived. A piece's derived fields live in `computed:`
+ * documents its run writes, so until the piece has run somewhere the store
+ * holds no record of one, and a read there finds nothing however real the
+ * path is. A position this cannot settle — one the read ceiling withholds,
+ * or in a space the run may not read — is left to the measured read, which
+ * says what stopped it.
+ */
+const landsUnderived = async (
+  runtime: Runtime,
+  link: NormalizedFullLink,
+  select: readonly string[],
+  sessionSpace: MemorySpace,
+  foreignSpaces: HarnessForeignSpaces,
+): Promise<boolean> => {
+  try {
+    const selected = runtime.getCellFromLink({
+      ...link,
+      path: [...link.path, ...select],
+      schema: undefined,
+    });
+    await selected.pull();
+    const at = selected.resolveAsCell().getAsNormalizedFullLink();
+    if (
+      entityKindOfIdString(at.id) !== "computed" ||
+      !admitsFabricReference(at.space, sessionSpace, foreignSpaces)
+    ) {
+      return false;
+    }
+    const document = runtime.getCellFromLink({
+      ...at,
+      path: [],
+      schema: undefined,
+    });
+    await document.pull();
+    return document.getRaw() === undefined;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The confidentiality atom types `cell` carries, for a refusal to name. A
+ * label that cannot be read names nothing.
+ */
+const confidentialityAtoms = (cell: Cell<unknown> | undefined): string[] =>
+  cell === undefined ? [] : [
+    ...new Set(
+      disclosedCfcLabels(cfcLabelViewForCellFailClosedWithStatus(cell).view)
+        .flatMap((label) => label.confidentiality.flat()),
+    ),
+  ];
+
 export const readValueToolDescriptor: HarnessToolDescriptor = {
   toolId: "read_value",
   title: "Read Value",
   description:
-    "Return the value behind a handle token this run holds, optionally narrowed to a path within it: strings, numbers and every other value as stored, and a position that links to another document as that document's handle token. Run describe_handle on the token first — a token this run has not described is refused. Everything read joins this run's context, and its CFC label stays on the run: whatever the run produces afterwards carries that label. Where the run's policy does not let the value reach you, the refusal names the label that kept it back, and delegate_task can hand the token to a subagent that reads it and returns what the task needs. Read only what the task needs: narrow with select rather than reading a whole piece to find one field.",
+    "Return the value behind a described handle token this run holds, as stored, with a position linking to another document returned as that document's handle token.",
   effectClass: "read",
   inputSchema: {
     type: "object",
@@ -93,8 +166,7 @@ export const readValueToolDescriptor: HarnessToolDescriptor = {
       },
       select: {
         type: "string",
-        description:
-          "A path within the value, segments separated by /, such as items/0/title. Omit it to read the whole value.",
+        description: "A path within the value, such as items/0/title.",
       },
     },
     required: ["token"],
@@ -173,7 +245,43 @@ export const readValueTool: HarnessToolDefinition<
     let value: unknown;
     let refusal: string | undefined;
     let observedLabel: IFCLabel | undefined;
+    let measured: Cell<unknown> | undefined;
     try {
+      // A derived value is the piece's to produce, so a read that lands where
+      // no run has produced it runs the piece, as `call_verb` does, and reads
+      // what the run derives. Only a piece can be run: a handle on the
+      // derived document itself names no piece, and says so.
+      if (
+        await landsUnderived(
+          runtime,
+          link,
+          select,
+          space,
+          session.foreignSpaces,
+        )
+      ) {
+        const piece = runtime.getCellFromLink({
+          ...link,
+          path: [],
+          schema: undefined,
+        });
+        await piece.sync();
+        if (getPatternIdentityRef(piece) === undefined) {
+          return fail(
+            `${entry.token} is a value its piece derives, and it holds none until that piece runs; read it through the piece's handle, which runs the piece`,
+          );
+        }
+        // Running the piece commits what it derives and fires what its
+        // builtins send, so it waits on the authorization a side effect
+        // needs, even though the read itself does not.
+        if (context.sideEffectsAuthorized !== true) {
+          return fail(
+            `${entry.token} holds a value its piece derives, and the piece has not run; running it is a side effect this run is not authorized for. A run under a direct command reads it, which runs the piece`,
+          );
+        }
+        await runtime.startWithCommit(piece);
+        await runtime.idle();
+      }
       // A link at the position itself is followed, so a piece's field reads
       // as the value it aliases. Links within that value stay links. The
       // position is pulled before it is resolved: a resolution stops at a
@@ -184,8 +292,10 @@ export const readValueTool: HarnessToolDefinition<
         path: [...link.path, ...select],
         schema: undefined,
       }).withTx(releaseTx);
+      measured = selected;
       await selected.pull();
       const read = selected.resolveAsCell();
+      measured = read;
       // Following the link widens nothing: the value it lands on must be in
       // a space the run may read, as the handle's own space had to be.
       const at = read.getAsNormalizedFullLink();
@@ -226,8 +336,11 @@ export const readValueTool: HarnessToolDefinition<
       // measured, and binds every reader the session runs, so the refusal
       // says which limit held rather than offering a route around it.
       if (error instanceof CfcReadCeilingError) {
+        const atoms = confidentialityAtoms(measured).join(", ");
         return fail(
-          `the value was withheld: its label is above this session's read ceiling; describe_handle lists the labels ${entry.token} carries`,
+          `the value was withheld: its label${
+            atoms === "" ? "" : ` (${atoms})`
+          } is above this session's read ceiling; describe_handle lists the labels ${entry.token} carries`,
         );
       }
       return fail(
