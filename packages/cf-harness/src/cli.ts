@@ -2485,7 +2485,7 @@ const appendStructuredResultInstructions = (
     allowedToolIds === undefined || allowedToolIds.includes("submit_result")
   ) {
     lines.push(
-      "- Finish by calling submit_result with the whole result as `result`. It validates the value against the configured schema and tells you what to correct; an accepted result ends the run.",
+      "- Finish by calling submit_result with the whole result as `result`. It validates the value against the configured schema and tells you what to correct; an accepted result ends the run, so make it your last call. Where the result refers to something you hold a handle for, write the handle token, not an address.",
     );
   }
   lines.push(

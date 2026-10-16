@@ -63,6 +63,8 @@ a line for each new document to the index below.
 - [`custom-space-roots.md`](custom-space-roots.md) — seal a custom
   default-pattern reservation with the initial ACL, or one leaving the root to
   the space's creator, as `inSpace(..., { root: true })` does.
+- [`meeting-room-allocation.md`](meeting-room-allocation.md) — host-local atomic
+  selection of a canonical calendar meeting Loom, without granting membership.
 - [`space-kinds.md`](space-kinds.md) — the kind a space declares in its genesis
   commit, as `inSpace(..., { spaceKind })` does: how it is sealed so that only
   its creator states it, once; who can read it; the known kinds; and what a

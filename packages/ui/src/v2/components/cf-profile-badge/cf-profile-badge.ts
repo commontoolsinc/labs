@@ -196,7 +196,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
 
       .tooltip-meta {
         font-size: var(--cf-font-size-xs, 0.75rem);
-        color: var(--cf-theme-color-muted-foreground, hsl(0, 0%, 45%));
+        color: var(--cf-theme-color-text-muted, hsl(0, 0%, 45%));
       }
 
       @media (prefers-reduced-motion: reduce) {

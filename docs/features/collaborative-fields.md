@@ -109,6 +109,11 @@ edits made while that apply is in flight go out in the next one, until none
 remain. A local update is confirmed by Memory or reported through the editor's
 error and reconciliation events; it is never dropped silently.
 
+Disabling collaboration keeps the editor read-only while it confirms pending
+operations and refreshes the bound Cell's materialized value. The operation
+stream remains the editor's display authority until that read completes. A
+failed refresh leaves the editor read-only and emits `cf-error`.
+
 One collaborative epoch owns a field until it is explicitly released or its
 entity is deleted. An ordinary write may change other paths, but it cannot
 change an active collaborative path. Deliberate release plus replacement may be
