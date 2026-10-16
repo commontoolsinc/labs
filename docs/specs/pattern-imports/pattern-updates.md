@@ -582,8 +582,10 @@ then start it:
 4. The running source's release time is the later of the one the revision that
    adopted it records and the one the reconciliation record confirms for it.
    If `currentId` differs and the running source has a release time, an answer
-   stating an earlier time or none is an earlier release than the piece runs. The piece keeps its source, and the
-   attempt records that it follows its origin, naming what the origin offered.
+   stating an earlier time or none is an earlier release than the piece runs.
+   The piece keeps its source, and the attempt records that it follows its
+   origin, naming the source it runs rather than the earlier one offered, so
+   that hosts offering the two releases in turn leave the record as it is.
    Two answers stating the same time are not ordered, and an answer to a piece
    whose source records no time is not either. A running artifact that will
    not load has nothing to keep and continues regardless, so the earlier

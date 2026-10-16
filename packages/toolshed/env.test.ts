@@ -244,3 +244,32 @@ Deno.test("TOOLSHED_RELEASED_AT is an RFC 3339 date-time, or nothing", () => {
     );
   }
 });
+
+Deno.test("TOOLSHED_RELEASED_AT refuses a time ahead of the host's clock", () => {
+  const parse = (offset: number) => {
+    const value = new Date(Date.now() + offset).toISOString();
+    return {
+      value,
+      result: EnvSchema.safeParse({ TOOLSHED_RELEASED_AT: value }),
+    };
+  };
+
+  // Within the allowance for clock skew between hosts, a time just ahead is
+  // the deploy's own.
+  const skewed = parse(60_000);
+  assertEquals(
+    skewed.result.data?.TOOLSHED_RELEASED_AT,
+    Date.parse(skewed.value),
+  );
+  // Further ahead, the parse fails, which refuses startup, naming the value.
+  const ahead = parse(60 * 60_000);
+  assert(!ahead.result.success);
+  const issue = ahead.result.error.issues.find((issue) =>
+    issue.path[0] === "TOOLSHED_RELEASED_AT"
+  );
+  assertEquals(
+    issue?.message,
+    "TOOLSHED_RELEASED_AT is more than five minutes ahead of this host's " +
+      `clock, which no deploy that has happened is: \`${ahead.value}\``,
+  );
+});

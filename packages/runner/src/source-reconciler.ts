@@ -784,9 +784,9 @@ export class SourceReconciler {
    *
    * Reaching the same conclusion again writes nothing, so opening a piece that
    * is up to date stays a read, apart from the first open after its origin
-   * offers the same source as a later release. An accepted transition has already cleared
-   * whatever the last one concluded, so an update records its fresh outcome
-   * over an empty field rather than over a stale one.
+   * offers the same source as a later release. An accepted transition has
+   * already cleared whatever the last one concluded, so an update records its
+   * fresh outcome over an empty field rather than over a stale one.
    *
    * Losing the record is not losing the reconciliation: the outcome describes
    * what happened, and the piece runs what it runs either way.
@@ -979,6 +979,11 @@ export class SourceReconciler {
         resultCell.sourceURI,
         offered,
       ]);
+      // The record names the source the piece runs, which the later release
+      // offered, rather than the earlier offer, which the line above names.
+      // Two hosts offering the two in turn then leave one record, where
+      // naming each offer would rewrite it on every open.
+      state.offered = { ...state.running };
       return "ahead";
     }
     if (this.#refusedBefore(resultCell, state, offered)) return "rejected";

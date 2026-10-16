@@ -892,24 +892,31 @@ describe("piece source reconciliation", () => {
           running: "v2",
         });
         expect(originUpdates(piece)).toHaveLength(1);
-        // The record says the piece follows its origin, and names what that
-        // origin offered.
+        // The record says the piece follows its origin, and names the source
+        // it runs, which the later release offered.
         expect(getPieceReconciliation(piece)).toMatchObject({
           outcome: "followed",
-          offered: { identity: identities.v1, symbol: SYMBOL },
+          offered: { identity: identities.v2, symbol: SYMBOL },
         });
       });
 
       it("settles on the later of two releases its hosts offer in turn", async () => {
         const { piece, offer } = await followingPiece();
         const outcomes: string[] = [];
-        for (let round = 0; round < 3; round++) {
+        const round = async () => {
           outcomes.push(
             (await offer({ marker: "v2", releasedAt: LATER })).outcome,
             (await offer({ marker: "v1", releasedAt: EARLIER })).outcome,
           );
-        }
+        };
+        await round();
+        // Once the piece has settled, the alternation is a read: the record
+        // an earlier offer leaves is the one the later offer leaves.
+        using writes = spy(runtime, "editWithRetry");
+        await round();
+        await round();
 
+        expect(writes.calls).toHaveLength(0);
         expect(outcomes).toEqual([
           "updated",
           "ahead",

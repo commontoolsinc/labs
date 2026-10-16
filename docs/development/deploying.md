@@ -97,6 +97,13 @@ the release the instances run from gives that pairing by construction. A
 toolshed whose environment does not set the time advertises identities alone,
 and a piece it serves then follows whichever identity it was offered last.
 
+The time has to be the deploy's own. A time from the future would stamp every
+release a piece adopts from that deploy, and every correct release after it
+would read as earlier, so pieces would stay where they are until a deploy stated
+a later time still. A toolshed therefore refuses to start with a time more than
+five minutes ahead of its own clock, which allows for skew between the host that
+deploys and the hosts that run.
+
 ## The wrapper is owned by another repository
 
 `/opt/cf/deploy.sh` is not in this repository. The

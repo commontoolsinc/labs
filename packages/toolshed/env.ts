@@ -65,6 +65,16 @@ function selfApiOrigin(host: string, port: number): string {
   return `http://${name}:${port}`;
 }
 
+/**
+ * How far `TOOLSHED_RELEASED_AT` may run ahead of this host's clock: the
+ * allowance for skew between the host that deploys and the hosts that run. A
+ * deploy states the time it happens and starts its instances after it, so a
+ * time further ahead is a clock or a typo. Every piece that adopted a release
+ * stamped with it would read every correct release after it as earlier, and
+ * stay where it is until a deploy stated a later time still.
+ */
+const RELEASED_AT_CLOCK_SKEW_MS = 5 * 60_000;
+
 // NOTE: This is where we define the environment variable types and defaults.
 // Exported so the parsing rules (e.g. OTEL_ENABLED) can be unit-tested without
 // going through the module-level singleton below.
@@ -425,6 +435,14 @@ export const EnvSchema = z.object({
         code: "custom",
         message: "TOOLSHED_RELEASED_AT must be an RFC 3339 date-time with an " +
           `offset, such as 2026-10-16T14:03:00Z: \`${value}\``,
+      });
+      return z.NEVER;
+    }
+    if (releasedAt > Date.now() + RELEASED_AT_CLOCK_SKEW_MS) {
+      ctx.addIssue({
+        code: "custom",
+        message: "TOOLSHED_RELEASED_AT is more than five minutes ahead of " +
+          `this host's clock, which no deploy that has happened is: \`${value}\``,
       });
       return z.NEVER;
     }
