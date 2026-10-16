@@ -1259,7 +1259,12 @@ export const FabriChatRoomCore = pattern<
     manager,
     present: participantPrincipals,
   });
-  const cannotSend = computed(() => !canSend);
+  // The composers' `disabled`. It defaults to `true`, which is what a
+  // composer renders until this has computed: without a default the prop is
+  // absent then, so a composer would show enabled, disable itself until the
+  // viewer's profile and access resolve, and enable again, dropping what was
+  // typed or clicked meanwhile.
+  const cannotSend = computed((): boolean | Default<true> => !canSend);
   const isOwner = computed(() => isOwnerOf(messages));
   const viewer = computed((): ChatRoomViewer => {
     const profile = viewerProfileOf(myProfile);

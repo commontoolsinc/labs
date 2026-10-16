@@ -30,6 +30,7 @@ import { CfcEnvelopeStabilityError } from "./envelope-stability-reason.ts";
 import { CfcSchemaMigrationError } from "./migration-reason.ts";
 import { isValueStamp } from "./minted-integrity.ts";
 import {
+  canonicalizeCfcSchemaDocument,
   cfcSchemaResolvedRoot,
   hoistCfcSchemaDefs,
   localDefinitionName,
@@ -1522,10 +1523,16 @@ export const mergeCfcSchemaEnvelopes = (
       ? { definitions: definitions ?? {}, active: new Set() }
       : undefined,
   );
+  // The merged document is persisted and hashed as it is returned, so it
+  // leaves here in canonical form: one root map, every authored definition,
+  // one minted definition per meaning those do not carry, nothing minted
+  // that the document does not reach.
   return internSchema(
-    definitions !== undefined && isObjectOrArray(merged)
-      ? { ...merged, $defs: definitions }
-      : merged,
+    canonicalizeCfcSchemaDocument(
+      definitions !== undefined && isObjectOrArray(merged)
+        ? { ...merged, $defs: definitions }
+        : merged,
+    ),
   );
 };
 

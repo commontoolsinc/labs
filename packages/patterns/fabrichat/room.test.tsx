@@ -13,7 +13,7 @@ import {
   UI,
   Writable,
 } from "commonfabric";
-import { findNodeByProp, propValue } from "../test/vnode-helpers.ts";
+import { findNodeByProp, propsOf, propValue } from "../test/vnode-helpers.ts";
 import { FabriChatMessageRow } from "./message-row.tsx";
 import {
   type ComposerState,
@@ -96,6 +96,13 @@ const mainTexts = (latest: readonly MessageCell[]): string =>
 const composerDisabled = (root: unknown): unknown =>
   propValue(findNodeByProp(root, "inputId", "fabrichat-message"), "disabled");
 
+// The default of the composer whose field is `inputId`, for its `disabled`:
+// what it renders before the value has computed.
+const composerDisabledDefault = (root: unknown, inputId: string): unknown =>
+  (propsOf(findNodeByProp(root, "inputId", inputId))?.disabled as
+    | { schema?: { default?: unknown } }
+    | undefined)?.schema?.default;
+
 export default pattern(() => {
   const messages = Writable.of<MessagesValue>([] as MessagesValue);
   const aliceProfile = Writable.of<TestProfile>({ name: "Alice" });
@@ -156,6 +163,15 @@ export default pattern(() => {
       },
       { assertion: assert(() => composerDisabled(pending[UI]) === true) },
       { assertion: assert(() => composerDisabled(alice[UI]) === false) },
+      // The conversation's composer and a thread's start out disabled, before
+      // whether the viewer may send has computed.
+      {
+        assertion: assert(() =>
+          composerDisabledDefault(alice[UI], "fabrichat-message") === true &&
+          composerDisabledDefault(alice[UI], "fabrichat-thread-message") ===
+            true
+        ),
+      },
       {
         assertion: assert(() =>
           alice.canSend === true && pending.canSend === false
