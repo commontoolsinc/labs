@@ -196,7 +196,7 @@ export interface PendingMainFailure {
  * values are not ordered and nothing but equality is asked of them; an
  * aggregate carrying none was written before the stamps began.
  */
-export const CATCH_RULE = 2;
+export const CATCH_RULE = 3;
 
 /** A fresh, empty history. */
 export function emptyState(): IdentityState {
@@ -401,7 +401,7 @@ export interface FoldContext {
   credited: Map<string, string>;
 
   /** Where and when each identity has been seen failing. */
-  failures: Map<string, Array<{ day: string; source: string }>>;
+  failures: Map<string, SeenFailure[]>;
 
   /**
    * The identities each run (see `runOf`) newly broke, with the run's
@@ -409,6 +409,23 @@ export interface FoldContext {
    * outlives the batch and ages with the outcomes at a commit.
    */
   crowds: Map<string, { day: string; identities: Set<string> }>;
+}
+
+/** One failure of an identity, as the environmental rule counts it. */
+export interface SeenFailure {
+  day: string;
+  source: string;
+
+  /**
+   * Whether this failure was away from the default branch while that
+   * branch was already failing this identity, which is also what stops
+   * it being a catch. A pull request's run tests the pull request merged
+   * into the default branch, and a workstation runs a change on top of
+   * one of its commits, so either fails a test the default branch is
+   * failing. Such a failure is the default branch's breakage seen again,
+   * and the environmental rule leaves it out when it counts sources.
+   */
+  brokenOnMain?: true;
 }
 
 /** A context holding nothing, for a fold with no history behind it. */
@@ -431,7 +448,7 @@ export interface StoredFoldContext {
   recentCommits: string[];
   mainAtCommit: Array<[string, { day: string; outcome: "pass" | "fail" }]>;
   credited: Array<[string, string]>;
-  failures: Array<[string, Array<{ day: string; source: string }>]>;
+  failures: Array<[string, SeenFailure[]]>;
   crowds?: Array<[string, { day: string; identities: string[] }]>;
 }
 
@@ -529,14 +546,21 @@ export function parseContext(value: unknown): FoldContext {
   }
   for (const [key, seen] of pairs(stored.failures)) {
     if (!Array.isArray(seen)) continue;
-    const kept = seen.filter((failure): failure is {
-      day: string;
-      source: string;
-    } =>
-      isObjectOrArray(failure) &&
-      isDay((failure as { day?: unknown }).day) &&
-      typeof (failure as { source?: unknown }).source === "string"
-    );
+    const kept: SeenFailure[] = [];
+    for (const failure of seen) {
+      if (!isObjectOrArray(failure)) continue;
+      const held = failure as {
+        day?: unknown;
+        source?: unknown;
+        brokenOnMain?: unknown;
+      };
+      if (!isDay(held.day) || typeof held.source !== "string") continue;
+      kept.push({
+        day: held.day,
+        source: held.source,
+        ...(held.brokenOnMain === true ? { brokenOnMain: true as const } : {}),
+      });
+    }
     if (kept.length > 0) context.failures.set(key, kept);
   }
   for (const [run, crowd] of pairs(stored.crowds)) {
@@ -653,13 +677,10 @@ export function foldObservations(
   // judged is what stops a failure elsewhere at one commit being weighed
   // against whatever `main` happened to say last in this batch.
   const mainAtCommit = new Map<string, "pass" | "fail" | "skip">();
+  const failedHere = new Set<string>();
   for (const observation of observations) {
     const key = testIdentityKey(observation.test);
-    if (observation.outcome === "fail") {
-      const list = failures.get(key) ?? [];
-      list.push({ day: observation.day, source: observation.source });
-      failures.set(key, list);
-    }
+    if (observation.outcome === "fail") failedHere.add(key);
     if (observation.place !== "main" || observation.outcome === "skip") {
       continue;
     }
@@ -700,8 +721,12 @@ export function foldObservations(
   // identity whose previous run there in its order did not fail; anywhere
   // else, one the default branch was not already failing. Whether another rule sets a
   // failure aside needs the whole batch, so `crowded` asks that later.
+  // Each failure is also recorded here for `environmental`, which reads
+  // the record only after this pass. A failure elsewhere that the default
+  // branch was already failing is marked as such.
   const crowds = context.crowds;
   const lastMainOf = new Map<string, MainOutcomes>();
+  const hasFailed = (key: string) => failures.has(key) || failedHere.has(key);
   for (const observation of observations) {
     // A skip is a test that deliberately did not run, so it agrees with
     // nothing and contradicts nothing; counting it as disagreement would
@@ -716,19 +741,27 @@ export function foldObservations(
         withMainOutcome(said, observation.seed, observation.outcome),
       );
     }
-    if (
-      observation.outcome === "fail" &&
-      !(observation.place === "main"
+    if (observation.outcome === "fail") {
+      const onMain = observation.place === "main";
+      const continued = onMain
         ? lastMain === "fail"
-        : brokenOnMain(key, observation, lastMain))
-    ) {
-      const run = runOf(observation);
-      let crowd = crowds.get(run);
-      if (crowd === undefined) {
-        crowd = { day: observation.day, identities: new Set() };
-        crowds.set(run, crowd);
+        : brokenOnMain(key, observation, lastMain);
+      const list = failures.get(key) ?? [];
+      list.push({
+        day: observation.day,
+        source: observation.source,
+        ...(continued && !onMain ? { brokenOnMain: true as const } : {}),
+      });
+      failures.set(key, list);
+      if (!continued) {
+        const run = runOf(observation);
+        let crowd = crowds.get(run);
+        if (crowd === undefined) {
+          crowd = { day: observation.day, identities: new Set() };
+          crowds.set(run, crowd);
+        }
+        crowd.identities.add(key);
       }
-      crowd.identities.add(key);
     }
     const point = pointOf(observation);
     let seen = outcomesAtCommit.get(point);
@@ -741,12 +774,12 @@ export function foldObservations(
         const held = outcomesAtCommit.get(dropped);
         if (held === undefined) continue;
         for (const identity of [...held.identities.keys()]) {
-          if (!failures.has(identity)) held.identities.delete(identity);
+          if (!hasFailed(identity)) held.identities.delete(identity);
         }
         if (held.identities.size === 0) outcomesAtCommit.delete(dropped);
       }
     }
-    if (!recent.includes(point) && !failures.has(key)) continue;
+    if (!recent.includes(point) && !hasFailed(key)) continue;
     const outcomes = seen.identities.get(key) ?? new Set<string>();
     outcomes.add(observation.outcome);
     seen.identities.set(key, outcomes);
@@ -758,10 +791,16 @@ export function foldObservations(
     (outcomesAtCommit.get(pointOf(observation))?.identities.get(key)?.size ??
       0) > 1;
 
+  // A failure the default branch was already failing is that branch's
+  // breakage, counted once through the branch's own source rather than
+  // once for every pull request or workstation that carried it.
   const environmental = (key: string, day: string, source: string): boolean => {
     const nearby = new Set<string>([source]);
     for (const failure of failures.get(key) ?? []) {
-      if (Math.abs(daysBetween(failure.day, day)) > CATCH_BREADTH_WINDOW_DAYS) {
+      if (
+        failure.brokenOnMain === true ||
+        Math.abs(daysBetween(failure.day, day)) > CATCH_BREADTH_WINDOW_DAYS
+      ) {
         continue;
       }
       nearby.add(failure.source);
