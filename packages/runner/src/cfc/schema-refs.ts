@@ -609,8 +609,10 @@ const isMintedDefinitionName = (name: string): boolean =>
 
 /**
  * The canonical form of a schema document that is about to be persisted or
- * hashed: one definition map at the root, holding one definition per
- * distinct meaning, and only the definitions the document reaches.
+ * hashed: one definition map at the root, holding every definition the
+ * author named, at most one minted definition per meaning the authored ones
+ * do not already carry, and no minted definition the document does not
+ * reach.
  *
  * A merge of two envelopes keeps both documents' definitions apart by
  * renaming one side's map wholesale (`hoistCfcSchemaDefs()`), and a
@@ -650,8 +652,12 @@ export const canonicalizeCfcSchemaDocument = (
     if (cached !== undefined) return cached;
   }
   const canonical = canonicalizeCfcSchemaDocumentUncached(schema);
-  if (cacheable) canonicalDocumentCache.set(schema, canonical);
-  return canonical;
+  if (!cacheable) return canonical;
+  // Interned, so what the cache hands out is frozen and shared; a document
+  // already in canonical form interns to itself.
+  const interned = internSchema(canonical);
+  canonicalDocumentCache.set(schema, interned);
+  return interned;
 };
 
 const canonicalDocumentCache = new WeakMap<object, JSONSchema>();
