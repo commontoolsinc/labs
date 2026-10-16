@@ -220,7 +220,7 @@ async function createProfileFromFallback(page: Page, name: string) {
 
 // Click the save/done cf-button whose accessible text matches `label`. Each of
 // the embed's edit-mode buttons has distinct visible text ("Save name",
-// "Save avatar", "Save bio", "Done"), so matching by text picks exactly one.
+// "Save bio", "Done"), so matching by text picks exactly one.
 async function clickSaveByLabel(page: Page, label: string) {
   await waitForRuntimeIdle(page);
   const token = `profile-embed-save-${crypto.randomUUID()}`;

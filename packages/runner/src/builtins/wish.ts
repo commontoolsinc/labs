@@ -237,6 +237,7 @@ function getResolutionKind(parsed: ParsedWishTarget): string {
     case "#profile":
     case "#profileName":
     case "#profileAvatar":
+    case "#profilePicture":
     case "#profileBio":
     case "#profileSpace":
       return "home-target";
@@ -1087,6 +1088,14 @@ function resolveHomeSpaceTarget(
       return [{
         cell: getDefaultProfileCell(ctx),
         pathPrefix: ["avatar"],
+      }];
+    }
+
+    case "#profilePicture": {
+      // The default profile's picture: the bytes of a raster image.
+      return [{
+        cell: getDefaultProfileCell(ctx),
+        pathPrefix: ["picture"],
       }];
     }
 
