@@ -111,6 +111,16 @@ deduplicated at its event id
 ([events](../server-side-execution/events.md), "One entry, one COMPLETED
 delivery" and §4). So two sends of the same text are two messages.
 
+`commitSend`, the handler of `sendMessage`, also remembers a send that names a
+`requestId`: in the sender's own `sendRequests`, kept `PerUser`, it records
+the message each of the sender's newest hundred such sends pushed, under its
+id. A send naming an id already there pushes nothing, and answers with the
+recorded message, whatever event carries it, so a client that sends again
+because it can't tell whether a send landed adds no second message. It reads
+that record alone, never the room's messages, so its push stays a mergeable
+append, and it answers every send it pushes with the message pushed. A send
+naming no id, as the room's own controls send, reads and writes no record.
+
 An act on a message, and a reply, takes the message by its cell and reads it
 alone. A handler checks what the element's write policy does not — whose
 message or reaction it is, the obliteration rights, and that a message acted
@@ -220,6 +230,7 @@ what the document states is what the room allows.
   ([custom space roots](../../features/custom-space-roots.md)), and declares
   the space's kind ([space kinds](../../features/space-kinds.md)).
 - **Once-only delivery.** The room keeps no memory of the events it has acted
-  on, so it relies on the runtime delivering each durable stream entry to its
-  handler exactly once, and deduplicating a client's re-sent append at its
-  event id ([events](../server-side-execution/events.md), §4).
+  on, beyond the sends `sendRequests` names, so it relies on the runtime
+  delivering each durable stream entry to its handler exactly once, and
+  deduplicating a client's re-sent append at its event id
+  ([events](../server-side-execution/events.md), §4).

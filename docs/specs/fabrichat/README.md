@@ -355,8 +355,9 @@ design, as below.
   handlers write after that, until a deletion or an obliteration drops the
   link.
 - **Once per event.** A handler runs once per event, which the runtime
-  guarantees, so the room keeps no memory of the events it has acted on, and
-  a rendered control sends no `requestId`.
+  guarantees, so the room keeps no memory of the events it has acted on
+  beyond `sendRequests`, each sender's newest sends that named a
+  `requestId`, and a rendered control sends no `requestId`.
 - **Thread summaries.** `messages.threads` is derived in the pass that places
   each message in the views, which walks each reply chain once for the whole
   room. So the summaries together cost one walk of the messages rather than one

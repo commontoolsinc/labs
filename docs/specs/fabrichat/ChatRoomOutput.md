@@ -50,7 +50,10 @@ interface ChatRoomOutput {
     canObliterate: boolean;
   }[];
 
-  sendMessage: Stream<{ body: string; replyTo?: ChatReply }>;
+  sendMessage: Stream<
+    { body: string; replyTo?: ChatReply; requestId?: string },
+    { message: Cell<ChatMessage> } | undefined
+  >;
   editMessage: Stream<{ message: Cell<ChatMessage>; body: string }>;
   deleteMessage: Stream<{ message: Cell<ChatMessage> }>;
   obliterateMessage: Stream<{ message: Cell<ChatMessage> }>;
@@ -94,6 +97,12 @@ interface ChatRoomOutput {
       code: "not-member" | "invalid-title" | "fixed-title";
     }
   >;
+
+  /**
+   * The message each of this reader's newest sends that named a `requestId`
+   * sent, by that id.
+   */
+  sendRequests: Record<string, { message: Cell<ChatMessage>; seq: number }>;
   [UI]: VNode;
   [VIEWS]: { room: object };
 }
@@ -241,6 +250,10 @@ space.
 - **`titleRequests`** holds the outcome of each of the reader's
   [`setTitle`](#settitlerequestid-string-title-string) requests, by its
   `requestId`. Like `addRequests`, it is the reader's alone.
+- **`sendRequests`** holds, for each of the reader's newest hundred
+  [`sendMessage`](#sendmessagebody-string-replyto-chatreply-requestid-string)
+  events that named a `requestId`, the message it sent, by that id, with its
+  place among them as `seq`. Like `titleRequests`, it is the reader's alone.
 - The lists here are projections. An implementation may keep each message's
   reactions as a list of their own, as long as what it offers satisfies these
   rules.
@@ -261,8 +274,9 @@ client:
   under its own access. Passing the room's link to someone else passes neither:
   they read their own.
 - **`PerUser`**: one instance per user, which follows them across sessions.
-  That is only `addRequests` and `titleRequests`, the outcomes of the reader's
-  own adds and retitles. No one else reads them.
+  That is only `addRequests`, `titleRequests`, and `sendRequests`, the
+  outcomes of the reader's own adds, retitles, and sends that named a
+  `requestId`. No one else reads them.
 - **Computed for each reader**: `canSend`, `canAdd`, `viewer`, and
   `messageRights`. Each is derived when it's read, from the reader's own access
   and profile, so each reader sees their own answer, and it needs no instance
@@ -306,7 +320,11 @@ These rules hold for every stream:
   client's code (see
   [`clients.md`](clients.md#writing-the-reviewed-gesture-requirement)), and a
   person who tries again makes a new request, which takes effect again: two
-  sends of the same text are two messages.
+  sends of the same text are two messages. A client that sends again on its
+  own, because it can't tell whether a send landed, names the send with a
+  `requestId` (see
+  [`sendMessage`](#sendmessagebody-string-replyto-chatreply-requestid-string)),
+  which the room sends once for each sender, whatever event carries it.
 
 - A stream that names a reviewed surface admits an event only as a trusted
   gesture on that surface (see
@@ -344,14 +362,14 @@ These rules hold for every stream:
 
 | Stream | Reviewed surface | Effect |
 | --- | --- | --- |
-| [`sendMessage`](#sendmessagerequestid-string-version-chatmessageversion-replyto-chatreply) | `ChatSendSurface` | appends a message from the sender, once |
+| [`sendMessage`](#sendmessagebody-string-replyto-chatreply-requestid-string) | `ChatSendSurface` | appends a message from the sender, once |
 | [`editMessage`](#editmessagerequestid-string-message-cellchatmessage-version-chatmessageversion) | `ChatEditSurface` | records a new version of the sender's message, once |
 | [`deleteMessage`](#deletemessagerequestid-string-message-cellchatmessage) | `ChatDeleteSurface` | records the sender's message as deleted |
 | [`obliterateMessage`](#obliteratemessagerequestid-string-message-cellchatmessage) | `ChatObliterateSurface` | removes a message and its history, leaving a tombstone |
 | [`sendReaction`](#sendreactionrequestid-string-message-cellchatmessage-emoji-string) | `ChatReactSurface` | adds the sender's reaction, if it isn't there |
 | [`deleteReaction`](#deletereactionmessage-cellchatmessage-reaction-cellchatreaction) | `ChatReactSurface` | removes the sender's reaction, the one named |
 
-### `sendMessage(body: string, replyTo?: ChatReply)`
+### `sendMessage(body: string, replyTo?: ChatReply, requestId?: string)`
 
 - `body: string` — The message's text, exactly as the person saw it when they
   sent it. It must be a string, not empty or only whitespace.
@@ -360,21 +378,37 @@ These rules hold for every stream:
   which is shown in the main conversation. `replyTo.message` must be a message
   in this room, and a `"main"` reply must be to a message the main conversation
   shows.
+- `requestId?: string` — Chosen by the sender, and unique among its sends, such
+  as a random 128-bit value for each press of a send control. A client names
+  one when it may send the same send again. The room's own controls name none.
 
-Sends a message from the sender.
+An event may carry other keys, such as a `version` holding the text and a
+proposed time; the room ignores them.
+
+Sends a message from the sender, and answers with it: `{ message }`, the
+message sent.
 
 - **Admitted:** as a trusted gesture on `ChatSendSurface`.
 - **Effect:** appends a [`ChatMessage`](ChatMessage.md) to the room's messages,
   with the sender's profile as `authorProfile`, `body` as `body`, the handler
-  clock as `sentAt` (see [times](ChatMessage.md#times)), and no reactions.
+  clock as `sentAt` (see [times](ChatMessage.md#times)), and no reactions. A
+  send naming a `requestId` is recorded in the sender's `sendRequests` under
+  it, and the oldest of the sender's records goes once they hold more than a
+  hundred.
+- **Repeated:** a send naming a `requestId` the sender's `sendRequests` already
+  holds appends nothing, and answers with the message the recorded send sent.
+  The record is the sender's own, so another sender naming the same id sends a
+  message of their own, and suppresses no one's.
 - **Dropped:** a `body` that isn't a non-empty string, a sender whose profile
   hasn't resolved, or a `replyTo` whose `message` is outside the room's space.
   Otherwise the room takes `replyTo` as sent: a client sends a reply only to a
   message of the room that is not deleted, with a `shownIn` its target allows
-  (see [`ChatReply`](ChatReply.md)).
+  (see [`ChatReply`](ChatReply.md)). A dropped send records nothing, and answers
+  with nothing.
 
 Two messages with the same text are two sends, so sending "YES!" three times
-makes three messages.
+makes three messages, whatever `requestId` each names, as long as no two name
+the same one.
 
 ### `editMessage(message: Cell<ChatMessage>, body: string)`
 
