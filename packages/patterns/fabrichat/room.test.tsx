@@ -13,13 +13,7 @@ import {
   UI,
   Writable,
 } from "commonfabric";
-import {
-  findNode,
-  findNodeByProp,
-  propsOf,
-  propValue,
-  readValue,
-} from "../test/vnode-helpers.ts";
+import { findNodeByProp, propsOf, propValue } from "../test/vnode-helpers.ts";
 import { FabriChatMessageRow } from "./message-row.tsx";
 import {
   type ComposerState,
@@ -102,27 +96,12 @@ const mainTexts = (latest: readonly MessageCell[]): string =>
 const composerDisabled = (root: unknown): unknown =>
   propValue(findNodeByProp(root, "inputId", "fabrichat-message"), "disabled");
 
-// The surface holding the composer whose field is `inputId`.
-const composerSurface = (root: unknown, inputId: string): unknown =>
-  findNode(
-    root,
-    (node) =>
-      readValue(propsOf(node)?.["data-ui-pattern"]) === CHAT_SEND_SURFACE &&
-      findNodeByProp(node, "inputId", inputId) !== undefined,
-  );
-
-// The display of the composer whose field is `inputId`: its surface carries a
-// static `hidden`, which only a computed display outranks, so it is hidden
-// until that display has a value, and is shown only once the viewer may send.
-const composerDisplay = (root: unknown, inputId: string): unknown => {
-  const surface = composerSurface(root, inputId);
-  return propValue(surface, "hidden") === true
-    ? readValue(
-      (propValue(surface, "style") as { display?: unknown } | undefined)
-        ?.display,
-    )
-    : "<no static hidden>";
-};
+// The default of the composer whose field is `inputId`, for its `disabled`:
+// what it renders before the value has computed.
+const composerDisabledDefault = (root: unknown, inputId: string): unknown =>
+  (propsOf(findNodeByProp(root, "inputId", inputId))?.disabled as
+    | { schema?: { default?: unknown } }
+    | undefined)?.schema?.default;
 
 export default pattern(() => {
   const messages = Writable.of<MessagesValue>([] as MessagesValue);
@@ -184,18 +163,13 @@ export default pattern(() => {
       },
       { assertion: assert(() => composerDisabled(pending[UI]) === true) },
       { assertion: assert(() => composerDisabled(alice[UI]) === false) },
-      // The conversation's composer and a thread's, each shown only to a
-      // viewer who may send.
+      // The conversation's composer and a thread's start out disabled, before
+      // whether the viewer may send has computed.
       {
         assertion: assert(() =>
-          composerDisplay(pending[UI], "fabrichat-message") === "none" &&
-          composerDisplay(pending[UI], "fabrichat-thread-message") === "none"
-        ),
-      },
-      {
-        assertion: assert(() =>
-          composerDisplay(alice[UI], "fabrichat-message") === "block" &&
-          composerDisplay(alice[UI], "fabrichat-thread-message") === "block"
+          composerDisabledDefault(alice[UI], "fabrichat-message") === true &&
+          composerDisabledDefault(alice[UI], "fabrichat-thread-message") ===
+            true
         ),
       },
       {

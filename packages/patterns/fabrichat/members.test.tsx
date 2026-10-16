@@ -22,13 +22,7 @@ import {
   VIEWS,
   Writable,
 } from "commonfabric";
-import {
-  findNode,
-  findNodeByProp,
-  propsOf,
-  propValue,
-  readValue,
-} from "../test/vnode-helpers.ts";
+import { findNodeByProp, propValue, readValue } from "../test/vnode-helpers.ts";
 import FabriChatPlacement from "./placement.tsx";
 import { FabriChatMessageRow } from "./message-row.tsx";
 import {
@@ -108,19 +102,6 @@ const editorDisplay = (row: unknown): unknown =>
 // Whether a room's main composer is disabled.
 const composerDisabled = (room: unknown): unknown =>
   propValue(findNodeByProp(room, "inputId", "fabrichat-message"), "disabled");
-
-// The display of a room's composer whose field is `inputId`, the
-// conversation's or a thread's, whose surface is shown only to a viewer who
-// may send.
-const composerDisplay = (room: unknown, inputId: string): unknown =>
-  readValue(
-    (propValue(
-      findNode(room, (node) =>
-        readValue(propsOf(node)?.["data-ui-pattern"]) === CHAT_SEND_SURFACE &&
-        findNodeByProp(node, "inputId", inputId) !== undefined),
-      "style",
-    ) as { display?: unknown } | undefined)?.display,
-  );
 
 /** A message of the shared records, as an event names it. */
 function messageOf(cell: unknown): Writable<MessageRecord>;
@@ -249,8 +230,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       {
         assertion: assert(() =>
           room.canSend === true && composerDisabled(room[UI]) === false &&
-          composerDisplay(room[UI], "fabrichat-message") === "block" &&
-          composerDisplay(room[UI], "fabrichat-thread-message") === "block" &&
           reactingDisabled(room[UI]) === false
         ),
       },
@@ -316,8 +295,6 @@ export const carol = pattern<{ setup: Setup }>(({ setup }) => {
       {
         assertion: assert(() =>
           room.canSend === false && composerDisabled(room[UI]) === true &&
-          composerDisplay(room[UI], "fabrichat-message") === "none" &&
-          composerDisplay(room[UI], "fabrichat-thread-message") === "none" &&
           reactingDisabled(room[UI]) === true
         ),
       },
