@@ -826,11 +826,44 @@ const isWitnessEvidence = (entry: LabelMapEntry): boolean =>
     entry.observes === "shape" && !isRuntimeMintedTemplate(entry)
   );
 
-/** An entry as witness evidence: a `*` template's integrity witnesses nothing. */
-const asWitnessEvidence = (entry: LabelMapEntry): LabelMapEntry =>
-  isRuntimeMintedTemplate(entry)
-    ? { ...entry, label: { confidentiality: entry.label.confidentiality } }
-    : entry;
+/**
+ * Whether `entry` is a stamp the flow stage minted, a `derived` or
+ * `structure` entry: the value stamps and membership stamps whose
+ * `TransformedBy` atoms name an attempt, the identity that ran and the
+ * witnesses it consumed. A `TransformedBy` an entry holds by declaration, in
+ * a schema's `integrity`, describes no attempt (CFC §15.4).
+ */
+const isFlowStageStamp = (entry: LabelMapEntry): boolean =>
+  entry.origin === "derived" || entry.origin === "structure";
+
+/**
+ * An entry as witness evidence: a `*` template's integrity witnesses nothing,
+ * and a `TransformedBy` held by an entry that is no flow-stage stamp
+ * witnesses nothing either. Returns `entry` itself where nothing is left out,
+ * so a caller can tell the two apart by identity.
+ */
+const asWitnessEvidence = (entry: LabelMapEntry): LabelMapEntry => {
+  if (isRuntimeMintedTemplate(entry)) {
+    return {
+      ...entry,
+      label: { confidentiality: entry.label.confidentiality },
+    };
+  }
+  const integrity = entry.label.integrity;
+  // SPEC-PENDING https://github.com/commonfabric/specs/pull/69
+  if (
+    isFlowStageStamp(entry) || integrity === undefined ||
+    !integrity.some(isTransformedByAtom)
+  ) {
+    return entry;
+  }
+  const kept = integrity.filter((atom) => !isTransformedByAtom(atom));
+  const { integrity: _dropped, ...rest } = entry.label;
+  return {
+    ...entry,
+    label: kept.length > 0 ? { ...rest, integrity: kept } : rest,
+  };
+};
 
 /** One location an observation consumed, with what it resolves to there. */
 type ResolvedLocation = {
@@ -916,7 +949,7 @@ function* resolvedLocations(
       held === undefined &&
       evidenceAt.every((entry) =>
         isWitnessEvidence(entry) &&
-        (templates === "evidence" || !isRuntimeMintedTemplate(entry))
+        (templates === "evidence" || asWitnessEvidence(entry) === entry)
       )
     ) {
       yield {
@@ -4466,12 +4499,14 @@ const isRuntimeTemplateBeneath = (
 
 /**
  * Whether `entry` is a writer's stamp as a followed reference's witness takes
- * one: witness evidence a value read consumes, naming the code that wrote. A
- * link entry is none, whatever integrity it holds: it labels the pointer, and
- * a value read does not consume it.
+ * one: a stamp the flow stage minted that a value read consumes, naming the
+ * code that wrote. A link entry is none, whatever integrity it holds, and so
+ * is a declared one: the first labels the pointer, the second states a
+ * schema's claim, and neither names an attempt.
  */
 const isWriterStamp = (entry: LabelMapEntry): boolean =>
-  isWitnessEvidence(entry) && readConsumesEntry("value", entry) &&
+  isWitnessEvidence(entry) && isFlowStageStamp(entry) &&
+  readConsumesEntry("value", entry) &&
   (entry.label.integrity ?? []).some(isTransformedByAtom);
 
 /**
@@ -4496,10 +4531,12 @@ const slotStampPlacementUnknown = (
 /**
  * The input witnesses a followed reference holds at its slot: the retained
  * atoms of the value stamps that resolve there, and none when the envelope
- * does not say the stamp at the slot was placed with its reference. Which reference sits at a slot
- * decides which document a reader reads, so a reader that follows one to
- * confidential content consumed the choice as an input, whatever the slot's
- * own label says. A reference link writes put in place carries no
+ * does not say the stamp at the slot was placed with its reference. A
+ * `TransformedBy` an entry at the slot holds by declaration is no value
+ * stamp and witnesses nothing (`asWitnessEvidence`). Which reference sits at
+ * a slot decides which document a reader reads, so a reader that follows one
+ * to confidential content consumed the choice as an input, whatever the
+ * slot's own label says. A reference link writes put in place carries no
  * value stamp of its own, so it retains nothing unless its writer's stamp
  * covers the slot (`assertedValueRootPaths`).
  */

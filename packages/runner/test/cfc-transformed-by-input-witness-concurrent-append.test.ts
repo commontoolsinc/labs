@@ -264,14 +264,15 @@ const commitWitnessesSubmit = async (
 };
 
 /**
- * Rewrites the list's stored envelope as one written before the placement
- * rule held: the entries `entriesOf` makes of the stored ones, the same ones
- * unless told otherwise, saying nothing of where its stamps sit. In such an
- * envelope nothing says which reference a slot stamp describes.
+ * Rewrites the list's stored envelope with the entries `entriesOf` makes of
+ * the stored ones, the same ones unless told otherwise, and with
+ * `stampPlacement` saying where its stamps sit, or nothing of the kind when
+ * it is left out.
  */
-const forgetStampPlacement = async (
+const rewriteStoredEnvelope = async (
   runtime: Runtime,
   entriesOf: (stored: LabelMapEntry[]) => LabelMapEntry[] = (stored) => stored,
+  stampPlacement?: "committed",
 ): Promise<void> => {
   await load(runtime);
   const read = runtime.edit();
@@ -297,12 +298,23 @@ const forgetStampPlacement = async (
         version: 1,
         entries: entriesOf(metadata?.labelMap.entries ?? []),
       },
+      ...(stampPlacement !== undefined ? { stampPlacement } : {}),
     },
   } as never);
   expect((await tx.commit({ holdSyncedUntilCovered: false }).verdict).error)
     .toBeUndefined();
   await runtime.storageManager.synced();
 };
+
+/**
+ * Rewrites the list's stored envelope as one written before the placement
+ * rule held: the same entries, saying nothing of where its stamps sit. In
+ * such an envelope nothing says which reference a slot stamp describes.
+ */
+const forgetStampPlacement = (
+  runtime: Runtime,
+  entriesOf?: (stored: LabelMapEntry[]) => LabelMapEntry[],
+): Promise<void> => rewriteStoredEnvelope(runtime, entriesOf);
 
 describe("input witnesses over appends made concurrently", () => {
   let server: MemoryV2Server.Server;
@@ -476,6 +488,43 @@ describe("input witnesses over appends made concurrently", () => {
     await load(writer);
     await push(server, writer, SUBMIT, "approve");
     expect(await storedStampPlacement(server, "briefs")).toBe("committed");
+  });
+
+  it("takes no witness from a `TransformedBy` a schema declares over the list's items at a slot another writer filled", async () => {
+    // A trusted schema can declare `TransformedBy` in a list's item
+    // integrity, and the declared entry stands as store policy over every
+    // slot, the ones other writers append included. The attacker's raw
+    // append of a copied reference leaves no value stamp at its slot, and
+    // the submit step's later append stamps the list's own paths with the
+    // submit step again, so the declaration is the only `TransformedBy` at
+    // the copied slot. The envelope says where its writers' stamps sit, and
+    // the declaration is no writer's stamp: it names no attempt, so the
+    // copied slot witnesses nothing.
+    const writer = session();
+    await seed(writer);
+    await push(server, writer, SUBMIT, "reject");
+    await rewriteStoredEnvelope(writer, (stored) => [
+      ...stored,
+      {
+        path: ["*"],
+        label: {
+          integrity: [{ type: CFC_ATOM_TYPE.TransformedBy, identity: SUBMIT }],
+        },
+        origin: "declared",
+      },
+    ], "committed");
+    const attacker = session();
+    await load(attacker);
+    await asAttacker(attacker, (briefs) => {
+      const stored = briefs.getRaw() as unknown[];
+      briefs.push(stored[0] as never);
+    });
+    await load(writer);
+    await push(server, writer, SUBMIT, "approve");
+    expect(await storedStampPlacement(server, "briefs")).toBe("committed");
+    expect(
+      await commitWitnessesSubmit(server, ["reject", "reject", "approve"]),
+    ).toBe(false);
   });
 
   it("withholds the witness where a concurrent append put another writer's element among the submitted ones", async () => {

@@ -88,7 +88,10 @@ read's confidential locations:
   enclosing location does, so these locations cover every position of the value.
 - A location's integrity is its own resolution: per origin component, the most
   specific entry at or above it, joined across components. That is a claim
-  about the value at that location.
+  about the value at that location. A `TransformedBy` in that resolution is a
+  witness only where a flow stamp holds it, a `derived` or `structure` entry:
+  one a declared entry holds names no attempt (CFC §15.4) and is left out,
+  whatever the trust of the code that declared it.
 - An entry's `*` segment applies at every location beneath it. A location's `*`
   stands for the children that have no entry of their own, so a concrete
   sibling's entry does not resolve there.
@@ -127,7 +130,12 @@ transformation that follows a reference to confidential content consumed the
 reference as an input, whatever the slot holding it is labeled. Such a slot is
 a location of its own: its integrity is resolved over the value stamps at the
 slot, as a shallow read of it is, and it counts even when nothing labels the
-slot. So is a slot whose reference leads to another such slot. A reference
+slot. A value stamp is one the flow stage minted on the value an attempt
+wrote; a `TransformedBy` a schema declares at the slot, or in a template over
+the list's items, is no value stamp and witnesses nothing there, so a slot
+another writer filled under such a declaration witnesses only what that
+writer's own stamp says. So is a slot whose reference leads to another such
+slot. A reference
 counts when the transformation read the slot, or read recursively above it,
 and read the document it names at or below its target with confidentiality. A
 reference also counts when the transformation followed it and the label of
