@@ -4,4 +4,5 @@
 // fingerprint at runtime. Runtimes without repository file access skip the
 // compiled cache until a binary build writes the computed fingerprint here.
 export const SOURCE_COMPILE_CACHE_RUNTIME_VERSION = "cf/esm-compile/source";
-export const COMPILE_CACHE_RUNTIME_VERSION = "cf/esm-compile/twkkKArVQiAgXL9a";
+export const COMPILE_CACHE_RUNTIME_VERSION =
+  SOURCE_COMPILE_CACHE_RUNTIME_VERSION;
