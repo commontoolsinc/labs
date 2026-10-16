@@ -358,6 +358,9 @@ describe("runtime-sizes", () => {
             cfc: runtime.getCell(space, "wish").getMetaRaw(cfcMeta),
           },
           storage: runtime.getSizes().storage,
+          serverDocs: await (storageManager!.open(space) as unknown as {
+            listEntityIds(): Promise<string[] | undefined>;
+          }).listEntityIds(),
           experimental: runtime.experimental,
           deno: Deno.version,
         }),
