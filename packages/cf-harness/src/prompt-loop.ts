@@ -16,6 +16,10 @@ import { isAbsolute, relative } from "@std/path";
 
 import { PIECE_TARGETING_GUIDANCE } from "./piece-targeting.ts";
 import {
+  PATTERN_SOURCE_GUIDANCE,
+  RUN_PATTERN_GUIDANCE,
+} from "./tool-guidance.ts";
+import {
   type HarnessModelProviderId,
   isHarnessModelProviderId,
 } from "./config.ts";
@@ -220,7 +224,7 @@ import {
   classifyTask,
   type HarnessTaskClassification,
 } from "./task-classification.ts";
-import { createResearchRunner, researchModel } from "./research/runner.ts";
+import { createResearchRunner } from "./research/runner.ts";
 import { researchPatternRecords } from "./research/context.ts";
 import { REVISION_VERIFICATION_GUIDANCE } from "./revision-verification.ts";
 import {
@@ -1671,6 +1675,7 @@ const buildSubagentSystemPrompt = (
           ]
           : []),
         "Pass pattern source inline as the run_pattern `sourceText` argument. You have no write_file or edit_file; do not try to author patterns as workspace files.",
+        PATTERN_SOURCE_GUIDANCE,
         "Return a durable result object directly — `return { count, $UI: <div>…</div> }`. A whole-result derived wrapper is a known smell, but not a deterministic failure: after instantiation run_pattern checks the actual pattern pointer and refuses a piece materialized under a session-only identity.",
         "You own the write, compile-error, fix loop. A `compile-error` result is normal iteration material: read the diagnostic, correct the source, and call run_pattern again. Do not hand a compile error back to the parent as the answer.",
         PATTERN_AUTHORING_GUIDANCE,
@@ -1693,6 +1698,10 @@ const buildSubagentSystemPrompt = (
         }>} with an optional free-text "detail".`,
         "A failure is a complete, correct answer. Never return a reference to something you did not produce, never hand back a reference from an earlier step as if it were your result, and never present a partial or non-compiling pattern as a finished one.",
       ]
+      : []),
+    ...(profileConfig.profile !== PATTERN_AUTHOR_SUBAGENT_PROFILE &&
+        profileConfig.allowedToolIds.includes("run_pattern")
+      ? [RUN_PATTERN_GUIDANCE]
       : []),
     ...(profileConfig.profile === WEB_FETCH_SUBAGENT_PROFILE
       ? [
@@ -3103,15 +3112,6 @@ export class CfHarnessPromptLoop {
   #lastReservedSubagentSequence = 0;
 
   /**
-   * What the task-classification model call cost, held from `classifyTask`
-   * until the run's records exist, which the next transcript run opens and
-   * this then lands in: its attempts in the run report, its tokens in the
-   * total.
-   */
-  #classificationAttempts: HarnessModelAttemptDiagnostic[] = [];
-  #classificationUsage: HarnessModelUsage | undefined;
-
-  /**
    * The parent's subagent runs as they stood when the current turn's tool
    * calls were dispatched, and `undefined` outside a turn. Skill custody is
    * judged against this rather than the live state, so a delegation is not
@@ -3724,45 +3724,17 @@ export class CfHarnessPromptLoop {
   /**
    * Tags a fresh root task with the kinds of work it calls for and records
    * them on the run, before the host assembles the prompt the tags shape.
-   * When the keyword rule has no answer, one bounded call to the cheap
-   * research model decides; when that fails or runs past its bound, the task
-   * gets every tag. The tags gate the
-   * opening research pass and the parent's browser guidance here.
+   * The tags gate the opening research pass and the parent's browser
+   * guidance here.
    */
-  async classifyTask(
-    task: string,
-    options: { signal?: AbortSignal } = {},
-  ): Promise<HarnessTaskClassification> {
+  async classifyTask(task: string): Promise<HarnessTaskClassification> {
     const runState = this.engine.getRunState();
-    const classification = await classifyTask(task, {
+    const classification = classifyTask(task, {
       patternRefs: runState.patternRefs,
       skillRegistry: runState.skillRegistry,
       inputCells: runState.inputCells,
       browserHost: this.engine.browserHost !== undefined &&
         this.#allowedSubagentProfiles.has(BROWSER_SUBAGENT_PROFILE),
-    }, {
-      askModel: async (prompt, bound) => {
-        const result = await this.modelClient.complete({
-          model: researchModel(this.modelClient.providerId),
-          transcript: [{ role: "user", content: prompt }],
-          tools: [],
-          nativeModelToolIds: [],
-          runId: `${runState.runId}:task-classification`,
-          ...(this.#researchReasoningEffort !== undefined
-            ? { reasoningEffort: this.#researchReasoningEffort }
-            : {}),
-          signal: options.signal === undefined
-            ? bound
-            : AbortSignal.any([options.signal, bound]),
-          // A call past its bound no longer belongs to this run's accounting,
-          // which may already have been flushed into the run's records.
-          onAttempt: (attempt) => {
-            if (!bound.aborted) this.#classificationAttempts.push(attempt);
-          },
-        });
-        if (!bound.aborted) this.#classificationUsage = result.usage;
-        return result.assistant.content;
-      },
     });
     await this.engine.recordTaskClassification(classification);
     return classification;
@@ -3983,13 +3955,6 @@ export class CfHarnessPromptLoop {
       onUsage: recordModelUsage,
     });
     this.engine.setResearchRunner(runResearch);
-    for (const attempt of this.#classificationAttempts.splice(0)) {
-      recordModelAttempt(attempt);
-    }
-    if (this.#classificationUsage !== undefined) {
-      await recordModelUsage(this.#classificationUsage);
-      this.#classificationUsage = undefined;
-    }
     await this.engine.ensureDiagnosticsInitialized();
     this.engine.startRun();
     if (options.promptSlotBinding !== undefined) {
@@ -5295,6 +5260,13 @@ export class CfHarnessPromptLoop {
           toolId,
           input,
           signal,
+          evaluateToolPolicy(
+            this.engine.getRunState().cfcEnforcementMode,
+            tool.descriptor,
+            "side-effect",
+            promptSlotBinding,
+            input,
+          ).allowed,
         );
       signal?.throwIfAborted();
     } catch (error) {
@@ -5963,7 +5935,8 @@ export class CfHarnessPromptLoop {
   async #invokeBuiltinTool<TToolId extends BuiltinToolId>(
     toolId: TToolId,
     input: Record<string, unknown>,
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    sideEffectsAuthorized: boolean,
   ): Promise<{
     output: Awaited<ReturnType<CfHarnessEngine["invokeBuiltinTool"]>>["output"];
     resultRef: ToolResultRef;
@@ -5971,7 +5944,7 @@ export class CfHarnessPromptLoop {
     const result = await this.engine.invokeBuiltinTool(
       toolId,
       input as unknown as BuiltinToolInputMap[TToolId],
-      signal !== undefined ? { signal } : {},
+      { ...(signal !== undefined ? { signal } : {}), sideEffectsAuthorized },
     );
     return {
       output: result.output,

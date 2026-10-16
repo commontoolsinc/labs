@@ -2583,7 +2583,7 @@ export class CfHarnessEngine {
   async invokeBuiltinTool<TToolId extends BuiltinToolId>(
     toolId: TToolId,
     input: BuiltinToolInputMap[TToolId],
-    options: { signal?: AbortSignal } = {},
+    options: { signal?: AbortSignal; sideEffectsAuthorized?: boolean } = {},
   ): Promise<BuiltinToolInvocationResult<TToolId>> {
     const tool = getBuiltinTool(toolId);
     if (tool === undefined) {
@@ -2593,7 +2593,10 @@ export class CfHarnessEngine {
     await this.ensureDiagnosticsInitialized();
     try {
       const output = await tool.invoke(
-        this.#createToolContext(options.signal),
+        this.#createToolContext(
+          options.signal,
+          options.sideEffectsAuthorized,
+        ),
         input,
       ) as BuiltinToolOutputMap[TToolId];
       return await this.recordBuiltinToolOutput(toolId, input, output, options);
@@ -3004,11 +3007,12 @@ export class CfHarnessEngine {
     );
   }
 
-  #createToolContext(signal?: AbortSignal) {
+  #createToolContext(signal?: AbortSignal, sideEffectsAuthorized?: boolean) {
     const researchTaskCfcLabel = this.#researchTaskCfcLabel();
     return {
       runId: this.#runState.runId,
       cfcEnforcementMode: this.#runState.cfcEnforcementMode,
+      ...(sideEffectsAuthorized !== undefined ? { sideEffectsAuthorized } : {}),
       currentDir: this.#runState.currentDir,
       workspaceHostPath: this.workspaceHostPath,
       ...(signal !== undefined ? { signal } : {}),

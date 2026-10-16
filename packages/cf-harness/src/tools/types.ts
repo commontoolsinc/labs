@@ -64,6 +64,14 @@ import type {
 export interface HarnessToolContext {
   runId: string;
   cfcEnforcementMode: CfcEnforcementMode;
+
+  /**
+   * Whether the policy gate would admit a side effect on this call, decided
+   * as it decides a side-effect tool's. A tool classed as a read that can
+   * cause one only on some inputs asks this before causing it; a call made
+   * outside the prompt loop leaves it absent, which admits none.
+   */
+  sideEffectsAuthorized?: boolean;
   skillRegistry?: HarnessSkillRegistry;
   skillActivations?: HarnessSkillActivations;
   allowSkillScripts?: boolean;
