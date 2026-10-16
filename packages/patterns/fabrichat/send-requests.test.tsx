@@ -2,12 +2,12 @@
  * A FabriChat room's `sendMessage` and the `requestId` a sender may name. A
  * send naming an id its sender has already sent under adds nothing, and the
  * sender's record keeps naming the message the first one sent. A new id with
- * the same text adds a message, and so does every send that names no id. The
- * record is the sender's own, so another person naming the same id sends a
- * message of their own and suppresses no one's. Two sessions of one person
- * sending under one id at once add one message. Every participant sends
- * through one room, as every session of a room does; the room's profile is
- * one stand-in for all of them, since what keeps the record is the principal
+ * the same text adds a message, and so does every send that names no id, or an
+ * empty one. The record is the sender's own, so another person naming the same
+ * id sends a message of their own and suppresses no one's. Two sessions of one
+ * person sending under one id at once add one message. Every participant sends
+ * through one room, as every session of a room does; the room's profile is one
+ * stand-in for all of them, since what keeps the record is the principal
  * sending, not the profile.
  */
 import {
@@ -117,6 +117,19 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
         trustedUi: sendGesture,
       },
       { assertion: assert(() => countOf(setup.messages, "yes!") === 4) },
+      // An empty id names no press, so it counts as none: two sends under it
+      // are two messages.
+      {
+        action: room.sendMessage,
+        event: { requestId: "", body: "No id" },
+        trustedUi: sendGesture,
+      },
+      {
+        action: room.sendMessage,
+        event: { requestId: "", body: "No id" },
+        trustedUi: sendGesture,
+      },
+      { assertion: assert(() => countOf(setup.messages, "No id") === 2) },
       { label: "alice-sent" },
       { await: "bob-sent" },
       // Bob named the id Alice sends under next, and his send suppresses
