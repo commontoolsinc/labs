@@ -2421,14 +2421,69 @@ describe("canonicalizeCfcSchemaDocument", () => {
     });
   });
 
-  it("leaves a document alone whose nested map disagrees with the root's", () => {
-    const schema: JSONSchemaObj = {
+  it("drops a nested map, which is inert under the root's whatever it holds", () => {
+    const canonical = canonicalizeCfcSchemaDocument({
       type: "object",
       properties: {
         a: { $ref: "#/$defs/Entry", $defs: { Entry: { type: "number" } } },
       },
       $defs: { Entry: { type: "string" } },
-    };
-    expect(canonicalizeCfcSchemaDocument(schema)).toBe(schema);
+    }) as JSONSchemaObj;
+    expect(canonical).toEqual({
+      type: "object",
+      properties: { a: { $ref: "#/$defs/Entry" } },
+      $defs: { Entry: { type: "string" } },
+    });
+  });
+});
+
+describe("mergeCfcSchemaEnvelopes with definitions that refer to each other", () => {
+  // Three definitions in a chain, the first carrying a policy: a candidate
+  // whose policy differs is resolved before the merge, so its bodies arrive
+  // carrying its own definition map, and the hoist renames the candidate's
+  // names. The map a body carries is renamed with it, so the merged document
+  // canonicalizes to the three definitions it has, however often it merges.
+  const envelope = (round: number): JSONSchemaObj => ({
+    type: "object",
+    properties: {
+      a: { $ref: "#/$defs/A" },
+      b: { $ref: "#/$defs/B" },
+      c: { $ref: "#/$defs/C" },
+    },
+    $defs: {
+      A: {
+        type: "object",
+        properties: {
+          s: {
+            type: "string",
+            ifc: {
+              confidentiality: Array.from(
+                { length: round + 1 },
+                (_, index) => `c${index}`,
+              ),
+            },
+          },
+          link: { $ref: "#/$defs/B" },
+        },
+      },
+      B: {
+        type: "object",
+        properties: { n: { type: "number" }, deeper: { $ref: "#/$defs/C" } },
+      },
+      C: { type: "object", properties: { z: { type: "boolean" } } },
+    },
+  });
+
+  it("keeps the map a resolved body carries consistent with the root map", () => {
+    let merged: JSONSchema = envelope(0);
+    const sizes: number[] = [];
+    for (let round = 1; round <= 6; round++) {
+      merged = mergeCfcSchemaEnvelopes(merged, envelope(round));
+      sizes.push(JSON.stringify(merged).length);
+    }
+    const root = merged as JSONSchemaObj;
+    expect(Object.keys(root.$defs ?? {}).toSorted()).toEqual(["A", "B", "C"]);
+    expect(JSON.stringify(merged).includes("__cfc_hoisted")).toBe(false);
+    expect(sizes[5] - sizes[2]).toBeLessThan(40);
   });
 });

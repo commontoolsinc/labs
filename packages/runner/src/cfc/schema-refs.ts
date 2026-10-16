@@ -198,7 +198,11 @@ const namespaceLocalDefinitionScope = (
 };
 
 // `schema` with every `#/$defs/<name>` ref below it whose name `renamed`
-// maps rewritten to the mapped name.
+// maps rewritten to the mapped name. A definition map below `schema` is
+// renamed with it, keys and bodies: a resolved body carries the map of the
+// document it came from (`resolveCfcSchemaRef()`), and a map left under the
+// old names beside refs rewritten to the new ones would disagree with the
+// document's root map for as long as the document lives.
 const renameLocalDefinitionRefs = (
   schema: JSONSchema,
   renamed: ReadonlyMap<string, string>,
@@ -211,6 +215,19 @@ const renameLocalDefinitionRefs = (
     if (nextName !== undefined) {
       result = { ...result, $ref: encodedLocalDefinitionRef(nextName) };
     }
+  }
+  if (isObjectNotArray(schema.$defs)) {
+    result = {
+      ...result,
+      $defs: Object.fromEntries(
+        Object.entries(schema.$defs as SchemaDefinitions).map((
+          [name, definition],
+        ) => [
+          renamed.get(name) ?? name,
+          renameLocalDefinitionRefs(definition, renamed),
+        ]),
+      ),
+    };
   }
   return mapSubschemas(
     result,
@@ -615,24 +632,6 @@ const definitionContentKey = (
   return write(definition);
 };
 
-// Every `$defs` map below the root of `schema`, with the path of the schema
-// that declares it.
-const nestedDefinitionMaps = (schema: JSONSchema): SchemaDefinitions[] => {
-  const maps: SchemaDefinitions[] = [];
-  const visit = (fragment: JSONSchema, atRoot: boolean): void => {
-    if (!isObjectOrArray(fragment)) return;
-    if (!atRoot && isObjectNotArray(fragment.$defs)) {
-      maps.push(fragment.$defs as SchemaDefinitions);
-    }
-    forEachSubschema(fragment, (child) => visit(child, false), {
-      ...ALL_SUBSCHEMAS,
-      includeDefs: true,
-    });
-  };
-  visit(schema, true);
-  return maps;
-};
-
 /**
  * The canonical form of a schema document that is about to be persisted or
  * hashed: one definition map at the root, holding one definition per
@@ -649,12 +648,10 @@ const nestedDefinitionMaps = (schema: JSONSchema): SchemaDefinitions[] => {
  * preferred, rewrites every local ref to the surviving name, drops the
  * nested maps (inert under the root's, `pruneCfcSchemaDefinitions()`), and
  * drops the minted definitions nothing reaches. A definition the author
- * named is kept whether or not anything refers to it.
- *
- * A nested map is inert under the root's map only while it agrees with it.
- * A document whose nested map defines a name the root defines differently,
- * or does not define, is returned as it is: such a map is a scope of its
- * own, and flattening it would rebind the refs below it.
+ * named is kept whether or not anything refers to it. A `$defs` below the
+ * root is inert whatever it holds: a `#/$defs/<name>` ref names a
+ * definition of the document root (`docs/specs/json_schema.md`), so
+ * dropping the map rebinds nothing.
  */
 export const canonicalizeCfcSchemaDocument = (
   schema: JSONSchema,
@@ -663,18 +660,6 @@ export const canonicalizeCfcSchemaDocument = (
     return schema;
   }
   const root = schema.$defs as SchemaDefinitions;
-  for (const nested of nestedDefinitionMaps(schema)) {
-    if (nested === root) continue;
-    for (const [name, definition] of Object.entries(nested)) {
-      const atRoot = root[name];
-      if (
-        atRoot === undefined ||
-        (atRoot !== definition && !fabricAwareEqual(atRoot, definition))
-      ) {
-        return schema;
-      }
-    }
-  }
 
   // The surviving name of each definition: iterated, since a definition's
   // content refers to other definitions by name, and two definitions compare
