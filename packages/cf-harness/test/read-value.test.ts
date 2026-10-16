@@ -345,6 +345,7 @@ describe("read-value", () => {
       expect(output.status).toBe("error");
       const message = (output as { message: string }).message;
       expect(message).toContain("above this session's read ceiling");
+      expect(message).toContain(SECRET_ATOM);
       expect(message).not.toContain("delegate_task");
       expect(JSON.stringify(output)).not.toContain("4417");
     });
@@ -368,6 +369,138 @@ describe("read-value", () => {
           (output as { cfc?: { observedLabel?: unknown } }).cfc?.observedLabel,
         ),
       ).toContain(SECRET_ATOM);
+    });
+  });
+
+  describe("on a piece in another space", () => {
+    /** A piece whose `rings` field is derived from its argument. */
+    const RINGS_PATTERN_SOURCE = [
+      "import { computed, Default, pattern, Writable } from 'commonfabric';",
+      "interface Ring { id: string; steps: number; }",
+      "interface Input { names?: Writable<string[] | Default<['drums', 'bass']>>; }",
+      "interface Output { rings: Ring[]; }",
+      "export default pattern<Input, Output>(({ names }) => ({",
+      "  rings: computed(() => names.get().map((id) => ({ id, steps: 16 }))),",
+      "}));",
+      "",
+    ].join("\n");
+
+    /**
+     * A run in its own space admitted to a second one, holding — described —
+     * a rings piece set up in the second space and never run there.
+     */
+    const foreignRings = async (): Promise<{
+      session: HarnessFabricSession;
+      table: HarnessHandleTable;
+      token: string;
+      ref: string;
+    }> => {
+      fabric = await createFabric("observe");
+      const neighbour = new PiecesController(
+        createSession({
+          identity: signer,
+          spaceDid: (await Identity.generate()).did(),
+        }),
+        fabric.runtime,
+      );
+      await neighbour.synced();
+      const created = await neighbour.create(RINGS_PATTERN_SOURCE, {
+        input: {},
+        start: false,
+      });
+      const ref =
+        `//${neighbour.getSpace()}/${created.getCell().getAsNormalizedFullLink().id}`;
+      return {
+        session: {
+          ...fabric.session,
+          foreignSpaces: { [neighbour.getSpace()]: "http://toolshed.test/" },
+        },
+        ref,
+        ...await held(ref),
+      };
+    };
+
+    /**
+     * The handle a whole read of the piece behind `token` hands back for its
+     * `rings` field, held and described.
+     */
+    const derivedHandle = async (
+      session: HarnessFabricSession,
+      table: HarnessHandleTable,
+      token: string,
+    ): Promise<{ table: HarnessHandleTable; token: string }> => {
+      const whole = await readValueTool.invoke(
+        contextWith(session, table),
+        { token },
+      );
+      const ref = (whole as { value: { rings: { "@link": string } } })
+        .value.rings["@link"];
+      const minted = await mintAddressHandle(table, ref);
+      return {
+        table: markHandleDescribed(minted.table, minted.token),
+        token: minted.token,
+      };
+    };
+
+    it("returns a nested value of a derived field", async () => {
+      // The field is derived, so the store holds it only once the piece has
+      // run; reading it runs the piece, as calling one of its verbs would.
+      const { session, table, token } = await foreignRings();
+
+      const output = await readValueTool.invoke(
+        contextWith(session, table),
+        { token, select: "rings/0/id" },
+      );
+
+      expect(output).toMatchObject({ status: "ok", value: "drums" });
+    });
+
+    it("refuses a derived field's own handle until its piece has run, naming the piece's handle as the route", async () => {
+      // The derived document records no piece, so nothing can run from it,
+      // and what it holds is not yet a fact about the path.
+      const { session, table, token } = await foreignRings();
+      const rings = await derivedHandle(session, table, token);
+
+      const output = await readValueTool.invoke(
+        contextWith(session, rings.table),
+        { token: rings.token, select: "1/id" },
+      );
+
+      expect(output).toMatchObject({
+        status: "error",
+        message: expect.stringContaining("read it through the piece's handle"),
+      });
+      expect(JSON.stringify(output)).not.toContain("holds nothing");
+    });
+
+    it("returns a value under a derived field's own handle once a read has run its piece", async () => {
+      const { session, table, token } = await foreignRings();
+      const rings = await derivedHandle(session, table, token);
+      await readValueTool.invoke(
+        contextWith(session, table),
+        { token, select: "rings" },
+      );
+
+      const output = await readValueTool.invoke(
+        contextWith(session, rings.table),
+        { token: rings.token, select: "1/id" },
+      );
+
+      expect(output).toMatchObject({ status: "ok", value: "bass" });
+    });
+
+    it("says a path the piece does not have holds nothing", async () => {
+      const { session, table, token } = await foreignRings();
+
+      const output = await readValueTool.invoke(
+        contextWith(session, table),
+        { token, select: "rings/5/id" },
+      );
+
+      expect(output).toMatchObject({
+        status: "error",
+        message: `${token} holds nothing at that path`,
+      });
     });
   });
 
