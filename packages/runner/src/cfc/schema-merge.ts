@@ -695,12 +695,28 @@ type MergeReferences = {
 };
 
 /**
+ * Keywords that annotate a schema and constrain no value. `$comment` is not
+ * one of them here: the runtime reads some of its values as property markers
+ * (`schema-view.ts`), so a branch whose comment changes does not correspond.
+ */
+const BRANCH_ANNOTATION_KEYWORDS: ReadonlySet<string> = new Set([
+  "title",
+  "description",
+  "examples",
+  "deprecated",
+  "readOnly",
+  "writeOnly",
+]);
+
+/**
  * Whether a node merge has to walk the body `side`'s reference names rather
- * than the reference: the other side is anything but that same bare
- * reference. Merged unresolved, whatever the other side declares beside the
- * `$ref` (an `ifc`, `properties`, `items`, a combinator, another reference)
- * would take the place of the referenced body's own and drop the claims it
- * declares.
+ * than the reference: the other side is anything but that same reference,
+ * bare or beside annotations alone. Merged unresolved, whatever the other side
+ * declares beside the `$ref` (an `ifc`, `properties`, `items`, a combinator,
+ * another reference) would take the place of the referenced body's own and
+ * drop the claims it declares. An annotation constrains nothing, so two sides
+ * naming one definition merge as that reference, which is what keeps a
+ * recursive definition from unrolling one level further on each merge.
  */
 const referenceIsShadowed = (
   side: JSONSchemaObj,
@@ -708,7 +724,9 @@ const referenceIsShadowed = (
 ): boolean =>
   typeof side.$ref === "string" &&
   (other.$ref !== side.$ref ||
-    Object.keys(other).some((key) => key !== "$ref"));
+    Object.keys(other).some((key) =>
+      key !== "$ref" && !BRANCH_ANNOTATION_KEYWORDS.has(key)
+    ));
 
 /**
  * `schema`'s reference resolved in `root`, as a merge walks it. An `ifc` beside
@@ -741,20 +759,6 @@ const resolveReferenceSide = (
   const resolved = resolveKeepingBodyClaims(side, { $defs: definitions });
   return isObjectNotArray(resolved) ? resolved as JSONSchemaObj : side;
 };
-
-/**
- * Keywords that annotate a branch and constrain no value. `$comment` is not
- * one of them here: the runtime reads some of its values as property markers
- * (`schema-view.ts`), so a branch whose comment changes does not correspond.
- */
-const BRANCH_ANNOTATION_KEYWORDS: ReadonlySet<string> = new Set([
-  "title",
-  "description",
-  "examples",
-  "deprecated",
-  "readOnly",
-  "writeOnly",
-]);
 
 /**
  * A branch's structural correspondence key. Policies and reference targets

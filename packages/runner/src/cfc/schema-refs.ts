@@ -239,6 +239,71 @@ const renameLocalDefinitionRefs = (
 };
 
 /**
+ * Partitions the definitions of one map into classes of definitions that
+ * mean the same schema, and returns each name's class number. Two definitions
+ * share a class when their bodies are equal once every local ref in them is
+ * read as the class of the definition it names, recursion included: the
+ * names start in one class, and each round splits a class by the hash of its
+ * members' bodies with refs written as class numbers, until no class splits.
+ * Two copies of a self-referential definition then share a class, where
+ * comparing their bodies name by name never would. A ref naming no
+ * definition in `definitions` stays as written, so it matches only the same
+ * ref. The bodies carry no `$defs` below them; a caller holding bodies that
+ * do strips those first, since they are inert.
+ */
+const definitionEquivalenceClasses = (
+  definitions: ReadonlyMap<string, JSONSchema>,
+): Map<string, number> => {
+  const names = [...definitions.keys()];
+
+  // A class is written into a ref under a marker no name the definitions
+  // refer to begins with, so a ref written as a class can never read as a
+  // ref to a definition, resolved or not, that happens to carry that text.
+  const referenced = localDefinitionNamesInScope(
+    {},
+    Object.fromEntries(definitions),
+  );
+  let leadingNuls = 0;
+  for (const name of referenced) {
+    let count = 0;
+    while (count < name.length && name.charCodeAt(count) === 0) count++;
+    if (count > leadingNuls) leadingNuls = count;
+  }
+  const marker = "\u0000".repeat(leadingNuls + 1);
+
+  // A round's key carries the class the name was in, so a class only ever
+  // splits, and an unchanged count is an unchanged partition.
+  let classOf = new Map<string, number>(names.map((name) => [name, 0]));
+  let classCount = 1;
+  while (true) {
+    const spelling = new Map<string, string>(
+      names.map((name) => [name, `${marker}${classOf.get(name)}`]),
+    );
+    const classByKey = new Map<string, number>();
+    const next = new Map<string, number>();
+    for (const name of names) {
+      const key = `${classOf.get(name)}:${
+        hashStringOf(
+          renameLocalDefinitionRefs(
+            definitions.get(name)!,
+            spelling,
+          ) as FabricValue,
+        )
+      }`;
+      let id = classByKey.get(key);
+      if (id === undefined) {
+        id = classByKey.size;
+        classByKey.set(key, id);
+      }
+      next.set(name, id);
+    }
+    classOf = next;
+    if (classByKey.size === classCount) return classOf;
+    classCount = classByKey.size;
+  }
+};
+
+/**
  * Merge the definition maps of `fragments` into one map, and return the
  * fragments without theirs. Each fragment is a self-contained view whose
  * `$defs` holds the closure its local refs reach, which is how
@@ -248,8 +313,12 @@ const renameLocalDefinitionRefs = (
  * their maps merge as they are. A fragment whose map defines a name
  * differently comes from another document — an arm that resolved through a
  * `cid:` ref into a cyclic group — and its whole map is renamed, refs and
- * all, so the merged map keeps the two meanings apart. A fragment carrying
- * no map is returned as it is.
+ * all, so the merged map keeps the two meanings apart. A definition a later
+ * fragment brings that means the same schema as one the merged map already
+ * holds, by `definitionEquivalenceClasses()`, is not added: the fragment's
+ * refs to it name the one already there. So hoisting a fragment against a
+ * map that already took in its definitions adds nothing and names nothing
+ * new. A fragment carrying no map is returned as it is.
  */
 export const hoistCfcSchemaDefs = (
   fragments: readonly JSONSchema[],
@@ -281,11 +350,40 @@ export const hoistCfcSchemaDefs = (
       stripped = renamedBody;
       additions = renamed!;
     }
-    merged ??= new Map();
-    for (const [name, definition] of Object.entries(additions)) {
-      if (!merged.has(name)) merged.set(name, definition);
+    if (merged === undefined) {
+      merged = new Map(Object.entries(additions));
+      return stripped;
     }
-    return stripped;
+    const held = merged;
+    const newNames = Object.keys(additions).filter((name) => !held.has(name));
+    if (newNames.length === 0) return stripped;
+    const union = new Map<string, JSONSchema>();
+    for (const [name, definition] of held) {
+      union.set(name, pruneCfcSchemaDefinitionsInternal(definition, false));
+    }
+    for (const name of newNames) {
+      union.set(
+        name,
+        pruneCfcSchemaDefinitionsInternal(additions[name], false),
+      );
+    }
+    const classes = definitionEquivalenceClasses(union);
+    // The first held name of each class is the one its later members take.
+    const heldNames = new Map<number, string>();
+    for (const name of held.keys()) {
+      const index = classes.get(name)!;
+      if (!heldNames.has(index)) heldNames.set(index, name);
+    }
+    const renamed = new Map<string, string>();
+    for (const name of newNames) {
+      const heldName = heldNames.get(classes.get(name)!);
+      if (heldName !== undefined) renamed.set(name, heldName);
+    }
+    for (const name of newNames) {
+      if (renamed.has(name)) continue;
+      held.set(name, renameLocalDefinitionRefs(additions[name], renamed));
+    }
+    return renameLocalDefinitionRefs(stripped, renamed) as JSONSchemaObj;
   });
   return {
     fragments: hoisted,
@@ -630,13 +728,8 @@ const isMintedDefinitionName = (name: string): boolean =>
  * definition of the document root (`docs/specs/json_schema.md`), so
  * dropping the map rebinds nothing.
  *
- * Two definitions mean the same when they are equal once every local ref
- * in them is read as the definition it names, recursion included: the
- * names are partitioned by refinement, every name in one class to begin
- * with, each round splitting a class by the hash of its members' bodies
- * with refs spelled as class ids, until no class splits. Two copies of a
- * self-referential definition then share a class, where comparing their
- * bodies name by name never would.
+ * Two definitions mean the same when `definitionEquivalenceClasses()` puts
+ * them in one class, recursion included.
  */
 export const canonicalizeCfcSchemaDocument = (
   schema: JSONSchema,
@@ -682,49 +775,7 @@ const canonicalizeCfcSchemaDocumentUncached = (
   );
   const names = [...root.keys()];
 
-  // A class is spelled into a ref under a marker no name the document
-  // refers to begins with, so a ref spelled as a class can never read as a
-  // ref to a definition, resolved or not, that happens to carry that text.
-  const referenced = localDefinitionNamesInScope(
-    schema,
-    Object.fromEntries(root),
-  );
-  let leadingNuls = 0;
-  for (const name of referenced) {
-    let count = 0;
-    while (count < name.length && name.charCodeAt(count) === 0) count++;
-    if (count > leadingNuls) leadingNuls = count;
-  }
-  const marker = "\u0000".repeat(leadingNuls + 1);
-
-  // Partition refinement: one class, split by content until stable. A
-  // round's key carries the class the name was in, so a class only ever
-  // splits, and an unchanged count is an unchanged partition.
-  let classOf = new Map<string, number>(names.map((name) => [name, 0]));
-  let classCount = 1;
-  while (true) {
-    const spelling = new Map<string, string>(
-      names.map((name) => [name, `${marker}${classOf.get(name)}`]),
-    );
-    const classByKey = new Map<string, number>();
-    const next = new Map<string, number>();
-    for (const name of names) {
-      const key = `${classOf.get(name)}:${
-        hashStringOf(
-          renameLocalDefinitionRefs(root.get(name)!, spelling) as FabricValue,
-        )
-      }`;
-      let id = classByKey.get(key);
-      if (id === undefined) {
-        id = classByKey.size;
-        classByKey.set(key, id);
-      }
-      next.set(name, id);
-    }
-    classOf = next;
-    if (classByKey.size === classCount) break;
-    classCount = classByKey.size;
-  }
+  const classOf = definitionEquivalenceClasses(root);
 
   // One surviving name per class: every authored name of the class stays,
   // and the class's minted names fold onto its first authored name, or onto
