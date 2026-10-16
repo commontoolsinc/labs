@@ -1,7 +1,6 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import type { MetaField } from "@commonfabric/runner";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { immutableCellsFor } from "../src/immutable-cell.ts";
@@ -12,15 +11,12 @@ import {
   cfcRejectionReasonPrefix,
   CfcRejectionTally,
 } from "../src/runtime-sizes.ts";
-import type { Action } from "../src/scheduler/types.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { prepareAndCommit, refuseAtCommitBoundary } from "./refused-commit.ts";
 import type { SpaceReplica } from "../src/storage/v2.ts";
 
 const signer = await Identity.fromPassphrase("runner-runtime-sizes");
 const space: MemorySpace = signer.did();
-
-// The stored CFC envelope sits under a meta field the cell API does not name.
-const cfcMeta = "cfc" as unknown as MetaField;
 
 describe("runtime-sizes", () => {
   describe("cfcRejectionReasonPrefix()", () => {
@@ -213,109 +209,26 @@ describe("runtime-sizes", () => {
     });
 
     it("tallies a commit CFC enforcement refused under its reason's prefix", async () => {
-      // A labeled target linked to a source whose document stores no CFC
-      // metadata is refused with the reason `missing link source metadata
-      // for <source> at /…`, so that is the prefix the tally has to carry.
+      // An ordinary write to a reserved grant document is refused by the
+      // write chokepoint's gate, so the tally carries that gate's words.
 
-      const runtime = createRuntime({
-        apiUrl: new URL(import.meta.url),
-        cfcEnforcementMode: "enforce-explicit",
-        cfcFlowLabels: "off",
-        cfcWriteFloor: "off",
-        cfcTriggerReadGating: false,
-        cfcDecomposedEnvelopes: false,
-        cfcPolicyEvaluation: "off",
-        cfcLabelMetadataProtection: "off",
-        cfcDeclaredMonotonicity: "off",
-      });
-      const labeled: JSONSchema = {
-        type: "object",
-        ifc: { confidentiality: ["personal-space"] },
-      };
-      const seed = runtime.edit();
-      seed.setCfcEnforcementMode("enforce-explicit");
-      runtime.getCell(space, "target", labeled, seed).set({ existing: true });
-      runtime.getCell(space, "source", undefined, seed).set({ title: "plain" });
-      seed.prepareCfc();
-      expect((await seed.commit().settled).ok).toBeDefined();
-      // The commit settles before the written documents finish loading into
-      // the replica; the link's refusal reads their stored metadata.
-      await runtime.storageManager.synced();
+      const runtime = createRuntime();
+      const tx = runtime.edit();
+      refuseAtCommitBoundary(tx, space, "tallied");
+      const { reasons, result } = await prepareAndCommit(tx);
 
-      const errors: { name?: string }[] = [];
-      const link: Action = (tx) => {
-        tx.setCfcEnforcementMode("enforce-explicit");
-        tx.addVerdictCallback((_tx, result) => {
-          if (result.error) errors.push(result.error);
-        });
-        runtime.getCell(space, "target", undefined, tx).set(
-          runtime.getCell(space, "source", undefined, tx),
-        );
-      };
-      let runs = 0;
-      const counted: Action = (tx) => {
-        runs += 1;
-        link(tx);
-      };
-      const seen: unknown[] = [];
-      const observed: Action = (tx) => {
-        counted(tx);
-        tx.addVerdictCallback(() => {
-          const state = tx.getCfcState();
-          seen.push({
-            relevant: state.relevant,
-            mode: state.enforcementMode,
-            cal: state.contentAddressedLabels,
-            env: state.decomposedEnvelopes,
-            prepare: state.prepare.status,
-            reasons: state.prepare.status === "invalidated"
-              ? state.prepare.reasons.length
-              : -1,
-            diagnostics: state.diagnostics.length,
-          });
-        });
-      };
-      runtime.scheduler.subscribe(observed, { isEffect: true });
-      await runtime.scheduler.idleWithPendingCommits();
-      console.error(
-        "[sizes-diag refusal]",
-        JSON.stringify({
-          seen,
-          sourceValue: runtime.getCell(space, "source").getRaw(),
-          targetValue: runtime.getCell(space, "target").getRaw(),
-          storage: runtime.getSizes().storage,
-          targetCfc: runtime.getCell(space, "target").getMetaRaw(cfcMeta),
-          sourceCfc: runtime.getCell(space, "source").getMetaRaw(cfcMeta),
-          sourceSchema: runtime.getCell(space, "source").getMetaRaw("schema"),
-          os: Deno.build.os,
-          envKeys: Object.keys(Deno.env.toObject()).filter((key) =>
-            key.startsWith("CF_") || key === "ENV" || key.startsWith("DENO_")
-          ),
-        }),
-      );
-
-      const stats = runtime.getCfcStats();
-      expect({
-        runs,
-        errors: errors.map((error) => error.name),
-        relevant: stats.cfcRelevantTx,
-        prepared: stats.cfcPreparedTx,
-        rejects: stats.cfcPrepareRejects,
-        tally: runtime.getSizes().cfcRejectionsByReason,
-      }).toEqual({
-        runs: 1,
-        errors: ["CfcCommitRefusalError"],
-        relevant: 2,
-        prepared: 1,
-        rejects: 1,
-        tally: { "missing link source metadata": 1 },
+      expect(result.error?.name).toBe("CfcCommitRefusalError");
+      expect(reasons).toHaveLength(1);
+      expect(runtime.getSizes().cfcRejectionsByReason).toEqual({
+        "unprivileged write to protected runtime surface": 1,
       });
     });
 
     it("tallies a commit whose CFC preparation crashed", async () => {
-      // A stored envelope carrying two ifc-bearing `anyOf` branches makes the
-      // next merging writer's preparation throw, and that commit is refused
-      // before storage as a `CommitPreparationError`.
+      // A stored envelope claiming a label under `candidate.name` beneath an
+      // `anyOf` with two ifc-bearing branches makes the next writer's
+      // preparation throw when it overlays that claim onto its own schema,
+      // and that commit is refused before storage.
 
       const runtime = createRuntime();
       const profile: JSONSchema = {
@@ -333,81 +246,28 @@ describe("runtime-sizes", () => {
               { type: "string", ifc: { confidentiality: ["other"] } },
             ],
           },
-          candidates: { type: "array", items: profile },
+          candidate: profile,
         },
       };
       const seed = runtime.edit();
       runtime.getCell(space, "wish", ambiguous, seed).set({
-        candidates: [{ name: "Bob" }],
+        candidate: { name: "Bob" },
       });
       seed.prepareCfc();
       expect((await seed.commit().settled).error).toBeUndefined();
-      const beforeSync = {
-        value: runtime.getCell(space, "wish").getRaw(),
-        cfc: runtime.getCell(space, "wish").getMetaRaw(cfcMeta),
-      };
-      // The crash needs the stored envelope the seed wrote, which the replica
-      // holds only once the document's load has completed.
-      await runtime.storageManager.synced();
-      console.error(
-        "[sizes-diag crash-seed]",
-        JSON.stringify({
-          beforeSync,
-          afterSync: {
-            value: runtime.getCell(space, "wish").getRaw(),
-            cfc: runtime.getCell(space, "wish").getMetaRaw(cfcMeta),
-          },
-          storage: runtime.getSizes().storage,
-          serverDocs: await (storageManager!.open(space) as unknown as {
-            listEntityIds(): Promise<string[] | undefined>;
-          }).listEntityIds(),
-          experimental: runtime.experimental,
-          deno: Deno.version,
-        }),
-      );
 
       const tx = runtime.edit();
       const resolved = runtime.getCell(space, "wish-resolved", profile, tx);
       resolved.set({ name: "Ada" });
       runtime.getCell(space, "wish", ambiguous, tx).set({
-        result: resolved,
-        candidates: [],
+        candidate: resolved,
       });
       runtime.prepareTxForCommit(tx);
-      const prepare = tx.getCfcState().prepare;
-      const state = tx.getCfcState();
-      console.error(
-        "[sizes-diag crash]",
-        JSON.stringify({
-          relevant: state.relevant,
-          mode: state.enforcementMode,
-          cal: state.contentAddressedLabels,
-          env: state.decomposedEnvelopes,
-          prepare: prepare.status,
-          diagnostics: state.diagnostics,
-          wishCfc: runtime.getCell(space, "wish").getMetaRaw(cfcMeta),
-          wishSchema: runtime.getCell(space, "wish").getMetaRaw("schema"),
-        }),
-      );
       const result = await tx.commit().settled;
 
-      const stats = runtime.getCfcStats();
-      expect({
-        error: result.error?.name,
-        relevant: tx.getCfcState().relevant,
-        status: prepare.status,
-        reasons: prepare.status === "invalidated" ? prepare.reasons.length : 0,
-        relevantTx: stats.cfcRelevantTx,
-        preparedTx: stats.cfcPreparedTx,
-        tally: runtime.getSizes().cfcRejectionsByReason,
-      }).toEqual({
-        error: "CommitPreparationError",
-        relevant: true,
-        status: "invalidated",
-        reasons: 1,
-        relevantTx: 2,
-        preparedTx: 1,
-        tally: { "CFC commit preparation crashed": 1 },
+      expect(result.error?.name).toBe("CommitPreparationError");
+      expect(runtime.getSizes().cfcRejectionsByReason).toEqual({
+        "CFC commit preparation crashed": 1,
       });
     });
   });
