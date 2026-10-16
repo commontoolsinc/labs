@@ -27,7 +27,10 @@
  * the room's participants. A notice is queued for each other member offered
  * nothing: one the request names only by principal, or whose profiles point at
  * no inbox. A member someone adds to a room later, from the room, is offered
- * it the same way, through `offerRoom`.
+ * it the same way, through `offerRoom`. A direct room's counterpart who got a
+ * notice instead is offered the room the same way once a later start with
+ * them names a profile of theirs pointing at an inbox, until they join it, and
+ * the notice is withdrawn.
  *
  * The people the user's rooms list, each by the principal their profile
  * attests, are what the manager's rendering offers to name a new group's
@@ -205,8 +208,9 @@ export interface ManagerStreamEvent {
 
   /**
    * A direct room's other member's profile, through whose share inbox a new
-   * room is offered to them, or the profile of a member added to a room,
-   * through whose share inbox `offerRoom` offers it.
+   * room, or a found one that was offered them nothing, is offered to them, or
+   * the profile of a member added to a room, through whose share inbox
+   * `offerRoom` offers it.
    */
   // `Cell<…>` is written out rather than reached through an alias: the
   // event's schema marks a reference position only where the wrapper is
@@ -240,6 +244,13 @@ export interface ManagerStreamEvent {
 
   /** The container whose explicit `chatRoom` declaration names the room. */
   container?: Cell<ChatContainer>;
+
+  /**
+   * Whether a `joinRoom` comes from a message or a reaction the user sent in
+   * the room, which leaves the title the catalog lists an already listed room
+   * under as it is.
+   */
+  messageAct?: boolean;
 
   /**
    * Whether accepting a room leaves its entry archived, when it is; absent,
@@ -810,6 +821,47 @@ const createRoom = (
 };
 
 /**
+ * Helper for `openDirect`, which offers `room`, a direct room it found, to
+ * `counterpart` through the share inbox `profile` points at, as `offerRooms`
+ * offers a new one, when the room was offered them nothing: a notice for them
+ * of the room is still waiting. The offer replaces each such notice, so they
+ * are withdrawn. A counterpart the room's roster lists has joined the room
+ * already, and is offered nothing, and so is one whose profile points at no
+ * inbox, whose notice stays. So does the notice when `requestId`, which keys
+ * the offer, is longer than a share inbox keeps an offer's `id`, since the
+ * inbox would cut it short and could take it for another's.
+ */
+const reofferDirect = (
+  state: ManagerActState,
+  requestId: string,
+  room: Cell<ChatRoomLink>,
+  counterpart: string,
+  profile: Cell<ChatManagerProfile> | undefined,
+): void => {
+  const notices = state.outgoingNotices.get() ?? [];
+  const waiting = notices.filter((notice) =>
+    notice.recipient === counterpart && equals(notice.room, room)
+  );
+  if (waiting.length === 0 || requestId.length > OFFER_ID_MAX_LENGTH) return;
+  if (profile === undefined || inboxPointerOf(profile) === undefined) return;
+  const joined = (room.key("roster").get() ?? []).some((member) =>
+    principalOf(member, "represents-principal") === counterpart
+  );
+  const space = spaceOf(room);
+  const from = currentPrincipal();
+  if (joined || !isWellFormedDID(space) || from === undefined) return;
+  state.outgoingNotices.set(
+    notices.filter((notice) => !waiting.includes(notice)),
+  );
+  offerToMember(
+    offerEnvelope(requestId, space, "", from),
+    room,
+    { recipient: counterpart, profiles: [profile] },
+    state,
+  );
+};
+
+/**
  * Performs one manager act: finding or creating a direct room, creating a
  * group room, offering a room to a member added to it, accepting a room,
  * forgetting one, or reporting a notice delivered. Each act's outcome is
@@ -949,6 +1001,7 @@ const performManagerAct = (
           ),
         );
       }
+      reofferDirect(state, requestId, known.room, counterpart, profile);
       recordOutcome(state, requestId, { status: "done", entry: known });
       return;
     }
@@ -1106,11 +1159,13 @@ const performManagerAct = (
     (membership?.state === "saved" ||
       (membership === undefined && listsRoomIn(catalog.get(), joinedSpace)))
   ) {
-    // Every write in the room sends one of these, so it reads only the room's
-    // `about`, whose links it doesn't follow, and writes the catalog only
-    // where the two titles differ, which a retitle makes them. A room listed
-    // only through a container has no catalog entry, and gets no write.
-    if (isWellFormedDID(joinedSpace)) {
+    // Every message and reaction in the room sends one of these, and none of
+    // them changes the room's title, so those leave the room's `about`
+    // unread. Any other join reads only `about`, whose links it doesn't
+    // follow, and writes the catalog only where the two titles differ, which
+    // a retitle makes them. A room listed only through a container has no
+    // catalog entry, and gets no write.
+    if (isWellFormedDID(joinedSpace) && event?.messageAct !== true) {
       refreshListedTitle(
         catalog,
         joinedSpace,
@@ -1480,7 +1535,10 @@ const performManagerAct = (
  * Starts a chat, finding or creating a direct room or creating a group room,
  * from a reviewed `ChatStart` on `ChatStartSurface`: a room's `about` record
  * names this handler and that action as its only writer, so a start that
- * creates a room commits only from that gesture.
+ * creates a room commits only from that gesture. A start that finds a direct
+ * room commits without one, and may offer the room to its counterpart, as
+ * `offerRoom` offers a room without one: the start that created the room, and
+ * granted them access, was the gesture.
  */
 export const commitStart = handler<ManagerStreamEvent, ManagerActState>(
   (event, state) => performManagerAct(event, state),
@@ -1705,9 +1763,16 @@ const FoundRoom = pattern<FoundRoomInput, FoundRoomOutput>(
       scope: computed(() => isWellFormedDID(space) ? [space] : []),
     });
     const standalone = computed(() => kind === CHAT_ROOM_OFFER_KIND);
+    // The room is the document its root or declaration finally reaches. A
+    // declaration may reach it through a document holding only a link, as a
+    // Loom root's ensured room is reached through the handler's output for
+    // it; that document stores no labels, so a link to it gives a labeled
+    // list nothing to carry, and the room's own labels are what a link to
+    // the room carries.
     return {
       room: computed(() =>
-        standalone ? root.result : root.result?.key("chatRoom").get()
+        (standalone ? root.result : root.result?.key("chatRoom").get())
+          ?.resolveAsCell()
       ),
     };
   },

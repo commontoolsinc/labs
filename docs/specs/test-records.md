@@ -99,6 +99,10 @@ A record carries `outcome` (`pass`, `fail`, or `skip`), `durationMs` from
 the runner's own measurement (never a clock inside the test process, which
 several packages fake), and optionally `file`, the repository-relative
 source path when the producer reliably knows it — metadata, not identity.
+A reader drops a record whose `file`, or whose name where the kind is
+`pattern`, is absolute or climbs above the repository root. Such a path
+names a file outside the repository, and no test of the repository lives
+there.
 A `cfcheck` item's duration is what the batch spent on that pattern's own
 files. The gate is its own runner and measures them itself: the compiler
 times each file it checks and each file it emits, and the batch charges
@@ -223,14 +227,21 @@ stop; recording never fails a run.
 
 A producer records the run it was asked for. Several are also libraries
 that this repository's own tests drive — the pattern runner behind
-`cf test`, the type-check task, the vintage gate's replay — and each takes
-the decision to record from its caller rather than from the environment
-alone. The entry point asks for records; a test driving the same function
-does not, because the files it hands over are that test's fixtures, and a
-fixture is data rather than a test of this repository. A test that drives
-such a harness as a child process hands it an empty
-`CF_TEST_RECORDS_DIR`, since the child reads its own environment; an
-empty value is recording off, the same as an unset one.
+`cf test`, the workspace runner behind `deno task test`, the type-check
+task, the vintage gate's replay — and each takes the decision to record
+from its caller rather than from the environment alone. The entry point
+asks for records; a test driving the same function does not, because the
+files it hands over are that test's fixtures, and a fixture is data
+rather than a test of this repository. A test that drives such a harness
+as a child process hands it an empty `CF_TEST_RECORDS_DIR`, since the
+child reads its own environment; an empty value is recording off, the
+same as an unset one.
+
+A file no repository holds is no test of one. The pattern runner and the
+browser harness, which name each test by its file or record the file
+alongside it, record nothing for a file outside every repository. A
+fixture a test writes to a temporary directory is such a file, so either
+harness run over one records nothing even where the run inherited a spool.
 
 A check that no lane can be asked to run is not recorded. A record is one
 execution of one test, and every history built from records — flake rate,

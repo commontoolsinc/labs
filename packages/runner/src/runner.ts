@@ -1191,24 +1191,35 @@ function samePatternRef(
 }
 
 /**
+ * Whether `link`, a cell an instance in a piece's tree owns, is owed a
+ * default: it declares one at a scope narrower than that of its owning
+ * instance's result cell, `ownerScope`, which a start's preparation seeds
+ * when the cell holds no value.
+ */
+function ownedCellOwesSeed(
+  link: NormalizedFullLink,
+  ownerScope: CellScope,
+): boolean {
+  return isObjectOrArray(link.schema) &&
+    link.schema.default !== undefined &&
+    scopeRank(link.scope) > scopeRank(ownerScope);
+}
+
+/**
  * Whether the gate before the start of a piece a resume pre-sync has named
  * takes the record of `link`, a cell an instance in the piece's tree owns,
  * for the cell; the owning instance's result cell is at `ownerScope`. It does
  * for a derived cell (`computed:`), which holds a value only once its
  * computation has produced one: after the pre-sync has asked the store for
  * it, a record holding no value is what the store holds. It does not for a
- * cell owed a default at a scope narrower than its owner's result, which a
- * start's preparation seeds when the cell holds no value.
+ * cell owed a default (`ownedCellOwesSeed`).
  */
 function ownedCellRecordSuffices(
   link: NormalizedFullLink,
   ownerScope: CellScope,
 ): boolean {
-  if (entityKindOfIdString(link.id) !== "computed") return false;
-  const owesSeed = isObjectOrArray(link.schema) &&
-    link.schema.default !== undefined &&
-    scopeRank(link.scope) > scopeRank(ownerScope);
-  return !owesSeed;
+  return entityKindOfIdString(link.id) === "computed" &&
+    !ownedCellOwesSeed(link, ownerScope);
 }
 
 /**
@@ -2395,6 +2406,22 @@ function dedupeNormalizedLinks(
     deduped.push(link);
   }
   return deduped;
+}
+
+/**
+ * Each of `links` at every scope: a write to a document whose instance scope
+ * is decided only when it is written, declared so that a write surface keyed
+ * by scope covers whichever instance it turns out to be.
+ */
+function atEveryScope(
+  links: readonly NormalizedFullLink[],
+): NormalizedFullLink[] {
+  return links.flatMap((link) =>
+    (["space", "user", "session"] as const).map((scope) => ({
+      ...link,
+      scope,
+    }))
+  );
 }
 
 /**
@@ -6680,7 +6707,12 @@ export class Runner {
       const rootSyncStart = performance.now();
       return rootCell.sync().then(() => {
         if (!this.#isStartAttemptCurrent(attempt)) return false;
-        logger.time(rootSyncStart, "start", "rootCellSync");
+        logger.timeDetailed(
+          () => rootCell.getAsNormalizedFullLink().id,
+          rootSyncStart,
+          "start",
+          "rootCellSync",
+        );
         if (rootCell.getRaw() === undefined) {
           return Promise.reject(new Error("No data at cell"));
         } else {
@@ -6836,7 +6868,12 @@ export class Runner {
           if (!this.#isStartAttemptCurrent(attempt)) return false;
           // Resume-boot decomposition: source-doc fetch + module load/eval for
           // a pattern this runtime has never instantiated.
-          logger.time(loadStart, "start", "loadPatternByIdentity");
+          logger.timeDetailed(
+            () => `${identityRef.identity}#${identityRef.symbol}`,
+            loadStart,
+            "start",
+            "loadPatternByIdentity",
+          );
           if (loaded) {
             return this.#doStart(rootCell, seenCells, attempt);
           } else {
@@ -6948,7 +6985,12 @@ export class Runner {
       } finally {
         // Synchronous instantiation cost of the resumed piece (pattern
         // setup, node wiring), distinct from the syncs around it.
-        logger.time(startCoreStart, "start", "startCoreResume");
+        logger.timeDetailed(
+          () => rootCell.getAsNormalizedFullLink().id,
+          startCoreStart,
+          "start",
+          "startCoreResume",
+        );
       }
 
       return true;
@@ -7396,7 +7438,15 @@ export class Runner {
    * owns is likewise here once its record is, unless a seed is owed to it
    * (`ownedCellRecordSuffices`): the pre-sync's waves have landed, so a
    * record holding no value is what the store holds, and a name-sync would
-   * deliver it again.
+   * deliver it again. Any other owned cell of such a family that is absent
+   * holds the run only while the replica has not examined the document
+   * (`IStorageProvider.unexaminedAbsences`): the pre-sync asked the store
+   * for every cell the family owns, so an absence it was told of is what
+   * the store holds, and the session's own instance of a session-scoped
+   * cell, which no store holds before the session writes it, the replica
+   * counts as examined without asking. A cell owed a default
+   * (`ownedCellOwesSeed`) holds the run whatever the replica examined: the
+   * hold's preparation is what seeds it.
    */
   #familyAbsent(
     pattern: Pattern,
@@ -7478,6 +7528,11 @@ export class Runner {
       readTx,
       instances,
     );
+    // The owned cells of a named family read absent are weighed together
+    // once every probe has run: what decides the hold is whether any of
+    // them is an absence the replica has yet to examine, which the probes'
+    // own reads through `readTx` are what the replica answers from.
+    const absent: NormalizedFullLink[] = [];
     for (const { pattern: owner, resultCell: ownerCell } of instances) {
       const ownerScope = ownerCell.getAsNormalizedFullLink().scope;
       for (const descriptor of owner.derivedInternalCells ?? []) {
@@ -7485,10 +7540,54 @@ export class Runner {
           .getAsNormalizedFullLink();
         const record = presyncNamed &&
           ownedCellRecordSuffices(link, ownerScope);
-        if (!present(link, record)) return hold("an owned cell");
+        if (present(link, record)) continue;
+        if (
+          !presyncNamed || budgetSpent ||
+          ownedCellOwesSeed(link, ownerScope)
+        ) {
+          return hold("an owned cell");
+        }
+        absent.push(link);
       }
     }
-    return false;
+    return absent.length > 0 && this.#absenceUnexamined(readTx, absent)
+      ? hold("an owned cell")
+      : false;
+  }
+
+  /**
+   * Whether any of `links`, documents the probes of a named family's gate
+   * read as absent through `readTx`, is one this replica never examined: no
+   * record of it, under the instance `readTx`'s identity resolves. A
+   * document the pre-sync asked the store for and was told nothing of has
+   * its record, and the session's own instance of a session-scoped document
+   * is counted examined without one, since no store holds it before the
+   * session writes it. A provider that cannot say, or an instance the
+   * identity cannot resolve, leaves the absence unexamined, as holding the
+   * run costs a name-sync and a wrong verdict costs a conflicting commit.
+   */
+  #absenceUnexamined(
+    readTx: IExtendedStorageTransaction,
+    links: readonly NormalizedFullLink[],
+  ): boolean {
+    const identity = readTx.tx.scopeKeyIdentity;
+    if (
+      identity !== undefined &&
+      links.some((link) => !canResolveScopeKey(link.scope, identity))
+    ) {
+      return true;
+    }
+    const unexamined = new Set<string>();
+    for (const space of new Set(links.map((link) => link.space))) {
+      const provider = this.#runtime.storageManager.open(space);
+      if (provider.unexaminedAbsences === undefined) return true;
+      for (const absence of provider.unexaminedAbsences(readTx.tx)) {
+        unexamined.add(`${absence.space}\0${absence.id}\0${absence.scope}`);
+      }
+    }
+    return links.some((link) =>
+      unexamined.has(`${link.space}\0${link.id}\0${link.scope}`)
+    );
   }
 
   /**
@@ -9552,7 +9651,12 @@ export class Runner {
         // the runner timing stats (they record even when the logger is
         // disabled) so load summaries can attribute slow storage-resume
         // boots.
-        logger.time(syncStart, "start", "syncCellsForRunningPattern");
+        logger.timeDetailed(
+          () => resultCell.getAsNormalizedFullLink().id,
+          syncStart,
+          "start",
+          "syncCellsForRunningPattern",
+        );
       }
     };
     const syncer = this.#dependencySyncer;
@@ -9696,7 +9800,12 @@ export class Runner {
     await this.#kickResumeWave(cells, (c) => {
       const cellSyncStart = performance.now();
       const synced = this.#syncFamilyCell(c, identity).finally(() =>
-        logger.time(cellSyncStart, "start", "resumeCellSync")
+        logger.timeDetailed(
+          () => c.getAsNormalizedFullLink().id,
+          cellSyncStart,
+          "start",
+          "resumeCellSync",
+        )
       );
       // A start that writes nothing carrying the policy needs no manifest,
       // and one that does reads it as absent and fails its commit loudly, so
@@ -13865,6 +13974,9 @@ export class Runner {
     const builtinOnActionRegistered = isRawBuiltinResult(builtinResult)
       ? builtinResult.onActionRegistered
       : undefined;
+    const builtinStoreWrites = isRawBuiltinResult(builtinResult)
+      ? builtinResult.storeWrites ?? []
+      : [];
 
     // Name the raw action for debugging - use implementation name or fallback to "raw"
     const impl = module.implementation as ((...args: unknown[]) => Action) & {
@@ -13928,9 +14040,15 @@ export class Runner {
       ...outputCells,
       ...staticRedirectWriteTargets,
     ]);
+    // isEffect can come from module options or from the builtin result
+    const isEffect = module.isEffect ?? builtinIsEffect;
     Object.assign(action, builtinAction, {
       reads: inputCells,
-      writes: schedulingWrites,
+      // An effect takes no write surface, so its stores are not declared.
+      writes: isEffect ? schedulingWrites : dedupeNormalizedLinks([
+        ...schedulingWrites,
+        ...atEveryScope(builtinStoreWrites),
+      ]),
       ...(module.materializerWriteEnvelopes
         ? { materializerWriteEnvelopes: module.materializerWriteEnvelopes }
         : {}),
@@ -13938,8 +14056,6 @@ export class Runner {
       pattern,
     });
 
-    // isEffect can come from module options or from the builtin result
-    const isEffect = module.isEffect ?? builtinIsEffect;
     const debounce = module.debounce ?? builtinDebounce;
     const noDebounce = module.noDebounce ?? builtinNoDebounce;
     const throttle = module.throttle ?? builtinThrottle;

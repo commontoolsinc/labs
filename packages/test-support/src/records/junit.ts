@@ -13,7 +13,11 @@
  * while the tests were registering.
  */
 
-import { type TestIdentity, type TestRecord } from "./schema.ts";
+import {
+  isRepositoryPath,
+  type TestIdentity,
+  type TestRecord,
+} from "./schema.ts";
 import {
   enclosingNames,
   fileForName,
@@ -323,11 +327,9 @@ const SOURCE_SUFFIX = /\.(ts|tsx|js|jsx|mts|mjs)$/;
  */
 export function isRelativeSourcePath(classname: string): boolean {
   if (classname.includes("://") || classname.startsWith("ext:")) return false;
-  if (classname.startsWith("/")) return false;
-  if (classname.includes("\\")) return false;
+  if (!isRepositoryPath(classname)) return false;
   const segments = classname.split("/");
   for (let i = 0; i < segments.length; i++) {
-    if (segments[i] === "..") return false;
     if (segments[i] === "." && i > 0) return false;
     if (segments[i] === "") return false;
   }

@@ -93,7 +93,12 @@ explicitly declares it through `chatRoom`. A declared container room includes
 that root as `container`; a standalone room needs no container, including when
 another space declares it. The manager's separate event checks private Home
 membership and lists or restores the conversation. Joining an already listed
-room without a `requestId` changes nothing. Room write handlers send their
+room without a `requestId` changes no membership and records nothing. A join
+from a message or a reaction, marked `messageAct`, leaves the title the
+manager's catalog lists the room under as it is, and any other join brings that
+title up to the room's (see
+[`joinRoom`](ChatManagerOutput.md#joinroomrequestid-string-room-cellchatroomoutput)).
+Room write handlers send their
 local `joined` stream after recording the write. Its `tellManagerJoined`
 handler reads the manager binding and sends `joinRoom` in a separate event,
 so the transaction that stores shared messages and reactions reads neither
@@ -168,7 +173,7 @@ that creates the room, so it is labeled with its creator, and `about` links it.
 own, so it is labeled with that member, and the creator's record keeps its
 label. It records each retitle's outcome in the sender's own `titleRequests`,
 kept `PerUser`, under the event's `requestId`, and a request already there
-changes nothing; a refusal writes nothing else. A request already there changes nothing.
+changes nothing; a refusal writes nothing else.
 `canSend` is computed for each viewer from their access and whether their
 profile resolves.
 

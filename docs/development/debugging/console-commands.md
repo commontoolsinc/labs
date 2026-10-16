@@ -295,7 +295,9 @@ commonfabric.logger["runtime-client"].timeStats
 
 // Stats for a specific key path
 commonfabric.logger["runtime-client"].getTimeStats("ipc/CellGet")
-// { count, min, max, average, p50, p95, lastTime, lastTimestamp, cdf, ... }
+// { count, min, max, average, p50, p95, lastTime, lastTimestamp, slowest, ... }
+// `slowest`: the longest few, longest first, each as
+// { elapsed, at, epochMs, detail? } — `at` on the `performance.now()` clock
 
 // Reset all timing stats
 commonfabric.resetAllTimingStats()

@@ -110,7 +110,9 @@ acceptance made on the user's behalf, with `keepArchived`, leaves it archived.
 the user's own choice, so it restores an archived entry whatever it says of
 `keepArchived`, and it lists a direct room this user created, which `accept`
 refuses, without changing `direct`. A join of a room the catalog keeps as saved
-that names no `requestId` changes nothing and records nothing. A room offered to the
+that names no `requestId` changes no membership and records nothing; it brings
+the entry's title up to the room's, as described below, unless it is marked
+`messageAct`. A room offered to the
 user is registered by the host that vets the offer (see [first
 contact](#first-contact)). Accepting or joining a container's declared chat supplies `container`, a link
 to the root declaring it. The manager checks that its `chatRoom` resolves to

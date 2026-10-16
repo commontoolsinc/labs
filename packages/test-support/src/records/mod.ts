@@ -88,7 +88,6 @@ export {
   readNameMaps,
   readRegistrations,
   repositoryPathOf,
-  repositoryRootOf,
   serializeSkipList,
   SKIP_LIST_VARIABLE,
 } from "./registration.ts";
