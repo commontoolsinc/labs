@@ -29,6 +29,7 @@ import {
   setPatternSource,
   systemPatternSource,
 } from "../src/index.ts";
+import { envelopeStabilityReason } from "../src/cfc/envelope-stability-reason.ts";
 import { PatternsRoute } from "../src/harness/patterns-route.deno.ts";
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
@@ -48,6 +49,19 @@ const TOO_LARGE = {
   message: "Memory message stands for more than 1000000 array slots " +
     "and record members",
 } as unknown as CommitError;
+// The CFC boundary's refusal of a write whose schema moves a claim the stored
+// envelope fixes, in the shape the boundary gives it: the plain reasons, the
+// class at the front of the one that names it, and the first in the message.
+const UNSTABLE_REASON = envelopeStabilityReason(
+  "writePolicyAnyOf must remain stable at /messages/0",
+);
+const UNSTABLE: CommitError = {
+  name: "CfcCommitRefusalError",
+  message: "CFC enforcement rejected commit: relevant transaction was not " +
+    `prepared: ${UNSTABLE_REASON}`,
+  reasons: [UNSTABLE_REASON],
+  refusals: [],
+};
 
 const parentSource = [
   `import { ${SYMBOL} } from "./reconcile-target.tsx";`,
@@ -258,6 +272,14 @@ describe("piece source reconciliation", () => {
           : result;
       },
     );
+  }
+
+  /** Commits `value` as the piece's stored argument. */
+  async function changeStoredArgument(piece: Cell<unknown>, value: unknown) {
+    const result = await runtime.editWithRetry((tx) => {
+      piece.withTx(tx).getArgumentCell()!.setRaw(value);
+    });
+    expect(result.error).toBeUndefined();
   }
 
   describe("origins nothing follows", () => {
@@ -1106,6 +1128,134 @@ describe("piece source reconciliation", () => {
 
         expect(prepared.calls).toHaveLength(2);
         expect(getPatternIdentityRef(piece)?.identity).toBe(v2Identity);
+      });
+
+      it("prepares the adoption again once the piece's stored argument changed", async () => {
+        // What the write carries is the piece's data, so the refusal answered
+        // for the data it was prepared over.
+
+        const v2Identity = await identityFor(source("v2"));
+        const piece = await preparePiece(
+          servingFetch(() => v2Identity, () => source("v2")),
+        );
+        await stampSource(piece, PARENT_SOURCE);
+        using _refused = refuseAdoption(piece, TOO_LARGE);
+        using prepared = spy(runtime.runner, "syncStoredPieceCells");
+        expect(await reconcile(piece)).toBe("unavailable");
+        expect(await reconcile(piece)).toBe("unavailable");
+        expect(prepared.calls).toHaveLength(1);
+
+        await changeStoredArgument(piece, { note: "changed" });
+        expect(await reconcile(piece)).toBe("unavailable");
+
+        expect(prepared.calls).toHaveLength(2);
+      });
+
+      it("logs the refusal once, as one line naming it, and not the write it refused", async () => {
+        const v2Identity = await identityFor(source("v2"));
+        const piece = await preparePiece(
+          servingFetch(() => v2Identity, () => source("v2")),
+        );
+        await stampSource(piece, PARENT_SOURCE);
+        const transaction = { localSeq: 2670, patches: ["…"] };
+        using _refused = refuseAdoption(piece, {
+          ...TOO_LARGE,
+          transaction,
+        } as unknown as CommitError);
+        using warned = stub(console, "warn");
+
+        expect(await reconcile(piece)).toBe("unavailable");
+        expect(await reconcile(piece)).toBe("unavailable");
+        expect(await reconcile(piece)).toBe("unavailable");
+
+        const lines = warned.calls.filter(({ args }) =>
+          args.includes("reconcile-commit-failed")
+        );
+        expect(lines).toHaveLength(1);
+        const [{ args }] = lines;
+        expect(args.every((arg) => typeof arg === "string")).toBe(true);
+        expect(args).toContain(TOO_LARGE.name);
+        expect(args).toContain(TOO_LARGE.message);
+        expect(args).toContain(piece.space);
+      });
+    });
+
+    describe("when a stored envelope refuses the adopting write", () => {
+      it("returns unavailable again without preparing the same adoption a second time", async () => {
+        const v2Identity = await identityFor(source("v2"));
+        const piece = await preparePiece(
+          servingFetch(() => v2Identity, () => source("v2")),
+        );
+        await stampSource(piece, PARENT_SOURCE);
+        using _refused = refuseAdoption(piece, UNSTABLE);
+        using resolved = spy(runtime.harness, "resolve");
+        using prepared = spy(runtime.runner, "syncStoredPieceCells");
+
+        expect(await reconcile(piece)).toBe("unavailable");
+        expect(await reconcile(piece)).toBe("unavailable");
+        expect(await reconcile(piece)).toBe("unavailable");
+
+        expect(resolved.calls).toHaveLength(1);
+        expect(prepared.calls).toHaveLength(1);
+        expect(getPatternIdentityRef(piece)?.identity).toBe(
+          await identityFor(source("v1")),
+        );
+        expect(getPieceReconciliation(piece)).toMatchObject({
+          outcome: "unreachable",
+          offered: { identity: v2Identity, symbol: SYMBOL },
+          detail: UNSTABLE.message,
+        });
+      });
+
+      it("prepares the adoption again once the piece's stored argument changed", async () => {
+        // Data the stored envelope no longer covers, a migrated room's, is
+        // what lets the same candidate commit.
+
+        const v2 = sourceWithChangedContract("v2");
+        const v2Identity = await identityFor(v2);
+        const piece = await preparePiece(
+          servingFetch(() => v2Identity, () => v2),
+        );
+        await stampSource(piece, PARENT_SOURCE);
+        using prepared = spy(runtime.runner, "syncStoredPieceCells");
+        {
+          using _refused = refuseAdoption(piece, UNSTABLE);
+          expect(await reconcile(piece)).toBe("unavailable");
+          expect(await reconcile(piece)).toBe("unavailable");
+          expect(prepared.calls).toHaveLength(1);
+        }
+
+        await changeStoredArgument(piece, { optional: "migrated" });
+        expect(await reconcile(piece)).toBe("updated");
+
+        expect(prepared.calls).toHaveLength(2);
+        expect(getPatternIdentityRef(piece)?.identity).toBe(v2Identity);
+      });
+
+      it("prepares the adoption again after a refusal whose reasons only say so in prose", async () => {
+        // The class is read off the reason the boundary tagged, never off
+        // the words of one it did not.
+
+        const v2Identity = await identityFor(source("v2"));
+        const piece = await preparePiece(
+          servingFetch(() => v2Identity, () => source("v2")),
+        );
+        await stampSource(piece, PARENT_SOURCE);
+        using prepared = spy(runtime.runner, "syncStoredPieceCells");
+        {
+          const prose = "writePolicyAnyOf must remain stable at /messages/0";
+          using _refused = refuseAdoption(piece, {
+            name: "CfcCommitRefusalError",
+            message: prose,
+            reasons: [prose],
+            refusals: [],
+          });
+          expect(await reconcile(piece)).toBe("unavailable");
+        }
+
+        expect(await reconcile(piece)).toBe("updated");
+
+        expect(prepared.calls).toHaveLength(2);
       });
     });
 

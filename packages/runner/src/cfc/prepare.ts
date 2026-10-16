@@ -146,6 +146,10 @@ import {
 import { ConsumedLabelIndex } from "./consumed-label-index.ts";
 import { collectDeclaredMonotonicityViolations } from "./declared-monotonicity.ts";
 import {
+  CfcEnvelopeStabilityError,
+  envelopeStabilityReason,
+} from "./envelope-stability-reason.ts";
+import {
   admitsRulesOfKind,
   type CfcGrantConsumptionContext,
   evaluateExchangeRules,
@@ -12006,9 +12010,17 @@ export function* prepareBoundaryCommitSteps(
         // message is preserved verbatim after the token. Schema-LOAD failures
         // are handled above by the shared gatherer and record their bare
         // message as before.
+        //
+        // A claim the stored envelope fixes, changed or weakened by this
+        // write's schema, is a verdict: the merge reads only the loaded stored
+        // envelope and the schema, so a re-run refuses it again. Its token
+        // tells a caller that only another schema or other stored data can
+        // change the answer.
         reasons.push(
           error instanceof CfcSchemaMigrationError
             ? `${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: ${error.message}`
+            : error instanceof CfcEnvelopeStabilityError
+            ? verdictReason(envelopeStabilityReason(error.message))
             : error instanceof Error
             ? error.message
             : `schema merge failed for ${id}`,

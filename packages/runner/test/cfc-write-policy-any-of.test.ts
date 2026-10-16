@@ -13,6 +13,8 @@ import {
   setCfcImplementationIdentity,
   setCfcTrustSnapshot,
 } from "../src/storage/extended-storage-transaction.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { isEnvelopeStabilityRefusal } from "../src/storage/rejection.ts";
 
 const signer = await Identity.fromPassphrase("write-policy-any-of");
 
@@ -53,6 +55,15 @@ const SCHEMA: JSONSchemaObj = {
   ifc: { writePolicyAnyOf: [policy("send", "Send"), policy("edit", "Edit")] },
 };
 
+/** How {@link fixture} writes the protected cell. */
+type WriteOptions = {
+  schema?: JSONSchema;
+  module?: string;
+  initialization?: "setup" | "default" | "seed";
+  value?: string;
+  recordedValue?: string;
+};
+
 /**
  * A runtime over an emulated store, and a way to write one protected cell as
  * a named writer of a module (`MODULE` unless named), with or without a
@@ -66,72 +77,90 @@ function fixture() {
     storageManager,
     cfcEnforcementMode: "enforce-explicit",
   });
+  const stage = (
+    tx: IExtendedStorageTransaction,
+    writer: string,
+    action: string | undefined,
+    options: WriteOptions,
+  ) => {
+    const schema = options.schema ?? SCHEMA;
+    const value = options.value ?? writer;
+    setCfcTrustSnapshot(tx, {
+      id: "test-trust",
+      actingPrincipal: signer.did(),
+    });
+    setCfcImplementationIdentity(tx, {
+      kind: "verified",
+      moduleIdentity: options.module ?? MODULE,
+      sourceFile: "/main.tsx",
+      bindingPath: [writer],
+    });
+    const cell = runtime.getCell(
+      signer.did(),
+      "protected-value",
+      schema,
+      tx,
+    );
+    cell.set(value);
+    const target = cell.getAsNormalizedFullLink();
+    if (options.initialization === "setup") {
+      tx.recordCfcWritePolicyInput({
+        kind: "structural-provenance",
+        claim: CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
+        target: { ...target, id: "of:setup-result" },
+        sources: [target],
+      }, runtimeWritePolicyAuthorization);
+    } else if (options.initialization !== undefined) {
+      tx.recordCfcWritePolicyInput({
+        kind: "initialization",
+        mode: options.initialization,
+        target,
+        value: options.recordedValue ?? value,
+      }, runtimeWritePolicyAuthorization);
+    }
+    if (action !== undefined) {
+      tx.recordCfcWritePolicyInput({
+        kind: "trusted-event",
+        target,
+        eventId: "test-event",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "ReviewedSurface",
+            eventIntegrity: ["ReviewedSurface"],
+            uiContractDataset: { uiAction: action },
+          },
+        },
+      });
+    }
+  };
   return {
     async write(
       writer: string,
       action?: string,
-      options: {
-        schema?: JSONSchema;
-        module?: string;
-        initialization?: "setup" | "default" | "seed";
-        value?: string;
-        recordedValue?: string;
-      } = {},
+      options: WriteOptions = {},
     ) {
-      const schema = options.schema ?? SCHEMA;
-      const value = options.value ?? writer;
       const tx = runtime.edit();
-      setCfcTrustSnapshot(tx, {
-        id: "test-trust",
-        actingPrincipal: signer.did(),
-      });
-      setCfcImplementationIdentity(tx, {
-        kind: "verified",
-        moduleIdentity: options.module ?? MODULE,
-        sourceFile: "/main.tsx",
-        bindingPath: [writer],
-      });
-      const cell = runtime.getCell(
-        signer.did(),
-        "protected-value",
-        schema,
-        tx,
-      );
-      cell.set(value);
-      const target = cell.getAsNormalizedFullLink();
-      if (options.initialization === "setup") {
-        tx.recordCfcWritePolicyInput({
-          kind: "structural-provenance",
-          claim: CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
-          target: { ...target, id: "of:setup-result" },
-          sources: [target],
-        }, runtimeWritePolicyAuthorization);
-      } else if (options.initialization !== undefined) {
-        tx.recordCfcWritePolicyInput({
-          kind: "initialization",
-          mode: options.initialization,
-          target,
-          value: options.recordedValue ?? value,
-        }, runtimeWritePolicyAuthorization);
-      }
-      if (action !== undefined) {
-        tx.recordCfcWritePolicyInput({
-          kind: "trusted-event",
-          target,
-          eventId: "test-event",
-          provenance: {
-            origin: "dom",
-            trusted: true,
-            ui: {
-              pattern: "ReviewedSurface",
-              eventIntegrity: ["ReviewedSurface"],
-              uiContractDataset: { uiAction: action },
-            },
-          },
-        });
-      }
+      stage(tx, writer, action, options);
       tx.prepareCfc();
       return (await tx.commit().settled).error?.message;
+    },
+    /**
+     * The same write through `editWithRetry`, and how many times it staged
+     * the write before the runtime settled on an answer.
+     */
+    async writeRetrying(
+      writer: string,
+      action?: string,
+      options: WriteOptions = {},
+    ) {
+      let attempts = 0;
+      const { error } = await runtime.editWithRetry((tx) => {
+        attempts++;
+        stage(tx, writer, action, options);
+      });
+      return { error, attempts };
     },
     async dispose() {
       await runtime.dispose();
@@ -401,6 +430,79 @@ describe("cfc-write-policy-any-of", () => {
           "writePolicyAnyOf cannot join",
         );
         expect(await f.write("edit", "Edit")).toBeUndefined();
+      });
+    });
+  });
+
+  describe("a later schema that moves the stored policy", () => {
+    // The stored envelope fixes which writers the position admits, so a
+    // schema that adds an alternative, or names another lone writer, is
+    // refused however often it is presented, and the refusal says so.
+
+    const grown: JSONSchemaObj = {
+      type: "string",
+      ifc: {
+        writePolicyAnyOf: [
+          ...SCHEMA.ifc!.writePolicyAnyOf!,
+          policy("rogue", "Send"),
+        ],
+      },
+    };
+    const lone = (writer: string): JSONSchemaObj => ({
+      type: "string",
+      ifc: {
+        writeAuthorizedBy: writerClaim(writer),
+        uiContract: contract("Send"),
+      },
+    });
+
+    it("refuses a grown list once, naming the stored envelope", async () => {
+      await withFixture(async (f) => {
+        expect(await f.write("send", "Send")).toBeUndefined();
+
+        const { error, attempts } = await f.writeRetrying("send", "Send", {
+          schema: grown,
+        });
+
+        expect(error?.name).toBe("CfcCommitRefusalError");
+        expect(isEnvelopeStabilityRefusal(error)).toBe(true);
+        expect(error?.message).toContain(
+          "writePolicyAnyOf must remain stable at /",
+        );
+        expect(attempts).toBe(1);
+      });
+    });
+
+    it("refuses another lone writer once, naming the stored envelope", async () => {
+      await withFixture(async (f) => {
+        expect(await f.write("send", "Send", { schema: lone("send") }))
+          .toBeUndefined();
+
+        const { error, attempts } = await f.writeRetrying("edit", "Send", {
+          schema: lone("edit"),
+        });
+
+        expect(error?.name).toBe("CfcCommitRefusalError");
+        expect(isEnvelopeStabilityRefusal(error)).toBe(true);
+        expect(error?.message).toContain(
+          "writeAuthorizedBy must remain stable at /",
+        );
+        expect(attempts).toBe(1);
+      });
+    });
+
+    it("does not name the stored envelope for a merge it refuses on other grounds", async () => {
+      // Moving between a lone writer and a list is refused by the merge too,
+      // but not as a claim the stored envelope fixes.
+
+      await withFixture(async (f) => {
+        expect(await f.write("send", "Send", { schema: lone("send") }))
+          .toBeUndefined();
+
+        const { error } = await f.writeRetrying("send", "Send");
+
+        expect(error?.message).toContain("writePolicyAnyOf cannot join");
+        expect(isEnvelopeStabilityRefusal(error)).toBe(false);
       });
     });
   });
