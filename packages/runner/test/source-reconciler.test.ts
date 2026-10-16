@@ -1008,6 +1008,24 @@ describe("piece source reconciliation", () => {
           expect(originUpdates(piece)).toHaveLength(1);
         });
 
+        it("gives a source adopted with no release time the time that confirms it", async () => {
+          const { piece, identities, offer } = await followingPiece();
+          await offer({ marker: "v2" });
+
+          expect(await offer({ marker: "v2", releasedAt: LATER })).toEqual({
+            outcome: "current",
+            running: "v2",
+          });
+          expect(getPieceReconciliation(piece)?.confirmed).toEqual({
+            identity: identities.v2,
+            releasedAt: Date.parse(LATER),
+          });
+          expect(await offer({ marker: "v1", releasedAt: EARLIER })).toEqual({
+            outcome: "ahead",
+            running: "v2",
+          });
+        });
+
         it("keeps the later release time across an attempt that cannot read one", async () => {
           const { piece, identities, offer } = await followingPiece();
           await offer({ marker: "v2", releasedAt: EARLIER });

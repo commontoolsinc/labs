@@ -204,13 +204,14 @@ function reconciliationFor(
 
 /**
  * Whether an offer released at `offered` is an earlier release than the one a
- * piece runs, released at `running`. Release times are compared only where
- * the running source records one: a piece adopted from a host stating none
- * has nothing to order an offer against, and takes it as before. An offer
- * stating none is earlier than any running release that records one, so a
- * host that states no release time cannot move a piece another host has
- * placed on a stated one. An offer stating the same time as the running
- * release is not earlier.
+ * piece runs, released at `running` (`runningReleasedAt()`). Release times are
+ * compared only where the running source has one: a piece adopted from a host
+ * stating none has nothing to order an offer against until a release offering
+ * that same source confirms it at a stated time, and until then takes any
+ * offer as before. An offer stating none is earlier than any running release
+ * that has one, so a host that states no release time cannot move a piece
+ * another host has placed on a stated one. An offer stating the same time as
+ * the running release is not earlier.
  */
 function isEarlierRelease(
   offered: number | undefined,
