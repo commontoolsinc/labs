@@ -2,7 +2,7 @@
 status: historical
 created: 2026-10-16
 archived: 2026-10-16
-reason: "Measurement of the FabriChat room cold load on main after commonfabric/labs#8993 with `localSessionDocuments` off and on, October 2026: the flag keeps the session derivations out of the server store as designed and changes nothing a load pays, because every commit the settle makes still carries shared reads and travels for validation."
+reason: "Measurement of the FabriChat room cold load on main after commonfabric/labs#8993 with `localSessionDocuments` off and on, October 2026: the flag keeps the session derivations out of the server store as designed and changes nothing a load pays beyond the three commits that no longer travel, because the 167 other commits it empties still carry shared reads and travel for validation."
 ---
 
 # The FabriChat room cold load with session documents kept local, October 2026
@@ -98,22 +98,23 @@ the runtime session that committed. The room's space holds, per cold load:
 
 So the flag did what its entry says. The session derivations left the
 server store, their reads left the commits, and the three session-only
-commits each load had made did not travel. What travelled instead was the
-same number of commits with nothing in them: 167 validation-only commits
-a load, each carrying the space-scoped reads its derivation had made, on
+commits each load had made did not travel. What travelled instead was
+167 validation-only commits a load, three fewer than the flag-off arm's
+171, each carrying the space-scoped reads its derivation had made, on
 average three. The registry's "shared reads still require server
 validation, even when all writes are local" is the whole of the
-difference between the arms, and it is the same number of round trips.
+difference between the arms, and it leaves all but three of the round
+trips in place.
 
 ## Why nothing moved
 
 A load's settle is paid per commit, not per byte. Each of the 190 commits
 is a scheduler run's `#prepareCfc`, its `commitNative`, a push, and a
 verdict to await before dependents can settle on it; the flag-on arm did
-every one of those for a commit that wrote nothing, because every session
-derivation in this room reads the room's space documents. The flag's
-local settle, which skips the connection, applies to a commit with no
-shared read at all, and this load has none.
+every one of those for the 167 commits that wrote nothing, because those
+derivations read the room's space documents. The flag's local settle,
+which skips the connection, applied to the three session-only commits a
+load makes with no shared read, and to nothing else.
 
 For the ranking the earlier record left, this moves the settle's lever.
 Stripping the session writes from the commits is not it. Either the
