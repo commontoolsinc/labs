@@ -202,13 +202,22 @@ What works today:
     space. A handle `describe_handle` has not answered for in this run is
     refused, so a value is read after its shape was looked at; the handle table
     records the answer on the entry. A link at the read position is followed; a
-    link inside the value returns as the linked document's handle. What it reads
-    is measured through its own transaction against the release ceiling with the
-    model as the sink, the measurement `call_verb` and `run_pattern` apply to
-    their results; a refused read names the offending atoms and that
-    `delegate_task` can hand the handle to a subagent; a value above the
-    session's read ceiling, which subagents inherit, is refused naming that
-    ceiling. A released read's label joins the run's model context)
+    link inside the value returns as the linked document's handle. A position in
+    a derived document no run has written yet runs the piece behind the handle,
+    as `call_verb` does, and reads what it derives; a run not authorized for
+    side effects, as the policy gate decides for a side-effect tool, is refused
+    instead, naming that the piece has not run. Running it commits the piece's
+    derived values to the piece's space, a foreign one included, where a commit
+    the session may not make is refused after the value was read locally; a
+    handle on such a document itself names no piece to run, and the refusal says
+    to read it through the piece's handle. "Holds nothing at that path" means
+    the path does not exist. What it reads is measured through its own
+    transaction against the release ceiling with the model as the sink, the
+    measurement `call_verb` and `run_pattern` apply to their results; a refused
+    read names the offending atoms and that `delegate_task` can hand the handle
+    to a subagent; a value above the session's read ceiling, which subagents
+    inherit, is refused naming that ceiling and the atoms the value carries. A
+    released read's label joins the run's model context)
   - `search_patterns` (present only when the run configures a pattern index with
     `--pattern-index-url`; finds published patterns by hashtag or free text and
     reports each one's kind, evidence quality, declared shapes, and import
