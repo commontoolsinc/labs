@@ -8251,7 +8251,6 @@ const gateRuntimeMintedIntegrity = (
   if (integrity === undefined || integrity.length === 0) {
     return label;
   }
-  // SPEC-PENDING https://github.com/commonfabric/specs/pull/70
   const filtered = authoringIdentity?.kind === "builtin"
     ? integrity.filter((atom) => !isTransformedByAtom(atom))
     : integrity.filter((atom) => !isRuntimeMintedIntegrityAtom(atom));
