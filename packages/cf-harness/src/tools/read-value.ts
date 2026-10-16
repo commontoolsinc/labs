@@ -82,7 +82,7 @@ export const readValueToolDescriptor: HarnessToolDescriptor = {
   toolId: "read_value",
   title: "Read Value",
   description:
-    "Return the value behind a handle token this run holds, as stored, with a position linking to another document returned as that document's handle token. describe_handle the token first; an undescribed token is refused. What you read joins the run's context, and its CFC label stays on everything the run produces afterwards. Where policy keeps the value from you, the refusal names the label, and delegate_task can hand the token to a subagent that reads it and returns what the task needs. Read only what the task needs: select one field rather than reading a whole piece.",
+    "Return the value behind a described handle token this run holds, as stored, with a position linking to another document returned as that document's handle token.",
   effectClass: "read",
   inputSchema: {
     type: "object",

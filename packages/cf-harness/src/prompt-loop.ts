@@ -16,6 +16,10 @@ import { isAbsolute, relative } from "@std/path";
 
 import { PIECE_TARGETING_GUIDANCE } from "./piece-targeting.ts";
 import {
+  PATTERN_SOURCE_GUIDANCE,
+  RUN_PATTERN_GUIDANCE,
+} from "./tool-guidance.ts";
+import {
   type HarnessModelProviderId,
   isHarnessModelProviderId,
 } from "./config.ts";
@@ -1671,6 +1675,7 @@ const buildSubagentSystemPrompt = (
           ]
           : []),
         "Pass pattern source inline as the run_pattern `sourceText` argument. You have no write_file or edit_file; do not try to author patterns as workspace files.",
+        PATTERN_SOURCE_GUIDANCE,
         "Return a durable result object directly — `return { count, $UI: <div>…</div> }`. A whole-result derived wrapper is a known smell, but not a deterministic failure: after instantiation run_pattern checks the actual pattern pointer and refuses a piece materialized under a session-only identity.",
         "You own the write, compile-error, fix loop. A `compile-error` result is normal iteration material: read the diagnostic, correct the source, and call run_pattern again. Do not hand a compile error back to the parent as the answer.",
         PATTERN_AUTHORING_GUIDANCE,
@@ -1693,6 +1698,10 @@ const buildSubagentSystemPrompt = (
         }>} with an optional free-text "detail".`,
         "A failure is a complete, correct answer. Never return a reference to something you did not produce, never hand back a reference from an earlier step as if it were your result, and never present a partial or non-compiling pattern as a finished one.",
       ]
+      : []),
+    ...(profileConfig.profile !== PATTERN_AUTHOR_SUBAGENT_PROFILE &&
+        profileConfig.allowedToolIds.includes("run_pattern")
+      ? [RUN_PATTERN_GUIDANCE]
       : []),
     ...(profileConfig.profile === WEB_FETCH_SUBAGENT_PROFILE
       ? [

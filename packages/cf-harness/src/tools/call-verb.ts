@@ -89,7 +89,7 @@ export const callVerbToolDescriptor: HarnessToolDescriptor = {
   toolId: "call_verb",
   title: "Call Verb",
   description:
-    "Send an event to a verb of the piece behind a handle token, running its handler: the way a pattern changes its own state. describe_handle on the piece lists its verbs with their event and result schemas; send one by name with an event satisfying its schema. Where the event takes a piece, pass its handle token, never a copy of its fields. An undeclared event, a missing required field, a copy where a reference is declared, or an unknown verb is refused before sending, so nothing changed: the refusal names the field and rule broken, or lists the piece's verbs. A handler that rejects the event fails the call with its own message. Returns the verb's result: numbers, booleans and nulls as themselves, a returned piece as its handle token, other values as reference tokens for describe_handle or run_pattern. The piece may be in this run's space or one admitted to it.",
+    "Send an event to a named verb of the piece behind a handle token, running its handler; returns the verb's result, with values that are not numbers, booleans or nulls as handle or reference tokens. The piece may be in this run's space or one admitted to it.",
   effectClass: "side-effect",
   inputSchema: {
     type: "object",
