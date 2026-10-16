@@ -470,32 +470,116 @@ export function manifestMoment(
   return moment.toISOString();
 }
 
+/**
+ * What a git command prints in `root`, or an error opening with
+ * `failure` and carrying what git said.
+ */
+async function gitOutput(
+  root: string,
+  args: readonly string[],
+  failure: string,
+): Promise<string> {
+  const result = await new Deno.Command("git", {
+    args: [...args],
+    cwd: root,
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  if (!result.success) {
+    throw new Error(
+      `${failure}: ${new TextDecoder().decode(result.stderr).trim()}`,
+    );
+  }
+  return new TextDecoder().decode(result.stdout);
+}
+
+/** A full git object id, in either hash a repository can use. */
+const OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
+
+/** The paths in what `git … -z` printed. */
+function pathsOf(listing: string): Set<string> {
+  return new Set(listing.split("\0").filter((path) => path.length > 0));
+}
+
 /** The files this change touched, as the repository names them. */
 export async function changedFiles(
   root: string,
   base: string | undefined,
 ): Promise<Set<string>> {
   if (base === undefined) return new Set();
-  const result = await new Deno.Command("git", {
-    args: ["diff", "--name-only", `${base}...HEAD`],
-    cwd: root,
-    stdout: "piped",
-    stderr: "piped",
-  }).output();
-  if (!result.success) {
-    // Treating this as a change-free pull request would drop every unit
-    // the change touched out of the mandatory set without saying so, and
-    // the lane would pass having run none of them.
-    throw new Error(
-      `cannot diff against ${base}: ` +
-        new TextDecoder().decode(result.stderr).trim(),
-    );
-  }
-  return new Set(
-    new TextDecoder().decode(result.stdout).split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0),
+  // A diff that fails throws rather than reading as a change-free pull
+  // request, which would drop every unit the change touched out of the
+  // mandatory set without saying so, and the lane would pass having run
+  // none of them.
+  return pathsOf(
+    await gitOutput(
+      root,
+      ["diff", "-z", "--name-only", `${base}...HEAD`],
+      `cannot diff against ${base}`,
+    ),
   );
+}
+
+/**
+ * The files `until` gained after `since`, through a `git` that throws
+ * when git fails. Where `since` is not an ancestor of `until`, only what
+ * `until` gained after the two parted counts, so a file that `until`
+ * still holds and `since` deleted is not one of them.
+ *
+ * `since` comes from a manifest, which is untrusted, so it reaches git
+ * only as a full object id. One that is not an object id, or that names
+ * no commit `git` can find, gives nothing.
+ */
+export async function gainedSince(
+  git: (...args: string[]) => Promise<string>,
+  since: string,
+  until: string,
+): Promise<Set<string>> {
+  if (!OBJECT_ID.test(since)) return new Set();
+  const found = await git("rev-list", "--no-walk", "--ignore-missing", since);
+  if (found.trim() === "") return new Set();
+  return pathsOf(
+    await git(
+      "diff",
+      "-z",
+      "--name-only",
+      "--no-renames",
+      "--diff-filter=A",
+      `${since}...${until}`,
+    ),
+  );
+}
+
+/**
+ * The files the default branch gained after `since`, the commit a
+ * manifest was published from, and before this change branched off from
+ * it at the merge base `changedFiles` diffs against.
+ *
+ * A unit no manifest has seen is forced into a run unless it is one of
+ * these. The default branch's full run runs every unit it holds, so a
+ * unit that landed there after the manifest's commit has records the
+ * manifest is too old to hold. A unit the change brings with it has none,
+ * and neither does one the manifest's own commit already held.
+ *
+ * A manifest naming no commit this checkout holds leaves nothing known to
+ * have landed since it.
+ */
+export async function landedFiles(
+  root: string,
+  base: string | undefined,
+  since: string | undefined,
+): Promise<Set<string>> {
+  if (base === undefined || since === undefined) return new Set();
+  // A lane that read fewer files than its siblings would pack a plan they
+  // are not following, so a listing that fails throws.
+  const git = (...args: string[]) =>
+    gitOutput(
+      root,
+      args,
+      `cannot list the files ${base} gained after ${since}`,
+    );
+  const mergeBase = (await git("merge-base", base, "HEAD")).trim();
+  return await gainedSince(git, since, mergeBase);
 }
 
 /** One suite's share of a lane, and what runs inside it. */
@@ -2113,6 +2197,12 @@ interface Reading {
   /** The files the change touched, and none for the full run. */
   changed: ReadonlySet<string>;
 
+  /**
+   * The files the default branch gained between the manifest's commit and
+   * where the change branched off, and none for the full run.
+   */
+  landed: ReadonlySet<string>;
+
   /** Which object the manifest was read from, or why there is none. */
   fetched: { objectName?: string; absent?: string };
 }
@@ -2153,6 +2243,11 @@ async function read(
     changed: options.full
       ? new Set<string>()
       : await changedFiles(options.root, options.base),
+    landed: options.full ? new Set<string>() : await landedFiles(
+      options.root,
+      options.base,
+      manifest.manifest?.commit,
+    ),
     fetched: {
       ...(manifest.objectName === undefined
         ? {}
@@ -2183,6 +2278,13 @@ interface RunInput {
   suites: readonly Suite[];
   manifest: Manifest | undefined;
   changed: ReadonlySet<string>;
+
+  /**
+   * The files the default branch gained between the manifest's commit and
+   * where the change branched off, and none for the full run.
+   */
+  landed: ReadonlySet<string>;
+
   full: boolean;
 
   /** What multiplies `DISCRETIONARY_SECONDS`. One where not given. */
@@ -2214,7 +2316,12 @@ interface RunInput {
  * has the same number of lanes.
  */
 export function planOver(input: RunInput & { lanes?: number }): PlanOver {
-  const read = census(input.suites, input.manifest, input.changed);
+  const read = census(
+    input.suites,
+    input.manifest,
+    input.changed,
+    input.landed,
+  );
   const lanes = input.lanes ?? lanesNeeded(input, read).lanes;
   const packed = (
     gates: readonly GateChoice[],
@@ -2301,13 +2408,14 @@ export async function lanePlan(
   suites: readonly Suite[],
   deps: Pick<LaneDeps, "manifest">,
 ): Promise<LanePlan> {
-  const { manifest, changed, fetched } = await read(options, deps);
+  const { manifest, changed, landed, fetched } = await read(options, deps);
   return {
     fetched,
     ...planOver({
       suites,
       manifest,
       changed,
+      landed,
       full: options.full,
       scale: options.scale,
       ...(options.of === undefined ? {} : { lanes: options.of }),
@@ -2348,17 +2456,18 @@ export async function runLanes(
   deps: LaneDeps,
 ): Promise<RunLanes> {
   const suites = await (deps.topology ?? loadTopology)(options.root);
-  const { manifest, changed } = await read(options, deps);
+  const { manifest, changed, landed } = await read(options, deps);
   const input: RunInput = {
     suites,
     manifest,
     changed,
+    landed,
     full: options.full,
     scale: options.scale,
   };
   const { lanes, capped } = lanesNeeded(
     input,
-    census(suites, manifest, changed),
+    census(suites, manifest, changed, landed),
   );
   const { laid } = planOver({ ...input, lanes });
   if (capped) {

@@ -377,14 +377,16 @@ Deno.test("each comment job selects runs by the triggering run's own facts", asy
 // it reads is the change itself. That commit is on the default branch,
 // which is what makes it safe to run in a job holding a write token; a
 // pull request head in the same job would be running fork-authored code
-// with permission to comment as the repository.
+// with permission to comment as the repository. Its whole history is
+// there because the report lists what the default branch gained since
+// the commit a manifest was published from, as the lanes do.
 Deno.test("the run report checks out the commit it reports on", async () => {
   const comment = await workflow("pull-request-comments.yml");
   assertStringIncludes(
     comment,
     "ref: ${{ github.event.workflow_run.head_sha }}",
   );
-  assertStringIncludes(comment, "fetch-depth: 2");
+  assertStringIncludes(comment, "fetch-depth: 0");
 });
 
 //

@@ -651,6 +651,23 @@ Two rules force a test in.
   unit runs, because what a runner is told to skip names only identities
   the manifest holds. A record a suite writes for itself rather than for
   one of its units makes no unit known.
+
+  A unit is not forced in for want of records where it is a file the
+  default branch gained after the commit the manifest was published from
+  and before the change branched off it. The full run on the default
+  branch runs every unit there, so the store has that unit's records, or
+  is about to, and the manifest is only too old to hold them. Forcing it
+  into every change tested in that window would charge each of them a
+  stand-in, and the lanes to hold it, for data that is already being
+  gathered. Such a unit keeps its stand-in at the floor score, and since
+  it has never run, the exploration pass reaches it first among what is
+  left. Everything else the manifest has not seen is forced in: a unit
+  the change brought, a unit the manifest's own commit already held, and
+  a unit whose name is not a path at all, such as a repository gate or a
+  type-check group, since a list of files cannot say when one of those
+  arrived. A manifest naming no commit the checkout holds leaves nothing
+  known to have arrived after it, and a consumer with no manifest has no
+  such commit, so the whole corpus stays mandatory there.
 - **What the change touches must run.** A changed test file's identities
   are mandatory. Everything else a change forces in goes through one
   rule, and there is no second rule beside it: a declaration names the
@@ -1164,8 +1181,10 @@ artifact follows from what it can do. It can only change *which* tests
 run. It cannot change what a test does, what a test asserts, or what the
 repository builds. That holds because of what a consumer lets its strings
 reach. The only ones that reach a command are suite and unit names, and
-only those matching a suite and a unit the tree defines. A test's name
-reaches nothing but the list of names a runner is told to skip.
+only those matching a suite and a unit the tree defines, and the commit
+the manifest names, only where it is a full object id, and only to ask
+git what the default branch gained after it. A test's name reaches
+nothing but the list of names a runner is told to skip.
 
 The worst a corrupted manifest achieves is a change that ran fewer tests
 than it should have, which the full run on the default branch catches.
@@ -1284,11 +1303,15 @@ request that commit is the merge its records name, and not the tip of its
 branch, since a manifest published between the two would explain a selection the
 lanes never made. A report that cannot establish that moment has no resolved
 manifest. Nor does a run whose tests did not run in lanes, since no manifest
-chose what it ran. Only a resolved manifest that holds the identity can support that last
-answer, and a report without one says the run did not run the test rather than
-crediting the selector with a decision nothing made. Where the manifest says the
-test was to have run — the packing reached it, or the store has never seen it,
-which makes it mandatory — a run with no record of it recorded less than it ran,
+chose what it ran. Only a resolved manifest can support that last answer,
+and a report without one says the run did not run the test rather than
+crediting the selector with a decision nothing made. With one, an identity the
+manifest holds was placed or passed over on its own. An identity it does not
+hold runs wherever its unit runs: the record the run under report wrote of it
+says which unit that is, and the plan says whether that unit was placed. One
+whose record names no unit is read as one the packing reached.
+Where the manifest says the test was to have run — the packing reached it or
+its unit — a run with no record of it recorded less than it ran,
 and that is a different statement from a run that did not reach it. A test the
 packing did not reach is something the change did not miss, and it must be
 described by what the plan the lanes computed says about leaving it out: its
@@ -1313,10 +1336,11 @@ default branch is never failed by it.
 
 The packing function is pure. No clock, no unseeded randomness, no
 dependence on anything but the working tree, the manifest, the diff, the
-policy, and the lane number. That is what lets every lane compute its own
-share and agree with the others by construction. The exploration draw's
-seed comes from the manifest, so the draw is the same in every lane and
-different between manifests.
+files the default branch gained between the manifest's commit and the
+change's merge base, the policy, and the lane number. That is what lets
+every lane compute its own share and agree with the others by
+construction. The exploration draw's seed comes from the manifest, so
+the draw is the same in every lane and different between manifests.
 
 The tree is an input alongside the manifest because the two answer
 different questions. The tree says which tests exist, and the manifest

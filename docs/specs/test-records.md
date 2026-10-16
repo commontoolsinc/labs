@@ -637,11 +637,13 @@ workflow's username input lets any member mint for any username, with the
 dispatch log as the record of who minted what for whom.
 
 A consumer that selects which tests run — a duration ratchet, sharding
-weights, failure-rate-driven selection — must additionally treat an
-identity it has no fresh records for as one that must run: records exist
-only for tests that ran, so a selector that never re-runs the unselected
-starves its own data, and a renamed test is an unknown identity until an
-alias line lands.
+weights, failure-rate-driven selection — must additionally see that an
+identity it has no fresh records for runs: records exist only for tests
+that ran, so a selector that never re-runs the unselected starves its own
+data, and a renamed test is an unknown identity until an alias line lands.
+A consumer whose own runs on `main` run every identity meets this there
+for anything `main` already holds, and need only force in elsewhere what
+`main` does not.
 
 Test selection reads `submissions/local/` as well, and weighs a failure
 seen there above one seen in continuous integration. That is a deliberate
