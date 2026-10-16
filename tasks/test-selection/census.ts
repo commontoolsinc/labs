@@ -284,8 +284,10 @@ export function census(
         taken.add(key);
         entries.push(entry);
         unmeasured += 1;
-        // Nothing in the manifest runs this unit, so it is unknown
-        // whatever else made it mandatory.
+        // Nothing in the manifest runs this unit, so where something made
+        // it mandatory it is mandatory as unknown. Being unknown makes it
+        // mandatory too, unless it landed on the default branch after the
+        // manifest's commit, where it runs only where the budget has room.
         if (reason !== undefined || !landed.has(unit)) {
           mandatory.set(key, reason ?? "unknown");
         }
