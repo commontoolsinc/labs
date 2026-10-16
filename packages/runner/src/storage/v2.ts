@@ -7802,17 +7802,14 @@ export class SpaceReplica
         !this.#isLocalSessionDocument(read)
       ),
     };
-    // A commit that writes only this replica's session documents settles
-    // here, whatever it read. A shared read names a document the replica
-    // holds, so a write that outdates the read reaches the replica as a
-    // frame, and the frame runs the derivation that read it again; a
-    // verdict refusing the read as stale would re-run the same derivation
-    // after the same frame. A read through a pending layer settles with
-    // that layer's commit below. A precondition on a shared document is a
-    // check on the server's head rather than on this replica's view, so a
-    // commit carrying one still travels, as a validation-only commit.
+    // A commit settles here only when nothing it touched is shared. One that
+    // read a shared document travels, with no operations when every write
+    // is local, because its session writes are only as good as those reads:
+    // a verdict refusing a read rolls the writes back, and it is what runs a
+    // handler, which no later frame runs again, against fresh state.
     const localOnly = this.#localSessionDocuments() &&
-      remoteOperations.length === 0 && !remotePreconditions?.length;
+      remoteOperations.length === 0 && !remotePreconditions?.length &&
+      remoteReads.confirmed.length === 0 && remoteReads.pending.length === 0;
     // Record local origins before the first rejection checkpoint: a later
     // guard must validate their failed verdict without contacting the server.
     if (localOnly) this.#localSessionCommitAccepted.set(localSeq, false);
@@ -7861,10 +7858,7 @@ export class SpaceReplica
       }
       // A local session read can depend on a mixed commit awaiting its
       // verdict or local application. Promote that dependency before its
-      // consumer can replace the confirmed base. A commit settling here
-      // waits for every pending layer it read through, shared ones
-      // included: the server is not asked about them, so a rejected one
-      // has to be found by the checkpoint below before the settle.
+      // consumer can replace the confirmed base.
       if (this.#localSessionDocuments()) {
         const origins = (commit.preconditions ?? []).flatMap((pin) =>
           pin.kind === "origin-committed" ? [pin.originLocalSeq] : []
