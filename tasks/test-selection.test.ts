@@ -26,6 +26,7 @@ import {
 import type { Manifest, ManifestEntry } from "./test-selection/manifest.ts";
 import { alarms } from "./test-selection/health.ts";
 import type { Suite } from "./test-topology/suite.ts";
+import { coverageGateSuite } from "./test-topology/coverage-gates.ts";
 import {
   DIALS,
   EXCLUDED_FROM_COVERAGE_GATE,
@@ -377,7 +378,7 @@ describe("coverageLines()", () => {
     });
     expect(await coverageLines(manifest, [workspaceUnit], [], first)).toEqual([
       "workspace-unit/packages/memory  2 units, against 41 uncovered lines " +
-      "at abcdef0",
+      "at abcdef0; its gate has no record yet",
     ]);
     expect(
       (await coverageLines(
@@ -449,7 +450,7 @@ describe("coverageLines()", () => {
     });
     expect(lines).toEqual([
       "workspace-unit/packages/memory  2 units, against 20 uncovered lines " +
-      "at near",
+      "at near; its gate has no record yet",
     ]);
     expect(asked).toEqual([["ahead", "near", "far"]]);
     expect(
@@ -460,7 +461,8 @@ describe("coverageLines()", () => {
         () => Promise.resolve(undefined),
       ),
     ).toEqual([
-      "workspace-unit/packages/memory  2 units, against no baseline yet",
+      "workspace-unit/packages/memory  2 units, against no baseline yet; " +
+      "its gate has no record yet",
     ]);
   });
 
@@ -472,8 +474,24 @@ describe("coverageLines()", () => {
       first,
     );
     expect(lines).toEqual([
-      "workspace-unit/packages/memory  2 units, against no baseline yet",
+      "workspace-unit/packages/memory  2 units, against no baseline yet; " +
+      "its gate has no record yet",
     ]);
+  });
+
+  it("names the score of a set's gate", async () => {
+    const manifest = sampleManifest({
+      entries: [sampleEntry(
+        { k: "gate", s: "memory", n: "coverage-gate workspace-unit" },
+        {
+          suite: "coverage-gate",
+          unit: "workspace-unit/packages/memory",
+          score: 0.4,
+        },
+      )],
+    });
+    expect((await coverageLines(manifest, [workspaceUnit], [], first))[0])
+      .toContain("its gate scores 0.400");
   });
 
   it("gives the reason for a member that carries no set", async () => {
@@ -1099,6 +1117,26 @@ describe("dispatch()", () => {
     });
     expect(result.code).toBe(1);
     expect(result.out).toContain("no identity for workspace-unit: unrun");
+  });
+
+  it("fails --verify on a gate nothing has recorded, which no lane runs", async () => {
+    const memory: Suite = {
+      ...suiteHolding(["packages/memory/test/memory.test.ts"]),
+      measured: [{
+        member: "packages/memory",
+        reachedBy: ["packages/memory/"],
+        units: ["packages/memory/test/memory.test.ts"],
+      }],
+    };
+    const result = await ran(["plan", "--verify"], {
+      topology: () => Promise.resolve([memory, coverageGateSuite([memory])]),
+    });
+    expect(result.code).toBe(1);
+    expect(result.out).toContain(
+      "no record of the gate coverage-gate: workspace-unit/packages/memory, " +
+        "so a change is offered it at the floor of the score",
+    );
+    expect(result.out).not.toContain("runs it as unknown");
   });
 
   describe("health", () => {

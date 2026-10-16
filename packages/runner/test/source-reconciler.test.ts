@@ -30,6 +30,7 @@ import {
   setPatternSource,
   systemPatternSource,
 } from "../src/index.ts";
+import { readStoredCfcSchemaHash } from "../src/cfc/metadata.ts";
 import { PatternsRoute } from "../src/harness/patterns-route.deno.ts";
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
@@ -1094,6 +1095,18 @@ describe("piece source reconciliation", () => {
       return piece;
     }
 
+    /** The schema hash of the envelope the piece's argument document stores. */
+    function argumentEnvelope(piece: Cell<unknown>): string | undefined {
+      const tx = runtime.edit();
+      try {
+        const { space, id, scope } = piece.getArgumentCell()!
+          .getAsNormalizedFullLink();
+        return readStoredCfcSchemaHash(tx, { space, id, scope });
+      } finally {
+        tx.abort();
+      }
+    }
+
     for (const refusal of [tooLarge, policyChanged]) {
       it(`records a \`${refusal.name}\`, and builds nothing for the same source again`, async () => {
         const v1Identity = await identityFor(source("v1"));
@@ -1188,42 +1201,64 @@ describe("piece source reconciliation", () => {
       });
     });
 
-    it("proposes again once the piece's stored argument changes", async () => {
-      const piece = await pieceOffered(source("v2"));
-      using adoptions = refuseAdoptions(tooLarge);
-      expect(await reconcile(piece)).toBe("rejected");
+    for (const refusal of [tooLarge, policyChanged]) {
+      it(`builds nothing again after a \`${refusal.name}\` once the piece's stored argument changes`, async () => {
+        // A write refused as too large grows with what the piece holds, so a
+        // change to its data rarely makes it fit. A write under the schema
+        // the piece runs leaves the envelopes a stored envelope's refusal
+        // answered for as they were. A piece taking writes keeps either one.
 
-      const argument = piece.getArgumentCell<Record<string, string>>()!;
-      const edited = await runtime.editWithRetry((tx) => {
-        argument.withTx(tx).setRaw({ note: "changed" });
+        const piece = await pieceOffered(source("v2"));
+        using adoptions = refuseAdoptions(refusal);
+        expect(await reconcile(piece)).toBe("rejected");
+        const envelope = argumentEnvelope(piece);
+
+        const argument = piece.getArgumentCell<Record<string, string>>()!;
+        const edited = await runtime.editWithRetry((tx) => {
+          argument.withTx(tx).setRaw({ note: "changed" });
+        });
+        expect(edited.error).toBeUndefined();
+        expect(argument.getRaw()).toEqual({ note: "changed" });
+        expect(argumentEnvelope(piece)).toBe(envelope);
+        expect(await reconcile(piece)).toBe("rejected");
+
+        expect(adoptions.refusals).toBe(1);
       });
-      expect(edited.error).toBeUndefined();
+    }
+
+    it("proposes again after a stored envelope's refusal once the envelope the piece's argument stores changes", async () => {
+      // A migration that rewrites what the piece stores is what can change
+      // the merge's answer.
+
+      const piece = await pieceOffered(sourceWithChangedContract("v2"));
+      using adoptions = refuseAdoptions(policyChanged);
+      expect(await reconcile(piece)).toBe("rejected");
+      const before = argumentEnvelope(piece);
+
+      const labeled = await runtime.editWithRetry((tx) => {
+        const argument = piece.withTx(tx).getArgumentCell()!;
+        runtime.getCellFromLink(
+          {
+            ...argument.getAsNormalizedFullLink(),
+            schema: {
+              type: "object",
+              properties: {
+                optional: {
+                  type: "string",
+                  ifc: { confidentiality: ["migrated"] },
+                },
+              },
+            },
+          },
+          undefined,
+          tx,
+        ).set({ optional: "migrated" });
+      });
+      expect(labeled.error).toBeUndefined();
+      expect(argumentEnvelope(piece)).not.toBe(before);
       expect(await reconcile(piece)).toBe("rejected");
 
       expect(adoptions.refusals).toBe(2);
-    });
-
-    it("builds nothing again once the stored argument is changed and changed back", async () => {
-      // The refusal remembers the argument by its content rather than by the
-      // value it read, so an argument changed and then restored, a different
-      // value equal to the first, changes nothing.
-
-      const piece = await pieceOffered(source("v2"));
-      using adoptions = refuseAdoptions(tooLarge);
-      expect(await reconcile(piece)).toBe("rejected");
-
-      const argument = piece.getArgumentCell<Record<string, string>>()!;
-      const before = argument.getRaw()!;
-      for (const value of [{ note: "changed" }, { ...before }]) {
-        const written = await runtime.editWithRetry((tx) => {
-          argument.withTx(tx).setRaw(value);
-        });
-        expect(written.error).toBeUndefined();
-      }
-      expect(argument.getRaw()).toEqual(before);
-      expect(await reconcile(piece)).toBe("rejected");
-
-      expect(adoptions.refusals).toBe(1);
     });
 
     it("proposes again once the piece's source state changes", async () => {
@@ -1296,6 +1331,24 @@ describe("piece source reconciliation", () => {
       });
     }
 
+    it("proposes again after a `CfcCommitRefusalError` that names a stored envelope's refusal only in prose", async () => {
+      // The class is read off the reason the boundary tagged, never off the
+      // words of one it did not.
+
+      const prose = "writePolicyAnyOf must remain stable at /messages/*";
+      const piece = await pieceOffered(source("v2"));
+      using adoptions = refuseAdoptions({
+        name: "CfcCommitRefusalError",
+        message: prose,
+        reasons: [prose],
+      });
+
+      expect(await reconcile(piece)).toBe("unavailable");
+      expect(await reconcile(piece)).toBe("unavailable");
+
+      expect(adoptions.refusals).toBe(2);
+    });
+
     it("proposes again once the space's memory session is replaced", async () => {
       const replace = captureSessionReplaced();
       const piece = await pieceOffered(source("v2"));
@@ -1329,6 +1382,21 @@ describe("piece source reconciliation", () => {
       await runtime.sourceReconciler.idle();
 
       expect(adoptions.refusals).toBe(2);
+    });
+
+    it("builds nothing again after a refusal received while another space's memory session was replaced", async () => {
+      // A replacement stands for the store of its own space only.
+
+      const replace = captureSessionReplaced();
+      const other = await Identity.fromPassphrase("another space");
+      const piece = await pieceOffered(source("v2"));
+      using adoptions = refuseAdoptions(tooLarge, () => replace(other.did()));
+
+      expect(await reconcile(piece)).toBe("rejected");
+      await runtime.sourceReconciler.idle();
+      expect(await reconcile(piece)).toBe("rejected");
+
+      expect(adoptions.refusals).toBe(1);
     });
 
     it("logs a summary of the refusal once, and never the transaction", async () => {

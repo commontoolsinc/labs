@@ -76,15 +76,16 @@ it.
 
 ### `coverage`
 
-Every measured set — one suite's units over one workspace member's lines —
-with how many units it holds and its baseline, and then every workspace
-member that carries no set, with the reason. Of the baselines this commit's
-manifest holds for a set, the one shown is the one measured at the newest
-default-branch commit the checkout contains. That is the one the coverage
-gate compares this commit against, since the gate resolves its manifest at
-the commit's moment too and chooses among its baselines the same way.
-This is what answers "why is my package not gated?" and "what am I being
-compared against?".
+Every measured set — one suite's units over one workspace member's lines — with
+how many units it holds, its baseline, and its gate's score, and then every
+workspace member that carries no set, with the reason. Of the baselines this
+commit's manifest holds for a set, the one shown is the one measured at the
+newest default-branch commit the checkout contains. That is the one the coverage
+gate compares this commit against on a pull request, since the gate resolves its
+manifest at the commit's moment too and chooses among its baselines the same
+way. On `main` a gate compares against its parent commit's own run first, and
+the manifest only where that run gives no figure. This is what
+answers "why is my package not gated?" and "what am I being compared against?".
 
 A member with two measured sets has two lines and two baselines. The
 counts are never added together: a line one suite's tests cover says
@@ -146,14 +147,15 @@ puts one of those past the bound is its own time on top of the charge and
 the charge alone does not say which. The count beside the suite is of
 what it can still run, so the two never disagree about the same test.
 
-`--verify` compares the units the topology enumerates against the
-identities this commit's manifest holds, in both directions. A unit the
-manifest holds nothing for is one every lane runs as unknown, and
-`--verify` fails on any. A manifest entry naming a unit the tree no longer
-enumerates is reported without failing, because a manifest is hours old
-and a unit deleted since it was published is expected to linger in it. A
-unit the configuration declares unavailable is passed over, since nothing
-runs it.
+`--verify` compares the units the topology enumerates against the identities
+this commit's manifest holds, in both directions. A unit the manifest holds
+nothing for is one every lane runs as unknown, and `--verify` fails on any. A
+coverage gate the manifest holds nothing for fails it too, and is reported as
+offered at the floor of the score, since no lane runs a gate and its first
+record comes from the default branch. A manifest entry naming a unit the tree no
+longer enumerates is reported without failing, because a manifest is hours old
+and a unit deleted since it was published is expected to linger in it. A unit
+the configuration declares unavailable is passed over, since nothing runs it.
 
 ### How many lanes the run on the default branch uses
 
@@ -344,13 +346,17 @@ failed, and not in a run that was cancelled. It reads what every lane uploaded:
 1. It holds the run's records to the topology: `deno task check-test-topology
    --commit "$GITHUB_SHA" --records test-records-artifacts`, which fails a
    recorded test that no suite of the topology claims.
-2. On a pull request, it reads the pull request's description as it stands,
-   through the API, runs [the coverage gate](#the-coverage-gate) over every
-   lane's coverage reports, and uploads the comment the gate wants posted as the
-   `coverage-comment` artifact. Where `tests` did not succeed, it passes the
-   gate `--tests-failed`, and the gate reports rather than gates.
-3. On a push, it measures the run's coverage with `tasks/coverage-report.ts`,
-   and ships the measurements to the record store.
+2. It judges [the coverage gates](#the-coverage-gate) the lanes' plan chose,
+   over every lane's coverage reports, and records each one. On a pull request
+   it reads the pull request's description as it stands, through the API, and
+   uploads the comment the gates want posted as the `coverage-comment`
+   artifact. On a push it reads the description of the pull request the push
+   merged, and where it cannot, it warns and accepts no rise. Where `tests` did
+   not succeed, it passes `--tests-failed`, and the gates report rather than
+   gate.
+3. On a push, it measures the run's coverage with `tasks/coverage-report.ts`.
+   It ships the gates' records, and on a push the measurements beside them, to
+   the record store.
 4. It fails unless every job it waited for succeeded or was skipped, and
    `tests` succeeded. A run whose lanes were skipped would otherwise pass having
    run no test.
@@ -373,38 +379,73 @@ build the release binaries check what those add.
 A **measured set** is one suite's units over one workspace member's lines.
 `deno task test-selection coverage` lists them.
 
-A change that touches a member's tree reaches its set, and reaching a set
-makes every one of its units run, with coverage turned on. How often each
-of them runs is unchanged: a unit its flake rate says to repeat is still
-repeated, and the repeats leave the set's number where it was, since a
-coverage count is the union over what the runs reached. `Status`, the job that
-joins the lanes, adds up what they measured for each set, scores each set over
-its member's own source, and compares that against what the same set measured at
-the newest `main` commit the branch contains. The baselines come from the
-manifest current at the commit under test. A rise fails the pull request, and it
-is the only coverage check that fails anything.
+Each set has a **coverage gate**: a test of its own, of kind `gate`, owned by
+the set's member and named for its suite, such as `["gate", "memory",
+"coverage-gate workspace-unit"]`. The gates make up the `coverage-gate` suite of
+the topology, one unit per set. No lane runs a gate. Running one means running
+every unit of its set with coverage turned on, which the lanes do, and judging
+what they measured, which `Status`, the job that joins the lanes, does.
+
+A change that touches a member's tree reaches its set, and that makes the set's
+gate one the plan may choose. It is chosen by its score, in the same passes as
+any test, and nothing forces it in. Choosing it places every identity of the
+set's units in whatever lanes hold them, inside the pass's share of the run's
+budget and charged what they add, or places nothing where the whole set does
+not fit. A test of the set the change edited runs anyway, so a gate whose whole
+set already runs costs nothing more. How often each identity runs is unchanged:
+one its flake rate says to repeat is still repeated, and the repeats leave the
+set's number where it was, since a coverage count is the union over what the
+runs reached. A gate whose set the change does not reach is never chosen, except
+by a run of every test, which chooses every gate, and `explain` on a gate's
+identity says whether the plan chose it.
+
+`Status` packs the plan the lanes packed, from the same tree and manifest, to
+learn which gates they chose. For each one, it adds up what the lanes measured
+for its set, scores the set over its member's own source, and compares that
+against what the same set measured at the newest `main` commit the branch
+contains. On a pull request the baselines come from the manifest current at the
+commit under test; on `main`, from the parent commit's own run, as below. A rise
+is a failure of the gate, and on a pull request a failing gate whose set the
+change reaches fails the run. It is the only coverage check that fails anything.
+A gate the change reached and the plan did not choose is listed as not measured,
+and fails nothing.
+
+`Status` records every gate it judged, as a test record under the gate's
+identity, so the publisher scores it as it scores any test: a rise no acceptance
+covers is a failure, a comparison that found none is a pass, and every other
+verdict, an accepted rise among them, is a skip. On `main` a gate compares a
+commit against its parent's figure alone, read from the parent's own push run
+once that run's Status job has uploaded it, and from the manifest otherwise. A
+gate that has caught rises scores higher, and is chosen more often.
 
 Run it yourself the way `Status` does:
 
 ```
 deno run -A tasks/coverage-gate.ts --base origin/main --reports <directory> \
-  [--body <description>] [--tests-failed] [--comment <file> --pr <number>]
+  [--full] [--body <description>] [--tests-failed] \
+  [--comment <file> --pr <number>]
+deno run -A tasks/coverage-gate.ts --full --default-branch \
+  --reports <directory> [--body <description>] [--tests-failed]
 ```
 
-where the directory holds the lanes' uploaded coverage. It prints a row
-per set — the baseline, this run's count, the change, and the outcome —
-and stops with a non-zero status on a rise nothing accepted. `--body` is the
-pull request's description, where an acceptance is read from. `Status` reads the
-description through the API rather than from the event that started the run. A
-re-run repeats that event, so reading the description as it stands is what makes
-an acceptance written after the push count on a re-run. A description `Status`
-cannot read fails the step. `Status` passes `--tests-failed` when `tests`, the
-job that runs the lanes, did not succeed.
+where the directory holds the lanes' uploaded coverage. The first is a pull
+request's, and `--full` says its run ran every test, which chooses every gate.
+The second is a push's, and reads the parent commit's run through GitHub's API,
+which takes `GITHUB_TOKEN`. It prints a row per set — the baseline, this run's
+count, the change, and the outcome — and stops with a non-zero status where a
+gate fails the run. With `CF_TEST_RECORDS_DIR` naming a spool, it writes each
+gate's record there. `--body` is the description acceptances are read from.
+`Status` reads a pull request's description through the API rather than from
+the event that started the run. A re-run repeats that event, so reading the
+description as it stands is what makes an acceptance written after the push
+count on a re-run. A description `Status` cannot read fails the step. `Status`
+passes `--tests-failed` when `tests`, the job that runs the lanes, did not
+succeed.
 
-The gate works out which sets it covers from the topology and the diff, cap
-included, through the same function the lanes run. It never reads that from
-what a lane reported, so a lane cannot make it gate a set or skip one. A set
-that rose is reported as a coverage failure rather than a test failure.
+The gate never reads which gates were chosen from what a lane reported, so a
+lane cannot make it judge a set or skip one. On a pull request it fails where it
+cannot read the store, since it cannot then pack the plan the lanes packed. A
+set that rose is reported as a coverage failure rather than a test failure.
 
 The gate asks git which of the baselines' commits the branch contains, so the
 checkout it runs in needs the whole history. A checkout too shallow to reach
@@ -450,32 +491,32 @@ Six things are worth knowing before reading a failure.
   such as `packages/connectors`, which holds members but is none, would
   otherwise pass for one that worked. The gate lists the names it did not
   recognize.
-- **A change reaching more than `LOCAL_COVERAGE_MAX_SETS` sets forces
-  none of them**, and the summary says so. The tests still run under the
-  ordinary rules; it is the run-the-whole-set part that stops. A set some
-  run measured anyway is still scored, so a pull request labelled
-  `ci: full`, which measures every set, is gated whatever the cap says.
+- **A pull request labelled `ci: full` runs every gate.** Those whose sets
+  the change reaches can fail it. The rest are judged and recorded, and a rise
+  in one of them fails nothing.
 - **A run with a failing test reports rather than gates every set a
-  lane's report measured.** Coverage measured through a failure says
-  nothing about whether the change was tested, and the failing test is
-  what to fix.
-- **A forced set that no lane's report measured fails**, in a run with a
-  failing test as in any other. That is a set no lane reported, or one
-  whose reports name no line of its member; a set's tests always load
-  some of their own member's source, so an empty report measured nothing
-  rather than covering nothing. The change was made to measure that set,
-  and a lane that stopped before writing its report, an upload that
-  carried nothing, a download that found nothing, and a lane that wrote
-  an empty report all arrive at the gate looking the same. The row says a
-  rise cannot be ruled out. A set the cap left unforced has nothing
-  asking for it to be measured, so one no run measured is reported rather
-  than failed.
+  lane's report measured**, and so does a set a lane measured through a
+  failure the run excused. Coverage measured through a failure says nothing
+  about whether the change was tested, and the failing test is what to fix.
+- **A chosen gate whose set no lane's report measured fails**, in a run with
+  a failing test as in any other, where the change reaches its set. That is a
+  set no lane reported, or one whose reports name no line of its member; a
+  set's tests always load some of their own member's source, so an empty
+  report measured nothing rather than covering nothing. The plan chose to
+  measure that set, and a lane that stopped before writing its report, an
+  upload that carried nothing, a download that found nothing, and a lane that
+  wrote an empty report all arrive at the gate looking the same. The row says
+  a rise cannot be ruled out, and the gate's record is a skip.
 
-Nothing about coverage fails a run on `main`. That run measures every set,
-which is where the baselines come from, and merges every report into the
-repository-wide figure the dashboard tile shows. That figure is a trend and
-fails nothing. `Status` measures both on a push with `tasks/coverage-report.ts`,
-over a directory holding the lanes' uploaded coverage:
+Nothing about coverage fails a run on `main`. That run judges every gate and
+records what each found, a rise as a failure, so that a gate's score counts the
+rises it has seen; it reads the description of the pull request the push
+merged, so a rise that pull request accepted is not recorded as a failure. It
+measures every set, which is where the baselines come from, and merges every
+report into the repository-wide figure the dashboard tile shows. That figure is
+a trend and fails nothing. `Status` measures both on a push with
+`tasks/coverage-report.ts`, over a directory holding the lanes' uploaded
+coverage:
 
 ```
 CF_TEST_RECORDS_DIR=<spool> deno run -A tasks/coverage-report.ts \
@@ -592,7 +633,6 @@ measurement to look at rather than a setting to fix.
 | `RERUN_BUDGET_SECONDS` | 300 | seconds | chosen | What one lane of the full run may spend rerunning its failures. Up when failures go without reruns for want of it; down when a broken `main` holds every lane this much longer than it needs. |
 | `COVERAGE_COMMENT_LINES` | 25 | lines | chosen | Up when coverage comments are too noisy; down when debt is climbing unnoticed. |
 | `LOCAL_COVERAGE_MAX_SECONDS` | 30 | seconds | chosen | Up when too many sets are reported as expensive for the report to be worth reading; down when one is quietly eating a lane. Nothing is excluded either way; it only decides what the summary mentions. |
-| `LOCAL_COVERAGE_MAX_SETS` | 2 | measured sets | chosen | Up when broader changes should still be gated and the run can afford those sets' whole unit lists; down when sweeping changes are crowding lanes. |
 | `EXCLUDED_FROM_COVERAGE_GATE` | 9 | workspace members | chosen | Not a quantity. A line comes off when a package fits the run's budget or gains a Deno-only half, which gives it a measured set. A line goes on when a package's own tests stop being what covers it. |
 | `LOCAL_COVERAGE_BASELINE_DAYS` | 7 | days | chosen | Up when branches based further back are being reported for want of a baseline they contain; down when the manifest carries more history than anybody reads. |
 | `CATCH_BREADTH_WINDOW_DAYS` | 2 | days | chosen | Up when a broken runner's failures are being counted as catches; down when genuine breadth is being written off as environmental. |
@@ -1376,13 +1416,14 @@ split, the run could carry the cost, or the member could go on
 EXCLUDED_FROM_COVERAGE_GATE.
 ```
 
-A set past `LOCAL_COVERAGE_MAX_SECONDS` makes every pull request that reaches it
-slower. What the line gives is the set's cost over the fewest lanes that hold
-it, counting what each of those lanes pays for the set's suites and
-capabilities. A set that no number of the run's lanes holds gets a line saying
-it costs "more with coverage on than the run's 5 lanes of 3m50s hold". Nothing
-is done about either automatically: which of the three to do is a decision
-about the repository.
+A set past `LOCAL_COVERAGE_MAX_SECONDS` makes every pull request that chooses
+its gate slower, and costs its gate a place wherever the run cannot spare that
+much. What the line gives is the set's cost over the fewest lanes that hold it,
+counting what each of those lanes pays for the set's suites and capabilities. A
+set that no number of the run's lanes holds gets a line saying it costs "more
+with coverage on than the run's 5 lanes of 3m50s hold", and no plan for a pull
+request can choose its gate. Nothing is done about either automatically: which
+of the three to do is a decision about the repository.
 
 ```
 test selection: packages/donut is on EXCLUDED_FROM_COVERAGE_GATE for its
@@ -1395,9 +1436,9 @@ Each entry on `EXCLUDED_FROM_COVERAGE_GATE` carries a kind in
 whole run holds, and `source` for a member whose own Deno-only tests are not
 what should measure it, or that has none. An entry of kind `size`, and only such
 an entry, comes off once its tests fit the whole run, and the line says when
-they do, so that the entry comes off because somebody read a measurement. A
-set's units are packed across lanes like any other mandatory work, so what it
-has to fit is the run rather than one lane. A set spread over several lanes pays
+they do, so that the entry comes off because somebody read a measurement.
+Choosing a set's gate packs its units across lanes, so what it has to fit is the
+run rather than one lane. A set spread over several lanes pays
 its suites' overheads and its capabilities' setup in each of them. It also pays
 each unit's overhead in every lane holding part of that unit, and a unit is
 split over no more lanes than it holds entries, so that overhead is paid at most
@@ -1651,10 +1692,12 @@ itself.
   coverage gate. As with the repository-wide figure, a change that
   touched no source at all is not asked about. The routes are: the
   member is on `EXCLUDED_FROM_COVERAGE_GATE`, so it carries no set; the
-  change reached more measured sets than `LOCAL_COVERAGE_MAX_SETS`
-  allows, so the gate did not run; the change did not touch the member,
-  so the gate had nothing to compare; or the gate did measure the set
-  and passed it, which means the two measurements disagree. Each calls
+  plan for the pull request did not choose the set's gate, so nothing
+  measured the set there; no manifest was resolved for the pull request's
+  run, so whether its plan chose the gate cannot be said; the change did
+  not touch the member, so the gate had nothing to compare; or the gate
+  did measure the set and passed it, which means the two measurements
+  disagree. Each calls
   for something different, which is why the note names it. The number is
   one member's source measured by one suite's tests alone, which a run
   measures whole however much of the corpus it ran. That is a different
@@ -1785,9 +1828,9 @@ again in place of the merged choice. The merge exists only inside
 anything that matches a record against the manifest or a plan finds the
 test by its own name.
 
-A change to such a member's source could make its unit mandatory only
-through the coverage gate, and none of these units has a measured set
-there: `packages/identity` because
+A change to such a member's source could bring its unit into a run only
+through a coverage gate the plan chose, and none of these units belongs to a
+measured set: `packages/identity` because
 [the coverage gate excludes it](#the-coverage-gate), and the five
 browser halves because a measured set holds only a member's Deno-only
 half. No diff names a directory, so these units reach a lane only on the

@@ -295,9 +295,6 @@ export const COVERAGE_COMMENT_LINES = 25;
 /** Seconds past which a measured set's units are reported as expensive. */
 export const LOCAL_COVERAGE_MAX_SECONDS = 30;
 
-/** Measured sets a change may reach and still be gated. */
-export const LOCAL_COVERAGE_MAX_SETS = 2;
-
 /**
  * How old a measured set's coverage baseline may be and still be
  * published. A publisher keeps one measured within this many days of the
@@ -938,16 +935,6 @@ export const DIALS: readonly Dial[] = [
       "Up when too many sets are reported as expensive for the report to be " +
       "worth reading; down when one is quietly eating a lane. Nothing is " +
       "excluded either way; it only decides what the summary mentions.",
-  },
-  {
-    name: "LOCAL_COVERAGE_MAX_SETS",
-    value: LOCAL_COVERAGE_MAX_SETS,
-    unit: "measured sets",
-    setBy: "chosen",
-    why:
-      "Up when broader changes should still be gated and the run can afford " +
-      "those sets' whole unit lists; down when sweeping changes are crowding " +
-      "lanes.",
   },
   {
     name: "EXCLUDED_FROM_COVERAGE_GATE",

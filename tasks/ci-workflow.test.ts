@@ -19,7 +19,7 @@ import {
   parseLaneArgs,
   profileRoot,
 } from "./ci-lane.ts";
-import { measuredSetDirectory } from "./test-selection/coverage.ts";
+import { measuredSetDirectory } from "./test-topology/coverage-gates.ts";
 import {
   FULL_LANE_BOUND_SECONDS,
   FULL_LANES_MAX,
@@ -814,6 +814,7 @@ Deno.test("Status waits for every job that runs a test", async () => {
       "github.event_name == 'push')",
   );
   assertEquals(status.permissions, {
+    actions: "read",
     contents: "read",
     "pull-requests": "read",
   });
@@ -898,17 +899,20 @@ Deno.test("Status fails unless every job passed and the lanes ran", async () => 
   );
 });
 
-Deno.test("Status holds a pull request's measured sets to their baselines", async () => {
+Deno.test("Status judges the coverage gates of every run", async () => {
   const status = (await parsedWorkflow("deno.yml")).jobs.status;
   const gate = namedStep(
     status,
     "🔎 Hold the measured sets to their baselines",
   );
-  assertEquals(
-    gate.if,
-    "${{ !cancelled() && github.event_name == 'pull_request' }}",
-  );
+  assertEquals(gate.if, "${{ !cancelled() }}");
   assertEquals(gate.env?.JOB_RESULTS, "${{ toJSON(needs) }}");
+  // A push reads what its parent commit's run measured through the API.
+  assertEquals(gate.env?.GITHUB_TOKEN, "${{ secrets.GITHUB_TOKEN }}");
+  assertEquals(
+    gate.env?.FULL,
+    "${{ needs.plan-full.outputs.args == '--full' }}",
+  );
   // The gate asks git which baselines' commits the branch holds.
   assertEquals(
     namedStep(status, "📥 Checkout repository").with?.["fetch-depth"],
@@ -916,60 +920,109 @@ Deno.test("Status holds a pull request's measured sets to their baselines", asyn
   );
 
   // The description is read as it stands, so an acceptance written after
-  // the push counts on a re-run. A run whose tests did not pass measured
-  // coverage through the failure, so the gate is told, and reports rather
-  // than gates.
-  const results = (plan: string, tests: string) =>
-    JSON.stringify({
-      "plan-full": { result: plan },
-      tests: { result: tests },
-    });
-  const words = async (jobResults: string, gh = "echo '$DESCRIPTION'") =>
+  // the push counts on a re-run. A push reads the description of the pull
+  // request it merged. A run whose tests did not pass measured coverage
+  // through the failure, so the gate is told, and reports rather than
+  // gates.
+  const words = async (
+    event: string,
+    full: string,
+    tests: string,
+    gh = "echo '$DESCRIPTION'",
+  ) =>
     await runStep(gate.run ?? "", {
       BASE_REF: "main",
+      EVENT: event,
+      FULL: full,
       GITHUB_REPOSITORY: "commonfabric/labs",
-      JOB_RESULTS: jobResults,
+      GITHUB_SHA: "c".repeat(40),
+      JOB_RESULTS: JSON.stringify({ tests: { result: tests } }),
       PR_NUMBER: "42",
       DESCRIPTION: "ACCEPT_COVERAGE_DEBT: packages/memory +1 lines",
     }, {
       deno: 'printf "%s\\n" "$@"',
-      gh: `[ "$2" = "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" ] || exit 9\n` +
+      gh: `case "$2" in\n` +
+        `  "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER") ;;\n` +
+        `  "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls") ;;\n` +
+        `  *) exit 9 ;;\n` +
+        `esac\n` +
         gh.replace("'$DESCRIPTION'", '"$DESCRIPTION"'),
     });
-  const passing = await words(results("skipped", "success"));
+  const passing = await words("pull_request", "false", "success");
   assertStepCode(passing, 0, "a passing run's gate fails");
-  assertEquals(passing.stdout.trim().split("\n"), [
+  const pullRequest = [
     "run",
     "-A",
     "tasks/coverage-gate.ts",
     "--base",
     "origin/main",
-    "--reports",
-    "lane-coverage",
     "--body",
     "ACCEPT_COVERAGE_DEBT: packages/memory +1 lines",
     "--comment",
     "coverage-comment.json",
     "--pr",
     "42",
-  ], withStderr("a passing run's gate", passing));
-  const full = await words(results("success", "success"));
+  ];
   assertEquals(
-    full.stdout,
-    passing.stdout,
+    passing.stdout.trim().split("\n"),
+    [...pullRequest, "--reports", "lane-coverage"],
+    withStderr("a passing run's gate", passing),
+  );
+  const full = await words("pull_request", "true", "success");
+  assertEquals(
+    full.stdout.trim().split("\n"),
+    [...pullRequest, "--full", "--reports", "lane-coverage"],
     withStderr("a full run's gate", full),
   );
-  const failed = await words(results("skipped", "failure"));
+  const failed = await words("pull_request", "false", "failure");
   assertEquals(
     failed.stdout.trim().split("\n"),
     [...passing.stdout.trim().split("\n"), "--tests-failed"],
     withStderr("a failed run's gate", failed),
   );
-  // A description that cannot be read fails the step rather than gating
-  // against an empty one.
+  const pushed = await words("push", "true", "success");
+  assertEquals(
+    pushed.stdout.trim().split("\n"),
+    [
+      "run",
+      "-A",
+      "tasks/coverage-gate.ts",
+      "--full",
+      "--default-branch",
+      "--body",
+      "ACCEPT_COVERAGE_DEBT: packages/memory +1 lines",
+      "--reports",
+      "lane-coverage",
+    ],
+    withStderr("a push's gate", pushed),
+  );
+  // A pull request's description that cannot be read fails the step rather
+  // than gating against an empty one. The default branch fails for no gate,
+  // so there it judges them as though nothing were accepted, and warns.
   assertStepFailed(
-    await words(results("skipped", "success"), "exit 1"),
+    await words("pull_request", "false", "success", "exit 1"),
     "an unread description passes",
+  );
+  const unread = await words("push", "true", "success", "exit 1");
+  assertStepCode(unread, 0, "a push whose description is unread fails");
+  assertEquals(
+    unread.stdout.trim().split("\n").filter((line) => !line.startsWith("::")),
+    [
+      "run",
+      "-A",
+      "tasks/coverage-gate.ts",
+      "--full",
+      "--default-branch",
+      "--body",
+      "",
+      "--reports",
+      "lane-coverage",
+    ],
+    withStderr("a push whose description is unread", unread),
+  );
+  assert(
+    unread.stdout.includes("::warning::"),
+    "a push whose description is unread says nothing",
   );
 
   const comment = namedStep(status, "📤 Upload coverage comment");
@@ -977,15 +1030,14 @@ Deno.test("Status holds a pull request's measured sets to their baselines", asyn
   assertEquals(comment.with?.path, "coverage-comment.json");
 });
 
-Deno.test("Status records no tests, and ships the run's coverage from a push", async () => {
+Deno.test("Status ships its gates' records from every run, and the run's coverage from a push", async () => {
   const status = (await parsedWorkflow("deno.yml")).jobs.status;
 
   // It reads what every lane of the run produced, so no lane can be asked to
-  // run it, and the criterion in `docs/specs/test-records.md` under
-  // "Recording" puts it outside test records: no wrapper, and no JUnit file
-  // gathered. What its spool holds is the run's coverage measurements, which
-  // it ships under the name readers list the store for, and only from a push,
-  // because every reader takes a figure from a push to main alone.
+  // run it: no wrapper, and no JUnit file gathered. What its spool holds is
+  // the record of each coverage gate it judged, which every run ships, and
+  // the run's coverage measurements, which only a push writes, because every
+  // reader takes a figure from a push to main alone.
   assert(
     !(status.steps ?? []).some((step) => step.run?.includes("run-recorded")),
     "the job wraps a command in run-recorded",
@@ -996,7 +1048,7 @@ Deno.test("Status records no tests, and ships the run's coverage from a push", a
   );
   const ship = namedStep(status, "📤 Ship test records");
   assertEquals(ship.with, { artifact: COVERAGE_ARTIFACT, job: "Status" });
-  assertEquals(ship.if, "${{ !cancelled() && github.event_name == 'push' }}");
+  assertEquals(ship.if, "${{ !cancelled() }}");
   assertEquals(
     namedStep(status, "📊 Report the run's coverage").if,
     "${{ !cancelled() && github.event_name == 'push' }}",
@@ -1010,8 +1062,10 @@ Deno.test("the store half of the drift guard reads every record artifact", async
   // An identity is claimed by the suite that would run it, so a record
   // artifact this does not see is a surface it cannot hold the topology to.
   // It therefore waits for every job that ships records, and downloads them
-  // by the prefix the ship step names them under. A job shipping the run's
-  // coverage measurements alone ships no test's record.
+  // by the prefix the ship step names them under. Status ships the records
+  // of the coverage gates it judges after the guard has read the lanes', and
+  // cannot wait for itself; the coverage-gate suite that claims those is
+  // built from the measured sets rather than read from the tree.
   const shippers = Object.keys(ci.jobs).filter((id) =>
     (ci.jobs[id].steps ?? []).some((step) =>
       step.uses === "./.github/actions/test-records-ship" &&
