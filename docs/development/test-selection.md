@@ -52,13 +52,13 @@ deno task test-selection explain '["integration","patterns","counter.test.ts","s
 ```
 
 It prints the suite and the invocation unit the identity belongs to, its
-score and its cost, the catches behind that score and how many distinct
-sources they came from, when the most recent one was, its churn and flake
-rate, whether the manifest withholds it, how many times it would run, and
-whether a lane testing this commit reaches it when the change touches
-nothing, which is the plan `plan --dry-run` prints. An identity the store
-has never seen is reported as mandatory, which is what an identity with no
-history is.
+score and its cost, the new real test failures behind that score and how
+many distinct sources they came from, when the most recent one was, its
+churn and flake rate, whether the manifest withholds it, how many times it
+would run, and whether a lane testing this commit reaches it when the change
+touches nothing, which is the plan `plan --dry-run` prints. An identity the
+store has never seen is reported as mandatory, which is what an identity
+with no history is.
 
 Each of those is printed on its own, because they are not alternatives: a
 withheld identity a change reaches runs anyway, so an answer that picked
@@ -641,19 +641,19 @@ measurement to look at rather than a setting to fix.
 | `LANES_MAX` | 30 | lanes | chosen | Up when the lane-count job says a run needs more lanes than this, and the organization's runner limit has room; down when one run crowds out the runs behind it. A run needing more lanes than this takes this many: a pull request then runs fewer tests chosen by score, and any run's mandatory work may put its lanes past their budget. |
 | `FULL_RUN_LABEL` | ci: full | a label | chosen | Not a quantity. Change it only if the label collides with one the repository already uses for something else. |
 | `UNMEASURED_COST_SECONDS` | 1 | seconds | chosen | Up when a lane holding new tests runs long; down when it finishes early. It is reached for only by a suite with no measured unit at all, since a suite that has any charges an unmeasured one the larger of its units' mean and their ninetieth percentile. |
-| `VALUE_FLOOR` | 0.05 | score | chosen | Up when the cheap tail is not being swept up; down when it crowds out tests with a record of catching things. |
-| `WEIGHT_PROVEN` | 0.55 | share of the score | chosen | Up when a record of catching things should count for more. The three weights are shares of one score, so what this gains the other two lose. |
+| `VALUE_FLOOR` | 0.05 | score | chosen | Up when the cheap tail is not being swept up; down when it crowds out tests with a record of new real test failures. |
+| `WEIGHT_PROVEN` | 0.55 | share of the score | chosen | Up when a record of new real test failures should count for more. The three weights are shares of one score, so what this gains the other two lose. |
 | `WEIGHT_BREADTH` | 0.25 | share of the score | chosen | Up when a test that several distinct sources have hit should count for more; down when breadth is mostly telling you about the environment rather than the test. |
 | `WEIGHT_CHURN` | 0.15 | share of the score | chosen | Up when something going wrong right now should jump the queue faster; down when the queue keeps being jumped by noise. |
-| `PROVEN_SATURATION` | 2 | catches | chosen | Where the `proven` term reaches half its ceiling. Up when the term should go on telling eight catches from four; down when one catch should already be worth nearly everything a test can earn. |
-| `FRESHNESS_HALF_LIFE_DAYS` | 120 | days | chosen | Up when old catches should keep more of their value; down when a test that caught something a year ago crowds out one that caught something last week. |
-| `FRESHNESS_FLOOR` | 0.3 | multiplier | chosen | Up when a very old catch should keep more of its worth; down when age should be allowed to retire one almost completely. |
-| `CATCH_WEIGHT_LOCAL` | 2 | multiplier | chosen | Up when evidence from a workstation should count for more; down if local records ever arrive in volume and stop being the scarce signal they are today. |
-| `CATCH_WEIGHT_PR` | 1 | multiplier | chosen | Neither. It is the unit the other two are expressed against, so move those instead. |
-| `CATCH_WEIGHT_MAIN` | 1.5 | multiplier | chosen | Up when an escape should pull harder on what gets selected next; down when the failures on `main` are mostly environmental rather than real. |
+| `PROVEN_SATURATION` | 2 | new real test failures | chosen | Where the `proven` term reaches half its ceiling. Up when the term should go on telling eight new real test failures from four; down when one new real test failure should already be worth nearly everything a test can earn. |
+| `FRESHNESS_HALF_LIFE_DAYS` | 120 | days | chosen | Up when new real test failures should keep more of their value as they age; down when a test that had a new real test failure a year ago crowds out one that had one last week. |
+| `FRESHNESS_FLOOR` | 0.3 | multiplier | chosen | Up when a very old new real test failure should keep more of its worth; down when age should be allowed to retire one almost completely. |
+| `NEW_REAL_TEST_FAILURE_WEIGHT_LOCAL` | 2 | multiplier | chosen | Up when evidence from a workstation should count for more; down if local records ever arrive in volume and stop being the scarce signal they are today. |
+| `NEW_REAL_TEST_FAILURE_WEIGHT_PR` | 1 | multiplier | chosen | Neither. It is the unit the other two are expressed against, so move those instead. |
+| `NEW_REAL_TEST_FAILURE_WEIGHT_MAIN` | 1.5 | multiplier | chosen | Up when an escape should pull harder on what gets selected next; down when the failures on `main` are mostly environmental rather than real. |
 | `BREADTH_SATURATION` | 2 | sources | chosen | Where the `breadth` term reaches half its ceiling. Up when the term should go on telling eight sources from four; down when one source should already be worth nearly all it can give. |
-| `ENVIRONMENTAL_MIN_SOURCES` | 5 | sources | chosen | How many distinct sources a failure must span inside `CATCH_BREADTH_WINDOW_DAYS` before it reads as the environment. Up when a genuinely broad regression is written off; down when a broken runner's failures still count as catches. |
-| `MASS_FAILURE_MIN_IDENTITIES` | 50 | identities | chosen | How many identities one run must newly break before none of those failures is a catch. Up when a breakage that reached many tests still escaped the pull requests that ran some of them; down when one broken run still credits a catch to a whole suite. |
+| `ENVIRONMENTAL_MIN_SOURCES` | 5 | sources | chosen | How many distinct sources a failure must span inside `NEW_REAL_TEST_FAILURE_BREADTH_WINDOW_DAYS` before it reads as the environment. Up when a genuinely broad regression is written off; down when a broken runner's failures still count as new real test failures. |
+| `MASS_FAILURE_MIN_IDENTITIES` | 50 | identities | chosen | How many identities one run must newly break before none of those failures is a new real test failure. Up when a breakage that reached many tests still escaped the pull requests that ran some of them; down when one broken run still credits a new real test failure to a whole suite. |
 | `CHURN_HALF_LIFE_DAYS` | 14 | days | chosen | Up when recent trouble should stay relevant for longer; down when a problem already fixed keeps its tests selected for weeks afterwards. |
 | `CHURN_WINDOW_DAYS` | 60 | days | chosen | How far back the decayed counts are read. Past this the weight is under one part in sixteen, so moving it is a performance decision rather than a policy one. |
 | `FLAKE_HALF_LIFE_RUNS` | 200 | runs | chosen | How many runs without disagreeing halve what a disagreement counts for. It is also how much evidence the share is measured over, so far below one over `FLAKE_EXCLUSION_RATE` the share swings about on too little: up when it does; down when a test that has plainly settled is still judged by what it did. |
@@ -675,16 +675,16 @@ measurement to look at rather than a setting to fix.
 | `FLAKE_ANCHOR_RATE` | 0.01 | share of runs | chosen | With `FLAKE_ANCHOR_EXECUTIONS`, the point the count's line passes through. Down to make the count climb faster with the rate; up to make it climb slower. |
 | `FLAKE_ANCHOR_EXECUTIONS` | 5 | runs of one item | chosen | What an item at `FLAKE_ANCHOR_RATE` runs. Up when intermittent regressions still get through; down when executions crowd a lane. |
 | `MAX_EXECUTIONS` | 10 | runs of one item | chosen | Where the line stops. Up when the flakiest items a change forces in still are not proven by what runs; down when they crowd a lane. |
-| `RERUN_EXECUTIONS` | 3 | runs of one unit | chosen | The most times the full run runs a unit again where a test in it failed every time. Up when flaky tests on `main` fail every rerun and go on being counted as catches; down when a real break's reruns take time that tells nobody anything. |
+| `RERUN_EXECUTIONS` | 3 | runs of one unit | chosen | The most times the full run runs a unit again where a test in it failed every time. Up when flaky tests on `main` fail every rerun and go on being counted as new real test failures; down when a real break's reruns take time that tells nobody anything. |
 | `RERUN_BUDGET_SECONDS` | 300 | seconds | chosen | What one lane of the full run may spend rerunning its failures. Up when failures go without reruns for want of it; down when a broken `main` holds every lane this much longer than it needs. |
 | `COVERAGE_COMMENT_LINES` | 25 | lines | chosen | Up when coverage comments are too noisy; down when debt is climbing unnoticed. |
 | `LOCAL_COVERAGE_MAX_SECONDS` | 30 | seconds | chosen | Up when too many sets are reported as expensive for the report to be worth reading; down when one is quietly eating a lane. Nothing is excluded either way; it only decides what the summary mentions. |
 | `EXCLUDED_FROM_COVERAGE_GATE` | 9 | workspace members | chosen | Not a quantity. A line comes off when a package fits the run's budget or gains a Deno-only half, which gives it a measured set. A line goes on when a package's own tests stop being what covers it. |
 | `LOCAL_COVERAGE_BASELINE_DAYS` | 7 | days | chosen | Up when branches based further back are being reported for want of a baseline they contain; down when the manifest carries more history than anybody reads. |
-| `CATCH_BREADTH_WINDOW_DAYS` | 2 | days | chosen | Up when a broken runner's failures are being counted as catches; down when genuine breadth is being written off as environmental. |
-| `SAME_COMMIT_REACH_DAYS` | 2 | days | chosen | How far back the fold remembers a commit's outcomes, so that a rerun landing in a later batch than the run it repeats is still read as the test disagreeing with itself. Up when reruns land far enough behind that their disagreement is being counted as a catch; down when the fold's memory is the thing that will not fit. It costs the number of identities that have failed times the number of commits, so it is the dial to check first when a run runs out of memory. |
-| `FLAKE_COMMIT_REACH` | 8 | commits | chosen | How many of the most recently observed commits the fold keeps every identity's outcomes at. Past that a commit keeps only the identities that have already failed, so this bounds a test's first failure: up when one lands more commits after the pass it disagrees with than this and is counted as a catch; down when the fold's memory is the thing that will not fit. |
-| `COMMIT_REACH_DAYS` | 30 | days | chosen | How late a re-run of a commit may arrive and still be recognized as one rather than judged as a new commit. Up when re-runs landing later than this have their failures counted as catches; down when the fold's memory of commits is the thing that will not fit. |
+| `NEW_REAL_TEST_FAILURE_BREADTH_WINDOW_DAYS` | 2 | days | chosen | Up when a broken runner's failures are being counted as new real test failures; down when genuine breadth is being written off as environmental. |
+| `SAME_COMMIT_REACH_DAYS` | 2 | days | chosen | How far back the fold remembers a commit's outcomes, so that a rerun landing in a later batch than the run it repeats is still read as the test disagreeing with itself. Up when reruns land far enough behind that their disagreement is being counted as a new real test failure; down when the fold's memory is the thing that will not fit. It costs the number of identities that have failed times the number of commits, so it is the dial to check first when a run runs out of memory. |
+| `FLAKE_COMMIT_REACH` | 8 | commits | chosen | How many of the most recently observed commits the fold keeps every identity's outcomes at. Past that a commit keeps only the identities that have already failed, so this bounds a test's first failure: up when one lands more commits after the pass it disagrees with than this and is counted as a new real test failure; down when the fold's memory is the thing that will not fit. |
+| `COMMIT_REACH_DAYS` | 30 | days | chosen | How late a re-run of a commit may arrive and still be recognized as one rather than judged as a new commit. Up when re-runs landing later than this have their failures counted as new real test failures; down when the fold's memory of commits is the thing that will not fit. |
 | `RENAME_SIMILARITY` | 0.7 | share of the longer name's own part | chosen | Up when the run report offers rename pairings nobody meant; down when a rename that discarded history goes unoffered. It only decides what is suggested — nothing is written to the alias file without somebody appending it. |
 | `RENAME_MARGIN` | 0.1 | share of the longer name's own part | chosen | Up when the run report pairs a deletion with an unrelated addition; down when a rename made alongside another rename in the same area goes unoffered. |
 | `RENAME_SUGGESTIONS` | 5 | suggestions in one comment | chosen | Up when a change that renamed many tests has its later suggestions cut off; down when a comment carrying this many is one nobody reads. |
@@ -743,18 +743,18 @@ day's sample is stored does not change `COST_RULE`: the days already
 stored are read forward into the new form, at or above what they held,
 and keep the stamp of the rules that sealed them.
 
-An aggregate also carries the set of rules its catches were credited
-under, as `CATCH_RULE`, and an aggregate carrying none was written before
-that stamp began. Changing what decides whether a failure is a catch, or
-which run and day one is attributed to, means changing `CATCH_RULE` in the
-same change. The next run then reads an aggregate naming another set, and
-rather than folding onto it, folds every day from the first one that
-aggregate's history holds into an empty aggregate, saying so in its log.
-That run takes about as long as a bootstrap over the same days. Nothing
-is lost: records carry no retention, so the whole history is still there
-to fold. Changing a weight that multiplies the counts does not change
-`CATCH_RULE`, since the counts are the same and the weights are applied
-when a manifest is scored.
+An aggregate also carries the set of rules its new real test failures were
+credited under, as `NEW_REAL_TEST_FAILURE_RULE`, stored under the name
+`catchRule`, and an aggregate carrying none was written before that stamp began.
+Changing what decides whether a failure is a new real test failure, or which run
+and day one is attributed to, means changing `NEW_REAL_TEST_FAILURE_RULE` in the
+same change. The next run then reads an aggregate naming another set, and rather
+than folding onto it, folds every day from the first one that aggregate's
+history holds into an empty aggregate, saying so in its log. That run takes
+about as long as a bootstrap over the same days. Nothing is lost: records carry
+no retention, so the whole history is still there to fold. Changing a weight
+that multiplies the counts does not change `NEW_REAL_TEST_FAILURE_RULE`, since
+the counts are the same and the weights are applied when a manifest is scored.
 
 A change to what a manifest or an aggregate holds needs no cold start.
 The area both are written under is named rather than numbered and does
@@ -785,13 +785,13 @@ still the newest one and consumers keep using it. A manifest going stale
 degrades selection quality slowly rather than failing anything, which is
 the right direction for a system nothing should gate on.
 
-That is why a run that cannot read any aggregate a previous run left
-refuses to publish rather than starting from nothing. The aggregate is
-where a test's catches live, and they accumulate over unbounded history:
-a run that lost it and carried on would publish a manifest scoring every
-test at the floor, and because it succeeded that manifest would be the
-one every lane obeys. A stale manifest is recoverable; a confident wrong
-one is not.
+That is why a run that cannot read any aggregate a previous run left refuses
+to publish rather than starting from nothing. The aggregate is where a
+test's new real test failures live, and they accumulate over unbounded
+history: a run that lost it and carried on would publish a manifest scoring
+every test at the floor, and because it succeeded that manifest would be the
+one every lane obeys. A stale manifest is recoverable; a confident wrong one
+is not.
 
 Refusing over the newest state alone would be permanent, though. Nothing
 but the publisher creates a state object, and it creates one only where
@@ -821,29 +821,50 @@ happens, naming what it passed over and what it folded onto. The newest
 state is read whatever day it carries, since taking it is not a choice
 between two aggregates.
 
-A cold start is asked for deliberately: the bootstrap is a manual dispatch with the bootstrap input
-set, run once, and an incremental run that finds no aggregate at all says
-so and stops. After that the incremental path keeps up. A store holding
-no aggregate is the whole of what asks for a bootstrap. A change to what
-a manifest or an aggregate holds does not, and neither does a stored
-aggregate this publisher cannot read: both leave the catches where they
-are, and a bootstrap would publish from an empty aggregate and drop
-them.
+A cold start is asked for deliberately: the bootstrap is a manual
+dispatch with the bootstrap input set, and an incremental run that finds
+no aggregate at all says so and stops. After that the incremental path
+keeps up. A store holding no aggregate is what asks for a bootstrap. A
+change to what a manifest or an aggregate holds does not, and neither
+does a stored aggregate this publisher cannot read: the incremental path
+reads past both.
 
-A bootstrap replaces the score history rather than extending it. It folds
-into an empty aggregate, so the state object it creates holds what its
-window shows and nothing earlier, and every later run reads that one. A
-test's catches accumulate over unbounded history, so the ones counted
-before the window stop counting, and a bootstrap over a narrow window
-throws away more than one over a wide window does. Nothing in the store
-is removed: the publisher's identity holds create and not delete or
-overwrite, so the state object a previous run left stays where it is and
+A bootstrap starts from nothing, so it is held to the stores where that
+loses nothing: it reads the stored states newest first, of any day, and
+refuses if any of them is an aggregate this publisher can read, naming it,
+and naming the `days` window an incremental run reaches it with where newer
+states that do not read stand in front of it. An incremental run
+folding onto that aggregate keeps every new real test failure it holds and
+reads from the last day it read, which is everything a bootstrap would have
+read since. A bootstrap starts from nothing only where the store holds no
+state at all, or holds only states that are not aggregates. Where no state
+reads and one of them is written in a shape from further ahead, it refuses
+as well, since that history reads as soon as a publisher at that shape is
+deployed. A listing or a read that fails ends a bootstrap too. Nothing in
+the store is removed: the publisher's identity holds create and not delete
+or overwrite, so the state object a previous run left stays where it is and
 stops being the newest.
 
-The two paths look back over different windows. An incremental run reads
-two days. A bootstrap reads sixty. The dispatch carries a days input
-naming a window of its own, and it applies in either mode, so a bootstrap
-over a shorter stretch of history is a matter of giving it.
+A new real test failure is dated to the day of the failure it credits. For a
+new real test failure on the default branch, that is the first failure of
+the run of failures the fix ended. Each test's state keeps its new real test
+failures by that day as well as in total, which is what lets an alias divide
+them at its date.
+
+The two paths look back over different windows. An incremental run reads two
+days, or from the last day its aggregate read where that is further back, so a
+publisher that has stopped catches up on the first run after it starts again.
+The last day read is read again because the run that read it ran before the day
+was over, and what that run folded is passed over. An incremental run reads no
+further back than that, apart from the day before today, which its two days
+reach: an object folded for an earlier day would be folded after the days that
+follow it, where the rules that decide whether a failure is a new real test
+failure read the runs in the order they happened. An object that arrives late
+for the day before is folded after what the last run read of today, out of order
+by at most that one day. A bootstrap reads sixty. The dispatch carries a days
+input naming a window of its own, and it applies in either mode: an incremental
+run widens to it, and never narrows below the last day its aggregate read; a
+bootstrap over a shorter stretch of history is a matter of giving it.
 
 The bootstrap input does not decide whether a run reads a rollup. One
 rule is asked of each source and date the window covers. A pair whose
@@ -876,14 +897,14 @@ estimate comes from the size of an observation rather than from a measured
 run without the file. The file is what leaves room for the corpus to grow
 into.
 
-The temporary file is removed when the day finishes or the read fails.
-A day whose shards will not read is read from its raw objects instead,
-which is how a day with no rollup at all is read, and the run says which
-day it read that way and what stopped the rollup. The fold takes nothing
-from the shards that did read, so no part of the day is counted twice,
-and the day is left open rather than recorded, so later runs read it the
-same way. Completed days are recorded, so no later run over a wide window
-folds their raw objects on top and doubles every catch in them.
+The temporary file is removed when the day finishes or the read fails. A day
+whose shards will not read is read from its raw objects instead, which is
+how a day with no rollup at all is read, and the run says which day it read
+that way and what stopped the rollup. The fold takes nothing from the shards
+that did read, so no part of the day is counted twice, and the day is left
+open rather than recorded, so later runs read it the same way. Completed
+days are recorded, so no later run over a wide window folds their raw
+objects on top and doubles every new real test failure in them.
 
 Falling back rather than ending the run is what keeps a shard from
 stopping the publisher for good. The store holds create and nothing else,
@@ -896,14 +917,13 @@ Every object of that day goes into the aggregate's list of folded
 objects, where the rollup path would have written one receipt, and that
 list is carried in every state object written from then on.
 
-The window is folded one day at a time, oldest first, whichever way each
-day is read. The rules that decide whether a failure is a catch look a
-day or two either side of it, and back at what the default branch last
-said, so a day folded after a later one would be judged against what
-happened after it. A day read from its rollup is folded in one batch
-with that day's local submissions, which the fold replays in time order.
-A day read the long way is folded in chunks of whole workflow runs, its
-local submissions among them.
+The window is folded one day at a time, oldest first, whichever way each day is
+read. The rules that decide whether a failure is a new real test failure look a
+day or two either side of it, and back at what the default branch last said, so
+a day folded after a later one would be judged against what happened after it. A
+day read from its rollup is folded in one batch with that day's local
+submissions, which the fold replays in time order. A day read the long way is
+folded in chunks of whole workflow runs, its local submissions among them.
 
 What the fallback rests on is that the shards that did read reached the
 batch and nothing else. Replaying the spooled observations is a read of
@@ -926,10 +946,9 @@ downloaded compactor key and no writing path from a workstation; a local
 
 The four-hourly publisher normally reaches no rollup: compaction leaves a
 partition open for a week, while the incremental publisher reads two days. A
-bootstrap, an incremental run catching up after an outage, or an incremental
-run using a deliberately widened window can reach older closed days and read
-their rollups. A day the compactor has not reached is folded from its raw
-objects.
+bootstrap, or an incremental run catching up after an outage, can reach days the
+compactor has closed and read their rollups. A day the compactor has not reached
+is folded from its raw objects.
 
 Publishing uses the workflow's own federated identity, pinned to that workflow
 file on the default branch. It is the only workflow principal with a
@@ -937,14 +956,53 @@ folder-scoped create grant for manifests. A personal reporting key cannot
 create one: it is scoped to its holder's own submissions folder. So a person
 runs `--dry-run --out` and reads what a run would have produced.
 
-The access token the workflow mints for that identity lasts an hour, and a
-run that folds every day of the history again, as one does after the rules
-for crediting a catch change, takes longer than that. So the workflow runs
-the publisher in two steps. The first reads, folds and scores with
-`--dry-run --out <dir>`, and holds no credential, since the store is public
-to read. The workflow then mints the token, and the second step runs
-`--create <dir>`, which checks what the first step wrote and creates the
-manifest and the aggregate from it.
+The access token the workflow mints for that identity lasts an hour, and a run
+that folds every day of the history again, as one does after the rules that
+credit new real test failures change, takes longer than that. So the workflow
+runs the publisher in two steps. The first reads, folds and scores with
+`--dry-run --out <dir>`, and holds no credential, since the store is public to
+read. The workflow then mints the token, and the second step runs `--create
+<dir>`, which checks what the first step wrote and creates the manifest and the
+aggregate from it.
+
+### What an aggregate keeps
+
+An aggregate keeps one state per test, and each state is bounded by the
+windows its counts are kept over and by the days the test had new real test
+failures on. Three things keep the number of states and the list of folded
+objects from growing with the store.
+
+A test the tree no longer holds is dropped once no run of it is recorded
+inside the windows a state keeps, as
+[What a run leaves out](#what-a-run-leaves-out) describes.
+
+A test renamed under an alias line is resolved on every run, the way
+each record a run reads is resolved. Its history from the days before
+the alias's date moves to the new name and is added to whatever the new
+name already holds. History from the alias's date onward stays under
+the old name, since that is what a record of that day resolves to. Each
+run moves whatever an alias line written since the previous run gives to
+a new name, and says how many tests it moved.
+
+The list of folded objects holds the days still open, and the first day the
+history holds. A day is closed once it has been read and is
+`COMPACTION_LAG_DAYS` behind the run, which is when the store stops expecting
+late arrivals for it. A closed day's objects leave the list and its rollup
+receipts go with them, and the aggregate records the last closed day instead, so
+a run over a wider window passes over the closed days rather than folding them
+twice. The objects and receipts of the first day its history holds stay in the
+list when that day closes, because that day is where a fold of the whole history
+under new rules starts, and every publisher reads it from the list. A bootstrap
+closes every day before its window, since the window is where the history it
+counts begins: a later run folding an earlier day would fold it after the days
+that follow it, and the rules that decide whether a failure is a new real test
+failure read the runs in the order they happened.
+
+A day closes only if every day before it has been read, which an incremental
+run makes sure of by reading from the last day its aggregate read. The days
+before the first day a bootstrap or a fold of the whole history reads are the
+exception: they close unread, because that day is where the history the run
+counts begins.
 
 ### Verifying publication
 
@@ -1030,21 +1088,29 @@ says the model holds.
 ### Recovery
 
 Read the failed run's log and the public object listing before taking action.
-Do not use bootstrap as a routine retry: it starts from an empty aggregate and
-replaces score history with only the selected window.
+A bootstrap is for a store holding no aggregate any publisher can read, and
+refuses anywhere else, naming the aggregate an incremental run should fold
+onto.
 
 - If the newest state is valid, rerun the ordinary workflow from `main` with
-  bootstrap off. An empty `days` reads the landed two-day default, which is
-  what an ordinary catch-up needs. An outage longer than that needs a wider
-  window, and the `days` input is what widens it. Such a run is still an
-  incremental one: it folds onto the state already there rather than
-  replacing it, which is what separates it from a bootstrap.
+  bootstrap off and `days` empty. Such a run reads from the last day the state
+  read, however long the outage was, and folds onto the state already there
+  rather than replacing it, which is what separates it from a bootstrap. The
+  selection area deletes its objects 45 days after they are created, so an
+  outage that long leaves no state, and is a cold start.
+- To count a readable aggregate's history again from the records, raise
+  `NEW_REAL_TEST_FAILURE_RULE` in a change and land it. The next run folds every
+  day from the first day that aggregate's history holds into an empty one. A
+  bootstrap refuses there, since it would start from a window rather than from
+  that day.
 - If the complete paginated listing has no state objects under the intended
   prefix, this is a cold start. Dispatch the workflow from `main` once with
-  bootstrap on and leave `days` empty so the landed sixty-day default applies.
-  Then require the three acceptance checks above. A change to what a manifest
-  or an aggregate holds is not a cold start: the area is named rather than
-  numbered, so it does not move, and both are read forward.
+  bootstrap on and leave `days` empty so the landed sixty-day default applies,
+  or, where earlier states expired, with `days` reaching the first day of the
+  store's history, since the records are kept and every new real test failure in
+  them counts. Then require the three acceptance checks above. A change to what
+  a manifest or an aggregate holds is not a cold start: the area is named rather
+  than numbered, so it does not move, and both are read forward.
 - If the run's log names a state it passed over and a state it folded onto,
   that pair says which aggregate the run took and nothing more: it is printed
   before the run reads a record or creates anything, so a later listing,
@@ -1064,8 +1130,9 @@ replaces score history with only the selected window.
   widening `days` is what reaches them: dispatch with a window reaching a day
   the listing above shows a readable state was created on. Either way leave
   the append-only manifests and state objects intact — they and the raw
-  record history are the recovery sources — and do not reach for bootstrap or
-  for object deletion or renaming.
+  record history are the recovery sources — and do not reach for object
+  deletion or renaming. A bootstrap refuses here, naming the newest state it
+  can read and the `days` window that reaches it.
 - If a widened window reaches no readable state either, work back through
   the listing, dispatching with a window that reaches the day each older
   state was created on, until one is folded onto or the listing runs out. A
@@ -1075,7 +1142,9 @@ replaces score history with only the selected window.
   every state is a body that arrived and is not an aggregate holds no
   history any publisher can reach, and that alone is the condition under
   which this is a cold start: dispatch once with bootstrap on, and then
-  require the three acceptance checks above.
+  require the three acceptance checks above. The bootstrap reads every state
+  of any day before it starts from nothing, and refuses where one of them
+  reads.
 - If listing a state, or reading one, fails outright, that is neither absence
   nor an unreadable state: the run learned nothing about the object, and
   refuses on that rather than taking the one behind it. Dispatch again once
@@ -1131,15 +1200,15 @@ can be asked to run it. And no run of it has been recorded inside the
 window a state keeps counters for, which is the longer of
 `CHURN_WINDOW_DAYS` and `FLAKE_WINDOW_DAYS` and so is sixty days today.
 
-The second condition is what the first cannot say on its own. A suite
-whose records name a scope the topology no longer holds claims none of
-its identities, and every one of those is still running on the default
-branch, so the runs hold them where the claim does not. What the second
-condition does not reach is a test the tree holds that nothing runs at
-all: a skip is the one outcome a state records nothing for, so such a
-test meets both conditions and is dropped like a deleted one. What that
-costs is catches from before the window, because every counter inside it
-is empty either way.
+The second condition is what the first cannot say on its own. A suite whose
+records name a scope the topology no longer holds claims none of its
+identities, and every one of those is still running on the default branch,
+so the runs hold them where the claim does not. What the second condition
+does not reach is a test the tree holds that nothing runs at all: a skip is
+the one outcome a state records nothing for, so such a test meets both
+conditions and is dropped like a deleted one. What that costs is new real
+test failures from before the window, because every counter inside it is
+empty either way.
 
 A unit a configuration declares unavailable is the exception, and is kept
 under the variant that declared it: the declaration is the tree saying the
@@ -1285,10 +1354,8 @@ holds none, so every identity in it is read as its own invocation unit
 until one of its records names a file again, and a suite whose units are
 files can place none of them. Those runs publish the manifest they would
 have published before, and the count falls as the records arrive. A
-bootstrap would fill the files in one run, and it is the wrong tool for
-it: a bootstrap replaces the score history with what its window holds,
-so it would pay for a count that falls on its own with every catch
-counted before that window.
+bootstrap is not the tool for it, and refuses over a store holding an
+aggregate in any case: the count falls on its own.
 
 What to check is that surface's wiring, which
 [the record guide](test-records.md#covering-a-new-test-surface) covers: the
@@ -1541,21 +1608,21 @@ Two things go with that rule.
 
 ### Running a failure again
 
-The publisher reads a test as flaky only where it both passed and failed at
-one commit, in one order. The run on the default branch runs most tests once
-per commit, so a flaky test there never does that on its own. Each of its
-failures is instead followed by a pass at a later commit, and the publisher
-credits the change between them with a catch. The test's score rises, and
+The publisher reads a test as flaky only where it both passed and failed at one
+commit, in one order. The run on the default branch runs most tests once per
+commit, so a flaky test there never does that on its own. Each of its failures
+is instead followed by a pass at a later commit, and the publisher credits the
+change between them with a new real test failure. The test's score rises, and
 selection picks it more often for doing what made it look valuable.
 
-So a lane of the full run runs a test again when the test failed every time
-the lane ran it. After its last batch, the lane runs the unit holding that
-test again, up to `RERUN_EXECUTIONS` times, and stops once each such test in
-it has passed. Every rerun is shipped as ordinary records of the lane's run:
-the same commit, the same seed, and the same start. A flaky test therefore
-leaves a pass beside its failure, and the publisher counts a flake rather
-than a catch. A test that is really broken fails every rerun, and its failure
-waits for a later commit to judge it, as before.
+So a lane of the full run runs a test again when the test failed every time the
+lane ran it. After its last batch, the lane runs the unit holding that test
+again, up to `RERUN_EXECUTIONS` times, and stops once each such test in it has
+passed. Every rerun is shipped as ordinary records of the lane's run: the same
+commit, the same seed, and the same start. A flaky test therefore leaves a pass
+beside its failure, and the publisher counts a flake rather than a new real test
+failure. A test that is really broken fails every rerun, and its failure waits
+for a later commit to judge it, as before.
 
 The reruns collect evidence and decide nothing. Whether the lane fails is
 settled from its batches' own records, with the excusal rules above, before
@@ -1696,15 +1763,15 @@ The comment carries up to seven notes, and it carries a note only when the
 run found something the pull request's own run could not have found for
 itself.
 
-- **A test that failed for the first time at this commit.** Precisely
-  that: it passed in the previous run on the default branch and failed in
-  this one. A test that was already failing produces no note, which is
-  what stops a break being attributed to whoever merged next. A test that
-  both passed and failed at this commit produces no note either: that is
-  the test disagreeing with itself, which the scorer calls flake evidence
-  rather than a catch. Nor does a test the pull request's own run failed,
-  because a failure that run reported is not something a later run found
-  for it.
+- **A test that failed for the first time at this commit.** Precisely that:
+  it passed in the previous run on the default branch and failed in this
+  one. A test that was already failing produces no note, which is what stops
+  a break being attributed to whoever merged next. A test that both passed
+  and failed at this commit produces no note either: that is the test
+  disagreeing with itself, which the scorer calls flake evidence rather than
+  a new real test failure. Nor does a test the pull request's own run
+  failed, because a failure that run reported is not something a later run
+  found for it.
 - **What the pull request's own run did with that test.** Its records say
   whether it ran the test, which is the only thing that settles it, and
   the manifest it resolved says why it did not. That manifest is the one current
@@ -1782,21 +1849,21 @@ itself.
   excused it, since an attempt that failed it without excusing it failed the
   run. The manifest supplies only the store's flake counts, and a report that
   cannot read it gives the note without them.
-- **A rename that discarded history**, with the number of catches it
-  would bring back and the line to append under
-  `tasks/test-identity-aliases/`. Four things have to hold: the
-  departing test caught something; the unit it lived in produced records
-  in this run, so its absence is a test that left rather than a suite
-  that did not run; the arriving name is one the store has never seen;
-  and the pairing is clear — alike past `RENAME_SIMILARITY`, ahead of
-  every other candidate by `RENAME_MARGIN`, and pointed at by no other
-  departure. Alikeness is the lower of two comparisons, one over the
-  groups a name is nested under and one over the part that is the test's
-  own, because either alone answers a different question: two tests under
-  one group share the whole chain, and two tests under different groups
-  routinely share a leaf. At most `RENAME_SUGGESTIONS` are offered. A rename is never inferred, so this
-  is a suggestion: append the line if the pairing is right, and ignore it
-  if it is not.
+- **A rename that discarded history**, with the number of new real test
+  failures it would bring back and the line to append under
+  `tasks/test-identity-aliases/`. Four things have to hold: the departing
+  test had a new real test failure; the unit it lived in produced records in
+  this run, so its absence is a test that left rather than a suite that did
+  not run; the arriving name is one the store has never seen; and the
+  pairing is clear — alike past `RENAME_SIMILARITY`, ahead of every other
+  candidate by `RENAME_MARGIN`, and pointed at by no other departure.
+  Alikeness is the lower of two comparisons, one over the groups a name is
+  nested under and one over the part that is the test's own, because either
+  alone answers a different question: two tests under one group share the
+  whole chain, and two tests under different groups routinely share a leaf.
+  At most `RENAME_SUGGESTIONS` are offered. A rename is never inferred, so
+  this is a suggestion: append the line if the pairing is right, and ignore
+  it if it is not.
 
 Five properties keep this on the right side of
 [the dashboard's rule](../../packages/dashboard/README.md#philosophy-and-values)
@@ -1990,9 +2057,9 @@ of the identity being the reported name:
   interpolated identifiers, which mint a new identity every time they
   shift.
 - A rename splits history unless a line is appended under
-  `tasks/test-identity-aliases/`. Most renames cost nothing, because
-  most tests have never caught anything; a rename of a test that has is
-  worth the line.
+  `tasks/test-identity-aliases/`. Most renames cost nothing, because most
+  tests have never had a new real test failure. A rename of a test that has
+  had one is worth the line.
 
 Until a run records it, a new test file is charged what
 [`standIn`](../../tasks/test-selection/census.ts) works out from the

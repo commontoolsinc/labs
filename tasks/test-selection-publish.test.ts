@@ -32,8 +32,12 @@ import {
   parseAggregate,
   reportFromText,
 } from "./test-selection/build.ts";
-import { CATCH_RULE, emptyState } from "./test-selection/score.ts";
-import { CATCH_WEIGHT_MAIN } from "./test-selection/policy.ts";
+import {
+  emptyState,
+  type IdentityState,
+  NEW_REAL_TEST_FAILURE_RULE,
+} from "./test-selection/score.ts";
+import { NEW_REAL_TEST_FAILURE_WEIGHT_MAIN } from "./test-selection/policy.ts";
 import { stateObjectName, statePrefix } from "./test-selection/store.ts";
 import { coverageGateSuite } from "./test-topology/coverage-gates.ts";
 import { MANIFEST_SCHEMA_VERSION } from "./test-selection/manifest.ts";
@@ -133,6 +137,13 @@ const lostUnit = () =>
     units: [],
     locate: () => undefined,
   }]);
+
+/** The newest manifest a run created. */
+async function newestPublished(created: Map<string, Uint8Array>) {
+  const newest = [...created.keys()].filter((one) => one.includes("/manifest-"))
+    .sort().at(-1)!;
+  return parseManifest(await gunzipToText(created.get(newest)!))!;
+}
 
 /** The identities the newest manifest a run created holds. */
 async function newestManifest(
@@ -625,10 +636,11 @@ describe("publish()", () => {
     expect(manifest!.entries[0]!.unit).toBe(
       "packages/memory/test/space.test.ts",
     );
-    // The failure at c1 that c2 went on to fix is a catch on main, and
-    // a catch there is weighted by where it happened. The 1.5 is
-    // `CATCH_WEIGHT_MAIN` written out: comparing against the dial would
-    // hold just as well for a dial of zero and a catch never counted.
+    // The failure at c1 that c2 went on to fix is a new real test failure
+    // on main, and one there is weighted by where it happened. The 1.5 is
+    // `NEW_REAL_TEST_FAILURE_WEIGHT_MAIN` written out. Comparing against
+    // the dial would hold just as well for a dial of zero and a new real
+    // test failure never counted.
     expect(manifest!.entries[0]!.inputs.catches).toBe(1.5);
   });
 
@@ -1484,8 +1496,8 @@ describe("publish() over a day that has been compacted", () => {
   it("takes a rollup on an incremental run over a day it has not seen", async () => {
     // One rule, so a run catching up after an outage or a widened window
     // reaches a day the same way a bootstrap does. A flag is permission
-    // to start from an empty aggregate and a wider window, not a second
-    // way to choose inputs.
+    // to start from the new real test failures alone and a wider window,
+    // not a second way to choose inputs.
     const older = "2026/08/19";
     const olderRollup =
       `labs/test-records/aggregated/v1/${older}/shard-0.ndjson`;
@@ -1494,13 +1506,14 @@ describe("publish() over a day that has been compacted", () => {
       [CI(older, "9")]: object("c9", "pass", "2026-08-19T01:00:00.000Z"),
       [olderRollup]: object("c9", "pass", "2026-08-19T01:00:00.000Z"),
     }, { [older]: [olderRollup] });
-    // The first run's window holds only the newer day, so the older one
-    // is a day the aggregate has never seen.
+    // The first run's window holds only the day before the older one, so
+    // the older one is a day the aggregate has never seen, and the next
+    // run's window starts on it.
     expect(
       await publish(
         ["--bootstrap", "--days", "1"],
         store,
-        NOW,
+        new Date("2026-08-18T12:00:00.000Z"),
         suites,
         noPrevious,
       ),
@@ -1892,7 +1905,7 @@ describe("publish() over an aggregate holding tests the tree has lost", () => {
     return JSON.stringify({
       schema: MANIFEST_SCHEMA_VERSION,
       day: "2026-08-19",
-      catchRule: CATCH_RULE,
+      catchRule: NEW_REAL_TEST_FAILURE_RULE,
       folded: [],
       compacted: [],
       states: {
@@ -2003,20 +2016,30 @@ describe("publish() over a state written further ahead than it reads", () => {
   const KEPT = JSON.stringify(["unit", "memory", "space > writes"]);
   const AHEAD = MANIFEST_SCHEMA_VERSION + 1;
 
-  /** A state carrying one identity's catches, in the shape given. */
+  /**
+   * A state carrying one identity's new real test failures, in the shape
+   * given.
+   */
   function carrying(schema: number, day: string): string {
     return JSON.stringify({
       schema,
       day,
-      catchRule: CATCH_RULE,
+      catchRule: NEW_REAL_TEST_FAILURE_RULE,
       folded: [],
       compacted: [],
-      states: { [KEPT]: { ...emptyState(), mainCatches: 2 } },
+      states: {
+        [KEPT]: {
+          ...emptyState(),
+          newRealTestFailureDays: {
+            [day]: { local: 0, pr: 0, main: 2, sources: ["main"] },
+          },
+        },
+      },
       files: { [KEPT]: "packages/memory/test/space.test.ts" },
     });
   }
 
-  it("folds onto the newest state behind it and keeps its catches", async () => {
+  it("folds onto the newest state behind it and keeps its new real test failures", async () => {
     const behind = stateObjectName("2026-08-20", "0");
     const over = stateObjectName("2026-08-20", "1");
     const { store, created } = fakeStore({
@@ -2034,11 +2057,11 @@ describe("publish() over a state written further ahead than it reads", () => {
     const entry = (await publishedManifest(created)).entries.find((one) =>
       testIdentityKey(one.test) === KEPT
     );
-    // Two main catches stood in the state that was folded onto, and the
-    // window holds one more. A run that had lost that state would carry
-    // the window's alone, and one that folded the window twice would
+    // Two new real test failures on main stood in the state that was folded
+    // onto, and the window holds one more. A run that had lost that state would
+    // carry the window's alone, and one that folded the window twice would
     // carry four.
-    expect(entry?.inputs.catches).toBe(CATCH_WEIGHT_MAIN * 3);
+    expect(entry?.inputs.catches).toBe(NEW_REAL_TEST_FAILURE_WEIGHT_MAIN * 3);
   });
 
   it("names both shapes and what to deploy when nothing behind it reads", async () => {
@@ -2057,9 +2080,12 @@ describe("publish() over a state written further ahead than it reads", () => {
     expect(said).toContain(
       `deploy a publisher that reads shape ${AHEAD} or above`,
     );
-    // The remedy that would lose the history the state holds is named as
-    // the one not to reach for.
-    expect(said).toContain("do not bootstrap");
+    // A bootstrap stops at a state written further ahead too, rather than
+    // starting from nothing past it, and the refusal says so.
+    expect(said).toContain(
+      "a bootstrap reads every stored state, of any day, and refuses where " +
+        "one reads or one is written in a shape from further ahead",
+    );
     expect(created.size).toBe(0);
   });
 
@@ -2085,7 +2111,7 @@ describe("publish() over a state written further ahead than it reads", () => {
     const entry = (await publishedManifest(created)).entries.find((one) =>
       testIdentityKey(one.test) === KEPT
     );
-    expect(entry?.inputs.catches).toBe(CATCH_WEIGHT_MAIN * 3);
+    expect(entry?.inputs.catches).toBe(NEW_REAL_TEST_FAILURE_WEIGHT_MAIN * 3);
   });
 
   it("refuses a state the store names and will not give", async () => {
@@ -2169,11 +2195,345 @@ describe("publish() over a state written further ahead than it reads", () => {
     );
     // The state named for a day the wider window reaches carried two of
     // these, and the window carries the third.
-    expect(entry?.inputs.catches).toBe(CATCH_WEIGHT_MAIN * 3);
+    expect(entry?.inputs.catches).toBe(NEW_REAL_TEST_FAILURE_WEIGHT_MAIN * 3);
   });
 });
 
-describe("publish() over an aggregate other catch rules credited", () => {
+describe("publish() --bootstrap over a store that holds a state", () => {
+  // A bootstrap starts from nothing, and a test's new real test failures
+  // accumulate over unbounded history that no window of records rebuilds. These
+  // turn on where it may do that.
+
+  const NOW = new Date("2026-08-20T12:00:00.000Z");
+  const KEPT = JSON.stringify(["unit", "memory", "space > writes"]);
+
+  /** A state whose one identity has had three new real test failures. */
+  function holding(schema = MANIFEST_SCHEMA_VERSION, day = "2026-08-20") {
+    return JSON.stringify({
+      schema,
+      day,
+      catchRule: NEW_REAL_TEST_FAILURE_RULE,
+      folded: [],
+      compacted: [],
+      states: {
+        [KEPT]: {
+          ...emptyState(),
+          mainCatches: 3,
+          lastCatch: day,
+          newRealTestFailureDays: {
+            [day]: { local: 0, pr: 0, main: 3, sources: ["main"] },
+          },
+        },
+      },
+      files: { [KEPT]: UNIT },
+    });
+  }
+
+  it("refuses over a state it can read, and says how to fold onto it", async () => {
+    const { store, created } = fakeStore({
+      ...seed(),
+      [stateObjectName("2026-08-20", "0")]: holding(),
+    });
+    const said = await saying(
+      () =>
+        publish(["--bootstrap", "--days", "1"], store, NOW, suites, noPrevious),
+      "warn",
+    );
+    expect(said).toContain(
+      `${stateObjectName("2026-08-20", "0")} is an aggregate this ` +
+        "publisher can read",
+    );
+    expect(said).toContain("Run without --bootstrap to fold onto it.");
+    expect(created.size).toBe(0);
+  });
+
+  it("names no window for the newest state, which every run reads", async () => {
+    const { store, created } = fakeStore({
+      ...seed(),
+      [stateObjectName("2026-08-05", "0")]: holding(
+        MANIFEST_SCHEMA_VERSION,
+        "2026-08-05",
+      ),
+    });
+    const said = await saying(
+      () =>
+        publish(["--bootstrap", "--days", "1"], store, NOW, suites, noPrevious),
+      "warn",
+    );
+    expect(said).toContain("Run without --bootstrap to fold onto it.");
+    expect(said).not.toContain("--days 16");
+    expect(created.size).toBe(0);
+  });
+
+  it("refuses over a readable state of any day, past every one it cannot read", async () => {
+    // The incremental walk stops at the first day it reads; a bootstrap
+    // looks at every state, and names the window that reaches this one.
+    const { store, created } = fakeStore({
+      ...seed(),
+      [stateObjectName("2026-08-05", "0")]: holding(
+        MANIFEST_SCHEMA_VERSION,
+        "2026-08-05",
+      ),
+      [stateObjectName("2026-08-20", "1")]: "{not json at all",
+    });
+    const said = await saying(
+      () =>
+        publish(["--bootstrap", "--days", "1"], store, NOW, suites, noPrevious),
+      "warn",
+    );
+    expect(said).toContain("with --days 16 to reach it");
+    expect(created.size).toBe(0);
+    // And the window it names is one an incremental run folds onto it
+    // with, keeping the three new real test failures it holds.
+    expect(await publish(["--days", "16"], store, NOW, suites, noPrevious))
+      .toBe(0);
+    const entry = (await publishedManifest(created)).entries.find((one) =>
+      testIdentityKey(one.test) === KEPT
+    );
+    expect(entry?.inputs.catches).toBe(NEW_REAL_TEST_FAILURE_WEIGHT_MAIN * 4);
+  });
+
+  it("starts from nothing where no state any publisher can read is stored", async () => {
+    const { store, created } = fakeStore({
+      ...seed(),
+      [stateObjectName("2026-08-20", "1")]: "{not json at all",
+    });
+    const said = await saying(() =>
+      publish(["--bootstrap", "--days", "1"], store, NOW, suites, noPrevious)
+    );
+    expect(said).toContain("no stored aggregate can be read by any publisher");
+    expect((await publishedManifest(created)).entries[0]!.inputs.catches)
+      .toBe(NEW_REAL_TEST_FAILURE_WEIGHT_MAIN);
+  });
+
+  it("refuses where the only states are written further ahead", async () => {
+    // Those are history a publisher reads once it is deployed, and
+    // starting from nothing past them would throw it away.
+    const { store, created } = fakeStore({
+      ...seed(),
+      [stateObjectName("2026-08-20", "1")]: holding(
+        MANIFEST_SCHEMA_VERSION + 1,
+      ),
+    });
+    const said = await saying(
+      () =>
+        publish(["--bootstrap", "--days", "1"], store, NOW, suites, noPrevious),
+      "warn",
+    );
+    expect(said).toContain("deploy a publisher that reads shape");
+    expect(created.size).toBe(0);
+  });
+
+  it("refuses where a state will not arrive", async () => {
+    const { store, created } = fakeStore({
+      ...seed(),
+      [stateObjectName("2026-08-20", "0")]: holding(),
+    });
+    const refusing: StoreAccess = {
+      ...store,
+      readText: () => Promise.reject(new Error("HTTP 503")),
+    };
+    expect(
+      await publish(
+        ["--bootstrap", "--days", "1"],
+        refusing,
+        NOW,
+        suites,
+        noPrevious,
+      ),
+    ).toBe(1);
+    expect(created.size).toBe(0);
+  });
+});
+
+describe("publish() over days it has read and closed", () => {
+  const FIRST = "2026/08/10";
+
+  /** A failure on the tenth and its fix, then today's two runs. */
+  function store() {
+    return fakeStore({
+      ...seed(),
+      [CI(FIRST, "8")]: object("c8", "fail", "2026-08-10T01:00:00.000Z"),
+      [CI(FIRST, "9")]: object("c9", "pass", "2026-08-10T02:00:00.000Z"),
+    });
+  }
+
+  /** The newest state a run created, read back. */
+  async function newestState(created: Map<string, Uint8Array>) {
+    const name = [...created.keys()].filter((one) => one.includes("/state/"))
+      .sort().at(-1)!;
+    return parseAggregate(await gunzipToText(created.get(name)!))!;
+  }
+
+  it("keeps the names of a week of objects and of the first day", async () => {
+    const { store: held, created } = store();
+    expect(
+      await publish(
+        ["--bootstrap", "--days", "11"],
+        held,
+        new Date("2026-08-20T12:00:00.000Z"),
+        suites,
+        noPrevious,
+      ),
+    ).toBe(0);
+    const state = await newestState(created);
+    expect(state.closed).toBe("2026/08/13");
+    expect(state.folded).toEqual([
+      CI(FIRST, "8"),
+      CI(FIRST, "9"),
+      CI(DAY, "1"),
+      CI(DAY, "2"),
+    ]);
+  });
+
+  it("counts a closed day once, however wide a later window is", async () => {
+    const { store: held, created } = store();
+    await publish(
+      ["--bootstrap", "--days", "11"],
+      held,
+      new Date("2026-08-20T12:00:00.000Z"),
+      suites,
+      noPrevious,
+    );
+    const once = (await publishedManifest(created)).entries[0]!.inputs.catches;
+    expect(once).toBe(NEW_REAL_TEST_FAILURE_WEIGHT_MAIN * 2);
+    expect(
+      await publish(
+        ["--days", "20"],
+        held,
+        new Date("2026-08-20T13:00:00.000Z"),
+        suites,
+        noPrevious,
+      ),
+    ).toBe(0);
+    const manifest = await newestPublished(created);
+    expect(manifest.entries[0]!.inputs.catches).toBe(once);
+  });
+
+  it("reads what arrived on the last day it read after that run", async () => {
+    const objects: Record<string, string> = {
+      [CI(FIRST, "8")]: object("c8", "fail", "2026-08-10T01:00:00.000Z"),
+    };
+    const { store: held, created } = fakeStore(objects);
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      held,
+      new Date("2026-08-10T01:30:00.000Z"),
+      suites,
+      noPrevious,
+    );
+    // The fix of the tenth's breakage lands after the run that read the
+    // tenth, and the next run comes three days later.
+    objects[CI(FIRST, "9")] = object("c9", "pass", "2026-08-10T02:00:00.000Z");
+    expect(
+      await publish(
+        [],
+        held,
+        new Date("2026-08-13T12:00:00.000Z"),
+        suites,
+        noPrevious,
+      ),
+    ).toBe(0);
+    const manifest = await newestPublished(created);
+    expect(manifest.entries[0]!.inputs.catches).toBe(
+      NEW_REAL_TEST_FAILURE_WEIGHT_MAIN,
+    );
+  });
+
+  it("reads from the last day the aggregate read, however far back", async () => {
+    // A publisher stopped for nine days catches up on the run after, so no
+    // day is left unread behind the days it folds.
+    const { store: held, created } = store();
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      held,
+      new Date("2026-08-10T12:00:00.000Z"),
+      suites,
+      noPrevious,
+    );
+    const said = await saying(() =>
+      publish(
+        [],
+        held,
+        new Date("2026-08-20T12:00:00.000Z"),
+        suites,
+        noPrevious,
+      )
+    );
+    expect(said).toContain(
+      "reading from 2026/08/10, the last day the aggregate read",
+    );
+    expect((await newestState(created)).closed).toBe("2026/08/13");
+    // The tenth's new real test failure and the twentieth's, each once.
+    expect((await newestPublished(created)).entries[0]!.inputs.catches)
+      .toBe(NEW_REAL_TEST_FAILURE_WEIGHT_MAIN * 2);
+  });
+
+  it("widens a window somebody asked for to the last day the aggregate read", async () => {
+    // A narrower window would leave days unread behind the ones it
+    // folds, which a later run could fold only after them.
+    const { store: held, created } = store();
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      held,
+      new Date("2026-08-10T12:00:00.000Z"),
+      suites,
+      noPrevious,
+    );
+    await publish(
+      ["--days", "1"],
+      held,
+      new Date("2026-08-20T12:00:00.000Z"),
+      suites,
+      noPrevious,
+    );
+    expect((await newestState(created)).closed).toBe("2026/08/13");
+  });
+
+  it("folds no object that arrives late for a day before its window", async () => {
+    // Folded after the days that follow it, a late pass would end a
+    // breakage that began after it and be credited with the fix.
+    const objects: Record<string, string> = {
+      [CI("2026/08/12", "1")]: object("c0", "pass", "2026-08-12T01:00:00.000Z"),
+    };
+    const { store: held, created } = fakeStore(objects);
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      held,
+      new Date("2026-08-12T12:00:00.000Z"),
+      suites,
+      noPrevious,
+    );
+    objects[CI("2026/08/15", "1")] = object(
+      "c2",
+      "fail",
+      "2026-08-15T01:00:00.000Z",
+    );
+    await publish(
+      [],
+      held,
+      new Date("2026-08-15T12:00:00.000Z"),
+      suites,
+      noPrevious,
+    );
+    objects[CI("2026/08/12", "2")] = object(
+      "c1",
+      "pass",
+      "2026-08-12T02:00:00.000Z",
+    );
+    await publish(
+      [],
+      held,
+      new Date("2026-08-16T12:00:00.000Z"),
+      suites,
+      noPrevious,
+    );
+    expect((await newestPublished(created)).entries[0]!.inputs.catches)
+      .toBe(0);
+  });
+});
+
+describe("publish() over an aggregate other new real test failure rules credited", () => {
   const NOW = new Date("2026-08-20T12:00:00.000Z");
   const STATE = stateObjectName("2026-08-19", "0");
   const KEPT = JSON.stringify(["unit", "memory", "space > writes"]);
@@ -2182,9 +2542,19 @@ describe("publish() over an aggregate other catch rules credited", () => {
   /**
    * The store a state that folded the two runs of an earlier day stands
    * in: a failure on the default branch, then its fix. The state holds
-   * more catches than those runs give, which is what a state credited
-   * under other rules looks like to the rules in force.
+   * more new real test failures than those runs give, which is what a
+   * state credited under other rules looks like to the rules in force.
    */
+  /** A state with five new real test failures, on the earlier day. */
+  function fiveOnMain(): IdentityState {
+    return {
+      ...emptyState(),
+      newRealTestFailureDays: {
+        "2026-08-18": { local: 0, pr: 0, main: 5, sources: ["main"] },
+      },
+    };
+  }
+
   function storeWith(catchRule?: number) {
     return fakeStore({
       ...seed(),
@@ -2196,17 +2566,41 @@ describe("publish() over an aggregate other catch rules credited", () => {
         ...(catchRule === undefined ? {} : { catchRule }),
         folded: [CI(EARLY, "1"), CI(EARLY, "2")],
         compacted: [],
-        states: { [KEPT]: { ...emptyState(), mainCatches: 5 } },
+        states: { [KEPT]: fiveOnMain() },
         files: {},
       }),
     });
   }
 
-  async function catchesOf(created: Map<string, Uint8Array>) {
+  async function newRealTestFailuresOf(created: Map<string, Uint8Array>) {
     return (await publishedManifest(created)).entries.find((one) =>
       testIdentityKey(one.test) === KEPT
     )?.inputs.catches;
   }
+
+  it("folds again from the first day an aggregate holds, though that day is closed", async () => {
+    const { store, created } = fakeStore({
+      ...seed(),
+      [CI(EARLY, "1")]: object("e1", "fail", "2026-08-18T01:00:00.000Z"),
+      [CI(EARLY, "2")]: object("e2", "pass", "2026-08-18T02:00:00.000Z"),
+      [STATE]: JSON.stringify({
+        schema: MANIFEST_SCHEMA_VERSION,
+        day: "2026-08-19",
+        closed: "2026/08/18",
+        folded: [CI(EARLY, "1")],
+        compacted: [],
+        states: { [KEPT]: fiveOnMain() },
+        files: {},
+      }),
+    });
+    const said = await saying(() =>
+      publish(["--days", "1"], store, NOW, suites, noPrevious)
+    );
+    expect(said).toContain("so this run folds every day from 2026-08-18 again");
+    expect(await newRealTestFailuresOf(created)).toBe(
+      NEW_REAL_TEST_FAILURE_WEIGHT_MAIN * 2,
+    );
+  });
 
   it("folds every day the aggregate holds again", async () => {
     const { store, created } = storeWith();
@@ -2214,27 +2608,33 @@ describe("publish() over an aggregate other catch rules credited", () => {
       publish(["--days", "1"], store, NOW, suites, noPrevious)
     );
     expect(said).toContain(
-      `${STATE} credited its catches under other rules, so this run ` +
-        `folds every day from 2026-08-18 again`,
+      `${STATE} credited its new real test failures under other rules, ` +
+        `so this run folds every day from 2026-08-18 again`,
     );
-    // One catch from the earlier day and one from the window, and none
-    // of the five the state held.
-    expect(await catchesOf(created)).toBe(CATCH_WEIGHT_MAIN * 2);
+    // One new real test failure from the earlier day and one from the
+    // window, and none of the five the state held.
+    expect(await newRealTestFailuresOf(created)).toBe(
+      NEW_REAL_TEST_FAILURE_WEIGHT_MAIN * 2,
+    );
     const written = [...created.keys()].find((name) =>
       name.startsWith(statePrefix())
     )!;
     const after = parseAggregate(await gunzipToText(created.get(written)!))!;
-    expect(after.catchRule).toBe(CATCH_RULE);
+    expect(after.catchRule).toBe(NEW_REAL_TEST_FAILURE_RULE);
     expect(after.folded).toContain(CI(EARLY, "1"));
   });
 
   it("folds onto an aggregate the rules in force credited", async () => {
-    const { store, created } = storeWith(CATCH_RULE);
+    const { store, created } = storeWith(NEW_REAL_TEST_FAILURE_RULE);
     const said = await saying(() =>
       publish(["--days", "1"], store, NOW, suites, noPrevious)
     );
-    expect(said).not.toContain("credited its catches under other rules");
-    expect(await catchesOf(created)).toBe(CATCH_WEIGHT_MAIN * 6);
+    expect(said).not.toContain(
+      "credited its new real test failures under other rules",
+    );
+    expect(await newRealTestFailuresOf(created)).toBe(
+      NEW_REAL_TEST_FAILURE_WEIGHT_MAIN * 6,
+    );
   });
 });
 

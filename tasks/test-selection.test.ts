@@ -154,7 +154,7 @@ describe("test-selection", () => {
       expect(lines.join("\n")).toContain("The manifest has no entry for it");
     });
 
-    it("prints the catches behind a score", () => {
+    it("prints the new real test failures behind a score", () => {
       const held = manifest();
       held.entries[0]!.inputs = {
         catches: 3,
@@ -163,15 +163,15 @@ describe("test-selection", () => {
         lastCatch: "2026-08-20",
       };
       const text = explainLines(held, TEST, { selected: true }).join("\n");
-      expect(text).toContain("3.0 weighted catches");
+      expect(text).toContain("3.0 weighted new real test failures");
       expect(text).toContain("2 sources");
       expect(text).toContain("2026-08-20");
       expect(text).toContain("selects it");
     });
 
-    it("says a test has never caught anything", () => {
+    it("says a test has never had a new real test failure", () => {
       expect(explainLines(manifest(), TEST).join("\n")).toContain(
-        "never caught anything",
+        "never had a new real test failure",
       );
     });
 
