@@ -189,8 +189,8 @@ event once. A client sees a send take effect when the message appears in the
 room's `messages`; nothing else is owed, and a client offers no retry of its
 own, since a person who sends again sends another message. A client that
 names a `requestId` on `sendMessage` has the room's word too: a send naming an
-id the room has recorded for its sender appends nothing, whatever event
-carries it, and answers with the message the first one sent (see
+id among the newest hundred the room has recorded for its sender appends
+nothing, whatever event carries it, and answers with the message the first one sent (see
 [`sendMessage`](ChatRoomOutput.md#sendmessagebody-string-replyto-chatreply-requestid-string)).
 
 A client that resumes an interrupted `createGroup` MUST resend it with its

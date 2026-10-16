@@ -381,6 +381,8 @@ These rules hold for every stream:
 - `requestId?: string` — Chosen by the sender, and unique among its sends, such
   as a random 128-bit value for each press of a send control. A client names
   one when it may send the same send again. The room's own controls name none.
+  An empty `requestId` counts as none: it names no press, so each send with
+  one is a send of its own.
 
 An event may carry other keys, such as a `version` holding the text and a
 proposed time; the room ignores them.

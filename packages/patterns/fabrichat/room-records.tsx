@@ -606,7 +606,8 @@ export const canActIn = (
 export interface RoomStreamEvent {
   /**
    * Chosen by a sender of `sendMessage`, and unique among its sends. A send
-   * whose id the room has already recorded for its sender pushes nothing.
+   * whose id is among the newest hundred the room has recorded for its sender
+   * pushes nothing. An empty id counts as none.
    */
   requestId?: string;
 
@@ -977,9 +978,11 @@ const recordSendRequest = (
 /**
  * Sends a message, from `ChatSendSurface`: the event's text, replying to the
  * event's `replyTo` where it carries one, and answers with the message sent.
- * A send naming a `requestId` the sender's record already holds pushes
- * nothing, and answers with the message the first send pushed; one naming a
- * new id is recorded under it. A send naming none is sent as it is.
+ * A send naming a `requestId` the sender's record still holds, among its
+ * newest `SEND_REQUESTS_KEPT`, pushes nothing, and answers with the message
+ * the first send pushed; one naming an id it doesn't hold is recorded under
+ * it. A send naming none, or an empty one, is sent as it is: an empty id
+ * names no press, and as a key it would fold every such send into the first.
  */
 export const commitSend = handler<
   RoomStreamEvent,

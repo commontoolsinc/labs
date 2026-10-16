@@ -1025,8 +1025,9 @@ export interface ChatRoomView {
 
   /**
    * Sends a message, and answers with it. A send naming a `requestId` this
-   * reader has already sent under adds nothing, and answers with the message
-   * the first one sent.
+   * reader has already sent under adds nothing, while the id is among the
+   * reader's newest hundred recorded, and answers with the message the first
+   * one sent.
    */
   sendMessage: Stream<RoomStreamEvent, SendResult | undefined>;
 
