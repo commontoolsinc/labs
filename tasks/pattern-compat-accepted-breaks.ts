@@ -323,18 +323,13 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       // because every field a row carries by value ships to every reader
       // of the universe.
       "result.mentionable[].body",
-      // A topic's author gained an optional `picture`, which the proof
-      // refuses on an object inside a union
-      // (docs/history/profile-picture-break.md).
-      "argument.topics[].createdBy",
     ],
     reason:
       "The board's mention universe became a derived index of two-string " +
       "rows holding each topic as an unread reference, so the published " +
       "`mentionable` stopped carrying a topic's own surface. Wired to the " +
       "raw topics list it multiplied every topic's resume into every " +
-      "sibling topic under document-granular delivery. Also carried: the " +
-      "author's new optional picture (docs/history/profile-picture-break.md).",
+      "sibling topic under document-granular delivery.",
     record: "docs/history/topics-mentionable-index-break.md",
   },
   {
@@ -1428,57 +1423,5 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     reason:
       "the room keeps no activity log, so the data face the adapter re-exports no longer carries one",
     record: "docs/history/fabrichat-pushed-messages-break.md",
-  },
-  {
-    // Profiles gained a picture stored as bytes, and the snapshots and views
-    // that carry a profile gained an optional `picture` beside it. The proof
-    // lets an open argument object gain an optional field, but not one that
-    // is a branch of a union, and each path below is one.
-    pattern: "battleship/multiplayer/lobby.tsx",
-    baselines: ["20260729T020824Z-sJ1DixMgTEi3A58c"],
-    paths: ["argument.player1"],
-    reason:
-      "a new optional `picture` field on an object inside a union, which the proof refuses although a stored value without it still validates",
-    record: "docs/history/profile-picture-break.md",
-  },
-  {
-    pattern: "battleship/multiplayer/room.tsx",
-    baselines: ["20260729T020824Z-WcQKUIL1IY6DUj_W"],
-    paths: ["argument.player1"],
-    reason:
-      "a new optional `picture` field on an object inside a union, which the proof refuses although a stored value without it still validates",
-    record: "docs/history/profile-picture-break.md",
-  },
-  {
-    pattern: "system/profile-picker.tsx",
-    baselines: [
-      "20261003T212417Z-QOwHYWA4c0a5_EXX",
-      "20261003T224736Z-AqiiUAQdhla5O1JZ",
-      "20261005T223959Z-cCzYHQilWH6ZuIbl",
-      "20261011T194332Z-UgB9t6TQSh9a5lyT",
-    ],
-    paths: ["argument.legacyDefaultProfile"],
-    reason:
-      "a new optional `picture` field on an object inside a union, which the proof refuses although a stored value without it still validates",
-    record: "docs/history/profile-picture-break.md",
-  },
-  {
-    // The two older baselines this break also reaches are carried by the
-    // entry above that names them.
-    pattern: "topics/main.tsx",
-    baselines: [
-      "20260831T204059Z-uEXtaGmcEP_6UKf5",
-      "20260905T021503Z-DBE_bqVhJLAC2xLu",
-      "20260906T062722Z-0jmNYAl_gIAvj6Il",
-      "20260909T185031Z-cUIuvNC9tjDj1hj7",
-      "20260911T180754Z-mcI7bUFztYae79gW",
-      "20260917T201944Z-o5fGzxpJS4nKBlkb",
-      "20260919T225206Z-z3VSL3ZeRKnVyBC6",
-      "20260928T194610Z-uB4Ov1bPSGq1mXsb",
-    ],
-    paths: ["argument.topics[].createdBy"],
-    reason:
-      "a new optional `picture` field on an object inside a union, which the proof refuses although a stored value without it still validates",
-    record: "docs/history/profile-picture-break.md",
   },
 ];
