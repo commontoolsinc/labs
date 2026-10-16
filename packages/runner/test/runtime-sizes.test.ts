@@ -250,8 +250,39 @@ describe("runtime-sizes", () => {
         runs += 1;
         link(tx);
       };
-      runtime.scheduler.subscribe(counted, { isEffect: true });
+      const seen: unknown[] = [];
+      const observed: Action = (tx) => {
+        counted(tx);
+        tx.addVerdictCallback(() => {
+          const state = tx.getCfcState();
+          seen.push({
+            relevant: state.relevant,
+            mode: state.enforcementMode,
+            cal: state.contentAddressedLabels,
+            env: state.decomposedEnvelopes,
+            prepare: state.prepare.status,
+            reasons: state.prepare.status === "invalidated"
+              ? state.prepare.reasons.length
+              : -1,
+            diagnostics: state.diagnostics.length,
+          });
+        });
+      };
+      runtime.scheduler.subscribe(observed, { isEffect: true });
       await runtime.scheduler.idleWithPendingCommits();
+      console.error(
+        "[sizes-diag refusal]",
+        JSON.stringify({
+          seen,
+          targetCfc: runtime.getCell(space, "target").getMetaRaw("cfc"),
+          sourceCfc: runtime.getCell(space, "source").getMetaRaw("cfc"),
+          sourceSchema: runtime.getCell(space, "source").getMetaRaw("schema"),
+          os: Deno.build.os,
+          envKeys: Object.keys(Deno.env.toObject()).filter((key) =>
+            key.startsWith("CF_") || key === "ENV" || key.startsWith("DENO_")
+          ),
+        }),
+      );
 
       const stats = runtime.getCfcStats();
       expect({
@@ -311,6 +342,20 @@ describe("runtime-sizes", () => {
       });
       runtime.prepareTxForCommit(tx);
       const prepare = tx.getCfcState().prepare;
+      const state = tx.getCfcState();
+      console.error(
+        "[sizes-diag crash]",
+        JSON.stringify({
+          relevant: state.relevant,
+          mode: state.enforcementMode,
+          cal: state.contentAddressedLabels,
+          env: state.decomposedEnvelopes,
+          prepare: prepare.status,
+          diagnostics: state.diagnostics,
+          wishCfc: runtime.getCell(space, "wish").getMetaRaw("cfc"),
+          wishSchema: runtime.getCell(space, "wish").getMetaRaw("schema"),
+        }),
+      );
       const result = await tx.commit().settled;
 
       const stats = runtime.getCfcStats();
