@@ -117,7 +117,7 @@ interface Attribution {
   /**
    * Name of the agent placing the notes, shown as their author. It is stored
    * without control characters and cut to at most 80 characters. Left out, the
-   * carry the caller's profile name.
+   * notes carry the caller's profile name.
    */
   agentName?: string;
 
