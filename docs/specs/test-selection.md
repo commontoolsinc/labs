@@ -936,8 +936,9 @@ of some of those suites. Each packing after the second offers fewer
 suites, so this ends, and it ends with every suite priced the way the
 lanes will run it.
 
-The job that joins the lanes packs the same plan, from the same tree and
-the same manifest, to learn which gates were chosen. On a pull request it
+The job that joins the lanes packs the same plan, from the same tree, the
+same manifest, and the lane count and scale the lanes were handed, to learn
+which gates were chosen. On a pull request it
 refuses to judge anything where it cannot read the store, as a lane
 refuses to pack. A run of every test chooses every gate whatever the
 store says.

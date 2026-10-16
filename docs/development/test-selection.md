@@ -441,8 +441,9 @@ runs reached. A gate whose set the change does not reach is never chosen, except
 by a run of every test, which chooses every gate, and `explain` on a gate's
 identity says whether the plan chose it.
 
-`Status` packs the plan the lanes packed, from the same tree and manifest, to
-learn which gates they chose. For each one, it adds up what the lanes measured
+`Status` packs the plan the lanes packed, from the same tree and manifest and
+the lane count and arguments `plan` handed them, to learn which gates they
+chose. For each one, it adds up what the lanes measured
 for its set, scores the set over its member's own source, and compares that
 against what the same set measured at the newest `main` commit the branch
 contains. On a pull request the baselines come from the manifest current at the
@@ -464,14 +465,17 @@ Run it yourself the way `Status` does:
 
 ```
 deno run -A tasks/coverage-gate.ts --base origin/main --reports <directory> \
-  [--full] [--body <description>] [--tests-failed] \
-  [--comment <file> --pr <number>]
-deno run -A tasks/coverage-gate.ts --full --default-branch \
+  [--full | --scale <n>] [--of <lanes>] [--body <description>] \
+  [--tests-failed] [--comment <file> --pr <number>]
+deno run -A tasks/coverage-gate.ts --full --default-branch [--of <lanes>] \
   --reports <directory> [--body <description>] [--tests-failed]
 ```
 
 where the directory holds the lanes' uploaded coverage. The first is a pull
 request's, and `--full` says its run ran every test, which chooses every gate.
+`--of` and `--scale` are the lane count and the scale `plan` handed the lanes,
+which `Status` passes on so that it packs the plan they packed; without them it
+counts the lanes the way `plan` does, at a scale of one.
 The second is a push's, and reads the parent commit's run through GitHub's API,
 which takes `GITHUB_TOKEN`. It prints a row per set — the baseline, this run's
 count, the change, and the outcome — and stops with a non-zero status where a
@@ -601,8 +605,8 @@ matching edit here fails `deno task test`.
 The **Units** column says what each number counts. Several of the dials
 are bare fractions that do not mean the same thing, and the table holds
 two different `0.25` values as it stands: `WEIGHT_BREADTH` is a share of a
-test's score and `FILL_DENSITY_SHARE` is a share of the run's budget. A
-share of an item's runs reads the same way again. Naming the unit is what
+test's score and `FILL_DENSITY_SHARE` is a share of the discretionary
+target. A share of an item's runs reads the same way again. Naming the unit is what
 keeps them from being compared to each other.
 
 The **Set by** column separates two kinds. A **chosen** value is a
@@ -655,9 +659,9 @@ measurement to look at rather than a setting to fix.
 | `FLAKE_HALF_LIFE_RUNS` | 200 | runs | chosen | How many runs without disagreeing halve what a disagreement counts for. It is also how much evidence the share is measured over, so far below one over `FLAKE_EXCLUSION_RATE` the share swings about on too little: up when it does; down when a test that has plainly settled is still judged by what it did. |
 | `FLAKE_WINDOW_DAYS` | 60 | days | chosen | How far back the counts are read at all. The weight decays by runs rather than by days, so this bounds what is remembered rather than marking where the weight has faded: a test that runs rarely can still be carrying weight when its days fall off the end. |
 | `COST_WINDOW_DAYS` | 7 | days | chosen | Up when cost estimates are noisy; down when durations drift with the code or the runner image faster than the estimate follows. |
-| `FILL_VALUE_SHARE` | 0.6 | share of the run's budget | chosen | Up when expensive high-value tests are crowded out by cheap ones; down when a lane spends its budget on a few slow tests and runs little else. The three shares sum to one. |
-| `FILL_DENSITY_SHARE` | 0.25 | share of the run's budget | chosen | Up when more of the cheap tail should run; down when the tail is displacing tests with a record. |
-| `FILL_EXPLORATION_SHARE` | 0.15 | share of the run's budget | chosen | Up when the unselected corpus is going stale; down when lanes spend the share on tests that never find anything. |
+| `FILL_VALUE_SHARE` | 0.6 | share of the discretionary target | chosen | Up when expensive high-value tests are crowded out by cheap ones; down when a lane spends its budget on a few slow tests and runs little else. The three shares sum to one. |
+| `FILL_DENSITY_SHARE` | 0.25 | share of the discretionary target | chosen | Up when more of the cheap tail should run; down when the tail is displacing tests with a record. |
+| `FILL_EXPLORATION_SHARE` | 0.15 | share of the discretionary target | chosen | Up when the unselected corpus is going stale; down when lanes spend the share on tests that never find anything. |
 | `MIN_CORRECTION_SPAN_SECONDS` | 23 | seconds | derived | A tenth of a lane's budget, measured as the widest gap between the time two batches' own tests took. Nothing edits it: it moves only when the lane's budget does. |
 | `MIN_CORRECTION_SAMPLES` | 3 | batches | chosen | Up when a slope is being fitted from too little and swinging about; down when a suite's real slope takes too long to be believed. |
 | `HEALTH_TOO_LONG_FACTOR` | 2 | multiplier | chosen | Up when the test selection tile goes red for ordinary growth in the tests too long for any lane; down when a jump that took tests out of every pull request went unreported. |

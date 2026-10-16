@@ -34,6 +34,13 @@ const NO_WHOLE_UNITS: ReadonlySet<string> = new Set();
 /** How many lanes the plans below are packed into unless they say. */
 const LANES = 5;
 
+/**
+ * What the plans below give the passes choosing by score unless they say:
+ * all of their lanes' budgets, so that what limits those passes is the
+ * lanes and their shares rather than the target.
+ */
+const ROOM = LANES * LANE_BUDGET_SECONDS;
+
 /** `count` identities of one suite, each in its own invocation unit. */
 function entries(
   count: number,
@@ -59,6 +66,7 @@ function run(
     capabilities: NO_CAPABILITIES,
     wholeUnits: NO_WHOLE_UNITS,
     lanes: LANES,
+    discretionarySeconds: ROOM,
     ...overrides,
   });
 }
@@ -1451,13 +1459,7 @@ describe("plan", () => {
           prologue: 0,
         },
       });
-      // A target as large as the lanes, so that the lanes are what limit
-      // how many run.
-      const result = run(manifest, {
-        boundSeconds: 300,
-        budgetSeconds: 230,
-        discretionarySeconds: 230 * LANES,
-      });
+      const result = run(manifest, { boundSeconds: 300, budgetSeconds: 230 });
       expect(result.crowding).toEqual([{
         suite: "workspace-unit",
         fixed: 250,

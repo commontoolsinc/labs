@@ -159,7 +159,7 @@ export const FLAKE_WINDOW_DAYS = 60;
 /** Days of durations an item's cost estimate reads. */
 export const COST_WINDOW_DAYS = 7;
 
-/** The share of the run's budget spent in descending value. */
+/** The share of the discretionary target spent in descending value. */
 export const FILL_VALUE_SHARE = 0.60;
 
 /** The share spent in descending value per second. */
@@ -501,8 +501,8 @@ export interface Dial {
  * Every dial, with the unit its value counts and the reason to move it.
  * The units matter because several dials are bare fractions that do not
  * mean the same thing: `WEIGHT_BREADTH` is a share of a test's score and
- * `FILL_DENSITY_SHARE` is a share of the run's budget, and naming the unit
- * is what keeps them from being compared to each other.
+ * `FILL_DENSITY_SHARE` is a share of the discretionary target, and naming
+ * the unit is what keeps them from being compared to each other.
  */
 export const DIALS: readonly Dial[] = [
   {
@@ -774,7 +774,7 @@ export const DIALS: readonly Dial[] = [
   {
     name: "FILL_VALUE_SHARE",
     value: FILL_VALUE_SHARE,
-    unit: "share of the run's budget",
+    unit: "share of the discretionary target",
     setBy: "chosen",
     why: "Up when expensive high-value tests are crowded out by cheap ones; " +
       "down when a lane spends its budget on a few slow tests and runs " +
@@ -783,7 +783,7 @@ export const DIALS: readonly Dial[] = [
   {
     name: "FILL_DENSITY_SHARE",
     value: FILL_DENSITY_SHARE,
-    unit: "share of the run's budget",
+    unit: "share of the discretionary target",
     setBy: "chosen",
     why: "Up when more of the cheap tail should run; down when the tail is " +
       "displacing tests with a record.",
@@ -791,7 +791,7 @@ export const DIALS: readonly Dial[] = [
   {
     name: "FILL_EXPLORATION_SHARE",
     value: FILL_EXPLORATION_SHARE,
-    unit: "share of the run's budget",
+    unit: "share of the discretionary target",
     setBy: "chosen",
     why:
       "Up when the unselected corpus is going stale; down when lanes spend " +

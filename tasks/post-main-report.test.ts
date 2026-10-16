@@ -733,11 +733,21 @@ describe("post-main-report", () => {
       };
       const topology = [measured, coverageGateSuite([measured])];
       expect(
-        manifestView(withGate, topology, new Set(["packages/bakery/src/x.ts"]))
+        manifestView(
+          withGate,
+          topology,
+          new Set(["packages/bakery/src/x.ts"]),
+          DEFAULT_RUN,
+        )
           .selected.has(testIdentityKey(gate)),
       ).toBe(true);
       expect(
-        manifestView(withGate, topology, new Set(["docs/README.md"]))
+        manifestView(
+          withGate,
+          topology,
+          new Set(["docs/README.md"]),
+          DEFAULT_RUN,
+        )
           .selected.has(testIdentityKey(gate)),
       ).toBe(false);
     });

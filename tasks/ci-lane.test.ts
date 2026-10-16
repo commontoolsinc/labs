@@ -1065,7 +1065,13 @@ describe("how many lanes a run asks for", () => {
       }]);
       const full = await counted("ci: full");
       expect(full.status).toBe(0);
-      expect(JSON.parse(full.out[0]!).args).toEqual(["--full"]);
+      // The base goes on, for the job that judges which gates the change
+      // reaches.
+      expect(JSON.parse(full.out[0]!).args).toEqual([
+        "--base",
+        "HEAD",
+        "--full",
+      ]);
     });
 
     it("stops before reading anything at a label it cannot read", async () => {
