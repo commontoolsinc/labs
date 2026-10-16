@@ -17,6 +17,51 @@ import {
 } from "../../test-utils/mock-cell-handle.ts";
 import { CFCodeEditor } from "./index.ts";
 
+Deno.test("a failed collaboration startup keeps displaying Cell updates read-only", async () => {
+  const cell = createMockCellHandle("initial", { schema: { type: "string" } });
+  const queried = Promise.withResolvers<OperationFieldSnapshot>();
+  const runtime = {
+    operationCodecs: () => Promise.resolve([CODEMIRROR_CHANGESET_CODEC]),
+    queryOperationField: () => queried.promise,
+    closeOperationSession: () => Promise.resolve(),
+  };
+  Object.defineProperties(cell, {
+    runtime: { value: () => runtime },
+    resolveAsCell: { value: () => Promise.resolve(cell) },
+  });
+  const editor = new CFCodeEditor();
+  editor.value = cell;
+  const failed = Promise.withResolvers<Error>();
+  editor.addEventListener("cf-error", (event) => {
+    failed.resolve((event as CustomEvent<{ error: Error }>).detail.error);
+  });
+  document.body.append(editor);
+  try {
+    await editor.updateComplete;
+    const view = editor.editorView;
+    if (view === undefined) throw new Error("The editor view is missing.");
+    editor.collaborative = true;
+    await editor.updateComplete;
+    pushUpdate(cell, "while connecting");
+    queried.reject(new Error("The initial collaboration query failed."));
+    expect((await failed.promise).message).toBe(
+      "The initial collaboration query failed.",
+    );
+    expect(view.state.doc.toString()).toBe("while connecting");
+
+    pushUpdate(cell, "after failure");
+    expect(view.state.doc.toString()).toBe("after failure");
+    editor.readonly = true;
+    await editor.updateComplete;
+    editor.readonly = false;
+    await editor.updateComplete;
+    expect(view.state.readOnly).toBe(true);
+    expect(writesSent(cell)).toEqual([]);
+  } finally {
+    editor.remove();
+  }
+});
+
 for (
   const [outcome, name] of [
     [

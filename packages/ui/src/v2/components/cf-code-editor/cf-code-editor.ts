@@ -2215,12 +2215,14 @@ export class CFCodeEditor extends BaseElement {
         this._collaboration !== controller
       ) return;
       controller.dispose();
+      this._collaboration = undefined;
       const error = cause instanceof Error ? cause : new Error(String(cause));
       this._collaborationFailed = true;
       this._cleanupPresence();
       view.dispatch({
         effects: this._readonly.reconfigure(EditorState.readOnly.of(true)),
       });
+      this._updateEditorFromCellValue();
       this.emit("cf-error", { error, message: error.message });
     }
   }
