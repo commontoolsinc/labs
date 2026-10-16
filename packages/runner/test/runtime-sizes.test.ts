@@ -238,6 +238,9 @@ describe("runtime-sizes", () => {
       runtime.getCell(space, "source", undefined, seed).set({ title: "plain" });
       seed.prepareCfc();
       expect((await seed.commit().settled).ok).toBeDefined();
+      // The commit settles before the written documents finish loading into
+      // the replica; the link's refusal reads their stored metadata.
+      await runtime.storageManager.synced();
 
       const errors: { name?: string }[] = [];
       const link: Action = (tx) => {
@@ -336,6 +339,9 @@ describe("runtime-sizes", () => {
       });
       seed.prepareCfc();
       expect((await seed.commit().settled).error).toBeUndefined();
+      // The crash needs the stored envelope the seed wrote, which the replica
+      // holds only once the document's load has completed.
+      await runtime.storageManager.synced();
 
       const tx = runtime.edit();
       const resolved = runtime.getCell(space, "wish-resolved", profile, tx);
