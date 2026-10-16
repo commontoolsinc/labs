@@ -408,7 +408,6 @@ export const entryFor = (
 export const isDeleted = (record: RepliedMessage | undefined): boolean =>
   record === undefined || typeof record.body !== "string";
 
-
 /**
  * Whether the principal this code runs for holds OWNER in the room's space,
  * which `cell` lives in: the event's actor in a handler, the viewer in a
