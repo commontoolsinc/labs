@@ -14,6 +14,7 @@ import {
   setCfcTrustSnapshot,
 } from "../src/storage/extended-storage-transaction.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { isEnvelopeStabilityRefusal } from "../src/storage/rejection.ts";
 
 const signer = await Identity.fromPassphrase("write-policy-any-of");
 
@@ -462,6 +463,7 @@ describe("cfc-write-policy-any-of", () => {
 
         expect(runs).toBe(1);
         expect(error?.name).toBe("CfcCommitRefusalError");
+        expect(isEnvelopeStabilityRefusal(error)).toBe(true);
         expect(error?.message).toContain(
           "writePolicyAnyOf must remain stable",
         );
@@ -490,6 +492,7 @@ describe("cfc-write-policy-any-of", () => {
 
         expect(runs).toBe(1);
         expect(error?.name).toBe("CfcCommitRefusalError");
+        expect(isEnvelopeStabilityRefusal(error)).toBe(true);
         expect(error?.message).toContain("confidentiality cannot be weakened");
       });
     });
@@ -518,6 +521,7 @@ describe("cfc-write-policy-any-of", () => {
 
         expect(runs).toBeGreaterThan(1);
         expect(error?.name).toBe("StorageTransactionAborted");
+        expect(isEnvelopeStabilityRefusal(error)).toBe(false);
         expect(error?.message).toContain(
           "writePolicyAnyOf must remain stable",
         );

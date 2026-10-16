@@ -41,8 +41,14 @@ import {
   Writable,
   type WritePolicyAnyOf,
 } from "commonfabric";
+import { profileKeyOf } from "../system/private-inbox.tsx";
 import { isSharedSpaceCatalog } from "../system/shared-space-catalog.ts";
-import { isSingleEmoji, type ShownIn, type ViewItem } from "./logic.ts";
+import {
+  isInMain,
+  isSingleEmoji,
+  type ShownIn,
+  type ViewItem,
+} from "./logic.ts";
 import type { commitStart } from "./manager.tsx";
 import {
   type AboutRecord,
@@ -342,13 +348,44 @@ export const entityKeyOf = (cell: unknown): string | undefined => {
 /** The handler clock's reading. */
 const now = (): FabricEpochNsec => epochNsecFromMsec(Date.now());
 
-/** A stored message as the views see it, keyed by its entity. */
+/**
+ * A stored message as the views see it, keyed by its entity: the facts the
+ * room's derivations read of it, taken from the record once, so that none of
+ * them reads the record again. A derivation over the entries reads plain
+ * values, and follows a link only where it hands one on.
+ */
 export interface MessageEntry extends ViewItem {
   /** A link to the stored message. */
   cell: MessageCell;
 
-  /** The stored message. */
-  record: MessageRecord;
+  /** Whether the message is shown in the main conversation. */
+  inMain: boolean;
+
+  /** Whether the message is live: neither deleted nor obliterated. */
+  live: boolean;
+
+  /**
+   * The key of the profile the sender sent under, as Home's `profileKeyOf()`
+   * names the link the message stores, which `sendInto()` writes resolved:
+   * the space of the profile's document and the entity it is, since an
+   * entity's id is minted from its cause and two spaces can hold documents of
+   * one id. Absent once obliterated. Two messages have the same author when
+   * their keys agree, and a reader is the author when their resolved
+   * profile's key is this one.
+   */
+  authorKey?: string;
+}
+
+/** The entries of a room's messages, and every author among them. */
+export interface MessageEntries {
+  /** Every stored message, in the order recorded. */
+  entries: MessageEntry[];
+
+  /**
+   * Every author, each once, in the order each first appears, by the link
+   * each message stores; an obliterated message names none.
+   */
+  authors: ProfileCell[];
 }
 
 /**
@@ -369,45 +406,60 @@ const cellAt = (
 };
 
 /**
- * Every stored message of `messages`, as a view item. It reads the list and
- * writes nothing, which its parameter declares by being a `Cell` where
+ * Every stored message of `messages`, as an entry, with the authors among
+ * them, in one walk of the list that reads each record once. It writes
+ * nothing, which its parameter declares by being a `Cell` where
  * `MessagesCell` is a `Writable`: a computation that hands a cell to a
  * helper of another module is scheduled as a writer of that cell when the
  * helper's parameter is a `Writable`.
  */
 export const messageEntries = (
   messages: Cell<MessagesValue>,
-): MessageEntry[] =>
-  ((messages.get() ?? []) as MessageRecord[]).flatMap((record, index) => {
-    if (record?.sentAt === undefined) return [];
-    const cell = cellAt(messages, index);
-    const key = viewKeyOf(cell);
-    if (key === undefined) return [];
-    const target = record.replyTo?.message;
-    const targetKey = target === undefined ? undefined : viewKeyOf(target);
-    return [{
-      key,
-      sentAt: nsecOf(record.sentAt),
-      ...(record.replyTo === undefined || targetKey === undefined ? {} : {
-        replyTo: { key: targetKey, shownIn: record.replyTo.shownIn },
-      }),
-      cell,
-      record,
-    }];
-  });
+): MessageEntries => {
+  const authorKeys = new Set<string>();
+  const authors: ProfileCell[] = [];
+  const entries = ((messages.get() ?? []) as MessageRecord[]).flatMap(
+    (record, index): MessageEntry[] => {
+      if (record?.sentAt === undefined) return [];
+      const cell = cellAt(messages, index);
+      const key = viewKeyOf(cell);
+      if (key === undefined) return [];
+      const target = record.replyTo?.message;
+      const targetKey = target === undefined ? undefined : viewKeyOf(target);
+      const item: ViewItem = {
+        key,
+        sentAt: nsecOf(record.sentAt),
+        ...(record.replyTo === undefined || targetKey === undefined ? {} : {
+          replyTo: { key: targetKey, shownIn: record.replyTo.shownIn },
+        }),
+      };
+      const author = record.authorProfile;
+      const authorKey = author === undefined ? undefined : profileKeyOf(author);
+      if (author !== undefined && authorKey !== undefined) {
+        if (!authorKeys.has(authorKey)) {
+          authorKeys.add(authorKey);
+          authors.push(author);
+        }
+      }
+      return [{
+        ...item,
+        cell,
+        inMain: isInMain(item),
+        live: !isDeleted(record),
+        ...(authorKey === undefined ? {} : { authorKey }),
+      }];
+    },
+  );
+  return { entries, authors };
+};
 
-/** The entry for the stored message `message` links, if it is in the room. */
-export const entryFor = (
-  entries: readonly MessageEntry[],
-  message: MessageCell | undefined,
-): MessageEntry | undefined =>
-  message === undefined
-    ? undefined
-    : entries.find((entry) => equals(entry.cell, message));
+/** What `messageRightsOf()` reads of a message: its author and its body. */
+export type RightsFacts = Pick<MessageRecord, "authorProfile" | "body">;
 
 /** Whether a message is deleted, by its sender or by obliteration. */
-export const isDeleted = (record: RepliedMessage | undefined): boolean =>
-  record === undefined || typeof record.body !== "string";
+export const isDeleted = (
+  record: Pick<RepliedMessage, "body"> | undefined,
+): boolean => record === undefined || typeof record.body !== "string";
 
 /**
  * Whether the principal this code runs for holds OWNER in the room's space,
@@ -419,7 +471,7 @@ export const isOwnerOf = (cell: Cell<unknown>): boolean =>
 
 /** Whether `profile` is the profile `record`'s author sent it under. */
 const isAuthorOf = (
-  record: MessageRecord | undefined,
+  record: RightsFacts | undefined,
   profile: ProfileCell | undefined,
 ): boolean => {
   const author = record?.authorProfile;
@@ -459,21 +511,40 @@ export const NO_MESSAGE_RIGHTS: MessageRights = {
  * by it.
  */
 export const messageRightsOf = (
-  record: MessageRecord | undefined,
+  record: RightsFacts | undefined,
   profile: ProfileCell | undefined,
   kind: ChatRoomKind,
   isOwner: boolean,
   ownersMayObliterate: boolean,
-): MessageRights => {
-  const isAuthor = isAuthorOf(record, profile);
-  const live = !isDeleted(record);
-  return {
-    canEdit: live && isAuthor,
-    canDelete: live && isAuthor,
-    canObliterate: record?.authorProfile !== undefined &&
-      ((isOwner && ownersMayObliterate) || (kind === "direct" && isAuthor)),
-  };
-};
+): MessageRights =>
+  rightsOf(
+    isAuthorOf(record, profile),
+    !isDeleted(record),
+    record?.authorProfile !== undefined,
+    kind,
+    isOwner,
+    ownersMayObliterate,
+  );
+
+/**
+ * `messageRightsOf()`, from the facts it decides by: whether the person is the
+ * message's author, whether the message is live, and whether it still names
+ * an author. The room derives every message's rights from its entries this
+ * way, and reads two plain values of each entry rather than its record.
+ */
+export const rightsOf = (
+  isAuthor: boolean,
+  live: boolean,
+  hasAuthor: boolean,
+  kind: ChatRoomKind,
+  isOwner: boolean,
+  ownersMayObliterate: boolean,
+): MessageRights => ({
+  canEdit: live && isAuthor,
+  canDelete: live && isAuthor,
+  canObliterate: hasAuthor &&
+    ((isOwner && ownersMayObliterate) || (kind === "direct" && isAuthor)),
+});
 
 /**
  * Whether the viewer can send, edit, delete, and react in the room whose

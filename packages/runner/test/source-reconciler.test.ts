@@ -1035,8 +1035,12 @@ describe("piece source reconciliation", () => {
     const policyChanged = {
       name: "CfcCommitRefusalError",
       message: "CFC enforcement rejected commit: relevant transaction was " +
-        "not prepared: writePolicyAnyOf must remain stable at /messages/*",
-      reasons: ["writePolicyAnyOf must remain stable at /messages/*"],
+        "not prepared: cfc-envelope-stability: writePolicyAnyOf must remain " +
+        "stable at /messages/*",
+      reasons: [
+        "cfc-envelope-stability: writePolicyAnyOf must remain stable at " +
+        "/messages/*",
+      ],
     };
 
     /**
@@ -1241,6 +1245,17 @@ describe("piece source reconciliation", () => {
       {
         name: "SpeculativeBasisError",
         message: "commit read basis names a speculative layer",
+      },
+      // A flow-control refusal other than a stored envelope's, which a grant
+      // can lift.
+      {
+        name: "CfcCommitRefusalError",
+        message: "the write would carry data where policy forbids it",
+        reasons: ["the write would carry data where policy forbids it"],
+      },
+      {
+        name: "RowLabelCommitError",
+        message: "a row's label forbids the write",
       },
     ];
 

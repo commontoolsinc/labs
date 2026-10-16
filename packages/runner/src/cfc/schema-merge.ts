@@ -26,6 +26,7 @@ import {
   bindCurrentPrincipalToStoredClauses,
   isCurrentPrincipalUserClause,
 } from "./current-principal-confidentiality.ts";
+import { CfcEnvelopeStabilityError } from "./envelope-stability-reason.ts";
 import { CfcSchemaMigrationError } from "./migration-reason.ts";
 import { isValueStamp } from "./minted-integrity.ts";
 import {
@@ -221,22 +222,6 @@ const reconcileWriterClaimStamp = (
   }
   return existingStamped ? existing : candidate;
 };
-
-/**
- * What the merge throws when a candidate changes or weakens an `ifc` claim the
- * existing envelope fixes: a set-like claim the candidate drops members of, or
- * a claim that must stay as it is — `writePolicyAnyOf`, `writeAuthorizedBy`,
- * `uiContract`, `exactCopyOf` and the rest of that set — and that the
- * candidate changes. It is a class of its own so that the commit boundary can
- * tell this refusal from the merge's others.
- */
-export class CfcEnvelopeStabilityError extends Error {
-  /** Constructs an instance with the merge's own `message`. */
-  constructor(message: string) {
-    super(message);
-    this.name = "CfcEnvelopeStabilityError";
-  }
-}
 
 const mergeSetLikeIfcArray = (
   key: string,

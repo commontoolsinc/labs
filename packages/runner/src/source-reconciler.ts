@@ -73,7 +73,10 @@ import type { Runtime } from "./runtime.ts";
 import { schemaRegistryEpoch } from "./schema-registry.ts";
 import { fabricAuthorityMatchesSpaceHost } from "./space-host.ts";
 import type { MemorySpace } from "./storage/interface.ts";
-import { isLastingRejection } from "./storage/rejection.ts";
+import {
+  isEnvelopeStabilityRefusal,
+  isOversizedRejection,
+} from "./storage/rejection.ts";
 
 /**
  * What went wrong, as a reason a record can carry: a thrown error, or the
@@ -113,8 +116,9 @@ const logger = getLogger("runner.source-reconcile", {
  * - `incompatible`: the origin offered source that cannot replace what the
  *   piece runs, and its owner has not said to take it anyway.
  * - `rejected`: the write that adopts the origin's source was refused for
- *   good — a terminal rejection, which no retry of the same write can get
- *   past. This runtime does not propose that source again until the
+ *   good — by the store as too large, or by a stored envelope whose claim the
+ *   candidate's schema changes or weakens — which neither a retry nor a grant
+ *   gets past. This runtime does not propose that source again until the
  *   candidate, the piece's source state, or its stored argument changes, or
  *   the space's memory session is replaced.
  * - `unavailable`: the origin's current source could not be adopted this
@@ -251,11 +255,14 @@ type CommitFailure = {
   detail: string;
 
   /**
-   * Whether the store refused the write for good: a terminal rejection that
-   * the same write receives again however often it is sent, from one pass to
-   * the next (`isLastingRejection`).
+   * Whether the write was refused for good: as too large
+   * (`isOversizedRejection`), or by a stored envelope its schema changes or
+   * weakens (`isEnvelopeStabilityRefusal`). The same write receives either
+   * again however often it is sent, from one pass to the next, and no grant
+   * lifts it. Other terminal rejections are not this: a CFC or row-label
+   * refusal can be lifted by a grant, which the next pass has to pick up.
    */
-  terminal: boolean;
+  lasting: boolean;
 };
 
 /**
@@ -270,7 +277,7 @@ type CommitFailure = {
  * replaces it, so a replacement forgets the space's refusals. A runtime that
  * starts again, which is when its own code can change, starts with none.
  */
-type TerminalRefusal = {
+type RefusedAdoption = {
   /** The space of the refused piece. */
   space: MemorySpace;
 
@@ -357,13 +364,16 @@ export class SourceReconciler {
 
   /**
    * The adoptions this runtime saw refused for good, by follower key. Kept in
-   * the runtime rather than on the piece: a terminal rejection is a verdict
-   * of the runtime that built the write and the store it sent it to, and
-   * another runtime — a later build, a client under different enforcement —
-   * may build a write that is admitted. What the piece records is the
-   * refusal itself, which every runtime reports the same way.
+   * the runtime rather than on the piece: such a refusal is the verdict of
+   * the runtime that built the write and the store it sent it to, and another
+   * runtime — a later build, a client under different enforcement — may build
+   * a write that is admitted. What the piece records is the refusal itself,
+   * which every runtime reports the same way. A refusal outlives the piece
+   * stopping: a host that keeps a piece running stops and starts it,
+   * reconciling on each start, and would otherwise build and send the refused
+   * write on every cycle.
    */
-  readonly #terminalRefusals = new Map<string, TerminalRefusal>();
+  readonly #refusedAdoptions = new Map<string, RefusedAdoption>();
 
   /**
    * How many memory sessions have been replaced, so that a refusal received
@@ -537,7 +547,7 @@ export class SourceReconciler {
     this.#fabricFollowers.clear();
     this.#cancelSessionReplaced?.();
     this.#systemFollowers.clear();
-    this.#terminalRefusals.clear();
+    this.#refusedAdoptions.clear();
     await this.idle();
   }
 
@@ -593,8 +603,8 @@ export class SourceReconciler {
    */
   #followSystemSources(space: MemorySpace): void {
     this.#sessionsReplaced++;
-    for (const [key, refused] of [...this.#terminalRefusals]) {
-      if (refused.space === space) this.#terminalRefusals.delete(key);
+    for (const [key, refused] of [...this.#refusedAdoptions]) {
+      if (refused.space === space) this.#refusedAdoptions.delete(key);
     }
     for (const follower of [...this.#systemFollowers.values()]) {
       if (follower.space === space) this.#reconcileFromSourceEvent(follower);
@@ -1398,9 +1408,9 @@ export class SourceReconciler {
     }, sourceUpdate);
     if (failure === undefined) return "updated";
     state.detail = failure.detail;
-    if (!failure.terminal) return "unavailable";
+    if (!failure.lasting) return "unavailable";
     if (sessionsReplaced !== this.#sessionsReplaced) return "rejected";
-    this.#terminalRefusals.set(this.#followerKey(resultCell), {
+    this.#refusedAdoptions.set(this.#followerKey(resultCell), {
       space: state.space,
       offered: candidateRef,
       snapshot: state.snapshot,
@@ -1423,7 +1433,7 @@ export class SourceReconciler {
     offered: { identity: string; symbol: string },
   ): boolean {
     const key = this.#followerKey(resultCell);
-    const refused = this.#terminalRefusals.get(key);
+    const refused = this.#refusedAdoptions.get(key);
     if (refused === undefined) return false;
     if (
       refused.offered.identity !== offered.identity ||
@@ -1431,7 +1441,7 @@ export class SourceReconciler {
       !samePieceSourceSnapshot(refused.snapshot, state.snapshot) ||
       !refused.argumentUnchanged(resultCell)
     ) {
-      this.#terminalRefusals.delete(key);
+      this.#refusedAdoptions.delete(key);
       return false;
     }
     state.offered = refused.offered;
@@ -1583,13 +1593,14 @@ export class SourceReconciler {
       { sourceUpdate },
     );
     if (signal?.aborted) {
-      return { detail: "the reconciliation was stopped", terminal: false };
+      return { detail: "the reconciliation was stopped", lasting: false };
     }
     if (result.error) {
       const { name, message } = result.error;
-      const terminal = isLastingRejection(result.error);
+      const lasting = isOversizedRejection(result.error) ||
+        isEnvelopeStabilityRefusal(result.error);
       logger.warn("reconcile-commit-failed", () => [
-        terminal
+        lasting
           ? "the store refused a source reconciliation's write for good"
           : "source reconciliation could not commit",
         state.space,
@@ -1603,11 +1614,11 @@ export class SourceReconciler {
         resultCell.sourceURI,
         result.error,
       ]);
-      return { detail: reconciliationDetail(result.error), terminal };
+      return { detail: reconciliationDetail(result.error), lasting };
     }
     return result.ok === true ? undefined : {
       detail: "the piece changed while its write was being prepared",
-      terminal: false,
+      lasting: false,
     };
   }
 

@@ -1,3 +1,5 @@
+import { isEnvelopeStabilityReason } from "../cfc/envelope-stability-reason.ts";
+
 /**
  * Permanent rejections are the commit-time precondition failures the engine
  * reports as `PreconditionFailedError` (spec scheduler-v2 §7.6): a failed
@@ -89,17 +91,30 @@ export function isTerminalRejection(
 }
 
 /**
- * A terminal rejection that stands beyond the attempt that received it: every
- * {@link isTerminalRejection} but a `SpeculativeBasisError`. That one refuses
- * a read basis naming a speculative layer of the committing process, which
- * settles, so the same write built again from a later read can commit. A
- * caller that remembers a refusal from one attempt to the next, as the source
- * reconciler does, asks this rather than {@link isTerminalRejection}.
+ * The store refused the commit for standing for more than it admits in one
+ * message. The size grows with what the write carries, so the same write is
+ * refused again while that and the store's limit stay as they are.
  */
-export function isLastingRejection(
+export function isOversizedRejection(
   error: { name?: string } | undefined | null,
 ): boolean {
-  return isTerminalRejection(error) && error?.name !== "SpeculativeBasisError";
+  return error?.name === "MessageTooLargeError";
+}
+
+/**
+ * The CFC boundary refused the commit as a verdict because its schema changes
+ * or weakens a claim a stored envelope fixes (`cfc/envelope-stability-reason.ts`),
+ * and for nothing else. The stored envelope and the write's schema decide it,
+ * and no grant moves either, so the same write is refused again while both
+ * stay as they are. Read off the refusal's `reasons`, where prepare puts the
+ * class at the front of each reason it records for one.
+ */
+export function isEnvelopeStabilityRefusal(
+  error: { name?: string; reasons?: readonly string[] } | undefined | null,
+): boolean {
+  const reasons = error?.reasons ?? [];
+  return error?.name === "CfcCommitRefusalError" && reasons.length > 0 &&
+    reasons.every(isEnvelopeStabilityReason);
 }
 
 /**

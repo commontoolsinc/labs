@@ -1366,22 +1366,24 @@ its origin advertised, one whose setup the piece's data refused, one whose
 adopting write was refused for good. The first may fix itself and the rest will
 not, so they do not share a state on the panel.
 
-A write refused for good carries a terminal rejection: a verdict on the write
-itself, from the store or from flow enforcement, which the same write receives
-again however often it is sent. The runtime that received it therefore does not
-build that write again while nothing it was built from has changed — the
-candidate the origin offers, the piece's source state, and the stored argument
-its setup restages. Any of those changing puts the candidate up for adoption
-again. So does the space's memory session being replaced, as a host restart
-replaces it, since what the store admits may have changed with it, and so does
-the runtime starting again. What the runtime remembers is its own: a terminal
-rejection is the verdict of the runtime that built the write and of the store
-it went to, and a later build, or a runtime under different enforcement, may
-build a write that is admitted. What the piece records is the refusal, which
-every runtime reports the same way. A refusal that is not for good — a
-conflict, a dropped connection, a read basis naming a speculative layer of the
-runtime's own, which settles — is proposed again on the next reconciliation,
-and an explicit ask builds and sends the write whatever was refused before.
+A write is refused for good when the store refuses it as too large to admit,
+or when a stored envelope refuses its schema for changing or weakening a claim
+the envelope fixes. The same write receives either refusal again however often
+it is sent, and no grant lifts either. The runtime that received one therefore
+does not build that write again while nothing it was built from has changed —
+the candidate the origin offers, the piece's source state, and the stored
+argument its setup restages. Any of those changing puts the candidate up for
+adoption again. So does the space's memory session being replaced, as a host
+restart replaces it, since what the store admits may have changed with it, and
+so does the runtime starting again. The piece stopping does not: a host that
+keeps a piece running stops and starts it. What the runtime remembers is its
+own: such a refusal is the verdict of the runtime that built the write and of
+the store it went to, and a later build, or a runtime under different
+enforcement, may build a write that is admitted. What the piece records is the
+refusal, which every runtime reports the same way. Every other failure — a
+conflict, a dropped connection, a flow-control or row-label refusal that a
+grant can lift — is proposed again on the next reconciliation, and an explicit
+ask builds and sends the write whatever was refused before.
 
 Distinguishing these needs the outcome of the last reconciliation to outlive
 the reconciliation, so the panel can show it to a reader who opened the piece
@@ -1577,7 +1579,7 @@ rejected without offering confirmation.
 | Use a UI affordance to push a known source URL into an owned space | **Fabric URL affordance required** | `RuntimeClient.createPiece(URL)`, `fetchProgram` with `compileAndRun`, and the omnibox's `fetchAndRunPattern` fetch and run a program from an arbitrary URL. None of them records an origin, and an arbitrary endpoint is no longer one, so they are one-shot instantiation rather than lifecycle operations. Nothing pushes a fabric URL into an owned space. |
 | Follow an immutable fabric URL | **Immutable URL follow required** | Following one resolves the pinned identity, adopts its source once, and can then never report a move again. Nothing follows a fabric origin at load today, and such an origin stores no export selector, so an implementation has either to store one or to choose the pinned source's normal entry export. |
 | Load or create from an immutable fabric URL | **Immutable URL flow required** | The source cache and fabric resolver can load verified `cf:pattern:<identity>` source and honor a trailing pin on an entity-FID reference. No product operation normalizes that URL and export symbol into immutable piece origin metadata or appends the required revision. |
-| Automatically refresh a mutable URL-origin piece when loaded | **Partial** | Opening a piece resolves its origin and adopts the source it names, before the piece starts, for every piece and through one mechanism. A `system:` ref resolves through the toolshed's `?identity` route, so an unchanged pattern costs one conditional request and no source download, and one whose compiled artifact this space no longer holds still compiles from source. A rooted path from before that scheme is re-stamped as the ref naming the same file. A mutable fabric entity resolves through the pattern identity it currently runs, and is observed while the follower runs; a content-addressed or pinned fabric URL resolves once and then has nothing to report. A running piece following a `system:` ref is reconciled again when its space's memory session is replaced, which a host restart causes. An accepted update changes the pattern, active origin, and guarded revision history atomically, and the piece's stored argument is guarded across it. Reconciliation resolves the current source rather than the complete accepted-manifest comparison specified below; a refusal is neither visible nor overridable; a failed resolution reaches no UI; and a piece nobody opens is never reconciled. |
+| Automatically refresh a mutable URL-origin piece when loaded | **Partial** | Opening a piece resolves its origin and adopts the source it names, before the piece starts, for every piece and through one mechanism. A `system:` ref resolves through the toolshed's `?identity` route, so an unchanged pattern costs one conditional request and no source download, and one whose compiled artifact this space no longer holds still compiles from source. A rooted path from before that scheme is re-stamped as the ref naming the same file. A mutable fabric entity resolves through the pattern identity it currently runs, and is observed while the follower runs; a content-addressed or pinned fabric URL resolves once and then has nothing to report. A running piece following a `system:` ref is reconciled again when its space's memory session is replaced, which a host restart causes. An adoption refused for good — by the store as too large, or by a stored envelope whose claim its schema changes or weakens — is recorded as a refusal and not prepared again in the same process while the candidate, the piece's source state, and its stored argument stay as they were; that lasts until the space's memory session is replaced. An accepted update changes the pattern, active origin, and guarded revision history atomically, and the piece's stored argument is guarded across it. Reconciliation resolves the current source rather than the complete accepted-manifest comparison specified below; a refusal is neither visible nor overridable; a failed resolution reaches no UI; and a piece nobody opens is never reconciled. |
 | Retain authored declaration files | **Implemented** | An authored declaration file is a module like any other. `computeModuleHashes` follows type-import edges and resolves them to a `.d.ts`, so editing one changes its importer's module identity and the entry identity. `persistableSourceFiles` keeps every rooted `.d.ts`, and both engine compile paths build the persisted module set from that same list, so a declaration-only change cannot reuse stale compiled bytes. Ambient, non-rooted declaration files are dropped, which is what distinguishes an authored declaration from the type environment the runtime injects. |
 | Publish explicit source subpaths | **Exports-map support required** | The `cf:` grammar parses a subpath. Compile resolution and the shared pin/update chase reject it before entry resolution, so current tooling cannot create a misleading subpath pin. There is no immutable authored-program manifest or exact public exports map. Entry imports continue to pin the entry identity. |
 | Record and propagate a runtime rebuild | **Provider and lifecycle required** | `computeModuleHashes` accepts `runtimeFingerprint`, and its unit test proves that changing the fingerprint changes a module with an external dependency. Production pattern compilation and source verification use the empty default. There is no authoritative executable-fingerprint provider. Source documents do not retain a non-empty identity fingerprint. The partial revision log has no runtime-neutral program digest, runtime-rebuild cause, owner-published propagation contract, or cross-runtime revert handling. |

@@ -487,8 +487,8 @@ describe("source-reconciler-protected-argument", () => {
         current,
         prime,
         ({ outcome, room, recorded, previousIdentity }) => {
-          expect(outcome).toBe("rejected");
-          expect(recorded?.outcome).toBe("refused");
+          expect(outcome).toBe("unavailable");
+          expect(recorded?.outcome).toBe("unreachable");
           expect(recorded?.detail).toContain(
             "writeAuthorizedBy requires a trusted verified binding identity " +
               "at /title",
@@ -542,8 +542,8 @@ describe("source-reconciler-protected-argument", () => {
         current,
         prime,
         ({ outcome, room, recorded, previousIdentity }) => {
-          expect(outcome).toBe("rejected");
-          expect(recorded?.outcome).toBe("refused");
+          expect(outcome).toBe("unavailable");
+          expect(recorded?.outcome).toBe("unreachable");
           expect(recorded?.detail).toContain(
             "missing trusted-event policy input for",
           );
@@ -602,8 +602,8 @@ describe("source-reconciler-protected-argument", () => {
         current,
         prime,
         ({ outcome, room, recorded, previousIdentity }) => {
-          expect(outcome).toBe("rejected");
-          expect(recorded?.outcome).toBe("refused");
+          expect(outcome).toBe("unavailable");
+          expect(recorded?.outcome).toBe("unreachable");
           expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
           expect(room.get().roster).toEqual({ items: ["ada"] });
         },
@@ -746,8 +746,8 @@ interface Input {
         current,
         prime,
         ({ outcome, room, recorded, previousIdentity }) => {
-          expect(outcome).toBe("rejected");
-          expect(recorded?.outcome).toBe("refused");
+          expect(outcome).toBe("unavailable");
+          expect(recorded?.outcome).toBe("unreachable");
           expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
           expect(room.get().roster).toEqual({ items: ["ada"] });
         },
@@ -768,8 +768,8 @@ interface Input {
         current,
         prime,
         ({ outcome, room, recorded, previousIdentity }) => {
-          expect(outcome).toBe("rejected");
-          expect(recorded?.outcome).toBe("refused");
+          expect(outcome).toBe("unavailable");
+          expect(recorded?.outcome).toBe("unreachable");
           expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
           expect(room.get().notes).toEqual([{ text: "hello", tags: ["new"] }]);
         },
@@ -968,8 +968,8 @@ interface Input {
         withList('[{ title: "first" }]'),
         prime,
         ({ outcome, room, recorded, previousIdentity }) => {
-          expect(outcome).toBe("rejected");
-          expect(recorded?.outcome).toBe("refused");
+          expect(outcome).toBe("unavailable");
+          expect(recorded?.outcome).toBe("unreachable");
           expect(recorded?.detail).toContain(
             "writeAuthorizedBy requires a trusted verified binding identity " +
               "at /titles/*",
@@ -996,8 +996,8 @@ interface Input {
         current,
         prime,
         ({ outcome, room, recorded, previousIdentity }) => {
-          expect(outcome).toBe("rejected");
-          expect(recorded?.outcome).toBe("refused");
+          expect(outcome).toBe("unavailable");
+          expect(recorded?.outcome).toBe("unreachable");
           expect(recorded?.detail).toContain("at /about");
           expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
           expect(room.get().about).toEqual({ title: "lunch" });
@@ -1019,8 +1019,8 @@ interface Input {
         current,
         prime,
         ({ outcome, room, recorded, previousIdentity }) => {
-          expect(outcome).toBe("rejected");
-          expect(recorded?.outcome).toBe("refused");
+          expect(outcome).toBe("unavailable");
+          expect(recorded?.outcome).toBe("unreachable");
           expect(recorded?.detail).toContain("at /about");
           expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
           expect(room.get().about).toEqual({ title: "lunch" });
@@ -1058,8 +1058,8 @@ interface Input {
         prime,
         ({ outcome, room, recorded, previousIdentity }) => {
           expect(room.get().label).toBeUndefined();
-          expect(outcome).toBe("rejected");
-          expect(recorded?.outcome).toBe("refused");
+          expect(outcome).toBe("unavailable");
+          expect(recorded?.outcome).toBe("unreachable");
           expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
           expect(room.get().about).toEqual({ title: "lunch" });
         },
@@ -1085,8 +1085,8 @@ interface Input {
           expect(stored.titles).toBeUndefined();
         },
         ({ outcome, room, recorded, previousIdentity }) => {
-          expect(outcome).toBe("rejected");
-          expect(recorded?.outcome).toBe("refused");
+          expect(outcome).toBe("unavailable");
+          expect(recorded?.outcome).toBe("unreachable");
           expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
           const stored = room.getArgumentCell<Room>()!.getRaw() as Room;
           expect(Object.hasOwn(stored, "titles")).toBe(true);
@@ -1113,8 +1113,8 @@ interface Input {
           expect(room.get().titles).toEqual([{ title: "tea" }]);
         },
         ({ outcome, room, recorded, previousIdentity }) => {
-          expect(outcome).toBe("rejected");
-          expect(recorded?.outcome).toBe("refused");
+          expect(outcome).toBe("unavailable");
+          expect(recorded?.outcome).toBe("unreachable");
           expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
           expect(room.get().titles).toEqual([{ title: "tea" }]);
         },

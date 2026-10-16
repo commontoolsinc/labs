@@ -146,6 +146,10 @@ import {
 import { ConsumedLabelIndex } from "./consumed-label-index.ts";
 import { collectDeclaredMonotonicityViolations } from "./declared-monotonicity.ts";
 import {
+  CfcEnvelopeStabilityError,
+  envelopeStabilityReason,
+} from "./envelope-stability-reason.ts";
+import {
   admitsRulesOfKind,
   type CfcGrantConsumptionContext,
   evaluateExchangeRules,
@@ -207,7 +211,6 @@ import { createTxCfcModulePolicyResolver } from "./policy-resolver.ts";
 import { cfcSchemaEntries } from "./schema-label-view.ts";
 import { sinkClassOf } from "./sink-inventory.ts";
 import {
-  CfcEnvelopeStabilityError,
   type CfcSchemaMergeIssue,
   cfcSchemaMergeIssue,
   cfcSchemaPoliciesEqual,
@@ -10223,8 +10226,8 @@ const mergeStoredCfcEnvelope = (
 /**
  * The reason the persist loop records when a candidate changes or weakens an
  * `ifc` claim a document's stored envelope fixes (`CfcEnvelopeStabilityError`),
- * tagged a verdict where the document whose envelope it was compared against
- * is one this transaction holds.
+ * marked as that class of refusal and tagged a verdict where the document
+ * whose envelope it was compared against is one this transaction holds.
  *
  * The merge runs only over an envelope `loadStoredCfcEnvelope` loaded whole:
  * the metadata read from the document, and every schema document it names,
@@ -10254,7 +10257,7 @@ const storedClaimVerdict = (
       meta: FLOOR_EVIDENCE_META,
     }).ok === undefined
     ? message
-    : verdictReason(message);
+    : verdictReason(envelopeStabilityReason(message));
 
 /**
  * Would a write under `candidate` commit over this stored envelope?

@@ -65,7 +65,8 @@ export class Runner {
     // directory the consuming task runs in; the directory's own name is
     // the fallback for a package without one. A file that fails to import
     // produces no per-test results and so records nothing; the run's
-    // failure stays visible in CI.
+    // failure stays visible in CI. A file inside no repository is no test
+    // of one and records nothing either.
     const recordsFragment = FragmentWriter.openForRun();
     const scope = await packageScope();
 
@@ -98,6 +99,7 @@ export class Runner {
 
         const testCount = await this.browser.getTestCount();
         this.reporter.onFileStart(tsTestPath, testCount);
+        const file = repositoryRelativePath(tsTestPath);
 
         const order = shuffled(
           Array.from({ length: testCount }, (_, index) => index),
@@ -110,12 +112,13 @@ export class Runner {
           }
           results.tests.push(testResult);
           this.reporter.onTestCompleted(testResult);
+          if (file === undefined) continue;
           recordsFragment?.append({
             line: "record",
             test: { k: "browser", s: scope, n: testResult.name },
             outcome: testResult.error === null ? "pass" : "fail",
             durationMs: Math.round(testResult.duration),
-            file: repositoryRelativePath(tsTestPath),
+            file,
           });
         }
         this.reporter.onFileEnd(tsTestPath);
@@ -127,17 +130,18 @@ export class Runner {
         (total, file) => total + file.tests.length,
         0,
       );
-      if (ran === registered) {
-        markWholeRun({
-          kind: "browser",
-          scope,
-          tests: Object.fromEntries(
-            this.results.map((file) => [
-              repositoryRelativePath(file.fileName),
-              file.tests.map((test) => test.name),
-            ]),
-          ),
-        });
+      // A file inside no repository is no test of one, so it has no place
+      // in the mark either, and a run of only such files leaves none.
+      const tests = Object.fromEntries(
+        this.results.flatMap((file) => {
+          const path = repositoryRelativePath(file.fileName);
+          return path === undefined
+            ? []
+            : [[path, file.tests.map((test) => test.name)]];
+        }),
+      );
+      if (ran === registered && Object.keys(tests).length > 0) {
+        markWholeRun({ kind: "browser", scope, tests });
       }
 
       const summary = summarize(this.results);
