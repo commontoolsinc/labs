@@ -174,19 +174,27 @@ Exit: a schema is recomposed once per reference per registry epoch.
       295, and all sixty rows instantiated inside their list's own run
       where none had been. The record is
       [`../history/development/performance/2026-10-13-fabrichat-row-name-syncs.md`](../history/development/performance/2026-10-13-fabrichat-row-name-syncs.md).
-- [ ] Of the four name-syncs a room's reload still pays, three are its
-      nested instances' own, and two of those deliver nothing: the room
-      core and the add-member surface are each held on a cell no name-sync
-      can deliver. One kind is a cell that is not a derived one and holds
-      no value, such as the one a `wish` writes to. The other is the
-      session's own instance of a session-scoped cell, which no store holds
-      before the session writes it. The room core's name-sync plans the
-      whole tree a second time. The replica separates a document it has
-      examined from one it has not
-      (`IStorageProvider.unexaminedAbsences`), and a gate that asked it
-      would hold only for a document a name-sync could deliver. A hold's
-      preparation also seeds a scoped default that is owed, which stays a
-      reason of its own to hold.
+- [x] A named family's start is held on an owned cell that is absent
+      only while the replica has not examined its document
+      (`IStorageProvider.unexaminedAbsences`): the pre-sync asked the store
+      for every cell the family owns, so an absence it was told of is what
+      the store holds, and the session's own instance of a session-scoped
+      cell, which no store holds before the session writes it, counts as
+      examined without asking. A cell owed a default at a narrower scope
+      still holds the run, since the hold's preparation is what seeds it
+      (`ownedCellOwesSeed`). Before this, a thirty-message room's load
+      paid eleven name-syncs, nine of them holds of named families on such
+      cells: the room core, the add-member surface and the manager core on
+      session-scoped cells, four nested instances on the valueless cell a
+      `wish` writes to; the room core's name-sync planned the whole room a
+      second time before the room could render, and half of the 3,976
+      list-child syncs a load paid were repeats. After: two name-syncs,
+      1,983 list-child syncs, 299 cell syncs where there were 776, and the
+      pre-sync's share of the worker's CPU from 17.6% to under 4% (a tree
+      whose rows own a session-scoped cell resumes with one name-sync,
+      `packages/runner/test/resume-presync-plan-count.test.ts`). The
+      record is
+      [`../history/development/performance/2026-10-16-fabrichat-room-cold-load-phases.md`](../history/development/performance/2026-10-16-fabrichat-room-cold-load-phases.md).
 - [ ] An instance the pre-sync did not name is still held on a derived
       cell that holds no value: one a caller's `run()` reaches, or one
       whose pre-sync round had a sync that failed. Taking the record there
