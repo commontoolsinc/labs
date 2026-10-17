@@ -713,6 +713,25 @@ describe("cfc schema sanitization", () => {
     ).toContain("value is above maximum");
   });
 
+  it("matches a `bigint` to a whole-number `enum` or `const` member by value", () => {
+    // The schema generator writes a bigint literal type as a number member,
+    // and a stored bigint is that member's integer.
+    expect(validateSchemaValue({ type: "integer", enum: [41, 42] }, 42n))
+      .toBeUndefined();
+    expect(validateSchemaValue({ const: 42 }, 42n)).toBeUndefined();
+    expect(validateSchemaValue({ type: "integer", enum: [41] }, 42n))
+      .toContain("value is not in enum");
+    expect(validateSchemaValue({ const: 42.5 }, 42n))
+      .toContain("value does not match const");
+    expect(validateSchemaValue({ const: "42" }, 42n))
+      .toContain("value does not match const");
+    // A member is the number it is: one past the number's precision does not
+    // stand for its neighbors.
+    expect(validateSchemaValue({ const: 2 ** 53 }, 2n ** 53n + 1n))
+      .toContain("value does not match const");
+    expect(validateSchemaValue({ const: 2 ** 53 }, 2n ** 53n)).toBeUndefined();
+  });
+
   it("checks an object schema's required keys against a FabricPrimitive's accessors", () => {
     const bytes = new FabricBytes(new Uint8Array([1, 2]));
 

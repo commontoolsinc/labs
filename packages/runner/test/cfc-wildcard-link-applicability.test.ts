@@ -207,6 +207,15 @@ describe("CFC wildcard policy applicability on links below the policy's path", (
     expect(wildcardPolicyMatchesValue(tx, target, number, 3n)).toBe(true);
     expect(wildcardPolicyMatchesValue(tx, target, string, 3n)).toBe(false);
   });
+
+  it("applies a whole-number `const` or `enum` condition to the `bigint` of that value", () => {
+    const three = { const: 3 } as const satisfies JSONSchema;
+    const small = { enum: [1, 2, 3] } as const satisfies JSONSchema;
+    expect(wildcardPolicyMatchesValue(tx, target, three, 3n)).toBe(true);
+    expect(wildcardPolicyMatchesValue(tx, target, three, 4n)).toBe(false);
+    expect(wildcardPolicyMatchesValue(tx, target, small, 2n)).toBe(true);
+    expect(wildcardPolicyMatchesValue(tx, target, small, 5n)).toBe(false);
+  });
 });
 
 describe("CFC wildcard policy value conditions on `FabricPrimitive` types", () => {
