@@ -993,6 +993,88 @@ describe("opening a space root", () => {
     expect(getPatternIdentityRef(after)?.identity).toBe(pinned);
   });
 
+  it("keeps the root when its host's identity route answers with an error", async () => {
+    // The heal cannot read when the official source was released, and an
+    // offer with no time is earlier than a pinned release that has one.
+
+    const { pinned } = await rootAheadOfThisRuntime(
+      "2026-10-16T15:03:00Z",
+      "2026-10-16T14:03:00Z",
+    );
+    stub.setIdentityResponse("unavailable", 503);
+
+    let thrown: unknown;
+    await controller.ensureDefaultPattern().catch((error) => (thrown = error));
+    await runtime.idle();
+
+    expect(String(thrown)).toContain("would move the root back");
+    const after = (await controller.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)?.identity).toBe(pinned);
+  });
+
+  it("keeps the root when its host's identity route cannot be reached", async () => {
+    const { pinned } = await rootAheadOfThisRuntime(
+      "2026-10-16T15:03:00Z",
+      "2026-10-16T14:03:00Z",
+    );
+    stub.failIdentity(true);
+
+    let thrown: unknown;
+    await controller.ensureDefaultPattern().catch((error) => (thrown = error));
+    await runtime.idle();
+
+    expect(String(thrown)).toContain("would move the root back");
+    const after = (await controller.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)?.identity).toBe(pinned);
+  });
+
+  it("keeps the root when its release is confirmed later while the heal prepares", async () => {
+    // The pinned release records no time, so before the swap nothing orders
+    // the official source against it. Another runtime then confirms it at a
+    // later release than the official one, and the swap's own transaction
+    // reads that order and declines.
+
+    const { pinned } = await rootAheadOfThisRuntime(
+      undefined,
+      "2026-10-16T14:03:00Z",
+    );
+    const root = (await controller.getDefaultPattern(false))!;
+    const manager = runtime.patternManager;
+    const original = manager.getPatternSourceProgramByIdentity.bind(manager);
+    let confirmed = false;
+    manager.getPatternSourceProgramByIdentity = (async (
+      ...args: Parameters<typeof original>
+    ) => {
+      if (!confirmed && args[0] === pinned) {
+        confirmed = true;
+        const { error } = await runtime.editWithRetry((tx) => {
+          const candidate = root.withTx(tx);
+          const history = candidate.getMetaRaw(
+            "pieceSourceHistory",
+          ) as FabricValue[];
+          const latest = history.at(-1) as Record<string, FabricValue>;
+          candidate.setMetaRaw("pieceSourceHistory", [
+            ...history.slice(0, -1),
+            { ...latest, releasedAt: Date.parse("2026-10-16T15:03:00Z") },
+          ], rawMetaWriteAuthorization);
+        });
+        expect(error).toBeUndefined();
+      }
+      return await original(...args);
+    }) as typeof manager.getPatternSourceProgramByIdentity;
+    try {
+      await controller.getDefaultPattern({ reconcile: false, start: true })
+        .catch(() => undefined);
+    } finally {
+      manager.getPatternSourceProgramByIdentity = original;
+    }
+    await runtime.idle();
+
+    expect(confirmed).toBe(true);
+    const after = (await controller.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)?.identity).toBe(pinned);
+  });
+
   it("rolls the root back to the source its history records moving from when its host offers it at a later release", async () => {
     // A deploy that rolls back states a later release time, which orders the
     // earlier source after the one the root holds.
