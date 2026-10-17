@@ -36,6 +36,7 @@
 //   and no batch is ever built for the failed space.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { stub } from "@std/testing/mock";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
@@ -79,6 +80,7 @@ import {
   stageSpaceAccessChanges,
   stampWaveRunContext,
   WaveAccumulator,
+  type WaveCommitOutcome,
   type WaveCommitRejection,
   type WaveCommitSink,
   waveRunContextOf,
@@ -1044,6 +1046,141 @@ describe("stage D seal-into-wave", () => {
     ).toBe(0);
     const stored = Engine.readState(engine, { id: xLink.id });
     expect(stored?.document).toEqual({ value: { value: 99 } });
+  });
+
+  it("warns for each dropped reader with the chain of withdrawn writes it read, back to the superseded write", async () => {
+    const lease = liveLease();
+    const wave = newWave({ lease });
+    runtime.installSealDestination(wave);
+
+    const x = runtime.getCell<{ value: number }>(space, "chain-x", undefined);
+    const z = runtime.getCell<{ value: number }>(space, "chain-z", undefined);
+    const w = runtime.getCell<{ value: number }>(space, "chain-w", undefined);
+
+    const tx1 = runtime.edit();
+    stampWaveRunContext(tx1, { actionId: "derive-x", kind: "derivation" });
+    x.withTx(tx1).set({ value: 10 });
+    expect((await tx1.commit().settled).error).toBeUndefined();
+
+    const tx2 = runtime.edit();
+    stampWaveRunContext(tx2, { actionId: "derive-z", kind: "derivation" });
+    z.withTx(tx2).set({ value: x.withTx(tx2).get()!.value + 1 });
+    expect((await tx2.commit().settled).error).toBeUndefined();
+
+    const tx3 = runtime.edit();
+    stampWaveRunContext(tx3, { actionId: "derive-w", kind: "derivation" });
+    w.withTx(tx3).set({ value: z.withTx(tx3).get()!.value + 1 });
+    expect((await tx3.commit().settled).error).toBeUndefined();
+
+    const xId = x.getAsNormalizedFullLink().id;
+    const zId = z.getAsNormalizedFullLink().id;
+    Engine.applyCommit(engine, {
+      sessionId: "rival-session",
+      principal: "user:rival",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: xId, value: { value: { value: 99 } } }],
+      },
+    });
+
+    runtime.clearSealDestination();
+    const warnings: string[] = [];
+    const warn = stub(console, "warn", (...args: unknown[]) => {
+      warnings.push(args.map(String).join(" "));
+    });
+    try {
+      await wave.commitWave(newSink());
+      await wave.settled();
+    } finally {
+      warn.restore();
+    }
+
+    const superseded = `written by action=derive-x kind=derivation ` +
+      `eventId=<none>, which had that write superseded by a concurrent ` +
+      `commit.`;
+    const dropped = warnings.filter((line) =>
+      line.includes("contribution-dropped")
+    );
+    expect(dropped).toHaveLength(2);
+    expect(dropped[0]).toContain(
+      `action=derive-z kind=derivation eventId=<none>: pure derivation ` +
+        `dropped`,
+    );
+    expect(dropped[0]).toContain(`It read \`${xId} space\`, ${superseded}`);
+    expect(dropped[1]).toContain(
+      `action=derive-w kind=derivation eventId=<none>: pure derivation ` +
+        `dropped`,
+    );
+    expect(dropped[1]).toContain(
+      `It read \`${zId} space\`, written by action=derive-z ` +
+        `kind=derivation eventId=<none>, which was dropped. ` +
+        `That run read \`${xId} space\`, ${superseded}`,
+    );
+  });
+
+  it("warns for a reader of a requeued event's write with that event's id", async () => {
+    const lease = liveLease();
+    const wave = newWave({ lease });
+    runtime.installSealDestination(wave);
+
+    const y = runtime.getCell<{ value: number }>(space, "chain-y", undefined);
+    const q = runtime.getCell<{ value: number }>(space, "chain-q", undefined);
+
+    const handlerTx = runtime.edit();
+    stampWaveRunContext(handlerTx, {
+      actionId: "handle-vote",
+      kind: "event-handler",
+      eventId: "e1",
+      acting: { user: "did:key:alice", session: "sess-1" },
+    });
+    y.withTx(handlerTx).set({ value: 1 });
+    expect((await handlerTx.commit().settled).error).toBeUndefined();
+
+    const readerTx = runtime.edit();
+    stampWaveRunContext(readerTx, { actionId: "derive-q", kind: "derivation" });
+    q.withTx(readerTx).set({ value: y.withTx(readerTx).get()!.value + 1 });
+    expect((await readerTx.commit().settled).error).toBeUndefined();
+
+    // A whole-doc set never commutes with the handler's, so the handler's
+    // consequence requeues rather than rebasing.
+    const yId = y.getAsNormalizedFullLink().id;
+    Engine.applyCommit(engine, {
+      sessionId: "rival-session",
+      principal: "user:rival",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: yId, value: { value: { value: 9 } } }],
+      },
+    });
+
+    runtime.clearSealDestination();
+    const warnings: string[] = [];
+    const warn = stub(console, "warn", (...args: unknown[]) => {
+      warnings.push(args.map(String).join(" "));
+    });
+    let outcome: WaveCommitOutcome;
+    try {
+      outcome = await wave.commitWave(newSink());
+      await wave.settled();
+    } finally {
+      warn.restore();
+    }
+
+    expect(outcome.requeuedEventIds).toEqual(["e1"]);
+    const dropped = warnings.filter((line) =>
+      line.includes("contribution-dropped")
+    );
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]).toContain(
+      `action=derive-q kind=derivation eventId=<none>: pure derivation ` +
+        `dropped`,
+    );
+    expect(dropped[0]).toContain(
+      `It read \`${yId} space\`, written by action=handle-vote ` +
+        `kind=event-handler eventId=e1, which was requeued.`,
+    );
   });
 
   it("drops a derived write over an intrusion the sealing replica had not taken, though the wave's basis covers it — never a blind clobber", async () => {
@@ -3954,6 +4091,110 @@ describe("stage D seal-into-wave", () => {
     expect(
       Engine.selectDocHead(engine, { id: outLink.id, scopeKey: "space" }),
     ).toBe(0);
+  });
+
+  it("warns for a read-only-space reader that sealed before the withdrawn writer without claiming it read that write", async () => {
+    const foreignSigner = await Identity.fromPassphrase(
+      "wave read-only space, reader first",
+    );
+    const foreign = foreignSigner.did() as MemorySpace;
+    const foreignEngine = await server.engineForSpace(foreign);
+    const lease = liveLease();
+    const engines = new Map<MemorySpace, Engine.Engine>([
+      [space, engine],
+      [foreign, foreignEngine],
+    ]);
+    const wave = newWave({ lease });
+    runtime.installSealDestination(wave);
+
+    const foreignDoc = runtime.getCell<{ value: number }>(
+      foreign,
+      "wave-ro-first-foreign",
+      undefined,
+    );
+    const homeIn = runtime.getCell<{ value: number }>(
+      space,
+      "wave-ro-first-home-in",
+      undefined,
+    );
+    const homeOut = runtime.getCell<{ value: number }>(
+      space,
+      "wave-ro-first-home-out",
+      undefined,
+    );
+
+    // The reader seals first: the foreign doc holds nothing yet.
+    const readerTx = runtime.edit();
+    stampWaveRunContext(readerTx, {
+      actionId: "derive-from-foreign",
+      kind: "derivation",
+    });
+    const seen = foreignDoc.withTx(readerTx).get();
+    expect(seen).toBeUndefined();
+    homeOut.withTx(readerTx).set({ value: 1 });
+    expect((await readerTx.commit().settled).error).toBeUndefined();
+
+    const writerTx = runtime.edit();
+    stampWaveRunContext(writerTx, {
+      actionId: "write-foreign",
+      kind: "event-handler",
+      eventId: "e-fw",
+      acting: { user: "did:key:alice", session: "sess-1" },
+      capabilityRef: "cap:test-grant",
+    });
+    writerTx.enableMultiSpaceWrites?.([foreign, space]);
+    foreignDoc.withTx(writerTx).set({ value: 5 });
+    homeIn.withTx(writerTx).set({ value: 5 });
+    expect((await writerTx.commit().settled).error).toBeUndefined();
+
+    // A whole-doc set never commutes, so the writer's home write requeues
+    // it, and its foreign write withdraws with it.
+    Engine.applyCommit(engine, {
+      sessionId: "rival-session",
+      principal: "user:rival",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: homeIn.getAsNormalizedFullLink().id,
+          value: { value: { value: 99 } },
+        }],
+      },
+    });
+
+    runtime.clearSealDestination();
+    const sink = new EngineWaveCommitSink({
+      engineFor: (s) => engines.get(s)!,
+      sessionId: executionLeaseHolder(`service:${space}`),
+    });
+    const warnings: string[] = [];
+    const warn = stub(console, "warn", (...args: unknown[]) => {
+      warnings.push(args.map(String).join(" "));
+    });
+    let outcome: WaveCommitOutcome;
+    try {
+      outcome = await wave.commitWave(sink);
+      await wave.settled();
+    } finally {
+      warn.restore();
+    }
+
+    expect(outcome.dispositions).toEqual([
+      { kind: "dropped" },
+      { kind: "requeued" },
+    ]);
+    const dropped = warnings.filter((line) =>
+      line.includes("contribution-dropped")
+    );
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]).toContain(
+      `It read \`${foreignDoc.getAsNormalizedFullLink().id} space\` in ` +
+        `${foreign}, which action=write-foreign kind=event-handler ` +
+        `eventId=e-fw also wrote; that run was requeued. The match is by ` +
+        `doc alone, so the read may predate that write.`,
+    );
+    expect(dropped[0]).not.toContain("written by action=write-foreign");
   });
 
   it("stage F: a bookkeeping contribution rebases commuting patches and carries derivedThrough; a semantic conflict drops it whole (Q4's sanctioned internal stamp kind)", async () => {
