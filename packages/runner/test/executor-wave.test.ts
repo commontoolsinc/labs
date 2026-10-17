@@ -1983,7 +1983,7 @@ describe("stage D seal-into-wave", () => {
       docs: Awaited<ReturnType<typeof seedDocs>>,
       session: string,
       path: string,
-      value: unknown,
+      value: string | Draft,
     ) => {
       Engine.applyCommit(engine, {
         sessionId: session,
