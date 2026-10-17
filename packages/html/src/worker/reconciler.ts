@@ -1593,10 +1593,16 @@ export class WorkerReconciler {
     }
   }
 
-  /** Follow a link-valued child to the result cell whose UI is rendered. */
+  /**
+   * Follow a link-valued child to the result cell whose UI is rendered. The
+   * cell names its stored position rather than a snapshot of an inline
+   * element: what is read off it on each read of the child — its space, and
+   * whether its document is a pattern's result — is the stored document's,
+   * and a snapshot would cost a hash of the element per read.
+   */
   #resolveCellForBinding(cell: Cell<unknown>): Cell<unknown> {
     try {
-      return cell.resolveAsCell();
+      return cell.resolveAsCell({ inlineArrayItemsInPlace: true });
     } catch {
       return cell;
     }
