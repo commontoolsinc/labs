@@ -333,8 +333,12 @@ function cellResource(
       kind: "stream",
       ...metadata,
       methods: {
+        // Waits for the handler's run, so a guest that reads after `send()`
+        // resolves reads what the handler wrote, and hears of a refused run.
         send: async (value) => {
-          await cell.sendStrict(value as ClientCellValue);
+          await cell.sendStrict(value as ClientCellValue, {
+            awaitHandling: true,
+          });
         },
       },
     };
