@@ -23,6 +23,7 @@ describe("PiecesController.getPieceCell", () => {
       resolveAsCell: () => piece,
       asSchema: () => piece,
       // It carries no pattern pointer of its own, so get() resolves it.
+      getAsNormalizedFullLink: () => ({ path: [] }),
       getMetaRaw: () => undefined,
     };
     const runtime = {

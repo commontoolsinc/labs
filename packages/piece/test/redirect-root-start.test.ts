@@ -15,7 +15,7 @@ import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import { createSession, Identity } from "@commonfabric/identity";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
-import { isLink, Runtime } from "@commonfabric/runner";
+import { entityIdFrom, isLink, Runtime } from "@commonfabric/runner";
 import {
   EmulatedStorageManager,
   newLoopbackServer,
@@ -110,5 +110,19 @@ describe("redirect-root piece start", () => {
 
     expect(await opened.key("label").pull()).toBe("done");
     expect(entityRefToString(opened.entityId)).toBe(pieceId);
+  });
+  it("resolves a cell at a path inside the piece's document through its links", async () => {
+    // The document's pattern pointer makes only its root the piece. A cell
+    // at a path inside it is a slot, opened as whatever its links reach.
+    const slot = readerRuntime.getCellFromEntityId(
+      space,
+      entityIdFrom(pieceId),
+      ["label"],
+    );
+    await slot.sync();
+
+    const opened = await readerPieces.getPieceCell(slot, false);
+
+    expect(entityRefToString(opened.entityId)).not.toBe(pieceId);
   });
 });

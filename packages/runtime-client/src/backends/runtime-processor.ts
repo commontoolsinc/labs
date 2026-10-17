@@ -76,6 +76,7 @@ import {
   isCell,
   isCellResult,
   isLoopbackHostname,
+  isPieceRoot,
   markDurableReadTx,
   type NormalizedFullLink,
   normalizeSpaceHost,
@@ -3232,14 +3233,15 @@ export class RuntimeProcessor {
     // arrives, plus what the server resolves at the address itself when the
     // value stored there is a link.
     await requestedCell.sync();
-    // A document carrying a pattern pointer of its own is the piece, even
-    // when its value is a redirect, as it is for a pattern that returns a
-    // sub-pattern's result whole. Only a document that is no piece names one.
-    const isPiece = getPatternIdentityRef(requestedCell) !== undefined;
-    const redirect = isPiece ? undefined : parseLink(
-      requestedCell.getRaw(),
-      requestedCell.getAsNormalizedFullLink(),
-    );
+    // A piece's root is the piece, even when its value is a redirect, as it is
+    // for a pattern that returns a sub-pattern's result whole. Only a
+    // document that is no piece names one.
+    const redirect = isPieceRoot(this.#runtime, requestedCell)
+      ? undefined
+      : parseLink(
+        requestedCell.getRaw(),
+        requestedCell.getAsNormalizedFullLink(),
+      );
     if (redirect?.overwrite === "redirect") {
       const target = this.#runtime.getCellFromLink({
         ...redirect,

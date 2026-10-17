@@ -44,6 +44,7 @@ import {
   inSpaceRootCause,
   isCell,
   isLink,
+  isPieceRoot,
   isStoredArgumentSchemaRefusal,
   isStream,
   type JSONSchema,
@@ -1055,13 +1056,12 @@ export class PiecesController<T = unknown> {
     // made the canonical cell local, so this resolves over local links with no
     // further sync. Idempotent for a normal top-level piece.
     //
-    // A document carrying a pattern pointer of its own is the piece, whatever
+    // The root of a document carrying a pattern pointer is the piece, whatever
     // its value links to. A pattern returning a sub-pattern's result as its
     // whole result stores a redirect to the child's result at its root, and
     // following it would start the child alone and leave stale everything the
     // root derives for the child.
-    let piece = getPatternIdentityRef(addressed) !== undefined ||
-        this.runtime.runner.sessionPatternPointerFor(addressed) !== undefined
+    let piece = isPieceRoot(this.runtime, addressed)
       ? addressed
       : addressed.resolveAsCell();
 
