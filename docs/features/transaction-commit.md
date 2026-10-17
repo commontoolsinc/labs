@@ -71,9 +71,9 @@ None of these reads tells confirmed state from what the replica holds locally.
 read-only transaction that reads past any speculation overlay, so every
 document it consumes is read at one instant, and reports whether each of those
 documents is confirmed: watched and delivered, with no pending local write and
-no value the replica made up locally. A content-addressed schema document that
-the replica's own accepted commit stored counts as confirmed whether or not a
-frame delivered it: the server ships such a document with a document that
+no value the replica made up locally. A content-addressed schema document in
+space scope that the replica's own accepted commit stored counts as confirmed
+whether or not a frame delivered it: the server ships such a document with a document that
 refers to it, a replica is not sent its own change to a document it holds, and
 content under a content-addressed id cannot change. Every read counts, a
 `sample()` as much

@@ -14,8 +14,8 @@ export type ConfirmedRead<R> = {
   /**
    * Whether every document `read` consumed holds confirmed state in `space`:
    * watched and delivered, with no pending local write and no value the
-   * replica made up locally, or, for a content-addressed schema document,
-   * stored by the replica's own accepted commit
+   * replica made up locally, or, for a content-addressed schema document in
+   * space scope, stored by the replica's own accepted commit
    * (`ISpaceReplica.isConfirmedDocument`).
    */
   confirmed: boolean;

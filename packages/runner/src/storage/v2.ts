@@ -6021,8 +6021,9 @@ export class SpaceReplica
       // in a frame: the server ships it with a document that refers to it,
       // and does not send a replica its own change to a document it holds.
       // Content under a `cid:` id cannot change, so holding that content
-      // confirmed is confirmation.
-      return id.startsWith("cid:") &&
+      // confirmed is confirmation. In space scope only: a session-scoped
+      // write is promoted here without any server accepting it.
+      return id.startsWith("cid:") && normalizeCellScope(scope) === "space" &&
         holdsContentAddressedValue(record, id.slice("cid:".length));
     }
     // Past its delivered seq, the confirmed state is an own accepted write
