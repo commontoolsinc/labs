@@ -116,12 +116,17 @@ The row's derivations fall into three groups, and each group has a home at
 the room, keyed by the message's view key the way `places` already is.
 
 **Shared facts, one record for the room.** `isDeletedNow`, `isEdited`,
-`replies`, `threadLabel` and `threadLinkDisplay` read the message alone, or
-the message and `places`. They join the record `messageFacts()` already
-derives in one walk of the messages (`facts.places` is this shape today), as
-`facts.rows: Record<key, RowFacts>`. The view binds
+`replies` and `threadLabel` read the message alone, or the message and
+`places`. They join the record `messageFacts()` already derives in one walk
+of the messages (`facts.places` is this shape today), as
+`facts.rows: Record<key, RowFacts>`, with `threadLinkDisplay` carried as the
+main conversation's: shown for a message with replies. The view binds
 `facts.rows.key(key).key("threadLinkDisplay")` where the row today bound its
-own computed. The record carries booleans and display strings and no
+own computed. The row's `inThread` is a fact about the list and not the
+message, and it stays one: the thread's list computed is a second computed
+over `threadMessages`, and it gives the thread link, the reply and the thread
+controls a static `display: "none"` where the main conversation's computed
+binds the record. The record carries booleans and display strings and no
 message's text. The body stays bound to `message.key("body")` directly, under
 `cf-cfc-authorship` as now, so the authorship it shows keeps the message's
 own integrity rather than a derived record's. The quote is another message's
@@ -223,22 +228,25 @@ change: `RoomStreamEvent` already carries `message`, and `isInRoomOf` already
 refuses a message outside the room.
 
 How the arguments join the event is the part that decides whether the
-gesture's trust survives, and a spread does not do it. The reconciler marks
-the event object the browser delivered as renderer-trusted
-(`Reconciler.dispatchEvent()` calls `markRendererTrustedEvent`), that mark is
-membership of the exact object in a weak set
-(`packages/runner/src/cfc/ui-contract.ts`), and `Cell.send()` carries it
-only from the object handed to it to the converted event it delivers. An
-event built as `{ …event, …with }` is a new object the renderer never
-marked, so every handler gated on a trusted gesture, FabriChat's edits,
-reactions and deletions among them, would refuse it. And in that spelling an
-argument named `provenance` would replace the renderer's. So the merge is
-defined the other way round: the registered handler sets each argument on the
-event object the renderer marked, and never over a field the event already
-carries; `h()` refuses at build time an argument whose name is one the
-renderer's event reserves (`provenance`, `detail`, `target`, `type` and the
-rest of `SerializedEvent`), so the collision is a compile-time error at the
-view and not a dispatch-time choice. The reconciler is a render boundary the
+gesture's trust survives, and a spread does not do it. The browser's event
+never reaches the worker: the main thread's applicator serializes it
+(`serializeEvent` in `packages/html/src/main/events.ts`) and sends the
+`SerializedEvent`, and it is that object the reconciler marks as
+renderer-trusted when `Reconciler.dispatchEvent()` calls
+`markRendererTrustedEvent` on it. The mark is membership of the exact object
+in a weak set (`packages/runner/src/cfc/ui-contract.ts`), and `Cell.send()`
+carries it only from the object handed to it to the converted event it
+delivers. An event built as `{ …event, …with }` is a new object the
+reconciler never marked, so every handler gated on a trusted gesture,
+FabriChat's edits, reactions and deletions among them, would refuse it. And
+in that spelling an argument named `provenance` would replace the
+renderer's. So the merge is defined the other way round: the registered
+handler sets each argument on the serialized event the reconciler marked,
+and never over a field the event already carries; `h()` refuses at build
+time an argument whose name is one the renderer's event reserves
+(`provenance`, `detail`, `target`, `type` and the rest of
+`SerializedEvent`), so the collision is a compile-time error at the view and
+not a dispatch-time choice. The reconciler is a render boundary the
 CFC correspondence procedure governs
 (`../development/cfc-spec-correspondence.md`), so the change is classified
 there first; it reads as host arrangement, since it moves no decision, but
