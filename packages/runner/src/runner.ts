@@ -11,6 +11,7 @@ import {
   isWalkableObjectOrArray,
   refuseFabricInstance,
   valueEqual,
+  valueEqualByWalk,
 } from "@commonfabric/data-model";
 import { type ACL, aclDocId } from "@commonfabric/memory/acl";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
@@ -3906,10 +3907,11 @@ export class Runner {
     //
     // The conversion MUST precede the no-op gate. A raw result is not
     // necessarily a `FabricValue` — one carrying `toJSON`, say, only becomes one
-    // here — and `valueEqual` hashes its operands, so comparing a raw result
-    // throws `` `hashOf()`: unsupported object type `` instead of deciding
-    // anything. Converting first also makes the gate compare what a write
-    // would actually store, since the stored side is already a `FabricValue`.
+    // here — and the comparison reads its operands as `FabricValue`s, so
+    // comparing a raw result throws on what it cannot read instead of
+    // deciding anything. Converting first also makes the gate compare what a
+    // write would actually store, since the stored side is already a
+    // `FabricValue`.
     // A result can carry a builder artifact -- a pattern tool, say -- and an
     // artifact is not a `FabricValue`, so it is replaced before the
     // conversion. That keeps the gate below comparing what a write would
@@ -3920,7 +3922,7 @@ export class Runner {
     return {
       result,
       fabricResult,
-      changed: !valueEqual(fabricResult, previousResult),
+      changed: !valueEqualByWalk(fabricResult, previousResult),
     };
   }
 
@@ -9429,7 +9431,10 @@ export class Runner {
         undefined,
         cellTx(candidate),
       );
-      return valueEqual(candidateArgument.getRawUntyped(), argumentValue);
+      return valueEqualByWalk(
+        candidateArgument.getRawUntyped(),
+        argumentValue,
+      );
     };
   }
 
