@@ -259,6 +259,13 @@ anything two players must agree on stays a Cell write.
 [Optional presence](./iframe-pattern-guide.md#optional-presence) in the
 iframe pattern guide is the contract.
 
+A change the pattern owns, or work only the pattern can start, such as a
+request to `agent()` or another LLM built-in, goes through a verb the pattern
+passes in as a stream; the guest sends it an event with
+`fabric.stream(name).send(event)`.
+[Optional streams](./iframe-pattern-guide.md#optional-streams) in the iframe
+pattern guide is the contract.
+
 Generate textures and simple audio locally when practical. The iframe CSP does
 not allow arbitrary network fetches, so do not load assets from a CDN. For
 larger assets, include data files through the supported pattern program rather

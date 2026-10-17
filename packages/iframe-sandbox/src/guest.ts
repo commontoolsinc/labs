@@ -580,6 +580,27 @@ export class RemoteSqlite {
   }
 }
 
+/** Guest-side sender for one stream resource, such as a pattern's verb. */
+export class RemoteStream<T = FabricValue> {
+  readonly #client: FabricClient;
+  readonly #name: string;
+
+  constructor(client: FabricClient, name: string) {
+    this.#client = client;
+    this.#name = name;
+  }
+
+  /**
+   * Sends `event` to the stream's handler. What the promise waits for is the
+   * host's to say; the `cf-iframe` host resolves it once the handler's run has
+   * committed, and rejects it with the reason when the runtime refuses the
+   * event or that run.
+   */
+  async send(event: T): Promise<void> {
+    await this.#client.call(this.#name, "send", event as FabricValue);
+  }
+}
+
 /** One other member of a presence room, at its latest record. */
 export type PresenceParticipant = BridgePresenceParticipant;
 
@@ -950,6 +971,11 @@ export class FabricClient {
 
   sqlite(name: string): RemoteSqlite {
     return new RemoteSqlite(this, name);
+  }
+
+  /** Returns a sender for the stream resource `name`. */
+  stream<T = FabricValue>(name: string): RemoteStream<T> {
+    return new RemoteStream<T>(this, name);
   }
 
   /** Returns the one shared guest handle for the presence resource `name`. */

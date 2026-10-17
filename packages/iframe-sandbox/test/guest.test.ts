@@ -1063,6 +1063,64 @@ describe("guest", () => {
       }
     });
 
+    it("sends a stream event as a call of the resource's `send` method", async () => {
+      const fabric = connectFabric();
+      try {
+        const host = handOffPort();
+        const sent = fabric.stream<{ text: string }>("addItem").send({
+          text: "Milk",
+        });
+
+        const request = await receive(host);
+        expect(request).toEqual({
+          protocol: BRIDGE_PROTOCOL,
+          version: BRIDGE_VERSION,
+          type: "request",
+          id: 0,
+          operation: "call",
+          resource: "addItem",
+          method: "send",
+          value: { text: "Milk" },
+        });
+        send(host, response(request.id));
+        await expect(sent).resolves.toBeUndefined();
+      } finally {
+        fabric.disconnect();
+      }
+    });
+
+    it("rejects a stream send with the error the host answers", async () => {
+      const fabric = connectFabric();
+      try {
+        const host = handOffPort();
+        const sent = fabric.stream<{ text: string }>("addItem").send({
+          text: "",
+        });
+
+        const request = await receive(host);
+        send(host, {
+          protocol: BRIDGE_PROTOCOL,
+          version: BRIDGE_VERSION,
+          type: "response",
+          id: request.id,
+          ok: false,
+          error: {
+            code: "operation-failed",
+            message: "An item needs text.",
+            resource: "addItem",
+          },
+        });
+        await expect(sent).rejects.toMatchObject({
+          name: "FabricBridgeError",
+          code: "operation-failed",
+          message: "An item needs text.",
+          resource: "addItem",
+        });
+      } finally {
+        fabric.disconnect();
+      }
+    });
+
     it("rejects pending work when disconnected", async () => {
       const fabric = connectFabric();
       const pending = fabric.describe();

@@ -264,6 +264,13 @@ through a presence room instead of a Cell.
 [Optional presence](./iframe-pattern-guide.md#optional-presence) in the
 iframe pattern guide is the contract.
 
+A change the pattern owns, or work only the pattern can start, such as a
+request to `agent()` or another LLM built-in, goes through a verb the pattern
+passes in as a stream; the guest sends it an event with
+`fabric.stream(name).send(event)`.
+[Optional streams](./iframe-pattern-guide.md#optional-streams) in the iframe
+pattern guide is the contract.
+
 When an interaction starts from an array position, resolve that position to a
 stable Cell before subscribing or writing. The returned handle remains attached
 to the same item even when it moves:

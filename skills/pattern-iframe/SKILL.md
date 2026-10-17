@@ -1,6 +1,6 @@
 ---
 name: pattern-iframe
-description: Build or generate a Common Fabric pattern whose primary UI is a self-contained `cf-iframe` guest. Use when an agent should turn an input-data shape and a small state/output contract into a working iframe-first pattern without learning the broader pattern framework, including plain DOM, React, D3, Phaser 2D games, Babylon.js 3D scenes, PerSpace/PerUser/PerSession data, path-scoped Cell access, stable array-item handles, mergeable pushes, bridged SQLite, or ephemeral presence such as live cursors.
+description: Build or generate a Common Fabric pattern whose primary UI is a self-contained `cf-iframe` guest. Use when an agent should turn an input-data shape and a small state/output contract into a working iframe-first pattern without learning the broader pattern framework, including plain DOM, React, D3, Phaser 2D games, Babylon.js 3D scenes, PerSpace/PerUser/PerSession data, path-scoped Cell access, stable array-item handles, mergeable pushes, bridged SQLite, ephemeral presence such as live cursors, or pattern verbs the guest sends events to through streams, such as a user-triggered `agent()` or LLM request.
 ---
 
 # Iframe-first patterns
@@ -38,6 +38,10 @@ Keep the authored surface small:
 - `guest.ts` or `guest.tsx` owns the application. It may use plain DOM code or
   React and the guest bridge.
 - `main.tsx` is generated glue. Do not hand-edit it.
+- A contract that declares `streams` makes each one a required input of the
+  wrapper, so generate the wrapper to `frame.tsx` and write `main.tsx` by hand
+  to declare the verbs and pass them in. The general guide's "Optional streams"
+  section covers this, including LLM built-ins.
 - One joint initial `pull()` barrier owns readiness for every resource an action
   uses. Keep action controls disabled until it resolves; an individual
   synchronous `sink()` callback must never declare the guest ready.
