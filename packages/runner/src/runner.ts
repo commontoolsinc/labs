@@ -10,7 +10,6 @@ import {
   isKeyableObjectOrArray,
   isWalkableObjectOrArray,
   refuseFabricInstance,
-  valueEqual,
   valueEqualByWalk,
 } from "@commonfabric/data-model";
 import { type ACL, aclDocId } from "@commonfabric/memory/acl";
@@ -9657,7 +9656,10 @@ export class Runner {
             !Array.isArray(manifest) ||
             !manifest.some((entry) =>
               isObjectOrArray(entry) && "link" in entry &&
-              valueEqual(fabricFromConvertibleJsValue(entry.link), expectedLink)
+              valueEqualByWalk(
+                fabricFromConvertibleJsValue(entry.link),
+                expectedLink,
+              )
             )
           ) {
             defaultsPrepared = false;
