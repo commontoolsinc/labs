@@ -25,6 +25,17 @@ const SF_BOX: Bounds = {
   east: -122.39,
   west: -122.45,
 };
+/**
+ * A small box beside Paris, east of the Paris box: within four zoom levels of
+ * a map fitted to one Paris marker, so Leaflet animates the move and reports
+ * it.
+ */
+const PARIS_EAST: Bounds = {
+  north: 48.87,
+  south: 48.85,
+  east: 2.62,
+  west: 2.58,
+};
 /** Outside the Paris box by about the box's own width. */
 const NEAR_PARIS = { lat: 48.86, lng: 2.6 };
 
@@ -438,16 +449,17 @@ Deno.test("stored bounds that load after mount do not undo a fit to the features
     map.fitToBounds = true;
   });
   expect(drawsMarkerInside(page.map)).toBe(true);
-  // The stored view, a box near San Francisco, loads late.
+  const moved = nextBoundsChange(page.map);
+  // The stored view, a box near San Francisco, loads late…
   pushUpdate(bounds, SF_BOX);
+  // …and a later value, a consumer framing a box beside Paris, follows. A
+  // frame apart, since values pushed together reach the map as the last.
   await nextFrame();
-  await nextFrame();
-  expect(drawsMarkerInside(page.map)).toBe(true);
-  // A later value, a consumer framing somewhere, still applies.
-  pushUpdate(bounds, { ...SF_BOX, north: SF_BOX.north + 0.01 });
-  await nextFrame();
-  await nextFrame();
-  expect(drawsMarkerInside(page.map)).toBe(false);
+  pushUpdate(bounds, PARIS_EAST);
+  // The first move is to the later value: the stored view moved nothing.
+  const detail = await moved;
+  expect(detail.center.lat).toBeCloseTo(48.86, 1);
+  expect(detail.center.lng).toBeCloseTo(2.6, 1);
 });
 
 Deno.test("stored bounds apply when the map does not fit to its features", async () => {
@@ -455,8 +467,79 @@ Deno.test("stored bounds apply when the map does not fit to its features", async
   using page = await mounted((map) => {
     map.bounds = bounds;
   });
+  const applied = nextBoundsChange(page.map);
   pushUpdate(bounds, PARIS);
-  await nextFrame();
-  await nextFrame();
+  await applied;
   expect(await showsMarkerAt(page.map, PARIS_CENTER)).toBe(true);
+});
+
+//
+// Moves already under way, and moves asked for while a person moves
+//
+
+Deno.test("a press during cf-map's own fit leaves that fit cf-map's", async () => {
+  using page = await fittedTo(NEAR_DEFAULT);
+  const fit = nextBoundsChange(page.map);
+  page.map.value = NEAR_DEFAULT_NUDGED;
+  await page.map.updateComplete;
+  // The fit is animating; a press that moves nothing lands in the middle.
+  press(page.map);
+  release(page.map, 0);
+  expect((await fit).userInitiated).toBe(false);
+});
+
+Deno.test("panTo during a drag does not move the map under it", async () => {
+  using page = await mounted(() => {});
+  press(page.map);
+  moveTo(page.map, 40);
+  page.map.panTo(PARIS_CENTER.lat, PARIS_CENTER.lng);
+  const pan = nextBoundsChange(page.map);
+  release(page.map, 40);
+  const detail = await pan;
+  expect(detail.userInitiated).toBe(true);
+  expect(detail.center.lat).toBeCloseTo(37.77, 1);
+});
+
+Deno.test("turning fitToBounds off drops a fit still waiting for a size", async () => {
+  const hidden = document.createElement("div");
+  hidden.style.display = "none";
+  document.body.append(hidden);
+  try {
+    const map = sizedMap((map) => {
+      map.value = { markers: [{ position: PARIS_CENTER }] };
+      map.fitToBounds = true;
+    });
+    hidden.append(map);
+    await map.updateComplete;
+    map.fitToBounds = false;
+    await map.updateComplete;
+    const shown = nextBoundsChange(map);
+    hidden.style.display = "block";
+    await shown;
+    expect(drawsMarkerInside(map)).toBe(false);
+  } finally {
+    hidden.remove();
+  }
+});
+
+Deno.test("fitBounds() asked for while hidden runs once the map is shown", async () => {
+  const hidden = document.createElement("div");
+  hidden.style.display = "none";
+  document.body.append(hidden);
+  try {
+    const map = sizedMap((map) => {
+      map.value = { markers: [{ position: PARIS_CENTER }] };
+    });
+    hidden.append(map);
+    await map.updateComplete;
+    map.fitBounds();
+    map.fitToBounds = false;
+    await map.updateComplete;
+    const shown = nextBoundsChange(map);
+    hidden.style.display = "block";
+    await shown;
+    expect(drawsMarkerInside(map)).toBe(true);
+  } finally {
+    hidden.remove();
+  }
 });
