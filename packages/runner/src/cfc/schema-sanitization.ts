@@ -618,10 +618,13 @@ const typeMatches = (
       return true;
     case "string":
       return typeof value === "string";
+    // A `bigint` is an integer, and `integer` is a subtype of `number` (the
+    // rule the read side's schemaTypeMatchesValueType applies in traverse.ts).
     case "number":
-      return typeof value === "number" && Number.isFinite(value);
+      return (typeof value === "number" && Number.isFinite(value)) ||
+        typeof value === "bigint";
     case "integer":
-      return Number.isInteger(value);
+      return Number.isInteger(value) || typeof value === "bigint";
     case "boolean":
       return typeof value === "boolean";
     case "null":
@@ -643,6 +646,29 @@ const typeMatches = (
       }
       return !rejectUnknownType;
   }
+};
+
+/**
+ * Whether `value` is a multiple of `multipleOf`. A `bigint` is measured
+ * exactly, however large: a finite `multipleOf` is the dyadic rational
+ * `p / 2^k`, found by doubling it until it is whole, and `value` is a multiple
+ * of it when `value * 2^k` is a multiple of `p`. A number is measured within
+ * floating-point tolerance.
+ */
+const isMultipleOf = (value: number | bigint, multipleOf: number): boolean => {
+  if (!(multipleOf > 0) || !Number.isFinite(multipleOf)) return false;
+  if (typeof value === "bigint") {
+    let whole = multipleOf;
+    let shift = 0n;
+    while (!Number.isInteger(whole)) {
+      whole *= 2;
+      shift++;
+    }
+    return (value << shift) % BigInt(whole) === 0n;
+  }
+  const quotient = value / multipleOf;
+  const tolerance = Number.EPSILON * Math.max(1, Math.abs(quotient)) * 4;
+  return Math.abs(quotient - Math.round(quotient)) <= tolerance;
 };
 
 /**
@@ -2103,7 +2129,10 @@ function validateStrictSchemaConstraints(
     }
   }
 
-  if (typeof value === "number" && Number.isFinite(value)) {
+  if (
+    (typeof value === "number" && Number.isFinite(value)) ||
+    typeof value === "bigint"
+  ) {
     if (schema.minimum !== undefined && value < schema.minimum) {
       return mismatch(`value is below minimum ${schema.minimum}`);
     }
@@ -2126,15 +2155,10 @@ function validateStrictSchemaConstraints(
         `value is not below exclusiveMaximum ${schema.exclusiveMaximum}`,
       );
     }
-    if (schema.multipleOf !== undefined) {
-      const quotient = value / schema.multipleOf;
-      const tolerance = Number.EPSILON * Math.max(1, Math.abs(quotient)) * 4;
-      if (
-        schema.multipleOf <= 0 ||
-        Math.abs(quotient - Math.round(quotient)) > tolerance
-      ) {
-        return mismatch(`value is not a multiple of ${schema.multipleOf}`);
-      }
+    if (
+      schema.multipleOf !== undefined && !isMultipleOf(value, schema.multipleOf)
+    ) {
+      return mismatch(`value is not a multiple of ${schema.multipleOf}`);
     }
   }
 
