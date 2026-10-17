@@ -60,6 +60,7 @@ import {
   PatternManager,
   type PatternSetupCommitReceipt,
   PatternSetupPostCommitError,
+  pieceSourceMovedPast,
   type PieceSourceTransition,
   preparePieceSourceTransitionBaseline,
   Runtime,
@@ -3194,6 +3195,20 @@ export class PiecesController<T = unknown> {
       );
     }
 
+    // A root whose history records its move from the official source to the
+    // pinned one is ahead of this runtime, not dead: some runtime loaded the
+    // pinned release, and this one serves or compiles an earlier one, as a
+    // host a deploy has not yet restarted does. Swapping back would undo the
+    // update, and every runtime that can load it would make it again, so the
+    // root keeps it. The check is read again inside the swap's transaction.
+    const movedBackReason = () =>
+      `would move the root back to ${officialRef.identity}#` +
+      `${officialRef.symbol}, the release its history records moving from ` +
+      `to the pinned one, which this runtime is behind`;
+    if (pieceSourceMovedPast(rootToStart, officialRef, pinnedRef)) {
+      throw clearError(movedBackReason(), migrationError);
+    }
+
     const sourceSnapshot = getPieceSourceSnapshot(rootToStart);
     if (sourceSnapshot === undefined) {
       throw clearError("has no source state to update", migrationError);
@@ -3212,13 +3227,19 @@ export class PiecesController<T = unknown> {
       origin: officialUrlPath,
       expected: sourceSnapshot,
     };
+    let movedBack = false;
     const swapResult = await runtime.editWithRetry((tx) => {
+      movedBack = false;
       const rootTx = rootToStart.withTx(tx);
       const currentRef = getPatternIdentityRef(rootTx);
       if (
         currentRef?.identity !== pinnedRef.identity ||
         currentRef?.symbol !== pinnedRef.symbol
       ) {
+        return false;
+      }
+      if (pieceSourceMovedPast(rootTx, officialRef, pinnedRef)) {
+        movedBack = true;
         return false;
       }
       applyPieceSourceTransition(
@@ -3257,6 +3278,7 @@ export class PiecesController<T = unknown> {
         swapResult.error,
       );
     }
+    if (movedBack) throw clearError(movedBackReason(), migrationError);
     if (!swapResult.ok) {
       // The root was repointed by a concurrent heal between the failed repair
       // and this swap. We must NOT overwrite the newer identity (the whole

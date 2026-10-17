@@ -268,6 +268,7 @@ export {
   type PieceReconciliation,
   type PieceReconciliationOutcome,
   type PieceReconciliationReason,
+  pieceSourceMovedPast,
   type PieceSourceRevision,
   type PieceSourceRevisionOperation,
   type PieceSourceSnapshot,

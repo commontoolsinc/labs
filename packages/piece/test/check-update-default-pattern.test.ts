@@ -19,6 +19,7 @@ import {
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/cfc/migration-reason";
+import type { FabricValue } from "@commonfabric/data-model";
 import { createSession, Identity } from "@commonfabric/identity";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { FabricLink } from "@commonfabric/data-model/fabric-instances";
@@ -189,6 +190,8 @@ function identityForSource(
 
 interface StubControls {
   setSource(source: string): void;
+  /** Sends `releasedAt` beside every system identity, or no time when unset. */
+  setReleasedAt(releasedAt: string | undefined): void;
   setCustomSource(source: string | null): void;
   setIdentitySource(source: string): void;
   setIdentityResponse(body: string, status?: number): void;
@@ -208,6 +211,7 @@ function installFetchStub(): StubControls {
   // Served at CUSTOM_APP_URL when set; null keeps the path unserved (404).
   let customSource: string | null = null;
   let identitySource: string | undefined;
+  let releasedAt: string | undefined;
   const imports: Record<string, string> = {};
   const identityImports: Record<string, string> = {};
   let identityResponse: { body: string; status: number } | undefined;
@@ -253,7 +257,14 @@ function installFetchStub(): StubControls {
             { ...imports, ...identityImports },
             url.pathname,
           ),
-          { headers: { "content-type": "text/plain" } },
+          {
+            headers: {
+              "content-type": "text/plain",
+              ...(releasedAt === undefined
+                ? {}
+                : { "CF-Released-At": releasedAt }),
+            },
+          },
         );
       }
       sourceFetchCount++;
@@ -289,6 +300,7 @@ function installFetchStub(): StubControls {
 
   return {
     setSource: (s) => (source = s),
+    setReleasedAt: (r) => (releasedAt = r),
     setCustomSource: (s) => (customSource = s),
     setIdentitySource: (s) => (identitySource = s),
     setIdentityResponse: (body, status = 200) => {
@@ -863,6 +875,72 @@ describe("opening a space root", () => {
       await identityForSource(SOURCE_V2),
     );
     expect(getPatternIdentityRef(updated.getCell())?.symbol).toBe("default");
+  });
+
+  it("keeps a root on a release the history records moving to while its host still serves the earlier one", async () => {
+    // A runtime older than the root's release cannot load it, and the host it
+    // reaches is one a deploy has not yet restarted, still serving the
+    // release the root moved from. The history records that move, so the
+    // reconciler keeps the root's release; the root then fails to start here,
+    // and the repair must not swap it back to the earlier official source,
+    // which every runtime that can load the later release would move forward
+    // again.
+
+    await setup();
+    stub.setReleasedAt("2026-10-16T14:03:00Z");
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+    const officialV1 = await identityForSource(SOURCE_V1);
+    expect(getPatternIdentityRef(root)?.identity).toBe(officialV1);
+    const laterRelease = await identityForSource(
+      patternSource("release-this-runtime-cannot-load"),
+    );
+    await controller.stopPiece(root);
+    const { error } = await runtime.editWithRetry((tx) => {
+      const candidate = root.withTx(tx);
+      const space = root.getAsNormalizedFullLink().space;
+      const sourceOf = (identity: string) =>
+        runtime.getCell(space, `pattern:${identity}`, undefined, tx)
+          .getAsLink();
+      const timestamp = Date.now();
+      const history = (candidate.getMetaRaw("pieceSourceHistory") ??
+        []) as FabricValue[];
+      const origin = getPatternSource(root)!;
+      candidate.setMetaRaw("pieceSourceHistory", [
+        ...history,
+        {
+          revisionId: "baseline-official-v1",
+          timestamp,
+          pattern: { identity: officialV1, symbol: "default" },
+          source: sourceOf(officialV1),
+          origin,
+          operation: "baseline",
+        },
+        {
+          revisionId: "update-to-later-release",
+          timestamp,
+          pattern: { identity: laterRelease, symbol: "default" },
+          source: sourceOf(laterRelease),
+          origin,
+          operation: "origin-update",
+          releasedAt: Date.parse("2026-10-16T15:03:00Z"),
+        },
+      ], rawMetaWriteAuthorization);
+      for (const meta of ["patternIdentity", "patternSetupIdentity"] as const) {
+        candidate.setMetaRaw(
+          meta,
+          { identity: laterRelease, symbol: "default" },
+          rawMetaWriteAuthorization,
+        );
+      }
+    });
+    expect(error).toBeUndefined();
+
+    await controller.ensureDefaultPattern().catch(() => undefined);
+    await runtime.idle();
+
+    const after = (await controller.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)?.identity).toBe(laterRelease);
   });
 
   it("follows a custom origin when the pattern a root holds cannot load, given `reconcile: false`", async () => {

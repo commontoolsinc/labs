@@ -643,7 +643,13 @@ restarting them, two deployments reaching the same memory — answer one piece's
 successive attempts differently, each consistently, and each answer differs from
 what the last attempt adopted. Ordered by identity alone, the piece would move
 on every attempt. The release time is what keeps it on the later release:
-step 4 refuses the earlier one.
+step 4 refuses the earlier one. Without one, the piece's history still orders
+the two for a runtime that cannot load what the piece runs: when it records the
+move from the offered source to the running one, that runtime is behind the
+running release and keeps it, and so does the root repair, which would
+otherwise compile the earlier official source such an instance serves. A
+runtime that can load what the piece runs takes the offer, as it takes any
+unordered one.
 
 Authored identity deliberately does not fingerprint bare runtime imports or the
 runtime's implementation. Local compilation and evaluation are a capability
