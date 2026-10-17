@@ -955,7 +955,9 @@ Default paths of §7:
     literal key, `Row["status"]`, as the property's declaration writes them,
     for a property of a type written without type arguments;
   - a tuple's positionless items, the union of its element types, in the
-    order the tuple lists its elements, so `["a", 1]` emits `["a", 1]`;
+    order the tuple lists its elements, intrinsic ones included, so
+    `["a", 1]` emits `["a", 1]` and `[Box<string>, string]` lists the box
+    first;
   - where nothing written is read — a node a transform built, as
     ts-transformers builds one for an inferred type — as the union's alias
     declares them, if it has one without type parameters;

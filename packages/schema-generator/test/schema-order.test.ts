@@ -478,6 +478,31 @@ describe("schema-order", () => {
       });
     });
 
+    it("emits an intrinsic element where the tuple lists it", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          "export const early: string | undefined = undefined;",
+          "export interface Box<T> { v: T; }",
+          "export interface Wrap { t: [Box<string>, string]; }",
+        ].join("\n"),
+        interfaceSchema("Wrap"),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+      expect(lazy).toMatchObject({
+        properties: {
+          t: {
+            items: {
+              anyOf: [
+                { properties: { v: { type: "string" } } },
+                { type: "string" },
+              ],
+            },
+          },
+        },
+      });
+    });
+
     it("emits two tuples in the order the tuple lists them", async () => {
       const { lazy, checkedFirst } = await bothReadings(
         [

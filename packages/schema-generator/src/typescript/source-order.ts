@@ -53,8 +53,9 @@ export function unionNodeMembersInOrder(
   node: ts.UnionTypeNode,
 ): readonly ts.TypeNode[] {
   if (isWrittenNode(ts.getOriginalNode(node))) return node.types;
-  const rest: Array<{ node: ts.TypeNode; tier: number; key: string | number }> =
-    [];
+  const rest: Array<
+    { node: ts.TypeNode; tier: number; key: string | number | bigint }
+  > = [];
   for (const member of node.types) {
     const literal = literalNodeKey(member);
     if (literal === "keyword") continue;
@@ -62,10 +63,7 @@ export function unionNodeMembersInOrder(
     else rest.push({ node: member, tier: 3, key: canonicalNodeKey(member) });
   }
   rest.sort((left, right) =>
-    left.tier - right.tier ||
-    (typeof left.key === "number" && typeof right.key === "number"
-      ? left.key - right.key
-      : compareStrings(String(left.key), String(right.key)))
+    left.tier - right.tier || compareNodeKeys(left.key, right.key)
   );
   let next = 0;
   return node.types.map((member) =>
@@ -90,13 +88,27 @@ const KEYWORD_TYPE_KINDS: ReadonlySet<ts.SyntaxKind> = new Set([
 ]);
 
 /**
+ * Compares two keys `unionNodeMembersInOrder()` sorts by, which share a kind
+ * within one tier: numbers and bigints by value, strings by code unit.
+ */
+function compareNodeKeys(
+  left: string | number | bigint,
+  right: string | number | bigint,
+): number {
+  if (typeof left === "string" || typeof right === "string") {
+    return compareStrings(String(left), String(right));
+  }
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/**
  * Where `unionNodeMembersInOrder()` places the member `node`: `"keyword"`
  * for a keyword, `true`, `false` or `null`; a tier and a value for a
  * literal, numbers before bigints before strings; `undefined` otherwise.
  */
 function literalNodeKey(
   node: ts.TypeNode,
-): "keyword" | { tier: number; key: string | number } | undefined {
+): "keyword" | { tier: number; key: string | number | bigint } | undefined {
   const member = unwrapTypeParentheses(node);
   if (KEYWORD_TYPE_KINDS.has(member.kind)) return "keyword";
   if (!ts.isLiteralTypeNode(member)) return undefined;
@@ -109,16 +121,20 @@ function literalNodeKey(
     case ts.SyntaxKind.NumericLiteral:
       return { tier: 0, key: Number((literal as ts.NumericLiteral).text) };
     case ts.SyntaxKind.BigIntLiteral:
-      return { tier: 1, key: (literal as ts.BigIntLiteral).text };
+      return {
+        tier: 1,
+        key: BigInt((literal as ts.BigIntLiteral).text.slice(0, -1)),
+      };
     case ts.SyntaxKind.StringLiteral:
       return { tier: 2, key: (literal as ts.StringLiteral).text };
     case ts.SyntaxKind.PrefixUnaryExpression: {
       const unary = literal as ts.PrefixUnaryExpression;
-      if (
-        unary.operator === ts.SyntaxKind.MinusToken &&
-        ts.isNumericLiteral(unary.operand)
-      ) {
+      if (unary.operator !== ts.SyntaxKind.MinusToken) return undefined;
+      if (ts.isNumericLiteral(unary.operand)) {
         return { tier: 0, key: -Number(unary.operand.text) };
+      }
+      if (ts.isBigIntLiteral(unary.operand)) {
+        return { tier: 1, key: -BigInt(unary.operand.text.slice(0, -1)) };
       }
       return undefined;
     }
@@ -129,7 +145,8 @@ function literalNodeKey(
 
 /**
  * A key for `node` that two nodes share exactly when they are written the
- * same way: its kind, its names and literals' text, and its children's keys,
+ * same way: its kind and operator (`operatorOf()`), its names and literals'
+ * text, and its children's keys,
  * those of a union's members in the order of the keys, so that a union the
  * node holds reads the same whatever order it lists its members in.
  */
@@ -148,7 +165,23 @@ function canonicalNodeKey(node: ts.Node): string {
     children.push(canonicalNodeKey(child));
   });
   if (ts.isUnionTypeNode(node)) children.sort(compareStrings);
-  return `${ts.SyntaxKind[node.kind]}(${children.join(",")})`;
+  return `${ts.SyntaxKind[node.kind]}${operatorOf(node)}(${
+    children.join(",")
+  })`;
+}
+
+/**
+ * What `node` writes that is no child of it, which `canonicalNodeKey()` keys
+ * besides its children: a type operator's or a prefix operator's token, as
+ * `readonly` against `keyof` or `-` against `+`, and whether an import type
+ * is `typeof`.
+ */
+function operatorOf(node: ts.Node): string {
+  if (ts.isTypeOperatorNode(node) || ts.isPrefixUnaryExpression(node)) {
+    return `:${ts.SyntaxKind[node.operator]}`;
+  }
+  if (ts.isImportTypeNode(node) && node.isTypeOf) return ":typeof";
+  return "";
 }
 
 /**

@@ -282,11 +282,16 @@ function sourceOrderOfMembers(
     ? paired
     : indexedAccessPairing(siteNode, members, checker);
   if (written === undefined && tupleItems?.items === union) {
+    // Every member, an intrinsic one included, goes where the tuple lists
+    // it; members one element holds, as a `boolean`'s two do, keep the
+    // order `inSourceOrder()` gives them.
+    const place = (index: number) =>
+      tupleElementPlace(members[index]!, tupleItems.elements) ??
+        Number.POSITIVE_INFINITY;
     return inSourceOrder(
       members.map((_, index) => index),
       (index) => members[index]!,
-      (index) => tupleElementPlace(members[index]!, tupleItems.elements),
-    );
+    ).sort((left, right) => place(left) - place(right));
   }
   const ranking = written ?? declaredPairing(union, members, checker);
   const rankOfNode = new Map<ts.TypeNode, number>();
