@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { spy, stub } from "@std/testing/mock";
 import { expect } from "@std/expect";
 
-import { defer, type Deferred } from "@commonfabric/utils/defer";
+import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
+import { defer, type Deferred } from "@commonfabric/utils/defer";
 import {
   EmulatedStorageManager,
   newLoopbackServer,
@@ -827,25 +828,32 @@ describe("piece source reconciliation", () => {
       const BETWEEN = "2026-10-16T14:33:00Z";
       const LATER = "2026-10-16T15:03:00Z";
 
-      type Offer = { marker: "v1" | "v2"; releasedAt?: string };
+      type Offer = { marker: "v1" | "v2" | "v3"; releasedAt?: string };
 
       /**
        * A piece following the tracked pattern's system origin, running v1 with
        * no release time, and a function that makes its host offer `offer` and
        * reconciles the piece against it. Each returns the outcome and the
-       * marker of the source the piece then runs.
+       * marker of the source the piece then runs. `sourceRequests` lists the
+       * path of every request for source rather than for an identity.
        */
       async function followingPiece() {
         const identities = {
           v1: await identityFor(source("v1")),
           v2: await identityFor(source("v2")),
+          v3: await identityFor(source("v3")),
         };
         let served: Offer = { marker: "v1" };
+        const sourceRequests: string[] = [];
         const piece = await preparePiece(
           servingFetch(
             () => identities[served.marker],
             () => source(served.marker),
-            undefined,
+            (url) => {
+              if (!url.searchParams.has("identity")) {
+                sourceRequests.push(url.pathname);
+              }
+            },
             () => served.releasedAt,
           ),
         );
@@ -856,6 +864,8 @@ describe("piece source reconciliation", () => {
             ? "v1"
             : running === identities.v2
             ? "v2"
+            : running === identities.v3
+            ? "v3"
             : running;
         };
         const offer = async (next: Offer) => {
@@ -863,12 +873,32 @@ describe("piece source reconciliation", () => {
           const outcome = await reconcile(piece);
           return { outcome, running: runningMarker() };
         };
-        return { piece, identities, offer };
+        return { piece, identities, offer, sourceRequests };
       }
 
       function originUpdates(piece: Cell<unknown>) {
         return getPieceSourceRevisions(piece).filter((revision) =>
           revision.operation === "origin-update"
+        );
+      }
+
+      /**
+       * Makes this runtime unable to load `identity` while `when()` returns
+       * `true`, as a runtime older than that release is.
+       */
+      function cannotLoad(
+        identity: string,
+        when: () => boolean = () => true,
+      ) {
+        const manager = runtime.patternManager;
+        const load = manager.loadPatternByIdentity.bind(manager);
+        return stub(
+          manager,
+          "loadPatternByIdentity",
+          (...args: Parameters<typeof load>) =>
+            when() && args[0] === identity
+              ? Promise.resolve(undefined)
+              : load(...args),
         );
       }
 
@@ -1148,29 +1178,164 @@ describe("piece source reconciliation", () => {
             releasedAt: Date.parse(LATER),
           });
         });
+
+        it("does not adopt a release that confirmation makes earlier than a running source this runtime cannot load but moved to", async () => {
+          // The offer is later than the running source when this pass begins,
+          // so only the commit can find it earlier, and only the history the
+          // commit reads can say this runtime is behind what the piece runs.
+
+          const { piece, identities, offer } = await followingPiece();
+          await offer({ marker: "v2", releasedAt: EARLIER });
+          using _unloadable = cannotLoad(identities.v2);
+          const sync = runtime.runner.syncStoredPieceCells.bind(runtime.runner);
+          using _overtaken = stub(
+            runtime.runner,
+            "syncStoredPieceCells",
+            async (...args: Parameters<typeof sync>) => {
+              await confirmElsewhere(piece, identities.v2, LATER);
+              return sync(...args);
+            },
+          );
+
+          expect(await offer({ marker: "v1", releasedAt: BETWEEN })).toEqual({
+            outcome: "ahead",
+            running: "v2",
+          });
+          expect(originUpdates(piece)).toHaveLength(1);
+        });
       });
 
-      it("adopts an earlier release over a running pattern this space cannot load", async () => {
-        // A piece that cannot start has nothing to keep, so the earlier release
-        // is a rescue rather than a step back.
+      describe("when this runtime cannot load the running pattern", () => {
+        // A runtime cannot load a pattern every runtime has lost, and cannot
+        // load a release newer than itself either. Only the piece's history
+        // tells the two apart: a recorded move to the running source means
+        // some runtime loaded it, so this one is behind it.
 
-        const { identities, offer } = await followingPiece();
-        await offer({ marker: "v2", releasedAt: LATER });
+        it("adopts an earlier release the history records no move from", async () => {
+          // Nothing says any runtime can load the running source, so the piece
+          // has nothing it can start, and the earlier release is a rescue.
 
-        const manager = runtime.patternManager;
-        const load = manager.loadPatternByIdentity.bind(manager);
-        manager.loadPatternByIdentity = (...args: Parameters<typeof load>) =>
-          args[0] === identities.v2
-            ? Promise.resolve(undefined)
-            : load(...args);
-        try {
-          expect(await offer({ marker: "v1", releasedAt: EARLIER })).toEqual({
+          const { piece, identities, offer } = await followingPiece();
+          await offer({ marker: "v2", releasedAt: LATER });
+          using _unloadable = cannotLoad(identities.v2);
+
+          expect(await offer({ marker: "v3", releasedAt: EARLIER })).toEqual({
             outcome: "updated",
-            running: "v1",
+            running: "v3",
           });
-        } finally {
-          manager.loadPatternByIdentity = load;
-        }
+          expect(originUpdates(piece)).toHaveLength(2);
+        });
+
+        it("keeps a later release whose move from the earlier one the history records", async () => {
+          const { piece, identities, offer, sourceRequests } =
+            await followingPiece();
+          await offer({ marker: "v2", releasedAt: LATER });
+          using _unloadable = cannotLoad(identities.v2);
+          sourceRequests.length = 0;
+
+          expect(await offer({ marker: "v1", releasedAt: EARLIER })).toEqual({
+            outcome: "ahead",
+            running: "v2",
+          });
+          // The identity's answer settles it: the earlier source is not fetched.
+          expect(sourceRequests).toEqual([]);
+          expect(originUpdates(piece)).toHaveLength(1);
+          expect(getPieceReconciliation(piece)).toMatchObject({
+            outcome: "followed",
+            offered: { identity: identities.v2, symbol: SYMBOL },
+          });
+        });
+
+        it("stays on the later release while a runtime that can load it shares the piece", async () => {
+          // Partway through a deploy, a host still serving the earlier release
+          // offers it to a runtime too old to load the later one, and a host
+          // serving the later release offers that to a runtime that can.
+
+          const { piece, identities, offer } = await followingPiece();
+          await offer({ marker: "v2", releasedAt: LATER });
+          let stale = false;
+          using _unloadable = cannotLoad(identities.v2, () => stale);
+          const outcomes: unknown[] = [];
+          for (let cycle = 0; cycle < 2; cycle++) {
+            stale = true;
+            outcomes.push(await offer({ marker: "v1", releasedAt: EARLIER }));
+            stale = false;
+            outcomes.push(await offer({ marker: "v2", releasedAt: LATER }));
+          }
+
+          expect(outcomes).toEqual([
+            { outcome: "ahead", running: "v2" },
+            { outcome: "current", running: "v2" },
+            { outcome: "ahead", running: "v2" },
+            { outcome: "current", running: "v2" },
+          ]);
+          expect(originUpdates(piece)).toHaveLength(1);
+        });
+
+        describe("when the move to it displaced the earlier release without a baseline", () => {
+          // A transition whose predecessor's source is not retained records no
+          // baseline revision for it. It names the predecessor in
+          // `displacedPattern`, stamped with the transition's own timestamp.
+
+          /**
+           * Rewrites `piece`'s history as such a transition leaves it: the
+           * adopting revision alone, and `displacedPattern` naming `displaced`
+           * at `displacedAt`, which defaults to that revision's timestamp.
+           */
+          async function displaceWithoutBaseline(
+            piece: Cell<unknown>,
+            displaced: string,
+            displacedAt = getPieceSourceRevisions(piece).at(-1)!.timestamp,
+          ) {
+            const written = await runtime.editWithRetry((tx) => {
+              const history = piece.withTx(tx).getMetaRaw(
+                "pieceSourceHistory",
+              ) as unknown[];
+              piece.withTx(tx).setMetaRaw(
+                "pieceSourceHistory",
+                history.slice(-1) as FabricValue,
+                rawMetaWriteAuthorization,
+              );
+              piece.withTx(tx).setMetaRaw("displacedPattern", {
+                identity: displaced,
+                symbol: SYMBOL,
+                displacedAt,
+              }, rawMetaWriteAuthorization);
+            });
+            expect(written.error).toBeUndefined();
+          }
+
+          it("keeps a later release whose transition displaced the earlier one", async () => {
+            const { piece, identities, offer } = await followingPiece();
+            await offer({ marker: "v2", releasedAt: LATER });
+            await displaceWithoutBaseline(piece, identities.v1);
+            expect(
+              getPieceSourceRevisions(piece).map(({ pattern }) =>
+                pattern.identity
+              ),
+            ).toEqual([identities.v2]);
+            using _unloadable = cannotLoad(identities.v2);
+
+            expect(await offer({ marker: "v1", releasedAt: EARLIER })).toEqual(
+              { outcome: "ahead", running: "v2" },
+            );
+          });
+
+          it("adopts the earlier release when the displacement matches no recorded revision", async () => {
+            const { piece, identities, offer } = await followingPiece();
+            await offer({ marker: "v2", releasedAt: LATER });
+            await displaceWithoutBaseline(
+              piece,
+              identities.v1,
+              getPieceSourceRevisions(piece).at(-1)!.timestamp - 1,
+            );
+            using _unloadable = cannotLoad(identities.v2);
+
+            expect(await offer({ marker: "v1", releasedAt: EARLIER })).toEqual(
+              { outcome: "updated", running: "v1" },
+            );
+          });
+        });
       });
 
       it("keeps the running source when its host's release time is not a time", async () => {

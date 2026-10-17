@@ -212,6 +212,7 @@ import {
   type URI,
 } from "./storage/interface.ts";
 import {
+  internalVerifierRead,
   isDurableReadTx,
   machineryRead,
   markDurableReadTx,
@@ -357,6 +358,22 @@ const BOUND_CHILD_NODE_WEIGHT = 4096;
  * held for it is diagnosable.
  */
 const NAMING_PROBE_BUDGET = 256;
+
+/**
+ * The read metadata of `Runner.#documentPresent`, the presence probe that
+ * decides whether a run of a piece, or a swap of one to another pattern, waits
+ * for a name-sync (`Runner.#patternToNameBeforeRun`,
+ * `Runner.#swapReadsAbsent`). It reads through a read-only transaction of its
+ * own, and what it finds decides only when the run happens, never what it
+ * computes. So it is a runtime-internal read, which neither schedules nor
+ * taints, and which a runtime read ceiling does not measure: a document whose
+ * value the ceiling withholds is on the replica all the same, and the run's
+ * own reads of it are the reads the ceiling governs.
+ */
+const PRESENCE_PROBE_READ = {
+  ...ignoreReadForScheduling,
+  ...internalVerifierRead,
+};
 
 /**
  * How many times a named piece's run starts again after its start transaction
@@ -7457,7 +7474,7 @@ export class Runner {
           : ["value"],
         ...(link.scope !== undefined && { scope: link.scope }),
       },
-      { meta: ignoreReadForScheduling },
+      { meta: PRESENCE_PROBE_READ },
     ) !== undefined;
   }
 
@@ -15000,21 +15017,26 @@ export function getPieceSourceRevisions(
 }
 
 /**
- * Whether the piece's recorded source history moved it from `running` to
- * `pointer`: its latest revision names `pointer`, and either an earlier
- * revision names `running` or a recorded transition displaced `running`. A
- * transition whose predecessor's source is not retained records no baseline
- * revision for it; it names that predecessor in the `displacedPattern` meta,
- * stamped with the transition's own timestamp, which its revisions carry too.
- * A later transition leaves that record in place, so a record whose timestamp
- * matches a revision still in the history shows `running` was displaced
- * before the latest revision was recorded. A history this runtime cannot read
- * answers `false`.
+ * Whether the piece's recorded source history moved it from `from` to `to`:
+ * its latest revision names `to`, and either an earlier revision names `from`
+ * or a recorded transition displaced `from`. A transition whose predecessor's
+ * source is not retained records no baseline revision for it; it names that
+ * predecessor in the `displacedPattern` meta, stamped with the transition's
+ * own timestamp, which its revisions carry too. A later transition leaves that
+ * record in place, so a record whose timestamp matches a revision still in the
+ * history shows `from` was displaced before the latest revision was recorded.
+ * A history this runtime cannot read returns `false`.
+ *
+ * A runtime that cannot load `to` asks this to tell a source it is behind
+ * from one that is dead: when the piece moved from `from` to `to`, some
+ * runtime loaded `to`, so it is ahead of this one rather than unloadable
+ * everywhere. The history cannot tell the two apart for a source that every
+ * runtime has since lost, which it reads as ahead too.
  */
-function pieceSourceMovedPast(
+export function pieceSourceMovedPast(
   resultCell: Cell<unknown>,
-  running: { identity: string; symbol: string },
-  pointer: { identity: string; symbol: string },
+  from: { identity: string; symbol: string },
+  to: { identity: string; symbol: string },
 ): boolean {
   let history: PieceSourceRevision[];
   try {
@@ -15025,14 +15047,14 @@ function pieceSourceMovedPast(
   const latest = history.at(-1);
   if (
     latest === undefined ||
-    patternIdentityKey(latest.pattern) !== patternIdentityKey(pointer)
+    patternIdentityKey(latest.pattern) !== patternIdentityKey(to)
   ) {
     return false;
   }
-  const runningKey = patternIdentityKey(running);
+  const fromKey = patternIdentityKey(from);
   if (
     history.slice(0, -1).some((revision) =>
-      patternIdentityKey(revision.pattern) === runningKey
+      patternIdentityKey(revision.pattern) === fromKey
     )
   ) {
     return true;
@@ -15042,7 +15064,7 @@ function pieceSourceMovedPast(
   });
   const displacedRef = asPatternIdentityRef(displaced);
   return displacedRef !== undefined &&
-    patternIdentityKey(displacedRef) === runningKey &&
+    patternIdentityKey(displacedRef) === fromKey &&
     isObjectOrArray(displaced) &&
     history.some((revision) => revision.timestamp === displaced.displacedAt);
 }
