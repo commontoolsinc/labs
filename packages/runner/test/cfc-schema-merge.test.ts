@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
+import { droppedStoredClaim } from "../src/cfc/claim-preservation.ts";
 import {
   cfcSchemaMergeIssue,
   cfcSchemaPoliciesEqual,
@@ -113,6 +114,24 @@ describe("mergeCfcSchemaEnvelopes", () => {
       const candidate = tree(writer("m2"));
       const merged = mergeCfcSchemaEnvelopes(tree(writer("m1")), candidate);
       expect(mergeCfcSchemaEnvelopes(merged, candidate)).toEqual(merged);
+    });
+
+    it("throws for two references that do not resolve rather than minting a definition from them", () => {
+      // Where the policies differ, every reference is resolved before the
+      // merge, so a pair naming nothing never reaches the merge of two
+      // bodies.
+
+      const unresolved = (name: string): JSONSchemaObj => ({
+        type: "object",
+        properties: { pin: { $ref: `#/$defs/${name}` } },
+        $defs: { Other: { type: "string", ifc: writer() } },
+      });
+      expect(() =>
+        mergeCfcSchemaEnvelopes(
+          unresolved("Missing"),
+          unresolved("AlsoMissing"),
+        )
+      ).toThrow(/requires resolved schemas/);
     });
 
     it("throws for a definition that changes the stored writer inside the recursion", () => {
