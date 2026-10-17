@@ -360,18 +360,17 @@ const BOUND_CHILD_NODE_WEIGHT = 4096;
 const NAMING_PROBE_BUDGET = 256;
 
 /**
- * The read metadata of the probes that decide whether a run of a piece, or a
- * swap of one to another pattern, waits for a name-sync
- * (`Runner.#patternToNameBeforeRun`, `Runner.#swapReadsAbsent`): whether a
- * document is on this replica, and where a redirect in the argument hops to
- * next. They read through a read-only transaction of their own, and what they
- * find decides only when the run happens, never what it computes. So they are
- * runtime-internal reads, which neither schedule nor taint, and which a
- * runtime read ceiling does not measure: a document whose value the ceiling
- * withholds is on the replica all the same, and the run's own reads of it are
- * the reads the ceiling governs.
+ * The read metadata of `Runner.#documentPresent`, the presence probe that
+ * decides whether a run of a piece, or a swap of one to another pattern, waits
+ * for a name-sync (`Runner.#patternToNameBeforeRun`,
+ * `Runner.#swapReadsAbsent`). It reads through a read-only transaction of its
+ * own, and what it finds decides only when the run happens, never what it
+ * computes. So it is a runtime-internal read, which neither schedules nor
+ * taints, and which a runtime read ceiling does not measure: a document whose
+ * value the ceiling withholds is on the replica all the same, and the run's
+ * own reads of it are the reads the ceiling governs.
  */
-const NAMING_PROBE_READ = {
+const PRESENCE_PROBE_READ = {
   ...ignoreReadForScheduling,
   ...internalVerifierRead,
 };
@@ -7475,7 +7474,7 @@ export class Runner {
           : ["value"],
         ...(link.scope !== undefined && { scope: link.scope }),
       },
-      { meta: NAMING_PROBE_READ },
+      { meta: PRESENCE_PROBE_READ },
     ) !== undefined;
   }
 
@@ -7737,7 +7736,7 @@ export class Runner {
             path: ["value", ...link.path],
             ...(link.scope !== undefined && { scope: link.scope }),
           },
-          { meta: NAMING_PROBE_READ },
+          { meta: ignoreReadForScheduling },
         );
         // Only a redirect's hop continues the walk: what it redirects to is
         // the next document of the chain the argument's link forms. The
@@ -7770,7 +7769,7 @@ export class Runner {
           ...(argumentLink.scope !== undefined &&
             { scope: argumentLink.scope }),
         },
-        { meta: NAMING_PROBE_READ },
+        { meta: ignoreReadForScheduling },
       ),
       4,
     );
