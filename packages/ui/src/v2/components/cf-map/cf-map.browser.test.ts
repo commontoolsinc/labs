@@ -9,6 +9,7 @@ import { expect } from "@std/expect";
 
 import {
   createMockCellHandle,
+  pushUpdate,
   writesSent,
 } from "../../test-utils/mock-cell-handle.ts";
 import { CFMap } from "./index.ts";
@@ -17,6 +18,13 @@ import type { Bounds, CfBoundsChangeDetail, MapValue } from "./types.ts";
 /** A box around Paris, far from cf-map's default view of San Francisco. */
 const PARIS: Bounds = { north: 48.9, south: 48.82, east: 2.42, west: 2.27 };
 const PARIS_CENTER = { lat: 48.86, lng: 2.345 };
+/** A box around San Francisco, inside cf-map's default view. */
+const SF_BOX: Bounds = {
+  north: 37.81,
+  south: 37.76,
+  east: -122.39,
+  west: -122.45,
+};
 /** Outside the Paris box by about the box's own width. */
 const NEAR_PARIS = { lat: 48.86, lng: 2.6 };
 
@@ -405,4 +413,50 @@ Deno.test("a fit asked for during a drag runs once the drag ends", async () => {
   release(page.map, 40);
   expect((await pan).userInitiated).toBe(true);
   expect(drawsMarkerInside(page.map)).toBe(true);
+});
+
+//
+// The stored view and a fit to the features
+//
+
+Deno.test("a fit to the features wins over stored bounds there at mount", async () => {
+  using page = await mounted((map) => {
+    map.bounds = createMockCellHandle(PARIS);
+    map.value = NEAR_DEFAULT;
+    map.fitToBounds = true;
+  });
+  await nextFrame();
+  await nextFrame();
+  expect(drawsMarkerInside(page.map)).toBe(true);
+});
+
+Deno.test("stored bounds that load after mount do not undo a fit to the features", async () => {
+  const bounds = createMockCellHandle<Bounds>();
+  using page = await mounted((map) => {
+    map.bounds = bounds;
+    map.value = { markers: [{ position: PARIS_CENTER }] };
+    map.fitToBounds = true;
+  });
+  expect(drawsMarkerInside(page.map)).toBe(true);
+  // The stored view, a box near San Francisco, loads late.
+  pushUpdate(bounds, SF_BOX);
+  await nextFrame();
+  await nextFrame();
+  expect(drawsMarkerInside(page.map)).toBe(true);
+  // A later value, a consumer framing somewhere, still applies.
+  pushUpdate(bounds, { ...SF_BOX, north: SF_BOX.north + 0.01 });
+  await nextFrame();
+  await nextFrame();
+  expect(drawsMarkerInside(page.map)).toBe(false);
+});
+
+Deno.test("stored bounds apply when the map does not fit to its features", async () => {
+  const bounds = createMockCellHandle<Bounds>();
+  using page = await mounted((map) => {
+    map.bounds = bounds;
+  });
+  pushUpdate(bounds, PARIS);
+  await nextFrame();
+  await nextFrame();
+  expect(await showsMarkerAt(page.map, PARIS_CENTER)).toBe(true);
 });

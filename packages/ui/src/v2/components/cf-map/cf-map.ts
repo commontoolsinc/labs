@@ -170,6 +170,15 @@ export class CFMap extends BaseElement {
   private _unsizedFeatureFit = false;
 
   /**
+   * Whether the map has been given bound bounds yet. The first it is given
+   * are the view stored from a past session, whenever they arrive: at mount,
+   * or later when the cell's value loads. While `fitToBounds` is on, the fit
+   * to the features wins over that stored view; a later value, such as a
+   * consumer framing a chosen place, applies as usual.
+   */
+  private _boundsApplied = false;
+
+  /**
    * Whether a person's move is under way: from the `movestart` of a move
    * `_userMoved` marks to its `moveend`, which for a drag includes the
    * inertial glide after it. cf-map's own moves wait for it to end, so they
@@ -760,6 +769,11 @@ export class CFMap extends BaseElement {
     // Validate bounds before applying
     const validatedBounds = this._validateBounds(bounds);
     if (!validatedBounds) return;
+
+    // The stored view yields to a fit to the features
+    const stored = !this._boundsApplied;
+    this._boundsApplied = true;
+    if (stored && this.fitToBounds) return;
 
     // If cf-map may not move the map now, queue the update
     if (!this._canMoveMap()) {
@@ -1567,6 +1581,7 @@ export class CFMap extends BaseElement {
     this._pendingFitRequested = false;
     this._unsizedBounds = null;
     this._unsizedFeatureFit = false;
+    this._boundsApplied = false;
     this._userMoved = false;
     this._userMoveInFlight = false;
     this._resizing = false;
