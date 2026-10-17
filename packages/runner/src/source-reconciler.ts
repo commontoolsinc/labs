@@ -255,7 +255,7 @@ function runningReleasedAt(
 /**
  * Whether a piece keeps the source it runs, `running`, against an earlier
  * release offering `offered`. It does when this runtime can load `running`
- * (`loadable`), and when the piece's history records its move from `offered`
+ * (`loadable`), or when the piece's history records its move from `offered`
  * to `running` (`pieceSourceMovedPast()`): then a runtime loaded `running`,
  * and this one is behind that release rather than holding a dead one. Taking
  * the earlier release there would undo the move, and every runtime that can
