@@ -212,6 +212,7 @@ import {
   type URI,
 } from "./storage/interface.ts";
 import {
+  internalVerifierRead,
   isDurableReadTx,
   machineryRead,
   markDurableReadTx,
@@ -357,6 +358,22 @@ const BOUND_CHILD_NODE_WEIGHT = 4096;
  * held for it is diagnosable.
  */
 const NAMING_PROBE_BUDGET = 256;
+
+/**
+ * The read metadata of `Runner.#documentPresent`, the presence probe that
+ * decides whether a run of a piece, or a swap of one to another pattern, waits
+ * for a name-sync (`Runner.#patternToNameBeforeRun`,
+ * `Runner.#swapReadsAbsent`). It reads through a read-only transaction of its
+ * own, and what it finds decides only when the run happens, never what it
+ * computes. So it is a runtime-internal read, which neither schedules nor
+ * taints, and which a runtime read ceiling does not measure: a document whose
+ * value the ceiling withholds is on the replica all the same, and the run's
+ * own reads of it are the reads the ceiling governs.
+ */
+const PRESENCE_PROBE_READ = {
+  ...ignoreReadForScheduling,
+  ...internalVerifierRead,
+};
 
 /**
  * How many times a named piece's run starts again after its start transaction
@@ -7457,7 +7474,7 @@ export class Runner {
           : ["value"],
         ...(link.scope !== undefined && { scope: link.scope }),
       },
-      { meta: ignoreReadForScheduling },
+      { meta: PRESENCE_PROBE_READ },
     ) !== undefined;
   }
 
