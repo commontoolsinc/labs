@@ -195,9 +195,11 @@ feeds classification, manifest extraction, and value hashing in one pass. A
 scan-local cache retains at most 256 related documents per scope for owner and
 schema lookups; the scan retains hashes and diagnostic evidence rather than
 whole-scope document bodies. Generated exclusions are applied after all scopes'
-manifests have been read. Scheme 1, address ordering, and corruption and
-unhashable-value reporting also apply to the fingerprint step of full compaction
-verification. Fingerprinting expects an offline, unchanging store.
+manifests have been read. Fingerprint reports carry scheme-1 hashes, ordered
+addresses, ambiguity notices, and unhashable-value diagnostics; included decode
+failures throw. Full compaction verification compares the roll-up hashes and
+reports a computation failure if either fingerprint throws. Fingerprinting
+expects an offline, unchanging store.
 
 The `cf inspect value-at`, `diff`, and `converge` commands accept `--path-json`
 when a path must preserve its segments exactly. The standalone `value-at` and
