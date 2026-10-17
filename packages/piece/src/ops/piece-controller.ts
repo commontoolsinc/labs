@@ -4576,16 +4576,22 @@ export class PieceController<T = unknown> {
         confirmed.candidate,
         action.kind === "adopt",
       );
-      // A step that has become a gated release since it was reviewed waives
-      // the schema issue it was confirmed over, which the confirmation still
-      // answers.
-      const currentIssues = currentReview.waivedSchema === undefined
-        ? currentReview.issues
-        : { ...currentReview.issues, schema: currentReview.waivedSchema };
+      // The confirmation answers the issues the step raises now. A step that
+      // is a gated release now waives its schema issue, which a confirmation
+      // reviewed before it became one also answers; one reviewed while it
+      // was one never showed that issue, so it answers only without it.
+      const waived = currentReview.waivedSchema;
+      const confirmedIssues = confirmed.review.issues;
+      const answered = deepEqual(currentReview.issues, confirmedIssues) ||
+        (waived !== undefined &&
+          deepEqual(
+            { ...currentReview.issues, schema: waived },
+            confirmedIssues,
+          ));
       if (
         currentReview.argumentEvidence !==
           confirmed.review.argumentEvidence ||
-        !deepEqual(currentIssues, confirmed.review.issues)
+        !answered
       ) {
         if (hasPieceSourceCompatibilityIssues(currentReview.issues)) {
           prepared = { ...confirmed, review: currentReview };

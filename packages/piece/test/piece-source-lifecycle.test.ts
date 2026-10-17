@@ -1930,6 +1930,36 @@ describe("piece source lifecycle", () => {
       expect(await piece.result.get(["version"])).toBe("candidate");
     });
 
+    it("applies a confirmed incompatibility the step raised as a later release", async () => {
+      const origin = "system:gated-linked.tsx";
+      const route = "/api/patterns/gated-linked.tsx";
+      const source = await pieces.create(unionValueProgram(), { input: {} });
+      const piece = await pieces.create(optionalModeProgram(1), {
+        input: { value: 4 },
+      });
+      await repointTo(piece, origin, route, optionalModeProgram(1), earlier);
+      await seedLegacyModeLink(
+        piece,
+        (await source.result.getCell()).key("value"),
+      );
+      await offer(route, incompatibleOptionalModeProgram(), later);
+      const warning = await piece.changeSource({ kind: "adopt" });
+      expect(warning.status).toBe("incompatible");
+      if (warning.status !== "incompatible") {
+        throw new Error("expected an incompatibility warning");
+      }
+      expect(warning.prepared.review?.issues.schema).toBeUndefined();
+      expect(warning.prepared.review?.issues.retainedLinks).toBeDefined();
+
+      expect(
+        await piece.changeSource({ kind: "adopt" }, {
+          confirmedChange: warning.prepared,
+        }),
+      ).toEqual({ status: "applied" });
+
+      expect(await piece.result.get(["value"])).toBe("changed");
+    });
+
     it("returns an incompatibility warning for a release with no stated time", async () => {
       const origin = "system:gated-untimed.tsx";
       const route = "/api/patterns/gated-untimed.tsx";
