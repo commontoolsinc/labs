@@ -143,9 +143,9 @@ The after profile's 1,115 `hashOfInternal` samples by entry point: 654 under
 `hashOf`, nearly all schema interning from a dozen call sites (resolving
 references under the join, `memoizedStripAs` under alias sanitizing,
 verifying arrived schema documents, handler schemas, the superset selector,
-pruning definitions), and 451 under `hashStringOf`: snapshot ids under
+pruning definitions); 451 under `hashStringOf`: snapshot ids under
 `createElement`, watch ids and selector identities under `#refreshWatchSet`,
 `valueEqual` under writes, `#viewRefHash` under argument reads, child keys
-under the render. The 72,337 hashes of a mutable root per load are those, and
+under the render; 8 under `taggedHashStringOf`; and 2 reached directly. The 72,337 hashes of a mutable root per load are those, and
 each pays the per-hash overhead whatever its size. Fewer hashes, rather than
 cheaper walks, is the lever left in hashing.

@@ -755,7 +755,10 @@ export class ValueHasher {
   }
 
   /**
-   * Computes the hash of a value without consulting or populating any cache.
+   * Computes the hash of a value without consulting or populating the hash
+   * caches of `caching.ts`. The hasher's own caches, of string encodings and
+   * of deep-frozen containers' bytes, apply as they do to every hash: they
+   * change what is walked, never what is fed.
    */
   static computeHash(value: FabricValue): FabricHash {
     const valueHasher = new ValueHasher();

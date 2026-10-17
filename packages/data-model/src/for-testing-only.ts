@@ -393,11 +393,13 @@ export const getFrozenObjectHashCacheHitsForTestingOnly: () => number =
 
 /**
  * `getContainersHashed()` from `value-hash/ValueHasher.ts`, which counts the
- * arrays and plain objects fed to a hasher.
+ * arrays and plain objects a hasher walks. A deep-frozen container fed from
+ * the bytes an earlier walk kept is not walked and not counted, so the count
+ * is of work done, not of containers in the value.
  *
  * It is here because a hash is the same however much work went into it, so
- * nothing on the package's public surface says how wide a value was hashed. A
- * test that holds some code to hashing only part of a value — or none of it —
+ * nothing on the package's public surface says how wide a value was walked. A
+ * test that holds some code to walking only part of a value — or none of it —
  * reads the count before and after.
  */
 export const getContainersHashedForTestingOnly: () => number =

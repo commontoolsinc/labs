@@ -448,9 +448,11 @@ Deno.bench({
 // A fresh mutable root carrying a sub-object that many roots share, which is
 // what a resolved schema definition view looks like: `{ ...body, $defs }`
 // over one deep-frozen definition map. The hasher keeps the encoded bytes of
-// a deep-frozen sub-object it has walked, above a size threshold, so the
-// frozen arm is one `update()` of those bytes where the mutable arm is a
-// walk. The sizes straddle that threshold, which is what they are for.
+// a deep-frozen sub-object it has walked when they run to 256 bytes or more,
+// so the frozen arm is one `update()` of those bytes where the mutable arm is
+// a walk. The sizes straddle that floor, which is what they are for: at 4 and
+// 16 keys the encoding is under it and both arms walk, and at 64 and 256 keys
+// the frozen arm is fed from kept bytes.
 //
 
 function makeWideObject(entries: number): FabricPlainObject {
@@ -485,7 +487,7 @@ for (const entries of [4, 16, 64, 256]) {
   });
 
   Deno.bench({
-    name: `shared sub-object (${entries} keys, deep-frozen, bytes kept)`,
+    name: `shared sub-object (${entries} keys, deep-frozen)`,
     group: `shared-sub-object-${entries}`,
     fn(b) {
       const root = { i: entries, sub: frozenSub };
