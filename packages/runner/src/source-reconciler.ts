@@ -76,6 +76,7 @@ import {
   type PieceReconciliation,
   type PieceReconciliationOutcome,
   type PieceReconciliationReason,
+  pieceSourceMovedPast,
   type PieceSourceSnapshot,
   type PieceSourceTransition,
   preparePieceSourceTransitionBaseline,
@@ -130,8 +131,10 @@ const logger = getLogger("runner.source-reconcile", {
  * - `ahead`: the origin offered a `system:` release earlier than the one the
  *   piece runs, which the piece keeps. Against a running release that records
  *   a release time, an offer stating none is the earlier one. A piece whose
- *   running pattern cannot load takes the earlier release regardless, since it
- *   has nothing to keep.
+ *   running pattern cannot load takes the earlier release as a rescue, since
+ *   it has nothing to start, unless its history records its move from that
+ *   release to the one it runs: then this runtime is behind the running
+ *   release, and the piece keeps it.
  * - `incompatible`: the origin offered source that cannot replace what the
  *   piece runs, and its owner has not said to take it anyway.
  * - `rejected`: the write that adopts the origin's source was refused for
@@ -247,6 +250,25 @@ function runningReleasedAt(
   return adopted === undefined || reconfirmed === undefined
     ? adopted ?? reconfirmed
     : Math.max(adopted, reconfirmed);
+}
+
+/**
+ * Whether a piece keeps the source it runs, `running`, against an earlier
+ * release offering `offered`. It does when this runtime can load `running`
+ * (`loadable`), and when the piece's history records its move from `offered`
+ * to `running` (`pieceSourceMovedPast()`): then a runtime loaded `running`,
+ * and this one is behind that release rather than holding a dead one. Taking
+ * the earlier release there would undo the move, and every runtime that can
+ * load the later release would make it again. Otherwise the piece has nothing
+ * it can start, and the earlier release is a rescue.
+ */
+function keepsRunningSource(
+  resultCell: Cell<unknown>,
+  running: { identity: string; symbol: string },
+  offered: { identity: string; symbol: string },
+  loadable: boolean,
+): boolean {
+  return loadable || pieceSourceMovedPast(resultCell, offered, running);
 }
 
 async function abortable<T>(
@@ -992,7 +1014,12 @@ export class SourceReconciler {
     if (
       advertised !== state.running.identity &&
       isEarlierRelease(answer.releasedAt, runningRelease) &&
-      await this.#loadPattern(state.running, state.space) !== undefined
+      keepsRunningSource(
+        resultCell,
+        state.running,
+        offered,
+        await this.#loadPattern(state.running, state.space) !== undefined,
+      )
     ) {
       logger.debug("reconcile-earlier-release", () => [
         "not adopting an earlier release than the one this piece runs",
@@ -1562,10 +1589,11 @@ export class SourceReconciler {
     // when the commit lands, not only when this pass began: another runtime
     // can confirm the running source at a later release while this one
     // prepares. The order is read again inside the commit, so a confirmation
-    // that lands first makes this commit stale and its retry decline. A piece
-    // whose running pattern will not load takes the candidate as a rescue,
-    // as an earlier offer does.
-    const ordered = origin.kind === "system" &&
+    // that lands first makes this commit stale and its retry decline. Whether
+    // the piece keeps its running source against an earlier candidate is
+    // decided there too, by the history the commit reads.
+    const ordered = origin.kind === "system";
+    const loadable = ordered &&
       await this.#loadPattern(state.running, state.space) !== undefined;
     let overtaken = false;
     const failure = await this.#commit(resultCell, state, signal, (tx) => {
@@ -1576,6 +1604,12 @@ export class SourceReconciler {
         isEarlierRelease(
           advertised?.releasedAt,
           runningReleasedAt(resultCell.withTx(tx), state.running),
+        ) &&
+        keepsRunningSource(
+          resultCell.withTx(tx),
+          state.running,
+          candidateRef,
+          loadable,
         )
       ) {
         overtaken = true;
