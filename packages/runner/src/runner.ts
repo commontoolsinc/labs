@@ -6208,13 +6208,51 @@ export class Runner {
                   "pointer as written",
                 ]);
               }
+              // A piece whose history records an update from `running` to
+              // the pointer is stopped here instead of rolled back. The
+              // check runs twice: before the rollback opens a transaction,
+              // and again through that transaction, so an update recorded
+              // between the two is honored too.
+              const standDown = (
+                running: { identity: string; symbol: string },
+              ) => {
+                logger.warn("pattern-pointer-ahead-of-runtime", () => [
+                  `durable patternIdentity ${newRef.identity}#${newRef.symbol}`,
+                  "is a recorded update from the running pattern",
+                  `${running.identity}#${running.symbol}, and this runtime`,
+                  "cannot load it; stopping the piece here rather than",
+                  "rolling the update back",
+                ]);
+                this.stop(resultCell);
+              };
+              if (
+                this.#runtime.cfcEnforcementMode !== "disabled" &&
+                revertTarget !== undefined &&
+                patternIdentityKey(revertTarget) !== newKey &&
+                pieceSourceMovedPast(resultCell, revertTarget, newRef)
+              ) {
+                // The piece's own history records a move from the pattern
+                // running here to the one this runtime cannot load: a newer
+                // runtime adopted a release this one cannot compile. The
+                // pointer is ahead of this runtime, not dead. Writing the
+                // running identity back would undo the adoption, and every
+                // start of the newer runtime would adopt again. Stopping the
+                // piece here writes nothing, leaves the adoption standing for
+                // every runtime that can load it, and keeps this runtime from
+                // writing the piece's documents under a version they have
+                // moved past.
+                standDown(revertTarget);
+                return;
+              }
               if (
                 this.#runtime.cfcEnforcementMode !== "disabled" &&
                 revertTarget !== undefined &&
                 patternIdentityKey(revertTarget) !== newKey
               ) {
                 const revertRef = revertTarget;
+                let recordedUpdateAtCommit = false;
                 const rollForward = this.#runtime.editWithRetry((tx) => {
+                  recordedUpdateAtCommit = false;
                   // Async pointer repair from the meta watcher's load
                   // promise — no scheduler run stamps it; bookkeeping
                   // per serving-loop.md §3d.
@@ -6231,12 +6269,31 @@ export class Runner {
                   if (!cur || patternIdentityKey(cur) !== newKey) {
                     return false;
                   }
+                  if (
+                    pieceSourceMovedPast(
+                      resultCell.withTx(tx),
+                      revertRef,
+                      newRef,
+                    )
+                  ) {
+                    recordedUpdateAtCommit = true;
+                    return false;
+                  }
                   resultCell.withTx(tx).setMetaRaw("patternIdentity", {
                     identity: revertRef.identity,
                     symbol: revertRef.symbol,
                   }, rawMetaWriteAuthorization);
                   return true;
                 }).then((result) => {
+                  if (recordedUpdateAtCommit) {
+                    if (
+                      active && startLifecycleEpoch === this.#lifecycleEpoch &&
+                      currentPatternKey === newKey
+                    ) {
+                      standDown(revertRef);
+                    }
+                    return;
+                  }
                   // Only reclaim the observed key while it is STILL the
                   // failed one — a valid repoint that raced this rollback
                   // has already advanced the watcher state, and clobbering
@@ -14940,6 +14997,54 @@ export function getPieceSourceRevisions(
     revisions.push(revision);
   }
   return revisions;
+}
+
+/**
+ * Whether the piece's recorded source history moved it from `running` to
+ * `pointer`: its latest revision names `pointer`, and either an earlier
+ * revision names `running` or a recorded transition displaced `running`. A
+ * transition whose predecessor's source is not retained records no baseline
+ * revision for it; it names that predecessor in the `displacedPattern` meta,
+ * stamped with the transition's own timestamp, which its revisions carry too.
+ * A later transition leaves that record in place, so a record whose timestamp
+ * matches a revision still in the history shows `running` was displaced
+ * before the latest revision was recorded. A history this runtime cannot read
+ * answers `false`.
+ */
+function pieceSourceMovedPast(
+  resultCell: Cell<unknown>,
+  running: { identity: string; symbol: string },
+  pointer: { identity: string; symbol: string },
+): boolean {
+  let history: PieceSourceRevision[];
+  try {
+    history = getPieceSourceRevisions(resultCell);
+  } catch {
+    return false;
+  }
+  const latest = history.at(-1);
+  if (
+    latest === undefined ||
+    patternIdentityKey(latest.pattern) !== patternIdentityKey(pointer)
+  ) {
+    return false;
+  }
+  const runningKey = patternIdentityKey(running);
+  if (
+    history.slice(0, -1).some((revision) =>
+      patternIdentityKey(revision.pattern) === runningKey
+    )
+  ) {
+    return true;
+  }
+  const displaced = resultCell.getMetaRaw("displacedPattern", {
+    meta: ignoreReadForScheduling,
+  });
+  const displacedRef = asPatternIdentityRef(displaced);
+  return displacedRef !== undefined &&
+    patternIdentityKey(displacedRef) === runningKey &&
+    isObjectOrArray(displaced) &&
+    history.some((revision) => revision.timestamp === displaced.displacedAt);
 }
 
 /**
