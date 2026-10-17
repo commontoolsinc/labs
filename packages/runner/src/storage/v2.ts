@@ -151,6 +151,7 @@ import {
 } from "./event-append-queue.ts";
 import {
   IMemoryAddress,
+  IMemorySpaceAddress,
   IMergedChanges,
   IOperationStorageCapability,
   IPreconditionFailedError,
@@ -640,6 +641,9 @@ type PendingVersion =
 
 type ConfirmedVersion = MaterializedVersion & {
   seq: number;
+
+  /** Whether an accepted remote set or deletion establishes this whole value. */
+  acceptedWhole?: true;
 
   /**
    * Whether `value` is the store's value at `seq` with a derived write folded
@@ -6016,7 +6020,23 @@ export class SpaceReplica
   }
 
   /** ISpaceReplica.completeThroughSeq. */
-  completeThroughSeq(): number | undefined {
+  completeThroughSeq(
+    documents: readonly Pick<IMemorySpaceAddress, "id" | "scope">[] = [],
+  ): number | undefined {
+    // A receipt proves one stored version. Only a delivered watch or immutable
+    // content also proves that later commits cannot have changed it unseen.
+    for (const { id, scope } of documents) {
+      const key = this.#docKeyOf({ id, scope });
+      if (
+        !this.#delivered.has(key) && !(id.startsWith("cid:") &&
+          holdsContentAddressedValue(
+            this.#docs.get(key),
+            id.slice("cid:".length),
+          ))
+      ) {
+        return undefined;
+      }
+    }
     if (this.#completeThroughLost || this.#completeThroughSeq === 0) {
       return undefined;
     }
@@ -6047,13 +6067,9 @@ export class SpaceReplica
       return false;
     }
     if (delivered === undefined) {
-      // A schema document this replica's own commit stored may never arrive
-      // in a frame: the server ships it with a document that refers to it,
-      // and does not send a replica its own change to a document it holds.
-      // Content under a `cid:` id cannot change, so holding that content
-      // confirmed is confirmation.
-      return id.startsWith("cid:") &&
-        holdsContentAddressedValue(record, id.slice("cid:".length));
+      return confirmed.acceptedWhole === true ||
+        (id.startsWith("cid:") &&
+          holdsContentAddressedValue(record, id.slice("cid:".length)));
     }
     // Past its delivered seq, the confirmed state is an own accepted write
     // promoted locally, which a push through that seq has since covered.
@@ -10450,6 +10466,7 @@ export class SpaceReplica
             cloneIfNecessary(computed.value) as EntityDocument,
             coverClass,
           );
+          if (computed.op === "set") record.confirmed.acceptedWhole = true;
         }
         record.pending = record.pending.filter((entry) =>
           entry.localSeq !== localSeq
@@ -10545,6 +10562,11 @@ export class SpaceReplica
       );
 
       if (promoted) {
+        // A blind patch can merge with content this replica has never read.
+        // A whole replacement or deletion establishes the complete result.
+        if (!local && (pending.op === "set" || pending.op === "delete")) {
+          promoted.acceptedWhole = true;
+        }
         record.confirmed = promoted;
         record.materialized = reusedSuffix && reusedSuffix.length > 0
           ? {

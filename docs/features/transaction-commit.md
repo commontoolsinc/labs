@@ -70,12 +70,18 @@ None of these reads tells confirmed state from what the replica holds locally.
 `readConfirmed(runtime, space, read)` runs `read` synchronously in one
 read-only transaction that reads past any speculation overlay, so every
 document it consumes is read at one instant, and reports whether each of those
-documents is confirmed: watched and delivered, with no pending local write and
-no value the replica made up locally. A content-addressed schema document that
-the replica's own accepted commit stored counts as confirmed whether or not a
-frame delivered it: the server ships such a document with a document that
-refers to it, a replica is not sent its own change to a document it holds, and
-content under a content-addressed id cannot change. Every read counts, a
+documents is confirmed: no local write is pending, no refused write or
+incomplete wave is folded into the value, and the replica has evidence of a
+stored version. A server delivery or an accepted whole-document set or deletion
+establishes that version. A blind patch alone does not establish the complete
+result, since it may merge with content this replica has never loaded. Verified
+content under a content-addressed id also establishes a stored version.
+
+Confirmation alone does not establish freshness. An accepted mutable document
+that has never been delivered can remain at that accepted version while other
+sessions change it. Such a read returns `confirmed: true` without a `seq`:
+loading the document with `sync()` establishes its watch and brings in current
+state. Immutable content needs no continuing watch. Every read counts, a
 `sample()` as much
 as a `get()`. When they all are confirmed and the replica can say, it also
 returns the commit sequence the read is complete through: the `toSeq` of the
