@@ -198,7 +198,7 @@ function validateConfig(value: unknown):
     presence[name] = field;
   }
 
-  const streamSource = source.streams ?? [];
+  const streamSource = source.streams === undefined ? [] : source.streams;
   if (!Array.isArray(streamSource)) {
     throw new TypeError("IFRAME_PATTERN.streams must be an array of names.");
   }

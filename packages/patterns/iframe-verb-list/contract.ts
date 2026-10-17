@@ -2,7 +2,8 @@
  * The data contract of the verb list's frame. The items belong to the pattern
  * in `main.tsx`, which hands them to the guest as input and changes them only
  * through its `addItem` verb; the frame takes that verb as the stream the
- * guest sends to. What the guest owns is which items are checked off.
+ * guest sends to. What the guest owns is which items are checked off, and
+ * whether the list hides them.
  */
 
 /** One entry on the list. */
@@ -26,10 +27,10 @@ export interface IframeStateData {
   checked: Record<string, boolean>;
 }
 
-/** What the guest publishes. */
+/** What the guest publishes, shared by everyone on the piece. */
 export interface IframeOutputData {
-  /** How many items are checked off, as the guest last counted them. */
-  checkedCount: number;
+  /** Whether the list hides the items that are checked off. */
+  hideChecked: boolean;
 }
 
 /** The event the guest sends to `addItem`. */
@@ -55,7 +56,7 @@ export const DEFAULT_STATE: IframeStateData = {
 };
 
 export const DEFAULT_OUTPUT: IframeOutputData = {
-  checkedCount: 0,
+  hideChecked: false,
 };
 
 export const IFRAME_PATTERN = {

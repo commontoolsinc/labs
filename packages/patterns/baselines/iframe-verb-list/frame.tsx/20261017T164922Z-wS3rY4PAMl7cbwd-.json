@@ -75,13 +75,13 @@
     "$defs": {
       "IframeOutputData": {
         "properties": {
-          "checkedCount": {
-            "description": "How many items are checked off, as the guest last counted them.",
-            "type": "number"
+          "hideChecked": {
+            "description": "Whether the list hides the items that are checked off.",
+            "type": "boolean"
           }
         },
         "required": [
-          "checkedCount"
+          "hideChecked"
         ],
         "type": "object"
       },

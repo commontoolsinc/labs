@@ -53,7 +53,7 @@ export interface VerbListOutput {
   /** Which items are checked off, by item id, as the frame stores it. */
   state: IframeStateData;
 
-  /** How many items are checked off, as the frame last counted them. */
+  /** Whether the frame hides checked-off items, for everyone on the piece. */
   output: IframeOutputData;
 
   /**

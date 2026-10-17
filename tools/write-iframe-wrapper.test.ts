@@ -633,6 +633,10 @@ export const IFRAME_PATTERN = { name: "NoVerbs" } as const;
         "IFRAME_PATTERN.streams must be an array of names.",
       ],
       [
+        "null",
+        "IFRAME_PATTERN.streams must be an array of names.",
+      ],
+      [
         `["add-item"]`,
         `Stream name "add-item" must be a TypeScript identifier such as addItem.`,
       ],

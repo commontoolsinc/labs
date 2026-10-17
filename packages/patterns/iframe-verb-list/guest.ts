@@ -2,7 +2,10 @@
  * The verb list guest. It shows the pattern's items, which reach it as input,
  * and adds one only by sending the pattern's `addItem` verb an event: the list
  * is the pattern's, so the guest asks for an item rather than writing it.
- * Which items are checked off is the guest's own, kept in `state`.
+ * Which items are checked off is the guest's own, kept in `state`, and so is
+ * whether the list hides them, kept in `output`. The count of checked items is
+ * only shown, never stored: a count each guest wrote from its own reading
+ * could overwrite a newer one.
  */
 
 import { connectFabric } from "@commonfabric/iframe-sandbox/guest";
@@ -33,6 +36,10 @@ root.innerHTML = `
       <input id="new-item" placeholder="Add an item" autocomplete="off" disabled>
       <button type="button" class="cf-primary" id="add" disabled>Add</button>
     </div>
+    <label class="cf-row cf-muted">
+      <input type="checkbox" id="hide-checked" disabled>
+      Hide checked items
+    </label>
     <p id="error" role="alert"></p>
     <ul id="items"></ul>
   </main>
@@ -41,6 +48,7 @@ const status = root.querySelector<HTMLParagraphElement>("#status")!;
 const field = root.querySelector<HTMLInputElement>("#new-item")!;
 const addRow = root.querySelector<HTMLDivElement>("#add-row")!;
 const add = root.querySelector<HTMLButtonElement>("#add")!;
+const hideChecked = root.querySelector<HTMLInputElement>("#hide-checked")!;
 const error = root.querySelector<HTMLParagraphElement>("#error")!;
 const list = root.querySelector<HTMLUListElement>("#items")!;
 
@@ -76,6 +84,7 @@ function rowFor(item: ListItem): HTMLLIElement {
 function render(): void {
   const items = input.get()?.items ?? [];
   const checked = state.get()?.checked ?? {};
+  const hiding = output.get()?.hideChecked === true;
   const present = new Set(items.map((item) => item.id));
   for (const [id, row] of rows) {
     if (!present.has(id)) {
@@ -89,6 +98,7 @@ function render(): void {
     box.checked = checked[item.id] === true;
     box.disabled = !hydrated;
     row.toggleAttribute("data-checked", box.checked);
+    row.hidden = hiding && box.checked;
     row.querySelector("span")!.textContent = item.text;
     if (list.children[index] !== row) {
       list.insertBefore(row, list.children[index] ?? null);
@@ -96,6 +106,8 @@ function render(): void {
   });
 
   field.disabled = !hydrated;
+  hideChecked.checked = hiding;
+  hideChecked.disabled = !hydrated;
   addRow.setAttribute("aria-busy", String(sending));
   add.disabled = !hydrated || sending || field.value.trim() === "";
   const done = items.filter((item) => checked[item.id] === true).length;
@@ -132,13 +144,14 @@ async function submit(): Promise<void> {
 async function setChecked(id: string, value: boolean): Promise<void> {
   try {
     await state.key("checked").key(id).set(value);
-    const [{ items }, { checked }] = await Promise.all([
-      input.pull(),
-      state.pull(),
-    ]);
-    await output.key("checkedCount").set(
-      items.filter((item) => checked[item.id] === true).length,
-    );
+  } catch (cause) {
+    showError(cause);
+  }
+}
+
+async function setHideChecked(value: boolean): Promise<void> {
+  try {
+    await output.key("hideChecked").set(value);
   } catch (cause) {
     showError(cause);
   }
@@ -149,8 +162,12 @@ field.addEventListener("keydown", (event) => {
   if (event.key === "Enter") void submit();
 });
 add.addEventListener("click", () => void submit());
+hideChecked.addEventListener(
+  "change",
+  () => void setHideChecked(hideChecked.checked),
+);
 
-const stops = [input.sink(render), state.sink(render)];
+const stops = [input.sink(render), state.sink(render), output.sink(render)];
 void (async () => {
   try {
     await Promise.all([input.pull(), state.pull(), output.pull()]);

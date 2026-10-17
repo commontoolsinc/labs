@@ -626,19 +626,29 @@ so a write gated on a reviewed action refuses it.
 
 For an LLM call, the verb writes what the built-in reads, and the frame's input
 carries the built-in's state back. An empty task or prompt makes no request, so
-nothing runs before the first event:
+nothing runs before the first event. `agent()` identifies a request by its task
+text and the addresses of its inputs, not by the values they hold, and answers
+a request it has seen from its record, so the verb counts each ask into the
+task: asking the same question again is then a new request.
 
 ```tsx
 // Shown at module scope.
 import Frame from "./frame.tsx";
 
 export default pattern(() => {
-  const question = new Writable<string>("");
+  const request = new Writable<{ question: string; asked: number }>({
+    question: "",
+    asked: 0,
+  });
   const ask = action(({ text }: { text: string }) => {
-    question.set(text.trim());
+    request.set({ question: text.trim(), asked: request.get().asked + 1 });
+  });
+  const task = computed(() => {
+    const { question, asked } = request.get();
+    return question === "" ? "" : `Question ${asked}: ${question}`;
   });
   const answer = agent<{ answer: string }>({
-    task: question,
+    task,
     inputs: {},
     resultSchema: {
       type: "object",

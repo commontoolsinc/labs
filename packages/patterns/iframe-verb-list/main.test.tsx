@@ -33,15 +33,15 @@ export default pattern(() => {
     list.items.length === 2 && list.items[1].id === "eggs" &&
     list.items[1].text === "Eggs"
   );
-  const assert_nothing_is_checked = assert(() =>
+  const assert_nothing_is_checked_or_hidden = assert(() =>
     Object.keys(list.state.checked).length === 0 &&
-    list.output.checkedCount === 0
+    list.output.hideChecked === false
   );
 
   return {
     [TESTS]: [
       { assertion: assert_starts_empty },
-      { assertion: assert_nothing_is_checked },
+      { assertion: assert_nothing_is_checked_or_hidden },
 
       { action: action_add_milk },
       { assertion: assert_holds_milk },
