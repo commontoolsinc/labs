@@ -1997,8 +1997,14 @@ export const FabriChatManagerCore = pattern<
     const peopleDisplay = computed((): ChatDisplay =>
       shownPeople.length === 0 ? "none" : "block"
     );
-    const noticeList = computed(
-      () => [...((outgoingNotices.get() ?? []) as ChatManagerNotice[])],
+    // A notice whose room's roster lists a profile attesting its recipient
+    // has nothing left to tell them: they are in the room.
+    const noticeList = computed(() =>
+      ((outgoingNotices.get() ?? []) as ChatManagerNotice[]).filter((notice) =>
+        !(notice.room.key("roster").get() ?? []).some((member) =>
+          principalOf(member, "represents-principal") === notice.recipient
+        )
+      )
     );
     const cannotStart = computed(() => myProfile?.get() === undefined);
     // The principal this user's profile attests, which someone starting a
@@ -2137,27 +2143,6 @@ export const FabriChatManagerCore = pattern<
               </div>
             </cf-vstack>
           </div>
-          {noticeList.map((notice) => (
-            <cf-hstack gap="2" align="center">
-              <cf-text variant="caption">
-                {notice.recipient}{" "}
-                may not know of this chat yet. Open it, and send them its
-                address:
-              </cf-text>
-              <cf-cell-link $cell={notice.room} />
-              <cf-button
-                size="sm"
-                variant="ghost"
-                onClick={commitManager({
-                  act: "delivered",
-                  ...records,
-                  id: notice.id,
-                })}
-              >
-                Done
-              </cf-button>
-            </cf-hstack>
-          ))}
         </cf-vstack>
       ),
       [VIEWS]: { chats: view },

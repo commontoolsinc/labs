@@ -381,11 +381,12 @@ design, as below.
   manager's direct start control, and the chat addresses typed into its group
   control, name members by principal.
   Nothing delivers a notice yet (see
-  [first contact](FabriChatManager.md#first-contact)), so the manager's
-  rendering shows each queued notice with a link to its room, for the room's
-  creator to send on. Whoever opens the room's link, and whoever forgot the
-  room, joins it by writing in it: the room sends the writer's manager
-  `joinRoom`, which lists the room, or lists a forgotten one again.
+  [first contact](FabriChatManager.md#first-contact)), so the manager lists
+  each queued notice in `outgoingNotices` until a client reports it delivered
+  or the room's roster lists its recipient; the manager's own rendering shows
+  none. Whoever opens the room's link, and whoever forgot the room, joins it by
+  writing in it: the room sends the writer's manager `joinRoom`, which lists
+  the room, or lists a forgotten one again.
 - **The index discovers rooms and keeps individual choices.** The manager
   lists saved standalone rooms from Home's shared-space catalog, and finds
   declared conversations through other saved spaces' root `chatRoom` links.
