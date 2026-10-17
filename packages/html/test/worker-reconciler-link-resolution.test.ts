@@ -1,14 +1,21 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
+import { cfcAtom } from "@commonfabric/api/cfc";
 import { Identity } from "@commonfabric/identity";
 import { type Cell, hasInlineCellScheme, Runtime } from "@commonfabric/runner";
 import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
+  writeSeedEnvelopeDoc,
+} from "../../runner/test/cfc-seed-envelope.ts";
 import { patchableCell } from "../../runner/test/support/patchable-cell.ts";
 import type { VDomOp } from "../src/vdom-ops.ts";
+import { cellLabelSources } from "../src/worker/display-fit.ts";
 import type { WorkerVNode } from "../src/worker/types.ts";
 import { WorkerReconciler } from "../src/worker/reconciler.ts";
 
@@ -263,6 +270,88 @@ describe("worker reconciler link resolution", () => {
       expect(boundaries).toEqual([[]]);
     } finally {
       reconciler.unmount();
+      await runtime.dispose();
+    }
+  });
+
+  it("reads the target's stored labels into the resolved label source for a link into an inline array element, as for a link to a document's root, without resolving a snapshot handle", async () => {
+    // A dereference consumes the current labels of its target (CFC §8.2.4),
+    // read where the value is stored. The holder's element and the holder's
+    // root each carry a label the pointer's own document does not, so the
+    // resolved source shows whether the target's labels were read.
+
+    const owner = await Identity.fromPassphrase("link resolution label owner");
+    const foreign = await Identity.fromPassphrase(
+      "link resolution label holder",
+    );
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: StorageManager.emulate({ as: owner }),
+    });
+    const target = cfcAtom.space(foreign.did());
+    try {
+      const inlineHolder = runtime.getCell<unknown>(
+        foreign.did(),
+        "link resolution labeled inline holder",
+      );
+      const rootHolder = runtime.getCell<unknown>(
+        foreign.did(),
+        "link resolution labeled root holder",
+      );
+      const seedTx = runtime.edit();
+      writeSeedEnvelopeDoc(seedTx, foreign.did());
+      const envelope = (path: string[]) => ({
+        version: 1 as const,
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+        labelMap: {
+          version: 1 as const,
+          entries: [{
+            path,
+            origin: "derived" as const,
+            observes: "value" as const,
+            label: { confidentiality: [target], integrity: [] },
+          }],
+        },
+      });
+      seedStoredEnvelope(seedTx, {
+        ...inlineHolder.getAsNormalizedFullLink(),
+        path: [],
+      }, {
+        value: { items: [vnode("Inline")] },
+        cfc: envelope(["items", "0"]),
+      });
+      seedStoredEnvelope(seedTx, {
+        ...rootHolder.getAsNormalizedFullLink(),
+        path: [],
+      }, { value: vnode("Root"), cfc: envelope([]) });
+      expect((await seedTx.commit().settled).error).toBeUndefined();
+
+      const inlinePointer = countingSnapshotHandles(
+        runtime.getCell<unknown>(owner.did(), "link resolution inline pointer"),
+      );
+      const rootPointer = countingSnapshotHandles(
+        runtime.getCell<unknown>(owner.did(), "link resolution root pointer"),
+      );
+      const seeded = await runtime.editWithRetry((tx) => {
+        inlinePointer.cell.withTx(tx).set(inlineHolder.key("items").key(0));
+        rootPointer.cell.withTx(tx).set(rootHolder);
+      });
+      expect(seeded.error).toBeUndefined();
+
+      const resolvedSourceLabels = (cell: Cell<unknown>) => {
+        const sources = cellLabelSources(cell);
+        expect(sources).toHaveLength(2);
+        return sources![1].view?.entries.flatMap((entry) =>
+          entry.label.confidentiality ?? []
+        );
+      };
+      expect({
+        inline: resolvedSourceLabels(inlinePointer.cell),
+        root: resolvedSourceLabels(rootPointer.cell),
+        snapshotHandles: inlinePointer.snapshotHandles() +
+          rootPointer.snapshotHandles(),
+      }).toEqual({ inline: [target], root: [target], snapshotHandles: 0 });
+    } finally {
       await runtime.dispose();
     }
   });
