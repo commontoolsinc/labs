@@ -369,3 +369,40 @@ Deno.test("features that arrive during a drag neither move the map nor take the 
   await nextFrame();
   expect(drawsMarkerInside(page.map)).toBe(false);
 });
+
+Deno.test("a resize during a drag leaves the drag the person's", async () => {
+  using page = await fittedTo(NEAR_DEFAULT);
+  press(page.map);
+  moveTo(page.map, 40);
+  const resized = nextBoundsChange(page.map);
+  page.map.style.width = "200px";
+  await resized;
+  // Far features, whose fit must still wait for the drag to end.
+  page.map.value = { markers: [{ position: PARIS_CENTER }] };
+  await page.map.updateComplete;
+  const pan = nextBoundsChange(page.map);
+  release(page.map, 40);
+  const detail = await pan;
+  expect(detail.userInitiated).toBe(true);
+  expect(detail.center.lat).toBeCloseTo(37.79, 1);
+  await nextFrame();
+  await nextFrame();
+  expect(drawsMarkerInside(page.map)).toBe(false);
+});
+
+Deno.test("a fit asked for during a drag runs once the drag ends", async () => {
+  using page = await mounted((map) => {
+    map.value = { markers: [{ position: PARIS_CENTER }] };
+  });
+  expect(drawsMarkerInside(page.map)).toBe(false);
+  press(page.map);
+  moveTo(page.map, 40);
+  page.map.fitToBounds = true;
+  await page.map.updateComplete;
+  // Asked for mid-drag, the fit waits rather than moving the map under it.
+  expect(drawsMarkerInside(page.map)).toBe(false);
+  const pan = nextBoundsChange(page.map);
+  release(page.map, 40);
+  expect((await pan).userInitiated).toBe(true);
+  expect(drawsMarkerInside(page.map)).toBe(true);
+});

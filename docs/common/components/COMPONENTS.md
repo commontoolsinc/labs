@@ -897,6 +897,13 @@ interface MapPolyline {
 
 **Note:** Polylines do not emit click events. For clickable segments, use circles as waypoints.
 
+**Who moves the map:** while a person is dragging, zooming, or gliding after a
+drag, cf-map holds its own moves (a feature fit, a bound `center`/`zoom`/
+`bounds` value) until their move ends. The person's view then wins: a refit
+set off by changed features and any queued bound value are dropped, while a
+fit asked for meanwhile (turning `fitToBounds` on) still runs. A bound
+`bounds` value applies on mount, ahead of a bound `center`/`zoom`.
+
 ### Usage
 
 ```tsx

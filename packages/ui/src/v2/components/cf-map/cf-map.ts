@@ -193,6 +193,19 @@ export class CFMap extends BaseElement {
   private _pendingZoomUpdate: number | null = null;
   private _pendingBoundsUpdate: Bounds | null = null;
   private _pendingFitToBounds = false;
+  /**
+   * Whether the queued fit was asked for (`fitToBounds` turned on, or
+   * `fitBounds()` called) rather than set off by a change to the features. A
+   * person's move cancels a refit the features set off, but not a fit asked
+   * for while they moved, which is the latest thing anyone wanted.
+   */
+  private _pendingFitRequested = false;
+
+  /**
+   * Whether cf-map is following a container resize. The resize's `moveend`
+   * comes with no `movestart`, so it must not end a person's move in flight.
+   */
+  private _resizing = false;
 
   // Cell controllers for reactive data binding
   // These manage subscriptions automatically via Lit's ReactiveController lifecycle
@@ -338,7 +351,7 @@ export class CFMap extends BaseElement {
 
     // Handle fitToBounds changes
     if (changedProperties.has("fitToBounds") && this.fitToBounds) {
-      this._fitMapToBounds();
+      this._fitMapToBounds(true);
     }
 
     this._viewApplied = true;
@@ -550,17 +563,22 @@ export class CFMap extends BaseElement {
 
     // Bounds change event (moveend covers both pan and zoom)
     this._map.on("moveend", () => {
-      const personMoved = this._userMoveInFlight;
       this._reportMove();
+      // A resize's move, which may land in the middle of a person's, ends
+      // nothing and starts nothing.
+      if (this._resizing) return;
+      const personMoved = this._userMoveInFlight;
       this._userMoveInFlight = false;
       if (personMoved) {
-        // The person's view supersedes the moves queued behind theirs: a fit
-        // or a view written before they moved would undo it.
+        // The person's view supersedes the moves queued behind theirs. A
+        // refit set off by the features would undo it. A view queued from a
+        // cell is dropped too: the report just wrote the person's view into
+        // those cells, so the last write is theirs, and the map agrees with
+        // its cells. A fit asked for while they moved still runs.
         this._pendingCenterUpdate = null;
         this._pendingZoomUpdate = null;
         this._pendingBoundsUpdate = null;
-        this._pendingFitToBounds = false;
-        return;
+        if (!this._pendingFitRequested) this._pendingFitToBounds = false;
       }
       // Moves queued behind this one start once it is reported. A move
       // cf-map is making from a cell leaves the queue to the move after it.
@@ -795,18 +813,20 @@ export class CFMap extends BaseElement {
     // a person's move still under way, such as a wheel zoom's animation.
     const size = this._map.getSize();
     const element = this._map.getContainer();
-    if (element.clientWidth !== size.x || element.clientHeight !== size.y) {
-      this._userMoved = false;
-    }
+    // During a person's move the map follows the new size as part of their
+    // move, and the move stays theirs.
+    const resized = element.clientWidth !== size.x ||
+      element.clientHeight !== size.y;
+    if (resized && !this._userMoveInFlight) this._userMoved = false;
     const bounds = this._unsizedBounds;
     if (bounds === null && !this._unsizedFeatureFit) {
-      this._map.invalidateSize();
+      this._invalidateSize();
       return;
     }
 
     this._isUpdatingFromCell = true;
     try {
-      this._map.invalidateSize();
+      this._invalidateSize();
     } finally {
       this._isUpdatingFromCell = false;
     }
@@ -827,6 +847,15 @@ export class CFMap extends BaseElement {
     if (this._unsizedFeatureFit) {
       this._unsizedFeatureFit = false;
       this._fitMapToBounds();
+    }
+  }
+
+  private _invalidateSize(): void {
+    this._resizing = true;
+    try {
+      this._map?.invalidateSize();
+    } finally {
+      this._resizing = false;
     }
   }
 
@@ -883,8 +912,10 @@ export class CFMap extends BaseElement {
 
     // Process fitToBounds
     if (this._pendingFitToBounds) {
+      const requested = this._pendingFitRequested;
       this._pendingFitToBounds = false;
-      this._fitMapToBounds();
+      this._pendingFitRequested = false;
+      this._fitMapToBounds(requested);
     }
   }
 
@@ -1278,12 +1309,13 @@ export class CFMap extends BaseElement {
   // Fit to Bounds
   //
 
-  private _fitMapToBounds(): void {
+  private _fitMapToBounds(requested = false): void {
     if (!this._map) return;
 
     // If cf-map may not move the map now, queue the fit
     if (!this._canMoveMap()) {
       this._pendingFitToBounds = true;
+      this._pendingFitRequested ||= requested;
       return;
     }
 
@@ -1532,10 +1564,12 @@ export class CFMap extends BaseElement {
     this._pendingZoomUpdate = null;
     this._pendingBoundsUpdate = null;
     this._pendingFitToBounds = false;
+    this._pendingFitRequested = false;
     this._unsizedBounds = null;
     this._unsizedFeatureFit = false;
     this._userMoved = false;
     this._userMoveInFlight = false;
+    this._resizing = false;
 
     // Note: CellControllers are automatically cleaned up by Lit's reactive
     // controller system. They implement ReactiveController with
@@ -1565,7 +1599,7 @@ export class CFMap extends BaseElement {
    * Programmatically fit the map to show all features
    */
   fitBounds(): void {
-    this._fitMapToBounds();
+    this._fitMapToBounds(true);
   }
 
   /**
