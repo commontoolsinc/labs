@@ -6475,12 +6475,15 @@ const schemaTypeMatchesValue = (
         return Array.isArray(value);
       case "boolean":
         return typeof value === "boolean";
+      // A `bigint` is an integer, and `integer` is a subtype of `number`, as
+      // resolveSchemaForValue() reads both.
       case "integer":
-        return typeof value === "number" && Number.isInteger(value);
+        return (typeof value === "number" && Number.isInteger(value)) ||
+          typeof value === "bigint";
       case "null":
         return value === null;
       case "number":
-        return typeof value === "number";
+        return typeof value === "number" || typeof value === "bigint";
       case "object":
         return isObjectNotArray(value);
       case "string":
