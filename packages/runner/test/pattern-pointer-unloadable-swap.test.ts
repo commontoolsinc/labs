@@ -141,6 +141,52 @@ describe("unloadable patternIdentity pointer vs a running pattern", () => {
     expect((cell.getAsQueryResult() as { marker: string }).marker).toBe("v1");
   });
 
+  it("stops the piece and keeps a pointer a recorded update moved past the running pattern", async () => {
+    // Another runtime, newer than this one, adopted a release this runtime
+    // cannot load: its transition records the running pattern as the
+    // baseline and the new identity as the update, and moves the pointer in
+    // the same commit. This runtime is the one behind. Writing its running
+    // identity back would undo the adoption, and the next start of the newer
+    // runtime would adopt again, without end.
+    rt = newRuntime();
+    const { cell, v1Ref } = await runV1(
+      "unloadable-pointer-recorded-transition",
+    );
+    const unloadableIdentity = await unloadableIdentityPromise;
+    const tx = rt.edit();
+    const sourceOf = (identity: string) =>
+      rt.getCell(space, `pattern:${identity}`, undefined, tx).getAsLink();
+    const now = Date.now();
+    cell.withTx(tx).setMetaRaw("pieceSourceHistory", [
+      {
+        revisionId: "baseline-v1",
+        timestamp: now,
+        pattern: { identity: v1Ref.identity, symbol: v1Ref.symbol },
+        source: sourceOf(v1Ref.identity),
+        operation: "baseline",
+      },
+      {
+        revisionId: "update-to-unloadable",
+        timestamp: now,
+        pattern: { identity: unloadableIdentity, symbol: "default" },
+        source: sourceOf(unloadableIdentity),
+        operation: "origin-update",
+      },
+    ], rawMetaWriteAuthorization);
+    cell.withTx(tx).setMetaRaw("patternIdentity", {
+      identity: unloadableIdentity,
+      symbol: "default",
+    }, rawMetaWriteAuthorization);
+    await tx.commit().settled;
+    await rt.idle();
+    await rt.runner.idlePointerMaintenance();
+    await rt.idle();
+    await rt.runner.idlePointerMaintenance();
+
+    expect(getPatternIdentityRef(cell)?.identity).toBe(unloadableIdentity);
+    expect(rt.runner.isRunning(cell)).toBe(false);
+  });
+
   it("never rolls back under CFC-disabled probes (undefined is not a verdict)", async () => {
     // With cfcEnforcementMode "disabled", loadPatternByIdentity returns
     // undefined for anything outside the in-memory index — "probe

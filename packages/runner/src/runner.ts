@@ -6211,6 +6211,32 @@ export class Runner {
               if (
                 this.#runtime.cfcEnforcementMode !== "disabled" &&
                 revertTarget !== undefined &&
+                patternIdentityKey(revertTarget) !== newKey &&
+                pieceSourceMovedPast(resultCell, revertTarget, newRef)
+              ) {
+                // The piece's own history records a move from the pattern
+                // running here to the one this runtime cannot load: a newer
+                // runtime adopted a release this one cannot compile. The
+                // pointer is ahead of this runtime, not dead. Writing the
+                // running identity back would undo the adoption, and every
+                // start of the newer runtime would adopt again. Stopping the
+                // piece here writes nothing, leaves the adoption standing for
+                // every runtime that can load it, and keeps this runtime from
+                // writing the piece's documents under a version they have
+                // moved past.
+                logger.warn("pattern-pointer-ahead-of-runtime", () => [
+                  `durable patternIdentity ${newRef.identity}#${newRef.symbol}`,
+                  "is a recorded update from the running pattern",
+                  `${revertTarget.identity}#${revertTarget.symbol}, and this`,
+                  "runtime cannot load it; stopping the piece here rather",
+                  "than rolling the update back",
+                ]);
+                this.stop(resultCell);
+                return;
+              }
+              if (
+                this.#runtime.cfcEnforcementMode !== "disabled" &&
+                revertTarget !== undefined &&
                 patternIdentityKey(revertTarget) !== newKey
               ) {
                 const revertRef = revertTarget;
@@ -14940,6 +14966,35 @@ export function getPieceSourceRevisions(
     revisions.push(revision);
   }
   return revisions;
+}
+
+/**
+ * Whether the piece's recorded source history moved it from `running` to
+ * `pointer`: its latest revision names `pointer`, and an earlier revision
+ * names `running`. A history this runtime cannot read answers `false`.
+ */
+function pieceSourceMovedPast(
+  resultCell: Cell<unknown>,
+  running: { identity: string; symbol: string },
+  pointer: { identity: string; symbol: string },
+): boolean {
+  let history: PieceSourceRevision[];
+  try {
+    history = getPieceSourceRevisions(resultCell);
+  } catch {
+    return false;
+  }
+  const latest = history.at(-1);
+  if (
+    latest === undefined ||
+    patternIdentityKey(latest.pattern) !== patternIdentityKey(pointer)
+  ) {
+    return false;
+  }
+  const runningKey = patternIdentityKey(running);
+  return history.slice(0, -1).some((revision) =>
+    patternIdentityKey(revision.pattern) === runningKey
+  );
 }
 
 /**
