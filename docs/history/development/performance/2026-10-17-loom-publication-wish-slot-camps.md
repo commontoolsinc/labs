@@ -25,25 +25,34 @@ The slot the earlier record names,
 piece `of:fid1:hdjkb9EzjHpbLev2rheaWUkLCsiWZGSQGCG_NBMG9nU`, and its 5,725
 revisions fall into two pairs of camps:
 
-| Wish-state targets | Writes | From | To |
+| Wish-state targets | Writes | First write | Last write |
 | --- | ---: | --- | --- |
-| `Wj2sdi…` / `i8fdSw…` | 2,221 / 2,211 | 17:33 UTC 10/14 | about 23:10 UTC 10/14 |
-| `fykMtc…` / `n66xEa…` | 651 / 639 | 23:00 UTC 10/14 | 04:33 UTC 10/15 |
+| `Wj2sdi…` / `i8fdSw…` | 2,221 / 2,211 | 17:33:11 UTC 10/14 | 23:00:15 / 23:10:13 UTC 10/14 |
+| `fykMtc…` / `n66xEa…` | 651 / 639 | 23:00:01 UTC 10/14 | 04:33:04 / 03:11:28 UTC 10/15 |
 
 The second pair is the one the earlier record tallied. The writes on each
 side of each pair include sessions of the same principal.
 
 The room's pattern pointer held one identity, `V6XMWvyJ…`, from the piece's
 creation at 17:31:59 UTC until 22:59:54 UTC, when a reconcile adopted
-`system:fabrichat/room.tsx` and moved it to `VuHsY5kt…`. So one pointer stood
-behind the room for the whole of the first pair, and another for the whole
-of the second; within a pair nothing repointed the room and nothing rolled it
-back. The deploys at 20:43 and 22:11 UTC did not move the pointer either: a
-room a Loom root's handler makes kept the code it was created with, in every
-session, until labs #8904, which merged after both deploys. The two inputs
-documents the earlier record compiled, at `19fb8152b8` and `6499525833`, are
-real, but they belong to two sources of the room, and each pair of camps ran
-under one source.
+`system:fabrichat/room.tsx` and moved it to `VuHsY5kt…`. That move is where
+one pair gives way to the other. The first pair's two targets alternated up
+to 22:59:59, and the second pair has no write before the move. After the
+move the first pair's targets took 13 more writes, all from five sessions
+that had been writing them before it. Three of those sessions wrote the
+second pair's target within seconds or minutes, and the other two never did:
+one stopped at 23:00:15, and the other wrote once more at 23:10:13, which is
+the first pair's last write. So the first pair ran while the stored pointer
+named `V6XMWvyJ…`, and its tail is sessions still running what they had
+loaded before the move. The second pair ran entirely under `VuHsY5kt…`.
+Within either pair, nothing repointed the room and nothing rolled it back.
+
+The deploys at 20:43 and 22:11 UTC did not move the pointer: a room a Loom
+root's handler makes kept the code it was created with, in every session,
+until labs #8904, which merged after both deploys. The two inputs documents
+the earlier record compiled, at `19fb8152b8` and `6499525833`, are real, but
+they belong to two sources of the room, and each pair of camps ran under one
+source.
 
 Fully inlined, the two camps' room result schemas (`6BAbdQS4…` and
 `y4dkSrca…`) differ only in the enum for `ChatRoomKind`, declared in
