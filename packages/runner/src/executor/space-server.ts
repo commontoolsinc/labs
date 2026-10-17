@@ -663,6 +663,18 @@ type RanLifecycleVerb = QueuedLifecycleVerb & {
   directCommitSeqs: ReadonlyArray<number>;
 };
 
+/** Where a durable stream entry sits, by the identity no compaction moves. */
+type StreamEntryAddress = {
+  /** The stream's sidecar document. */
+  readonly sidecarId: string;
+
+  /** The entry's event. */
+  readonly eventId: string;
+
+  /** The entry's arrival position, `0` for a seq-less entry. */
+  readonly seq: number;
+};
+
 /**
  * One space's serving loop. The SpaceServer IS the seal destination — a
  * stable dispatcher over rotating wave accumulators, so an action tx
@@ -3481,19 +3493,14 @@ export class SpaceServer implements TransactionSealDestination {
     );
   }
 
-  /**
-   * Whether the store holds a pending entry in this space that arrived before
-   * `seq`, across every stream. Always `false` for a seq-less entry, which
-   * holds no arrival position.
-   */
-  #earlierArrivalPending(seq: number | undefined): boolean {
-    if (seq === undefined) return false;
-    return Engine.selectPendingStreamEventDocs(this.#options.engine).some(
-      (doc) =>
-        doc.entries.some((pending) =>
-          typeof pending.seq === "number" && pending.seq < seq
-        ),
+  /** Whether the store holds `address`'s entry without its consequence. */
+  #streamEntryPending(address: StreamEntryAddress): boolean {
+    const stored = this.#storedStreamEntry(
+      address.sidecarId,
+      address.eventId,
+      address.seq,
     );
+    return stored !== undefined && stored.consequenced !== true;
   }
 
   #stageDeliveryCheckpoint(
@@ -4047,6 +4054,9 @@ export class SpaceServer implements TransactionSealDestination {
       { stored: StreamEventsDocValue["entries"] } | "sync-failed"
     >();
     let visibilityFlushed = false;
+    // The entries this pass has queued or found in flight, in arrival order:
+    // what a later entry's deferral is held behind while any is still pending.
+    const ahead: StreamEntryAddress[] = [];
     for (const { doc, entry } of ordered) {
       let sidecar = sidecars.get(doc.id);
       if (sidecar === undefined) {
@@ -4176,6 +4186,11 @@ export class SpaceServer implements TransactionSealDestination {
         const streamEntry = {
           sidecarId: doc.id,
           index,
+          seq: entry.seq ?? 0,
+        };
+        const streamEntryAddress: StreamEntryAddress = {
+          sidecarId: doc.id,
+          eventId: entry.eventId,
           seq: entry.seq ?? 0,
         };
         // Only a NUMERIC-seq consequenced twin skips this entry
@@ -4338,6 +4353,7 @@ export class SpaceServer implements TransactionSealDestination {
             this.#loadParkDeferredInPass = true;
             break;
           }
+          ahead.push(streamEntryAddress);
           continue;
         }
         const link: NormalizedFullLink = {
@@ -4393,6 +4409,7 @@ export class SpaceServer implements TransactionSealDestination {
           this.#drainInFlight.set(entry.eventId, "queued");
           const eventId = entry.eventId;
           const tenure = runtime;
+          const aheadOfThis = [...ahead];
           runtime.scheduler.queueEvent(
             link,
             entry.payload,
@@ -4511,7 +4528,9 @@ export class SpaceServer implements TransactionSealDestination {
                     // what creates its piece. While any is still pending,
                     // this deferral is the run racing it and spends none of
                     // the budget; the earliest pending entry always does.
-                    const arrivalHeld = this.#earlierArrivalPending(entry.seq);
+                    const arrivalHeld = aheadOfThis.some((earlier) =>
+                      this.#streamEntryPending(earlier)
+                    );
                     if (arrivalHeld) {
                       this.#options.stats.events.arrivalHeldDeferrals += 1;
                     }
@@ -4593,6 +4612,7 @@ export class SpaceServer implements TransactionSealDestination {
             },
           );
           queued += 1;
+          ahead.push(streamEntryAddress);
           this.#preQueueDeferralStreaks.delete(`queue\0${entry.eventId}`);
           // A retried head runs alone in its pass. Queued beside it, a later
           // arrival is swept behind a head that fails again
