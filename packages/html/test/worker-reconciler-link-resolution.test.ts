@@ -3,6 +3,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
 import { type Cell, hasInlineCellScheme, Runtime } from "@commonfabric/runner";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
@@ -34,7 +35,15 @@ function countingSnapshotHandles<T>(
   return { cell: counting, snapshotHandles: () => count };
 }
 
-const vnode = (text: string): WorkerVNode => ({
+/** A stored view node showing `text`, as a plain value a raw write takes. */
+const vnode = (
+  text: string,
+): {
+  type: "vnode";
+  name: string;
+  props: Record<string, never>;
+  children: string[];
+} => ({
   type: "vnode",
   name: "span",
   props: {},
@@ -198,6 +207,60 @@ describe("worker reconciler link resolution", () => {
 
       expect({ mount: atMount, update: root.snapshotHandles() - atMount })
         .toEqual({ mount: 0, update: 0 });
+    } finally {
+      reconciler.unmount();
+      await runtime.dispose();
+    }
+  });
+
+  it("marks a piece boundary on a child resolving to a pattern result's root, and none on a field inside the result that carries its own `$UI`", async () => {
+    const owner = await Identity.fromPassphrase("link resolution piece owner");
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: StorageManager.emulate({ as: owner }),
+    });
+    const ops: VDomOp[] = [];
+    const reconciler = new WorkerReconciler({
+      onOps: (batch) => {
+        for (const op of batch) ops.push(op);
+      },
+    });
+    const result = runtime.getCell<unknown>(
+      owner.did(),
+      "link resolution piece result",
+    );
+    try {
+      const seeded = await runtime.editWithRetry((tx) => {
+        const writable = result.withTx(tx);
+        writable.setMetaRaw("patternIdentity", {
+          identity: "link-resolution-piece",
+          symbol: "default",
+        }, rawMetaWriteAuthorization);
+        // A raw write stores the row inline in the result document, where a
+        // value write would store it as a document of its own.
+        writable.setRaw({
+          $UI: vnode("Piece"),
+          rows: [{ $UI: vnode("Field") }],
+        });
+      });
+      expect(seeded.error).toBeUndefined();
+
+      reconciler.mount({
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [
+          result as Cell<WorkerVNode>,
+          result.key("rows").key(0) as Cell<WorkerVNode>,
+        ],
+      });
+      await runtime.idle();
+      reconciler.flush();
+      expect(createdTexts(ops)).toEqual(["Piece", "Field"]);
+      const boundaries = ops.flatMap((op) =>
+        op.op === "set-piece-boundary" ? [op.cellRef.path] : []
+      );
+      expect(boundaries).toEqual([[]]);
     } finally {
       reconciler.unmount();
       await runtime.dispose();

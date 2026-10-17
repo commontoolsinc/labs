@@ -267,6 +267,12 @@ type DecidingRead = {
   readonly reads: readonly (SinkConsumedLabel | undefined)[];
 };
 
+/**
+ * Whether `value`, read from `cell`, is the whole result of a pattern: a value
+ * carrying a view, held at the root of a document a pattern's result is
+ * stored in. A field inside such a document that carries a view of its own is
+ * not one, so a renderer showing it does not become a piece target.
+ */
 function isNestedPatternOutput(value: unknown, cell: Cell<unknown>): boolean {
   if (
     !isObjectOrArray(value) || !(UI in value) ||
@@ -274,6 +280,7 @@ function isNestedPatternOutput(value: unknown, cell: Cell<unknown>): boolean {
   ) return false;
 
   try {
+    if (cell.getAsNormalizedFullLink().path.length > 0) return false;
     const patternIdentity = cell.getMetaRaw("patternIdentity");
     return isObjectOrArray(patternIdentity) &&
       typeof (patternIdentity as Record<string, unknown>).identity ===
