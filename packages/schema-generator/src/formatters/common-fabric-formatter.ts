@@ -4899,6 +4899,7 @@ export class CommonFabricFormatter implements TypeFormatter {
           unionType,
           context.typeNode,
           context.typeChecker,
+          context.tupleItems,
         )
     ) {
       // A scope wrapper around a cell formats as the cell alone, dropping the
