@@ -284,8 +284,8 @@ by any repo test.
 | `string` / `number` / `boolean` | `{ type: "string"/"number"/"boolean" }` | `primitive-formatter.ts` | many fixtures |
 | String/number literal | `{ type: …, enum: [v] }` (type path); `{ type: …, const: v }` (node path) | `primitive-formatter.ts`; `schema-generator.ts` | divergence pinned by `test/literal-encoding-paths.test.ts` (unions diverge structurally: `enum` list vs `anyOf` of `const`s); runner validation treats both alike but `schemasEqualIgnoringWriterStamp` (deepEqual, `cfc/prepare.ts`) does not — a path flip defeats stored-schema reuse |
 | Boolean literal | `{ type: "boolean", enum: [true/false] }` via `intrinsicName` | `primitive-formatter.ts` | boolean-literals test |
-| `bigint` | `{ type: "integer" }` | `primitive-formatter.ts` | probe only |
-| bigint literal (`42n`) | `{ type: "integer", enum: [Number(v)] }` — converted through `Number`, so precision above 2^53 would be lost | `primitive-formatter.ts` | probe only |
+| `bigint` | `{ type: "integer" }`; the runtime reads and validates a stored bigint under `integer` and `number` | `primitive-formatter.ts` | probe only |
+| bigint literal (`42n`) | `{ type: "integer", enum: [Number(v)] }` — converted through `Number`, so precision above 2^53 would be lost; the runtime matches a stored bigint to a whole-number member of its value | `primitive-formatter.ts` | probe only |
 | Template literal type | `{ type: "string" }` | `primitive-formatter.ts` | probe only |
 | `null` | `{ type: "null" }` | `primitive-formatter.ts` | fixtures |
 | `undefined` | `{ type: "undefined" }` — non-standard, deliberate (`api/index.ts`) | `primitive-formatter.ts`; node `schema-generator.ts` | fixtures |

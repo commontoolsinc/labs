@@ -57,6 +57,7 @@ import { encodePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { areLinksSame } from "../link-equality.ts";
+import { literalMemberMatches } from "../schema-literal-match.ts";
 import {
   droppedStoredClaim,
   type ForeignPositions,
@@ -6475,12 +6476,15 @@ const schemaTypeMatchesValue = (
         return Array.isArray(value);
       case "boolean":
         return typeof value === "boolean";
+      // A `bigint` is an integer, and `integer` is a subtype of `number`, as
+      // resolveSchemaForValue() reads both.
       case "integer":
-        return typeof value === "number" && Number.isInteger(value);
+        return (typeof value === "number" && Number.isInteger(value)) ||
+          typeof value === "bigint";
       case "null":
         return value === null;
       case "number":
-        return typeof value === "number";
+        return typeof value === "number" || typeof value === "bigint";
       case "object":
         return isObjectNotArray(value);
       case "string":
@@ -6563,13 +6567,16 @@ const policySchemaMatchesValue = (
     );
   }
   if (
-    schema.const !== undefined && !fabricAwareEqual(schema.const, value)
+    schema.const !== undefined &&
+    !literalMemberMatches(schema.const, value, fabricAwareEqual)
   ) {
     return false;
   }
   if (
     Array.isArray(schema.enum) &&
-    !schema.enum.some((candidate) => fabricAwareEqual(candidate, value))
+    !schema.enum.some((candidate) =>
+      literalMemberMatches(candidate, value, fabricAwareEqual)
+    )
   ) {
     return false;
   }

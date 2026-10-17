@@ -1285,6 +1285,47 @@ describe("cf-iframe cell bridge", () => {
     });
   });
 
+  it("sends a stream event that waits for the handler's run", async () => {
+    const requests: unknown[] = [];
+    const runtime = runtimeStub({
+      [$conn]: () => ({
+        request: (request: unknown) => {
+          requests.push(request);
+          return Promise.resolve({});
+        },
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+        peersOf: () => [],
+        signal: { aborted: false },
+      }),
+    });
+    const context = new CellHandle(runtime, ref, {
+      value: {
+        count: 1,
+        database: { id: "db-1" },
+      },
+    });
+
+    const events = createCellContextBridge(context).resources.events;
+    await events.methods!.send({ type: "refresh" });
+
+    expect(requests).toEqual([{
+      type: RequestType.CellSend,
+      cell: {
+        ...ref,
+        path: ["events"],
+        schema: {
+          type: "object",
+          asCell: ["stream"],
+          description: "Application events",
+        },
+      },
+      event: { type: "refresh" },
+      awaitCommit: true,
+      awaitHandling: true,
+    }]);
+  });
+
   it("reports a stream event the runtime refuses", async () => {
     const runtime = runtimeStub({
       [$conn]: () => ({

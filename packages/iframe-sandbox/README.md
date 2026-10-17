@@ -282,6 +282,32 @@ runs without a skip in both the default and server-execution ON pattern suites.
 It exercises `PerSpace`, `PerUser`, and `PerSession` cells and SQLite databases
 across two sessions for one identity, a second identity, and a guest reload.
 
+## Streams
+
+A `stream` resource carries events from the guest to a handler the host runs,
+such as a pattern's verb. The guest sends through `fabric.stream(name)`, which
+calls the resource's `send` method:
+
+```ts
+const addItem = fabric.stream<{ id: string; text: string }>("addItem");
+
+await addItem.send({ id: crypto.randomUUID(), text: "Milk" });
+```
+
+`cf-iframe`'s `context` adapter sends the event to the stream cell and waits for
+the handler's run: `send()` resolves once that run has committed, and rejects
+with the reason when the runtime refuses the event or the run, including an
+error the handler throws. It resolves with no value, so a verb's declared result
+does not reach the guest; the guest reads the effect through a cell. The event
+is not a trusted gesture, since guest code sent it rather than a control the
+host draws. The guest sends the event only once every cell operation it made
+before the send has settled, so the handler reads what they wrote, and the host
+handles the send in the same queue as the guest's cell operations, so a `pull()`
+made after it reads what the handler wrote.
+
+`packages/patterns/integration/iframe-verb-list.test.ts` drives a guest that
+adds to a pattern's list only through the pattern's verb, in a browser.
+
 ## Presence
 
 A presence room carries what its members are doing right now: a pointer, a
