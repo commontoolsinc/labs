@@ -54,21 +54,22 @@ thread is open. Against the load's counts:
 | --- | --- | --- |
 | scheduler runs | 1,157 | about 750: 606 derivation runs are the rows' computeds and `ifElse` nodes; the coordinator's child starts are 894 busy samples (`#startWithTx`) |
 | commits | 190 | 167 are session-scoped derivation commits, 130 of them `computed:` sets, about four to five per row (`isEditing`, the editor and picker displays, the picker label) |
-| commit finalization | 1,028 samples, 86% CFC preparation | one preparation per run, so about 65% of it is the rows' |
+| commit finalization | 1,028 samples, 86% CFC preparation | not attributed per row by the profile; the load made 615 preparations for 190 commits, and the rows' session derivations are 167 of those commits |
 | resume pre-sync | about 900 samples; 1,663 list-child syncs and 285 cell syncs | each row is a family of a result slot and some forty owned cells; the participants' twelve chips are the rest |
 | render sinks | 3,005 samples, 24% | about 25 bound props per row; not the instance's, the view's |
 
 Together the instances cost about a third of the busy samples, and the
-server stored 167 commits a load for them, each carrying its derivation's
-three space-scoped reads for validation even when `localSessionDocuments`
-emptied its operations
+server stored 167 commits a load for them, carrying 490 space-scoped reads
+between them, about three each on average, for validation even when
+`localSessionDocuments` emptied their operations
 (`2026-10-16-fabrichat-room-cold-load-local-session-documents.md`). The
 first load of a room, which builds the rows, took 36 s against the second
-load's 25 s; opening a thread started five rows the same way.
+load's 25 s; opening the fixture's thread of five replies started six rows
+the same way, the root's among them.
 
 Read per element rather than per load, this is what one list child of the
 `map` builtin cost: a start, a family pre-sync of its result slot and every
-owned cell, a run and a CFC preparation per node, and a commit per
+owned cell, a run per node, and a CFC preparation and a commit per
 session-scoped derivation. None of those is a cost of the row's logic. They
 are the cost of the child being an instance, and they are what a faster
 builtin removes.
@@ -169,7 +170,7 @@ Estimated from the measured counts:
 | child starts (`#startWithTx`) | 894 samples | 0; the chips remain, and they were not in this number | 894 |
 | scheduler runs | 1,157 | about 400: the room's own, plus the records' | 750 runs, about 500 samples |
 | commits | 190 | about 25: the 167 session derivation commits become one per record | 165 commits |
-| commit finalization | 1,028 samples | about 350, in proportion to runs | about 680 |
+| commit finalization | 1,028 samples | about 350, if it falls with the commits | about 680 |
 | resume pre-sync | about 900 samples | about 200: the chips' families and the room's own | about 700 |
 | render sinks | 3,005 samples | the same; the records' per-key sinks replace the rows' result sinks one for one | 0 |
 | module evaluation | 12% | the same | 0 |
@@ -199,7 +200,7 @@ the runtime's model of that. A pattern that reaches for a `computed()` to
 avoid what the builtin costs is a pattern working around the runtime, and
 every pattern with a list would have to do the same. The per-element costs
 the table above itemizes are the builtin's to lose: the child start, the
-family pre-sync, the run and CFC preparation per node, the commit per
+family pre-sync, the run per node, the CFC preparation and commit per
 session-scoped derivation.
 
 **A computed's output is a flat source.** A view node built inside one
