@@ -215,7 +215,9 @@ function reconciliationFor(
  * compared only where the running source has one: a piece adopted from a host
  * stating none has nothing to order an offer against until a release offering
  * that same source confirms it at a stated time, and until then takes any
- * offer as before. An offer stating none is earlier than any running release
+ * offer as before, except one its history records moving from while this
+ * runtime cannot load what it runs (`keepsRunningSource()`). An offer stating
+ * none is earlier than any running release
  * that has one, so a host that states no release time cannot move a piece
  * another host has placed on a stated one. An offer stating the same time as
  * the running release is not earlier.
@@ -1672,9 +1674,10 @@ export class SourceReconciler {
       return true;
     }, sourceUpdate);
     if (overtaken) {
-      // The piece keeps what it runs, as an earlier offer leaves it, and the
-      // record confirms that source at the release time that overtook this
-      // candidate.
+      // The piece keeps what it runs: the candidate became an earlier release
+      // while this pass prepared, or the history read inside the commit
+      // records the move from it. Where the running source has a release
+      // time, the record confirms that source at it.
       const confirmedAt = runningReleasedAt(resultCell, state.running);
       state.offered = { ...state.running };
       if (confirmedAt !== undefined) {
