@@ -32,6 +32,7 @@ import {
   isCellKind,
   isSchemaScope,
 } from "../scope.ts";
+import { literalMemberMatches } from "../schema-literal-match.ts";
 import { fabricAwareEqualThroughViews } from "../view-equality.ts";
 import type { CfcConfClause } from "./clause.ts";
 import { clauseAlternatives, isOrClause } from "./clause.ts";
@@ -1910,13 +1911,15 @@ const validateAgainstSchemaUncached = (
 
     if (
       Array.isArray(schema.enum) &&
-      !schema.enum.some((entry) => fabricAwareEqualThroughViews(entry, value))
+      !schema.enum.some((entry) =>
+        literalMemberMatches(entry, value, fabricAwareEqualThroughViews)
+      )
     ) {
       return mismatch("value is not in enum");
     }
     if (
       Object.hasOwn(schema, "const") &&
-      !fabricAwareEqualThroughViews(schema.const, value)
+      !literalMemberMatches(schema.const, value, fabricAwareEqualThroughViews)
     ) {
       return mismatch("value does not match const");
     }
