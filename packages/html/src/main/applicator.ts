@@ -46,6 +46,30 @@ function isTextNode(node: unknown): node is Node {
 }
 
 /**
+ * Returns the outermost element of the unbroken run of `display: contents`
+ * elements that starts at `element` and climbs through its parents, when an
+ * element of that run is assigned to a slot; otherwise `null`. That element is
+ * the one whose boxes WebKit must build anew after a mid-list insert below it
+ * (see `DomApplicator#repairSlottedContentsLayout`).
+ */
+function slottedContentsAncestor(element: Element): HTMLElement | null {
+  const view = element.ownerDocument?.defaultView;
+  if (!view) return null;
+  let outermost: HTMLElement | null = null;
+  let slotted = false;
+  for (
+    let current: Element | null = element;
+    current && isElementNode(current) &&
+    view.getComputedStyle(current).display === "contents";
+    current = current.parentElement
+  ) {
+    outermost = current;
+    if (current.assignedSlot) slotted = true;
+  }
+  return slotted ? outermost : null;
+}
+
+/**
  * Returns the first object that holds `key` directly, searching `target` and
  * then each object on its prototype chain in turn. Returns `null` if no object
  * in the chain holds `key`.
@@ -118,6 +142,13 @@ export class DomApplicator {
   readonly #setPropHandler: SetPropHandler;
   #pendingChildInserts: PendingChildInsert[] = [];
 
+  /**
+   * Parents that received a child somewhere other than at their end during
+   * the batch being applied; `#repairSlottedContentsLayout()` reads them once
+   * the batch is in.
+   */
+  readonly #midInsertParents = new Set<Element>();
+
   #rootNodeId: number | null = null;
 
   /**
@@ -154,6 +185,7 @@ export class DomApplicator {
       }
     }
     this.#replayPendingChildInserts();
+    this.#repairSlottedContentsLayout();
 
     if (batch.rootId !== undefined) {
       this.#rootNodeId = batch.rootId;
@@ -584,10 +616,49 @@ export class DomApplicator {
 
     if (beforeNode) {
       parent.insertBefore(child, beforeNode);
+      if (isElementNode(parent)) this.#midInsertParents.add(parent);
     } else {
       parent.appendChild(child);
     }
     return true;
+  }
+
+  /**
+   * Has WebKit lay out again every `display: contents` element in a slot that
+   * took a child somewhere other than at its end during the batch.
+   *
+   * WebKit places the box of a child inserted before an existing sibling of a
+   * `display: contents` element that is assigned to a slot, or that sits inside
+   * one, after the boxes of its later siblings, while the document holds it
+   * where it was inserted. The list draws out of order, and stays that way
+   * until something builds that element's boxes anew. The reconciler wraps
+   * every rendered array in such an element, so any `cf-*` component that slots
+   * a mapped list meets this whenever a row is inserted mid-list or moves.
+   * Chromium and Gecko lay the same tree out in document order.
+   *
+   * Hiding the element and reading its style back builds its boxes anew when
+   * it is shown again, all in this task: nothing is painted in between, nothing
+   * is disconnected, and focus, selection and the scroll offsets inside it
+   * are kept. It is done once per element, at the end of the batch, and only
+   * for elements that took a mid-list insert.
+   */
+  #repairSlottedContentsLayout(): void {
+    if (this.#midInsertParents.size === 0) return;
+    const repairs = new Set<HTMLElement>();
+    for (const parent of this.#midInsertParents) {
+      const slotted = slottedContentsAncestor(parent);
+      if (slotted) repairs.add(slotted);
+    }
+    this.#midInsertParents.clear();
+    for (const element of repairs) {
+      const value = element.style.getPropertyValue("display");
+      const priority = element.style.getPropertyPriority("display");
+      element.style.setProperty("display", "none");
+      void element.ownerDocument?.defaultView?.getComputedStyle(element)
+        .display;
+      if (value) element.style.setProperty("display", value, priority);
+      else element.style.removeProperty("display");
+    }
   }
 
   #deferChildInsert(
