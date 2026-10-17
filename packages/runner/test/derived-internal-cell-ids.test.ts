@@ -192,6 +192,15 @@ describe("derived-internal-cell-ids", () => {
       expect(mints()).toBe(1);
     });
 
+    it("hashes an id once for two partial causes equal but for the order of their keys", () => {
+      const { ids, mints } = counted();
+      const one = ids.idFor(first, { $generated: 1, name: "a" });
+      const other = ids.idFor(first, { name: "a", $generated: 1 });
+
+      expect(other.toString()).toBe(one.toString());
+      expect(mints()).toBe(1);
+    });
+
     it("returns ids that differ for `{ n: 0 }` and `{ n: -0 }`, each as derived", () => {
       const { ids } = counted();
       const zero = ids.idFor(first, { n: 0 }).toString();

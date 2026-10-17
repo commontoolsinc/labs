@@ -147,13 +147,16 @@ const NO_ENCODABLE_FORM = Symbol("noEncodableForm");
  * `createRef()` derives one id from them, so the key follows what that
  * derivation reads: a string, a number (with `-0` and `NaN` kept apart from
  * what `JSON.stringify()` makes of them), a boolean, `null`, a hole or an
- * `undefined` in an array, and the entries of a plain array or object in
- * their own order. An object reached a second time within one cause derives
- * as `null`, so `seen` holds the objects reached so far and a repeat is keyed
- * as `null` is. A key other than JSON data is refused rather than keyed: a
- * cell, a reactive, a query result, a function, a class instance, a value
- * carrying an encodable form, or a record holding a `/` key, which is how a
- * link or an entity reference is written.
+ * `undefined` in an array, the items of a plain array in order, and the
+ * entries of a plain object by key, so that two objects equal but for key
+ * order share a key as they share a hash. An object reached a second time
+ * within one cause derives as `null`, so `seen` holds the objects reached so
+ * far and a repeat is keyed as `null` is; the entries are read in the order
+ * the derivation reads them, which is what decides which occurrence is the
+ * repeat, and sorted by key only once read. A value other than JSON data is
+ * refused rather than keyed: a cell, a reactive, a query result, a function,
+ * a class instance, a value carrying an encodable form, or a record holding
+ * a `/` key, which is how a link or an entity reference is written.
  */
 function jsonContentKey(
   value: unknown,
@@ -189,13 +192,16 @@ function jsonContentKey(
       if (!isPlainObject(value) || Object.hasOwn(value, "/")) {
         return undefined;
       }
-      const entries: string[] = [];
+      const entries: [string, string][] = [];
       for (const [key, member] of Object.entries(value)) {
         const content = jsonContentKey(member, seen);
         if (content === undefined) return undefined;
-        entries.push(`${JSON.stringify(key)}:${content}`);
+        entries.push([JSON.stringify(key), content]);
       }
-      return `{${entries.join(",")}}`;
+      entries.sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+      return `{${
+        entries.map(([key, content]) => `${key}:${content}`).join(",")
+      }}`;
     }
     default:
       return undefined;

@@ -8,9 +8,9 @@ reason: "A count of the content hashes of mutable values a thirty-message FabriC
 # Which mutable values a FabriChat room's cold load hashes, October 2026
 
 The sibling investigation that made the value hasher keep the encoded bytes
-of a deep-frozen sub-container (its record is
-`2026-10-17-hasher-kept-container-bytes.md`, in a pull request of its own
-when this one was written) counted 107,591 hashes per cold load of the
+of a deep-frozen sub-container (pull request 9057 of `commonfabric/labs`,
+open when this was written, which carries its record as
+`2026-10-17-hasher-kept-container-bytes.md` beside this one) counted 107,591 hashes per cold load of the
 thirty-message room, 35,254 of a deep-frozen root and 72,337 of a mutable
 one, and found that after its change the per-hash cost, not the walks,
 was most of the 12 to 13% of busy samples under `hashOfInternal`. It left
@@ -75,8 +75,12 @@ hashed before; 15,172 were the first hash of their content.
 | `definitionEquivalenceClasses`                        |    246 |                 123 |
 | `hashSchema`                                          |    150 |                  26 |
 | `computeModuleHashes`                                 |    116 |                  77 |
-| `getMetaCell` (`createRef` of a meta cell)            |    888 |                 888 |
+| a module's pattern factory (`factoryFromPattern`)     |    112 |                  44 |
 | the rest                                              |     23 |                   — |
+
+The rows sum to the total. 888 of the `createRef` row are `getMetaCell`
+minting a meta cell's id from a fresh `{ type, parent }`, every one a
+repeat.
 
 The `createRef` row counts the ids `DerivedInternalCellIds.idFor()` minted.
 A second probe in that method sorted its 44,000 calls per load by the
@@ -150,8 +154,17 @@ the comparison.
 | `generateKey`                      |  1,922 | 1,922 |
 | `#viewRefHash`                     |  1,440 | 1,312 |
 | `schedulerActionInstanceKey`       |    939 |   939 |
-| `getMetaCell`                      |    888 |   888 |
-| every site but the schema generator's | 71,321 | 18,323 |
+| `definitionEquivalenceClasses`     |    246 |   246 |
+| `hashSchema`                       |    150 |   148 |
+| a module's pattern factory         |    112 |   112 |
+| `#viewKey`                         |      0 |    72 |
+| the rest                           |     23 |    23 |
+| every site but the schema generator's | 71,451 | 18,323 |
+
+The schema generator's rows left out are `dedupeByValueEqual`,
+`#mergePrimitiveSchemaIntoAnyOf`, the `anyOf` member re-hashed per merge,
+`#mergeIdenticalSchemas` and `computeModuleHashes`, 5,515 in the before
+load and none in the after load.
 
 Of the 18,323 that remain, 14,446 (79%) are the first hash of their content
 in the load; before, 15,172 were. What the cuts removed is the repeats. The
