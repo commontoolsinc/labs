@@ -320,6 +320,16 @@ const logger = getLogger("worker-reconciler", {
 });
 
 /**
+ * Whether `value`, as a view stores it, is or holds a link: a position a read
+ * of the value follows to another document, whose labels that read consumes.
+ */
+function holdsLink(value: unknown, base: Cell<unknown>): boolean {
+  if (parseLink(value, base) !== undefined) return true;
+  return isObjectOrArray(value) &&
+    Object.values(value).some((held) => holdsLink(held, base));
+}
+
+/**
  * Positions holding a longest strictly increasing run of `previousPositions`,
  * skipping the negative entries that stand for a child the document does not
  * hold yet.
@@ -3102,23 +3112,24 @@ export class WorkerReconciler {
    * The keys among `keys` whose value the node's render policy has to decide
    * on by what a read of that key consumes: each whose stored value is a
    * link, and every one when the policy does not admit the props object's
-   * own label, as when the props are linked from a document of their own. A
-   * props object that cannot be read counts every key.
+   * own label, as when the props are linked from a document of their own.
+   * `stored` is the props object as the document holds it, or undefined when
+   * it cannot be read, which counts every key.
    */
   #propKeysReadAlone(
     state: NodeState,
     propsCell: Cell<WorkerProps>,
+    stored: Record<string, unknown> | undefined,
     keys: readonly string[],
   ): ReadonlySet<string> {
-    const raw = this.#readCellPolicyValue(propsCell);
     if (
-      !isObjectNotArray(raw) ||
+      stored === undefined ||
       !canRenderCellUnderPolicy(propsCell, state.renderPolicy, this.#fitSources)
     ) {
       return new Set(keys);
     }
     return new Set(
-      keys.filter((key) => parseLink(raw[key], propsCell) !== undefined),
+      keys.filter((key) => parseLink(stored[key], propsCell) !== undefined),
     );
   }
 
@@ -3127,7 +3138,8 @@ export class WorkerReconciler {
    *
    * - Event props: resolved via .key().resolveAsCell() → stream/handler registration
    * - Binding props: resolved via .key().resolveAsCell() → cell reference
-   * - Style objects: resolved by the Cell<Props> schema and parent sink
+   * - Style objects: resolved by the Cell<Props> schema and parent sink,
+   *   unless a render policy gates the node and the object holds a link
    * - Other object/array props: per-prop sink via .key().asSchema(true)
    * - Primitive props: set directly from the resolved Cell<Props> value
    */
@@ -3175,8 +3187,10 @@ export class WorkerReconciler {
       const props = resolvedProps as Record<string, unknown>;
       const newKeys = new Set(Object.keys(props));
       const gated = !admitsEverything(state.renderPolicy);
+      const stored = gated ? this.#readCellPolicyValue(propsCell) : undefined;
+      const storedProps = isObjectNotArray(stored) ? stored : undefined;
       const readAlone = gated
-        ? this.#propKeysReadAlone(state, propsCell, [...newKeys])
+        ? this.#propKeysReadAlone(state, propsCell, storedProps, [...newKeys])
         : new Set<string>();
 
       // Remove props that no longer exist
@@ -3287,17 +3301,22 @@ export class WorkerReconciler {
             ),
           });
         } else if (
-          (isObjectOrArray(value) && (key !== "style" || gated)) ||
-          readAlone.has(key)
+          readAlone.has(key) ||
+          (isObjectOrArray(value) &&
+            (key !== "style" ||
+              (gated &&
+                (storedProps === undefined ||
+                  holdsLink(storedProps[key], propsCell)))))
         ) {
           // Generic object/array values are deliberately capped in
           // rendererVDOMSchema, so they need a per-prop sink for deep
-          // resolution. Style is excluded while no render policy gates the
-          // node: its explicit schema already traverses the object through
-          // the parent props sink. Under a policy, a style object and a value
-          // read through a link take a per-prop sink too, so the policy
-          // decides on the labels that read consumed; a literal is part of
-          // this view, which the policy already admitted.
+          // resolution. A style object's explicit schema already traverses
+          // it through the parent props sink, so a style is read on its own
+          // only when a render policy gates the node and the object holds a
+          // link: the policy then decides on the labels the read through
+          // that link consumes, as it does for a value read through a link.
+          // A literal, a style holding no link included, is part of this
+          // view, which the policy already admitted.
           const existingState = state.propSubscriptions.get(key);
           if (existingState?.cell) continue; // Already has active per-prop sink
 

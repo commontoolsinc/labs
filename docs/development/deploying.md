@@ -58,11 +58,18 @@ command has a 45-minute limit. The receiver performs these steps in order:
    is an ancestor of infra `main`, before checking out or executing infra code.
 2. Check out `commonfabric/infra` at that exact SHA, with full history and no
    persisted credentials. Install `jsonschema[format]==4.23.0` for validation.
+   Exchange the job's GitHub OIDC identity for a short-lived, read-only Google
+   access token using `RAPIDS_ARTIFACT_WORKLOAD_IDENTITY_PROVIDER` and
+   `RAPIDS_ARTIFACT_SERVICE_ACCOUNT`. Infra manages those repository variables
+   and the main-workflow trust in `tofu/weaver-dev-builds`.
 3. Run `releases/rapids_deploy.py <infra_sha> --validate-only`. The infra
    validator requires a clean exact checkout, main ancestry, a candidate equal
    to the current main candidate, green infra checks, green producer pins, and
    the exact Labs archive and attestation. The candidate file supplies artifact
-   selections.
+   selections. `RAPIDS_ARTIFACT_ACCESS_TOKEN` lets this step read the selected
+   Weaver completion manifest through the authenticated GCS API. The validator
+   verifies its pinned checksum against the downloaded bytes. The token is
+   scoped to manifest reads and is passed only to this validation step.
 4. Call `/opt/cf/deploy-rapids.sh "$INFRA_SHA"` on the bastion. The wrapper
    locks deployments, verifies the infra checkout and producer main ancestry,
    and invokes infra's `rapids_release.yml` playbook. Deployment is forward-only;

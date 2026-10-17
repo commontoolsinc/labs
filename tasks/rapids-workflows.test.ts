@@ -142,7 +142,7 @@ describe("rapids-workflows", () => {
     expect(job.if).toBe("github.ref == 'refs/heads/main'");
     expect(job.environment).toBe("toolshed");
     expect(job["timeout-minutes"]).toBe(60);
-    expect(job.permissions).toBeUndefined();
+    expect(job.permissions).toEqual({ contents: "read", "id-token": "write" });
     expect(job.env).toEqual({
       INFRA_SHA: "${{ inputs.infra_sha }}",
       PYTHONDONTWRITEBYTECODE: "1",
@@ -250,6 +250,38 @@ describe("rapids-workflows", () => {
       "GITHUB_RUN_ATTEMPT",
     ]);
     expect(deploy.with.capture_stdout).toBe(true);
+  });
+
+  it("authenticates manifest reads after trusted checkout and confines the access token to candidate validation", async () => {
+    const { steps } = (await workflow("rapids-release.yml")).jobs.deploy;
+    const checkout = oneStep(
+      steps,
+      (step) => step.uses?.startsWith("actions/checkout@") ?? false,
+    );
+    const auth = oneStep(
+      steps,
+      (step) => step.uses?.startsWith("google-github-actions/auth@") ?? false,
+    );
+    const validate = oneStep(
+      steps,
+      (step) => step.run?.includes("--validate-only") ?? false,
+    );
+    expect(steps.indexOf(checkout)).toBeLessThan(steps.indexOf(auth));
+    expect(steps.indexOf(auth)).toBeLessThan(steps.indexOf(validate));
+    expect(auth.with).toEqual({
+      workload_identity_provider:
+        "${{ vars.RAPIDS_ARTIFACT_WORKLOAD_IDENTITY_PROVIDER }}",
+      service_account: "${{ vars.RAPIDS_ARTIFACT_SERVICE_ACCOUNT }}",
+      token_format: "access_token",
+      create_credentials_file: false,
+    });
+    const token = `\${{ steps.${auth.id}.outputs.access_token }}`;
+    expect(auth.id).toBeDefined();
+    expect(validate.env.RAPIDS_ARTIFACT_ACCESS_TOKEN).toBe(token);
+    for (const step of steps.filter((step) => step !== validate)) {
+      expect(step.env.RAPIDS_ARTIFACT_ACCESS_TOKEN).toBeUndefined();
+      expect(JSON.stringify(step)).not.toContain(token);
+    }
   });
 
   it("uploads proof only after candidate validation, deployment, and receipt validation succeed", async () => {
