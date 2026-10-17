@@ -1,8 +1,10 @@
 /**
  * Computes the canonical content hash of a `FabricValue` by feeding its
  * type-tagged bytes into a single SHA-256 context. The module also keeps the
- * caches that make feeding a string cheaper, and counts the containers it
- * feeds, which is how a test tells a whole-value hash from a small one.
+ * caches that make feeding a string cheaper and that let a deep-frozen
+ * container be fed again without being walked again, and counts the
+ * containers it walks, which is how a test tells a whole-value hash from a
+ * small one.
  */
 
 import {
@@ -28,6 +30,7 @@ import { tagOfFabricValueElseNull, VALUE_TAGS } from "@/types";
 import { debugStr } from "@/value-debug";
 import { BaseFabricInstance } from "@/fabric-bases";
 import { codecOf, NULL_LIVE_ENVIRONMENT } from "@/codec-common";
+import { isKnownDeepFrozen } from "@/deep-freeze.ts";
 import {
   FabricBytes,
   FabricHash,
@@ -134,8 +137,68 @@ const smallLengthCache: Uint8Array[] = Array.from(
 );
 
 /**
- * How many arrays and plain objects have been fed to a hasher, counted from
- * when this module loaded. Only a test or a benchmark reads it, through
+ * The encoded bytes of deep-frozen arrays and plain objects a hasher has
+ * walked, by identity, so that one reached again is fed with a single
+ * `update()` of its bytes in place of the walk. The hash is one digest over
+ * the whole tree's bytes, so what is kept is the bytes and never a digest of
+ * them: feeding the kept bytes is byte-for-byte what the walk would feed.
+ *
+ * An entry is sound because a deep-frozen container's contents cannot change,
+ * and because the bytes of a container whose walk fed no cycle reference are
+ * the same wherever the container sits. A container whose walk did feed one
+ * is kept out: its graph holds a cycle, so what the walk feeds depends on
+ * which member of the cycle the walk reaches first, and a cached copy made
+ * under one root would be wrong under another. That rule is stricter than
+ * refusing only a reference to an ancestor outside the container, and has to
+ * be: two frozen objects `a` and `b` referring to each other are each other's
+ * ancestors depending on the root, so what either feeds under its own root is
+ * not what it feeds under the other.
+ *
+ * A container is kept only when its encoding is at least
+ * `MIN_KEPT_CONTAINER_BYTES` long, below which the walk costs less than the
+ * entry, and at most `MAX_KEPT_CONTAINER_BYTES`, above which the entry would
+ * hold a second copy of a large value for as long as the value lives. A
+ * container walked once and found not worth keeping, for any of the three
+ * reasons, is entered as `NOT_KEPT`, so that the next walk of it is not
+ * captured again: capturing costs a copy of every byte fed, and the lookup
+ * that finds the marker is one the walk pays anyway. A hasher's root is never
+ * kept, because `caching.ts` already serves a deep-frozen root's hash by
+ * identity; what this cache is for is a container shared by roots that differ.
+ */
+const frozenContainerBytesCache = new WeakMap<object, Uint8Array>();
+
+/**
+ * The entry in `frozenContainerBytesCache` for a deep-frozen container walked
+ * once and found not worth keeping. Compared by identity; no kept encoding is
+ * empty, a container's encoding holding its tags at least.
+ */
+const NOT_KEPT = new Uint8Array(0);
+
+/**
+ * Shortest encoding a container is kept at. Measured in
+ * `bench/hashing.bench.ts`: below this, walking the container again costs
+ * about what the lookup and the entry do.
+ */
+const MIN_KEPT_CONTAINER_BYTES = 256;
+
+/** Longest encoding a container is kept at. */
+const MAX_KEPT_CONTAINER_BYTES = 1024 * 1024;
+
+/** Length a capture buffer starts at. */
+const INITIAL_CAPTURE_BUFFER_LENGTH = 4096;
+
+/**
+ * A capture buffer no hasher is using, which the next capture takes rather
+ * than allocating one. Hashing is synchronous, so at most one hasher captures
+ * at a time unless hashing a value hashes another on the way, and then the
+ * inner hasher allocates its own.
+ */
+let spareCaptureBuffer: Uint8Array | undefined;
+
+/**
+ * How many arrays and plain objects have been walked by a hasher, counted
+ * from when this module loaded. A container fed from its kept bytes is not
+ * walked and is not counted. Only a test or a benchmark reads it, through
  * `getContainersHashed()`.
  */
 let containersHashed = 0;
@@ -195,6 +258,31 @@ export class ValueHasher {
   readonly #path = new IndexTrackingStack<object>();
 
   /**
+   * The buffer a capture collects bytes in, while this instance holds one. A
+   * capture is the walk of a deep-frozen container whose bytes are to be kept
+   * in `frozenContainerBytesCache`: every byte fed while it runs goes here as
+   * well as to the hasher.
+   */
+  #captureBuffer: Uint8Array | undefined;
+
+  /** How many bytes of `#captureBuffer` the running capture has filled. */
+  #captureLength = 0;
+
+  /**
+   * Depth of `#path` at which the container being captured sits, or `-1`
+   * while no capture runs. One capture runs at a time: a deep-frozen container
+   * inside a captured one is fed into the outer capture and not kept on its
+   * own.
+   */
+  #captureDepth = -1;
+
+  /**
+   * Whether the running capture has found its bytes not worth keeping: the
+   * walk fed a cycle reference, or outgrew `MAX_KEPT_CONTAINER_BYTES`.
+   */
+  #captureAbandoned = false;
+
+  /**
    * Constructs an instance which feeds the value's bytes to `hasher`, a new
    * SHA-256 hasher unless one is given. A hasher of another kind is handed
    * exactly the bytes a hash is computed over, and what it digests them to is
@@ -210,6 +298,7 @@ export class ValueHasher {
 
   /** Returns the digest of everything fed so far, as a `FabricHash`. */
   digest(): FabricHash {
+    this.#releaseCaptureBuffer();
     return new FabricHash(this.#hasher.digest(), "fid1", true);
   }
 
@@ -218,6 +307,7 @@ export class ValueHasher {
    * `base64url`.
    */
   digestString(): string {
+    this.#releaseCaptureBuffer();
     return this.#hasher.digest("base64url");
   }
 
@@ -226,30 +316,30 @@ export class ValueHasher {
    * format from the byte-level spec.
    */
   feedValue(value: FabricValue): void {
-    const hasher = this.#hasher;
-
     switch (typeof value) {
       case "boolean": {
-        hasher.update(value ? TAG_BOOLEAN_TRUE_BYTES : TAG_BOOLEAN_FALSE_BYTES);
+        this.#update(
+          value ? TAG_BOOLEAN_TRUE_BYTES : TAG_BOOLEAN_FALSE_BYTES,
+        );
         break;
       }
 
       case "number": {
-        hasher.update(TAG_NUMBER_BYTES);
-        hasher.update(float64BytesOf(value));
+        this.#update(TAG_NUMBER_BYTES);
+        this.#update(float64BytesOf(value));
         break;
       }
 
       case "string": {
-        hasher.update(getStringRep(value));
+        this.#update(getStringRep(value));
         break;
       }
 
       case "bigint": {
-        hasher.update(TAG_BIGINT_BYTES);
+        this.#update(TAG_BIGINT_BYTES);
         const bytes = bigintToMinimalTwosComplement(value);
         this.#feedLength(bytes.length);
-        hasher.update(bytes);
+        this.#update(bytes);
         break;
       }
 
@@ -258,19 +348,19 @@ export class ValueHasher {
         if (key === undefined) {
           throw new Error("Cannot hash unique (uninterned) symbol");
         }
-        hasher.update(TAG_SYMBOL_BYTES);
-        hasher.update(getStringRep(key));
+        this.#update(TAG_SYMBOL_BYTES);
+        this.#update(getStringRep(key));
         break;
       }
 
       case "undefined": {
-        hasher.update(TAG_UNDEFINED_BYTES);
+        this.#update(TAG_UNDEFINED_BYTES);
         break;
       }
 
       case "object": {
         if (value === null) {
-          hasher.update(TAG_NULL_BYTES);
+          this.#update(TAG_NULL_BYTES);
         } else {
           this.#feedObjectValue(value);
         }
@@ -287,20 +377,110 @@ export class ValueHasher {
   }
 
   /**
+   * Starts a capture of the given container's bytes if they might be worth
+   * keeping, and returns whether it did. They might be when the container is
+   * known deep-frozen, is not the root, has not been walked before, and no
+   * capture is already running; whether the bytes end up kept is
+   * `#endCapture()`'s decision. `kept` is what the cache holds for the
+   * container, which the caller has already looked up.
+   */
+  #beginCaptureIfWanted(value: object, kept: Uint8Array | undefined): boolean {
+    const depth = this.#path.depth;
+
+    if (
+      kept !== undefined || this.#captureDepth >= 0 || depth === 0 ||
+      !isKnownDeepFrozen(value)
+    ) {
+      return false;
+    }
+
+    if (this.#captureBuffer === undefined) {
+      this.#captureBuffer = spareCaptureBuffer ??
+        new Uint8Array(INITIAL_CAPTURE_BUFFER_LENGTH);
+      spareCaptureBuffer = undefined;
+    }
+
+    this.#captureDepth = depth;
+    this.#captureLength = 0;
+    this.#captureAbandoned = false;
+    return true;
+  }
+
+  /**
+   * Appends bytes just fed to the hasher to the running capture, or abandons
+   * the capture when they take it past the longest encoding kept.
+   */
+  #captureAppend(bytes: Uint8Array): void {
+    if (this.#captureAbandoned) {
+      return;
+    }
+
+    const length = this.#captureLength;
+    const needed = length + bytes.length;
+
+    if (needed > MAX_KEPT_CONTAINER_BYTES) {
+      this.#captureAbandoned = true;
+      return;
+    }
+
+    // Non-nullish type assertion (`!`) below, because a capture runs only
+    // after `#beginCaptureIfWanted()` has given this instance a buffer.
+    let buffer = this.#captureBuffer!;
+
+    if (buffer.length < needed) {
+      const grown = new Uint8Array(Math.max(needed, buffer.length * 2));
+      grown.set(buffer.subarray(0, length));
+      buffer = grown;
+      this.#captureBuffer = grown;
+    }
+
+    buffer.set(bytes, length);
+    this.#captureLength = needed;
+  }
+
+  /**
+   * Ends the running capture, which was of the given container, keeping its
+   * bytes if the walk made them worth keeping and marking the container
+   * `NOT_KEPT` otherwise.
+   */
+  #endCapture(value: object): void {
+    const length = this.#captureLength;
+    const worthKeeping = !this.#captureAbandoned &&
+      (length >= MIN_KEPT_CONTAINER_BYTES);
+
+    this.#captureDepth = -1;
+
+    // Non-nullish type assertion (`!`) below, for the reason given in
+    // `#captureAppend()`.
+    frozenContainerBytesCache.set(
+      value,
+      worthKeeping ? this.#captureBuffer!.slice(0, length) : NOT_KEPT,
+    );
+  }
+
+  /**
    * Feed an array value with sparse hole handling, terminated by `TAG_END`, or
-   * a cycle reference if the array is on the path.
+   * a cycle reference if the array is on the path, or its kept bytes if it is
+   * a deep-frozen array walked before.
    */
   #feedArray(value: FabricArray): void {
     if (this.#feedCycleIfOnPath(value)) {
       return;
     }
 
-    const hasher = this.#hasher;
+    const kept = frozenContainerBytesCache.get(value);
+
+    if (kept !== undefined && kept !== NOT_KEPT) {
+      this.#update(kept);
+      return;
+    }
+
+    const capturing = this.#beginCaptureIfWanted(value, kept);
     const path = this.#path;
 
     containersHashed++;
     path.push(value);
-    hasher.update(TAG_ARRAY_BYTES);
+    this.#update(TAG_ARRAY_BYTES);
     let i = 0;
     while (i < value.length) {
       if (!(i in value)) {
@@ -310,20 +490,25 @@ export class ValueHasher {
           runLen++;
           i++;
         }
-        hasher.update(TAG_HOLE_BYTES);
+        this.#update(TAG_HOLE_BYTES);
         this.#feedLength(runLen);
       } else {
         this.feedValue(value[i]);
         i++;
       }
     }
-    hasher.update(TAG_END_BYTES);
+    this.#update(TAG_END_BYTES);
     path.pop();
+
+    if (capturing) {
+      this.#endCapture(value);
+    }
   }
 
   /**
    * Feeds a cycle reference into the hasher if the given container is on the
-   * path. Returns whether it did.
+   * path. Returns whether it did. A reference fed during a capture abandons
+   * the capture, for the reason `frozenContainerBytesCache` gives.
    */
   #feedCycleIfOnPath(value: object): boolean {
     const path = this.#path;
@@ -333,7 +518,8 @@ export class ValueHasher {
       return false;
     }
 
-    this.#hasher.update(TAG_CYCLE_BYTES);
+    this.#captureAbandoned = true;
+    this.#update(TAG_CYCLE_BYTES);
     this.#feedLength(path.depth - at);
     return true;
   }
@@ -347,7 +533,7 @@ export class ValueHasher {
       ? smallLengthCache[value]!
       : encodeULEB128(value);
 
-    this.#hasher.update(valueBuf);
+    this.#update(valueBuf);
   }
 
   /**
@@ -357,59 +543,58 @@ export class ValueHasher {
    * `null` case is handled by the caller (`feedValue()`).
    */
   #feedObjectValue(value: FabricContainerValue | FabricPrimitive): void {
-    const hasher = this.#hasher;
     const tag = tagOfFabricValueElseNull(value);
 
     switch (tag) {
       case VALUE_TAGS.FabricEpochNsec: {
-        hasher.update(TAG_EPOCH_NSEC_BYTES);
+        this.#update(TAG_EPOCH_NSEC_BYTES);
         const bytes = bigintToMinimalTwosComplement(
           (value as { value: bigint }).value,
         );
         this.#feedLength(bytes.length);
-        hasher.update(bytes);
+        this.#update(bytes);
         return;
       }
 
       case VALUE_TAGS.FabricEpochDay: {
-        hasher.update(TAG_EPOCH_DAY_BYTES);
+        this.#update(TAG_EPOCH_DAY_BYTES);
         const bytes = bigintToMinimalTwosComplement(
           (value as { value: bigint }).value,
         );
         this.#feedLength(bytes.length);
-        hasher.update(bytes);
+        this.#update(bytes);
         return;
       }
 
       case VALUE_TAGS.FabricDurationNsec: {
-        hasher.update(TAG_DURATION_NSEC_BYTES);
+        this.#update(TAG_DURATION_NSEC_BYTES);
         const bytes = bigintToMinimalTwosComplement(
           (value as { value: bigint }).value,
         );
         this.#feedLength(bytes.length);
-        hasher.update(bytes);
+        this.#update(bytes);
         return;
       }
 
       case VALUE_TAGS.FabricDurationDay: {
-        hasher.update(TAG_DURATION_DAY_BYTES);
+        this.#update(TAG_DURATION_DAY_BYTES);
         const bytes = bigintToMinimalTwosComplement(
           (value as { value: bigint }).value,
         );
         this.#feedLength(bytes.length);
-        hasher.update(bytes);
+        this.#update(bytes);
         return;
       }
 
       case VALUE_TAGS.FabricHash: {
         const cid = value as FabricHash;
-        hasher.update(TAG_HASH_BYTES);
-        hasher.update(getStringRep(cid.tag));
+        this.#update(TAG_HASH_BYTES);
+        this.#update(getStringRep(cid.tag));
         // TODO(@danfuzz): Look into avoiding making a copy of bytes here.
         // This could be a performance issue.
         const cidBytes = cid.bytes;
         this.#feedLength(cidBytes.length);
-        hasher.update(cidBytes);
+        this.#update(cidBytes);
         return;
       }
 
@@ -424,10 +609,10 @@ export class ValueHasher {
       }
 
       case VALUE_TAGS.FabricBytes: {
-        hasher.update(TAG_BYTES_BYTES);
+        this.#update(TAG_BYTES_BYTES);
         const fab = value as FabricBytes;
         this.#feedLength(fab.length);
-        hasher.update(fab.slice());
+        this.#update(fab.slice());
         return;
       }
 
@@ -436,9 +621,9 @@ export class ValueHasher {
           return;
         }
         const fabInst = value as BaseFabricInstance;
-        hasher.update(TAG_INSTANCE_BYTES);
+        this.#update(TAG_INSTANCE_BYTES);
         const codec = codecOf(fabInst);
-        hasher.update(getStringRep(codec.tagForValue(fabInst)));
+        this.#update(getStringRep(codec.tagForValue(fabInst)));
         const state = codec.encode(fabInst, NULL_LIVE_ENVIRONMENT);
         this.#path.push(fabInst);
         this.feedValue(state);
@@ -456,7 +641,7 @@ export class ValueHasher {
             "Cannot hash a `FabricKeyPair` that holds opaque handles.",
           );
         }
-        hasher.update(TAG_KEY_PAIR_BYTES);
+        this.#update(TAG_KEY_PAIR_BYTES);
         this.feedValue(fab.algorithm);
         this.feedValue(fab.publicKeyBytes);
         this.feedValue(fab.privateKeyBytes);
@@ -465,7 +650,7 @@ export class ValueHasher {
 
       case VALUE_TAGS.FabricRegExp: {
         const fab = value as FabricRegExp;
-        hasher.update(TAG_REGEXP_BYTES);
+        this.#update(TAG_REGEXP_BYTES);
         this.feedValue(fab.source);
         this.feedValue(fab.flags);
         this.feedValue(fab.flavor);
@@ -474,7 +659,7 @@ export class ValueHasher {
 
       case VALUE_TAGS.FabricUnavailable: {
         const fab = value as FabricUnavailable;
-        hasher.update(TAG_UNAVAILABLE_BYTES);
+        this.#update(TAG_UNAVAILABLE_BYTES);
         this.feedValue(fab.reason);
         this.feedValue(fab.errorKind);
         this.feedValue(fab.rawErrorMessage);
@@ -492,14 +677,21 @@ export class ValueHasher {
   /**
    * Feed a plain object value, keys sorted by the byte order of their WTF-8
    * encoding, terminated by `TAG_END`, or a cycle reference if the object is on
-   * the path.
+   * the path, or its kept bytes if it is a deep-frozen object walked before.
    */
   #feedPlainObject(value: FabricPlainObject): void {
     if (this.#feedCycleIfOnPath(value)) {
       return;
     }
 
-    const hasher = this.#hasher;
+    const kept = frozenContainerBytesCache.get(value);
+
+    if (kept !== undefined && kept !== NOT_KEPT) {
+      this.#update(kept);
+      return;
+    }
+
+    const capturing = this.#beginCaptureIfWanted(value, kept);
     const path = this.#path;
 
     containersHashed++;
@@ -514,15 +706,43 @@ export class ValueHasher {
     // because of it).
     const keys = utf8SortedKeysOf(value);
 
-    hasher.update(TAG_OBJECT_BYTES);
+    this.#update(TAG_OBJECT_BYTES);
     for (const key of keys) {
       // Keys are encoded in the same format as strings, and values are hashed
       // recursively.
-      hasher.update(getStringRep(key));
+      this.#update(getStringRep(key));
       this.feedValue(value[key]);
     }
-    hasher.update(TAG_END_BYTES);
+    this.#update(TAG_END_BYTES);
     path.pop();
+
+    if (capturing) {
+      this.#endCapture(value);
+    }
+  }
+
+  /**
+   * Gives the capture buffer back for the next hasher to take, this instance
+   * being done feeding once it is asked for a digest.
+   */
+  #releaseCaptureBuffer(): void {
+    if (this.#captureBuffer !== undefined) {
+      spareCaptureBuffer = this.#captureBuffer;
+      this.#captureBuffer = undefined;
+    }
+  }
+
+  /**
+   * Feeds bytes to the hasher, and to the running capture if there is one.
+   * Every byte of a value goes through here, which is what makes a capture
+   * exactly what the hasher was fed.
+   */
+  #update(bytes: Uint8Array): void {
+    this.#hasher.update(bytes);
+
+    if (this.#captureDepth >= 0) {
+      this.#captureAppend(bytes);
+    }
   }
 
   //
@@ -555,7 +775,8 @@ export class ValueHasher {
 }
 
 /**
- * Counts the arrays and plain objects fed to a hasher.
+ * Counts the arrays and plain objects walked by a hasher. A container fed from
+ * its kept bytes is not among them.
  *
  * @internal Not in the `value-hash` barrel; `for-testing-only.ts` offers it to
  * tests.

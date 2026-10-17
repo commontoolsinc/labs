@@ -99,6 +99,17 @@ export function isDeepFrozen(value: unknown): boolean {
   return isDeepFrozenWithCache(value);
 }
 
+/**
+ * Returns `true` if the given object has already been proven deep-frozen, by
+ * `deepFreeze()` or by a walk of `isDeepFrozen()` that reached it. This is the
+ * constant-time half of `isDeepFrozen()`, for a hot path that can afford a
+ * `false` for an object nobody has asked about but not a walk: `false` says
+ * only that no proof is on record.
+ */
+export function isKnownDeepFrozen(value: object): boolean {
+  return isInDeepFrozenCache(value);
+}
+
 /** Memoizes failures only for the duration of a read-only conversion. */
 function isDeepFrozenWithCache(
   value: unknown,

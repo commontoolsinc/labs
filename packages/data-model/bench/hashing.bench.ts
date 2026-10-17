@@ -441,3 +441,57 @@ Deno.bench({
     b.end();
   },
 });
+
+//
+// Shared deep-frozen sub-object benchmarks (the kept-bytes cache activates)
+//
+// A fresh mutable root carrying a sub-object that many roots share, which is
+// what a resolved schema definition view looks like: `{ ...body, $defs }`
+// over one deep-frozen definition map. The hasher keeps the encoded bytes of
+// a deep-frozen sub-object it has walked, above a size threshold, so the
+// frozen arm is one `update()` of those bytes where the mutable arm is a
+// walk. The sizes straddle that threshold, which is what they are for.
+//
+
+function makeWideObject(entries: number): FabricPlainObject {
+  const result: Record<string, FabricValue> = {};
+  for (let i = 0; i < entries; i++) {
+    result[`key${i}`] = `value ${i % 8}`;
+  }
+  return result;
+}
+
+for (const entries of [4, 16, 64, 256]) {
+  const mutableSub = makeWideObject(entries);
+  const frozenSub = deepFreeze(makeWideObject(entries));
+
+  // Warm up: the first walk of the frozen sub-object is the one that keeps
+  // its bytes.
+  for (let i = 0; i < 20; i++) {
+    hashOf({ i, sub: mutableSub });
+    hashOf({ i, sub: frozenSub });
+  }
+
+  Deno.bench({
+    name: `shared sub-object (${entries} keys, mutable)`,
+    group: `shared-sub-object-${entries}`,
+    baseline: true,
+    fn(b) {
+      const root = { i: entries, sub: mutableSub };
+      b.start();
+      hashOf(root);
+      b.end();
+    },
+  });
+
+  Deno.bench({
+    name: `shared sub-object (${entries} keys, deep-frozen, bytes kept)`,
+    group: `shared-sub-object-${entries}`,
+    fn(b) {
+      const root = { i: entries, sub: frozenSub };
+      b.start();
+      hashOf(root);
+      b.end();
+    },
+  });
+}
