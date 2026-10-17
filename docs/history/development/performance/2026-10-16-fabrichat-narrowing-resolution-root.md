@@ -66,13 +66,16 @@ and 3 under `asCellFollowScopeCap()` whose root was one.
 | of which missed | 5,860 | 6,162 |
 | pair memo not consulted | 2,944 | 684 |
 
-The 2,260 resolutions the change moved into the memo are 1,957 hits and
+The 2,259 resolutions the change moved into the memo are 1,957 hits and
 302 misses, 296 of the misses the first resolution of each reference a
-narrowing follows against its map. Two of the three after loads agree on
-every figure; the first, taken while the machine's one-minute load passed
-220 and the room took 70 s rather than 40 s to render, consulted the memo
-155,914 times with the same 684 not consulted, so what varies with the
-load is how many times the render asks, not what the resolver can keep.
+narrowing follows against its map; the after load made one resolution
+fewer in all, 124,410 against 124,411. Two of the three after loads agree on
+every figure. The first consulted the memo 155,914 times with the same 684
+not consulted, and took 70 s rather than 40 s to render; a sibling
+investigation's loads of the same room ran against this rig's shell and
+store during those minutes, so that load is not one of this record's
+figures. What a concurrent load changes is how many times the render asks,
+not what the resolver can keep.
 
 ## What changed
 
