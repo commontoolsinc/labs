@@ -6688,10 +6688,11 @@ export class SpaceServer implements TransactionSealDestination {
         Engine.selectPendingStreamEventDocs(this.#options.engine).length > 0)
     ) {
       // Re-arm sources: a REQUEUED event (its entry stayed pending); a
-      // drained event whose seal failed transiently; and a wave that
+      // drained event whose seal failed transiently; a wave that
       // COMMITTED same-space emitted entries (LT1's budget-exhausted
       // fallback — the entry is durable input, the next wave processes
-      // it).
+      // it); and an entry held behind an earlier arrival this wave
+      // consequenced, which armed no backstop of its own (events.md §5).
       this.#eventScanOwed = true;
     }
     // Stage G, post-commit: hand the wave's sealed effects to the
