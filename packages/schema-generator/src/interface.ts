@@ -207,6 +207,16 @@ export interface GenerationContext {
 
   // Optional context
 
+  /**
+   * The element types of the tuple whose items `items` is, the union of
+   * them the checker builds, in the order the tuple lists them: the order the
+   * union's members are emitted in (`sourceOrderOfMembers()`).
+   */
+  tupleItems?: {
+    readonly items: ts.Type;
+    readonly elements: readonly ts.Type[];
+  };
+
   /** Type node for additional context */
   typeNode?: ts.TypeNode;
 

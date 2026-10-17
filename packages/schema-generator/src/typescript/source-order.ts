@@ -39,6 +39,119 @@ export function isWrittenNode(node: ts.Node): boolean {
 }
 
 /**
+ * The members `node`, a union node, lists, in source order: as written, where
+ * a source file writes `node` or the node a transform copied it from
+ * (`isWrittenNode()`); otherwise, as for a node a transform built from the
+ * checker's type, in an order of their own. A keyword member keeps its
+ * place, which a node printed from the checker's type gives it the same way
+ * in every program: the checker's intrinsic types are listed before any type
+ * a source declares, and printing moves `null` and `undefined` last. The
+ * other members fill the remaining places, literals first, by kind and
+ * value, then the rest, by `canonicalNodeKey()`.
+ */
+export function unionNodeMembersInOrder(
+  node: ts.UnionTypeNode,
+): readonly ts.TypeNode[] {
+  if (isWrittenNode(ts.getOriginalNode(node))) return node.types;
+  const rest: Array<{ node: ts.TypeNode; tier: number; key: string | number }> =
+    [];
+  for (const member of node.types) {
+    const literal = literalNodeKey(member);
+    if (literal === "keyword") continue;
+    if (literal !== undefined) rest.push({ node: member, ...literal });
+    else rest.push({ node: member, tier: 3, key: canonicalNodeKey(member) });
+  }
+  rest.sort((left, right) =>
+    left.tier - right.tier ||
+    (typeof left.key === "number" && typeof right.key === "number"
+      ? left.key - right.key
+      : compareStrings(String(left.key), String(right.key)))
+  );
+  let next = 0;
+  return node.types.map((member) =>
+    literalNodeKey(member) === "keyword" ? member : rest[next++]!.node
+  );
+}
+
+/** The kinds of keyword type node, as `string` and `undefined` are. */
+const KEYWORD_TYPE_KINDS: ReadonlySet<ts.SyntaxKind> = new Set([
+  ts.SyntaxKind.AnyKeyword,
+  ts.SyntaxKind.UnknownKeyword,
+  ts.SyntaxKind.NumberKeyword,
+  ts.SyntaxKind.BigIntKeyword,
+  ts.SyntaxKind.ObjectKeyword,
+  ts.SyntaxKind.BooleanKeyword,
+  ts.SyntaxKind.StringKeyword,
+  ts.SyntaxKind.SymbolKeyword,
+  ts.SyntaxKind.VoidKeyword,
+  ts.SyntaxKind.UndefinedKeyword,
+  ts.SyntaxKind.NeverKeyword,
+  ts.SyntaxKind.IntrinsicKeyword,
+]);
+
+/**
+ * Where `unionNodeMembersInOrder()` places the member `node`: `"keyword"`
+ * for a keyword, `true`, `false` or `null`; a tier and a value for a
+ * literal, numbers before bigints before strings; `undefined` otherwise.
+ */
+function literalNodeKey(
+  node: ts.TypeNode,
+): "keyword" | { tier: number; key: string | number } | undefined {
+  const member = unwrapTypeParentheses(node);
+  if (KEYWORD_TYPE_KINDS.has(member.kind)) return "keyword";
+  if (!ts.isLiteralTypeNode(member)) return undefined;
+  const { literal } = member;
+  switch (literal.kind) {
+    case ts.SyntaxKind.TrueKeyword:
+    case ts.SyntaxKind.FalseKeyword:
+    case ts.SyntaxKind.NullKeyword:
+      return "keyword";
+    case ts.SyntaxKind.NumericLiteral:
+      return { tier: 0, key: Number((literal as ts.NumericLiteral).text) };
+    case ts.SyntaxKind.BigIntLiteral:
+      return { tier: 1, key: (literal as ts.BigIntLiteral).text };
+    case ts.SyntaxKind.StringLiteral:
+      return { tier: 2, key: (literal as ts.StringLiteral).text };
+    case ts.SyntaxKind.PrefixUnaryExpression: {
+      const unary = literal as ts.PrefixUnaryExpression;
+      if (
+        unary.operator === ts.SyntaxKind.MinusToken &&
+        ts.isNumericLiteral(unary.operand)
+      ) {
+        return { tier: 0, key: -Number(unary.operand.text) };
+      }
+      return undefined;
+    }
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * A key for `node` that two nodes share exactly when they are written the
+ * same way: its kind, its names and literals' text, and its children's keys,
+ * those of a union's members in the order of the keys, so that a union the
+ * node holds reads the same whatever order it lists its members in.
+ */
+function canonicalNodeKey(node: ts.Node): string {
+  if (ts.isIdentifier(node) || ts.isPrivateIdentifier(node)) {
+    return `#${node.text}`;
+  }
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    return JSON.stringify(node.text);
+  }
+  if (ts.isNumericLiteral(node) || ts.isBigIntLiteral(node)) {
+    return node.text;
+  }
+  const children: string[] = [];
+  ts.forEachChild(node, (child) => {
+    children.push(canonicalNodeKey(child));
+  });
+  if (ts.isUnionTypeNode(node)) children.sort(compareStrings);
+  return `${ts.SyntaxKind[node.kind]}(${children.join(",")})`;
+}
+
+/**
  * `items`, a union's members or what stands for them in the checker's order,
  * in source order: the items whose types are intrinsic first, as they came,
  * then those `rankOf` places, by their rank, and then the rest, in the order
@@ -352,16 +465,30 @@ function aliasKeyArgument(
  * the order the checker created them in: intrinsic types by name, then
  * literals by kind and value, then declared types (`compareDeclaredTypes()`:
  * by name and declaration, a TS enum's members together, as the enum
- * declares them) — and then every other type. Two instantiations of one
- * declaration, and two types neither declared nor literal, compare equal.
+ * declares them) — and then every other type. Types the first key leaves
+ * equal, as two instantiations of one declaration or two intersections are,
+ * are compared by what they are made of (`compareStructure()`).
  *
- * It reads a type's flags, value, and symbol, and nothing the checker would
- * have to create: resolving a type's arguments, or printing it, can create
- * types, and the generator's recursion bounds read how old a type is
- * (`expanding-recursion.ts`), so a comparison that created one would move
- * where they cut.
+ * It reads a type's flags, value, symbol, and what the checker gave it when
+ * it created it, and nothing the checker would have to resolve or create, as
+ * a type's arguments resolved on request or its printed form are: what has
+ * been resolved by the time it is asked depends on the rest of the program,
+ * so an order read from it would too.
  */
 export function compareTypesBySource(left: ts.Type, right: ts.Type): number {
+  return compareTypes(left, right, 0);
+}
+
+/**
+ * How many levels into what two types are made of `compareStructure()`
+ * reads before it takes them for equal. Types that agree this deep are
+ * schemas that agree as deep, near enough, and every comparison stops at the
+ * same depth, so the order stays one order.
+ */
+const MAX_STRUCTURE_DEPTH = 8;
+
+/** `compareTypesBySource()`, `depth` levels into what types are made of. */
+function compareTypes(left: ts.Type, right: ts.Type, depth: number): number {
   if (left === right) return 0;
   const leftTier = tierOf(left);
   const rightTier = tierOf(right);
@@ -383,10 +510,240 @@ export function compareTypesBySource(left: ts.Type, right: ts.Type): number {
         (right as ts.StringLiteralType).value,
       );
     case Tier.Declared:
-      return compareDeclaredTypes(left, right);
+      return compareDeclaredTypes(left, right) ||
+        compareStructure(left, right, depth);
+    default:
+      return compareStructure(left, right, depth);
+  }
+}
+
+/** The kinds of type `compareStructure()` orders, in its order. */
+enum Structure {
+  Reference,
+  Object,
+  Intersection,
+  Union,
+  Other,
+}
+
+/** A type as the checker holds it: what it gave the type on creating it. */
+type TypeWithInternals = ts.Type & {
+  readonly target?: ts.Type & {
+    readonly symbol?: ts.Symbol;
+    readonly fixedLength?: number;
+    readonly elementFlags?: readonly number[];
+  };
+  readonly node?: ts.Node;
+  readonly mapper?: unknown;
+  readonly resolvedTypeArguments?: readonly ts.Type[];
+  readonly types?: readonly ts.Type[];
+};
+
+/** A property's symbol as the checker holds it: the type it was given. */
+type SymbolWithInternals = ts.Symbol & {
+  readonly links?: { readonly type?: ts.Type };
+};
+
+/**
+ * Compares two types `compareTypes()` leaves equal by what they are made of,
+ * read only where the checker gave it to them on creating them: an alias's
+ * instantiations by their alias arguments; a reference by its target, a
+ * tuple's arity and element kinds, and its arguments, unless it is a
+ * deferred reference, whose arguments are resolved only when something asks
+ * for them; an intersection or a union by its members; and an object no
+ * source declares, as the checker builds for a spread, by its properties'
+ * names and then their types. Each part is compared by `compareTypes()`, one
+ * level deeper, up to `MAX_STRUCTURE_DEPTH`.
+ */
+function compareStructure(
+  left: ts.Type,
+  right: ts.Type,
+  depth: number,
+): number {
+  if (depth >= MAX_STRUCTURE_DEPTH) return 0;
+  const inner = depth + 1;
+  const byAlias = compareAliases(left, right, inner);
+  if (byAlias !== 0) return byAlias;
+  const leftKind = structureOf(left);
+  const rightKind = structureOf(right);
+  if (leftKind !== rightKind) return leftKind - rightKind;
+  const l = left as TypeWithInternals;
+  const r = right as TypeWithInternals;
+  switch (leftKind) {
+    case Structure.Reference:
+      return compareReferences(l, r, inner);
+    case Structure.Intersection:
+      return compareTypeLists(l.types ?? [], r.types ?? [], inner);
+    case Structure.Union:
+      return compareTypeLists(
+        sortedTypes(l.types ?? [], inner),
+        sortedTypes(r.types ?? [], inner),
+        inner,
+      );
+    case Structure.Object:
+      return compareUndeclaredObjects(left, right, inner);
     default:
       return 0;
   }
+}
+
+/**
+ * Compares two types by the alias each is an instantiation of, where either
+ * is one: one that is before one that is not, two of different aliases by
+ * the aliases' names and declarations, and two of one alias by its
+ * arguments.
+ */
+function compareAliases(
+  left: ts.Type,
+  right: ts.Type,
+  depth: number,
+): number {
+  const leftAlias = left.aliasSymbol;
+  const rightAlias = right.aliasSymbol;
+  if (leftAlias === undefined || rightAlias === undefined) {
+    return Number(leftAlias === undefined) - Number(rightAlias === undefined);
+  }
+  if (leftAlias !== rightAlias) {
+    const leftAt = declarationPlace(leftAlias.declarations?.[0]);
+    const rightAt = declarationPlace(rightAlias.declarations?.[0]);
+    return compareStrings(leftAlias.getName(), rightAlias.getName()) ||
+      compareStrings(leftAt?.file ?? "", rightAt?.file ?? "") ||
+      (leftAt?.pos ?? 0) - (rightAt?.pos ?? 0);
+  }
+  return compareTypeLists(
+    left.aliasTypeArguments ?? [],
+    right.aliasTypeArguments ?? [],
+    depth,
+  );
+}
+
+/** The kind of type `compareStructure()` takes `type` for. */
+function structureOf(type: ts.Type): Structure {
+  if (type.flags & ts.TypeFlags.Intersection) return Structure.Intersection;
+  if (type.flags & ts.TypeFlags.Union) return Structure.Union;
+  if (type.flags & ts.TypeFlags.Object) {
+    const objectFlags = (type as ts.ObjectType).objectFlags;
+    if (objectFlags & ts.ObjectFlags.Reference) return Structure.Reference;
+    const declared = (type.getSymbol()?.declarations?.length ?? 0) > 0;
+    const instantiated = (type as TypeWithInternals).mapper !== undefined;
+    if (!declared && !instantiated) return Structure.Object;
+  }
+  return Structure.Other;
+}
+
+/**
+ * Compares two references, neither deferred, by their targets' names and
+ * declarations, a tuple's arity and element kinds, and then their
+ * arguments. A deferred reference is compared by the node writing it alone.
+ */
+function compareReferences(
+  left: TypeWithInternals,
+  right: TypeWithInternals,
+  depth: number,
+): number {
+  const leftTarget = left.target;
+  const rightTarget = right.target;
+  const leftAt = declarationPlace(leftTarget?.symbol?.declarations?.[0]);
+  const rightAt = declarationPlace(rightTarget?.symbol?.declarations?.[0]);
+  const byTarget = compareStrings(
+    leftTarget?.symbol?.getName() ?? "",
+    rightTarget?.symbol?.getName() ?? "",
+  ) ||
+    compareStrings(leftAt?.file ?? "", rightAt?.file ?? "") ||
+    (leftAt?.pos ?? 0) - (rightAt?.pos ?? 0) ||
+    (leftTarget?.fixedLength ?? -1) - (rightTarget?.fixedLength ?? -1) ||
+    compareNumberLists(
+      leftTarget?.elementFlags ?? [],
+      rightTarget?.elementFlags ?? [],
+    );
+  if (byTarget !== 0) return byTarget;
+  if (left.node !== undefined || right.node !== undefined) {
+    const leftNode = declarationPlace(left.node as ts.Declaration | undefined);
+    const rightNode = declarationPlace(
+      right.node as ts.Declaration | undefined,
+    );
+    return compareStrings(leftNode?.file ?? "", rightNode?.file ?? "") ||
+      (leftNode?.pos ?? -1) - (rightNode?.pos ?? -1);
+  }
+  return compareTypeLists(
+    left.resolvedTypeArguments ?? [],
+    right.resolvedTypeArguments ?? [],
+    depth,
+  );
+}
+
+/**
+ * Compares two objects no source declares and the checker did not
+ * instantiate, so built whole, by their properties' names in the order they
+ * are listed, and then by the types the checker gave those properties, where
+ * it gave them one on building them.
+ */
+function compareUndeclaredObjects(
+  left: ts.Type,
+  right: ts.Type,
+  depth: number,
+): number {
+  const leftProperties = left.getProperties();
+  const rightProperties = right.getProperties();
+  const byNames = compareStringLists(
+    leftProperties.map((property) => property.getName()),
+    rightProperties.map((property) => property.getName()),
+  );
+  if (byNames !== 0) return byNames;
+  for (let index = 0; index < leftProperties.length; index++) {
+    const leftType = (leftProperties[index] as SymbolWithInternals).links?.type;
+    const rightType = (rightProperties[index] as SymbolWithInternals).links
+      ?.type;
+    if (leftType === undefined || rightType === undefined) continue;
+    const byType = compareTypes(leftType, rightType, depth);
+    if (byType !== 0) return byType;
+  }
+  return 0;
+}
+
+/** `types` in the order `compareTypes()` gives them, `depth` levels in. */
+function sortedTypes(types: readonly ts.Type[], depth: number): ts.Type[] {
+  return [...types].sort((left, right) => compareTypes(left, right, depth));
+}
+
+/** Compares two lists of types member by member, a shorter one first. */
+function compareTypeLists(
+  left: readonly ts.Type[],
+  right: readonly ts.Type[],
+  depth: number,
+): number {
+  const shared = Math.min(left.length, right.length);
+  for (let index = 0; index < shared; index++) {
+    const byMember = compareTypes(left[index]!, right[index]!, depth);
+    if (byMember !== 0) return byMember;
+  }
+  return left.length - right.length;
+}
+
+/** Compares two lists of strings member by member, a shorter one first. */
+function compareStringLists(
+  left: readonly string[],
+  right: readonly string[],
+): number {
+  const shared = Math.min(left.length, right.length);
+  for (let index = 0; index < shared; index++) {
+    const byMember = compareStrings(left[index]!, right[index]!);
+    if (byMember !== 0) return byMember;
+  }
+  return left.length - right.length;
+}
+
+/** Compares two lists of numbers member by member, a shorter one first. */
+function compareNumberLists(
+  left: readonly number[],
+  right: readonly number[],
+): number {
+  const shared = Math.min(left.length, right.length);
+  for (let index = 0; index < shared; index++) {
+    const byMember = left[index]! - right[index]!;
+    if (byMember !== 0) return byMember;
+  }
+  return left.length - right.length;
 }
 
 /** The tiers `compareTypesBySource()` orders types into, in its order. */

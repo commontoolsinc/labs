@@ -22,8 +22,9 @@ import ts from "typescript";
 import { maxOf } from "@commonfabric/utils/math";
 
 /**
- * How many readings of one declaration, each instantiated after the one it is
- * read inside, may nest before the innermost is taken for a recursion that
+ * How many readings of one declaration, each instantiated with arguments at
+ * least as large as those of the one it is read inside (`expansionDepth()`),
+ * may nest before the innermost is taken for a recursion that
  * instantiates the declaration without end (`cutsExpansion()`), unless a
  * reading passes its own. The checker takes three for a recursion where its
  * answer is only "maybe"; this is set past the depth a finite chain written in
@@ -59,11 +60,12 @@ export const exhaustsBudget = (budget: ExpansionBudget): boolean =>
  * How deeply `type`, read inside `path`, the types it is read within,
  * outermost first, nests in instantiations of one declaration: the most
  * readings of any declaration it instantiates, itself among them, each
- * instantiated after the last, as the ids the checker numbers its types with
- * in creation order show. A nesting its author wrote out,
- * `Pair<Pair<Pair<string>>>`, is instantiated from the inside out, so its
- * readings are not counted. The checker counts the same way
- * (`isDeeplyNestedType`).
+ * instantiated with arguments at least as large as the last's
+ * (`argumentSize()`), as `Nest<T[]>` inside `Nest<T>` is. A nesting its
+ * author wrote out, `Pair<Pair<Pair<string>>>`, shrinks from the outside in,
+ * so its readings are not counted. The checker counts by the order it
+ * created the types in (`isDeeplyNestedType`), which depends on the rest of
+ * the program; their arguments do not.
  */
 export const expansionDepth = (
   type: ts.Type,
@@ -75,17 +77,50 @@ export const expansionDepth = (
     maxOf(
       recursionIdentities(type, checker).map((identity) => {
         let count = 0;
-        let lastId = 0;
+        let lastSize = -1;
         for (const outer of [...path, type]) {
           if (!recursionIdentities(outer, checker).includes(identity)) continue;
-          const id = (outer as ts.Type & { id?: number }).id ?? 0;
-          if (id >= lastId) count++;
-          lastId = id;
+          const size = argumentSize(outer, 0);
+          if (size >= lastSize) count++;
+          lastSize = size;
         }
         return count;
       }),
     ),
   );
+
+/**
+ * How many levels of arguments `argumentSize()` reads before it counts what
+ * lies below as one type. A recursion that instantiates its declaration
+ * without end grows its arguments by a level a reading, so readings this
+ * deep compare as equal and are counted, as growth is.
+ */
+const MAX_ARGUMENT_DEPTH = 64;
+
+/**
+ * How large the arguments `type` was instantiated with are: one for the type,
+ * and the sizes of its arguments, `depth` levels down. It reads only the
+ * arguments the checker gave the type on creating it: an alias's
+ * instantiation's alias arguments, or a reference's own, except a deferred
+ * reference's, which are resolved only when something asks for them.
+ */
+const argumentSize = (type: ts.Type, depth: number): number => {
+  if (depth >= MAX_ARGUMENT_DEPTH) return 1;
+  const reference = type as ts.Type & {
+    readonly node?: ts.Node;
+    readonly resolvedTypeArguments?: readonly ts.Type[];
+  };
+  const isReference = ((type as ts.ObjectType).objectFlags &
+    ts.ObjectFlags.Reference) !== 0;
+  const args = type.aliasTypeArguments ??
+    (isReference && reference.node === undefined
+      ? reference.resolvedTypeArguments
+      : undefined) ??
+    [];
+  let size = 1;
+  for (const arg of args) size += argumentSize(arg, depth + 1);
+  return size;
+};
 
 /**
  * Whether a reading cuts `type`, read inside `path`, as a recursion that

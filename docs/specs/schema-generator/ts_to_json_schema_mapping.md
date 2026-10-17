@@ -587,12 +587,15 @@ an alias that recurses through the tuple or array it writes,
 `type Tup<T> = [T, Tup<T[]>?]`, which is read under bindings by its
 instantiation, whose arguments differ at each level. The cut comes where one
 declaration, or one such deferred reference, is instantiated
-`MAX_EXPANDING_NESTING` (32) deep inside itself, each instantiation newer than
-the one it is read within, as the checker's `isDeeplyNestedType` counts. The
-innermost reading then accepts any value and is reported as the
-`schema-type:unread` warning. A nesting written out, whose inner
-instantiations are the older, is never cut, and an array or tuple no alias
-writes is not counted. A finite chain that recurses through one declaration
+`MAX_EXPANDING_NESTING` (32) deep inside itself, each instantiated with
+arguments at least as large as those of the one it is read within, `T[]`
+inside `T` (`argumentSize()`, which reads only the arguments the checker gave
+a type on creating it). The checker's own `isDeeplyNestedType` counts by the
+order it created the types in instead, which depends on the rest of the
+program, so this bound does not. The innermost reading then accepts any value
+and is reported as the `schema-type:unread` warning. A nesting written out,
+whose arguments shrink from the outside in, is never cut, and an array or
+tuple no alias writes is not counted. A finite chain that recurses through one declaration
 more than the cut allows is cut too; the remainder is reported, never refused.
 
 A recursion that branches, through more than one of its members, reaches
@@ -951,15 +954,28 @@ Default paths of §7:
   - where the union is read through an indexed access written with a
     literal key, `Row["status"]`, as the property's declaration writes them,
     for a property of a type written without type arguments;
+  - a tuple's positionless items, the union of its element types, in the
+    order the tuple lists its elements, so `["a", 1]` emits `["a", 1]`;
   - where nothing written is read — a node a transform built, as
     ts-transformers builds one for an inferred type — as the union's alias
     declares them, if it has one without type parameters;
   - and otherwise in a canonical order: literals by kind and value, then
     declared types by the name of their symbol and then by declaration, a TS
-    enum's members as the enum declares them; any other member keeps the
-    order it came in. A union the checker builds, as `keyof T`, an inferred
-    `cond ? "x" : "y"`, or a tuple's positionless items are, is listed this
-    way.
+    enum's members as the enum declares them, then every other type. Types
+    that order leaves equal are compared by what they are made of, as far as
+    the checker gave it to them on creating them: an alias's instantiations
+    by their alias arguments, a reference by its target and its arguments
+    (a deferred reference by the node writing it), an intersection or a union
+    by its members, and an object no source declares by its properties. A
+    union the checker builds, as `keyof T` or an inferred `cond ? "x" : "y"`
+    is, is listed this way.
+  - A union read without its type, at a node a transform built, keeps the
+    node's order where a source file writes the node or the node it was
+    copied from. Otherwise its keyword members keep their places, which a
+    node printed from the checker's type gives them the same way in every
+    program, and the other members fill the remaining places: literals by
+    kind and value, then the rest by a key read from each node's syntax, with
+    any union inside a node keyed whatever order it lists its members in.
   An object's properties are read from the source the same way. An interface
   or a class without type parameters lists its own members, a constructor's
   parameter properties among them, and then each base's properties, base by
@@ -969,10 +985,9 @@ Default paths of §7:
   type's order, else by their declarations. A mapped type over keys of its
   own, as `{ [P in "a" | "b"]: T }` is, does not take `T`'s order.
   None of this creates a type: resolving a type's arguments, printing it, or
-  reading a generic alias's members anew can, and the expanding recursion
-  bound reads how old a type is. The bound also spends one budget across a
-  union's members in the order it reads them, so where it cuts depends on
-  that order.
+  reading a generic alias's members anew can. The expanding recursion bound
+  spends one budget across a union's members in the order it reads them, so
+  where it cuts depends on that order, which is the source's.
 - The checker folds a member that is itself a union into the union it is a
   member of, so one member node can stand for several members
   (`pairUnionMemberNodes`, which `#labelsOf` in `schema-generator.ts` reads
