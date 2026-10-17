@@ -4116,9 +4116,9 @@ ORDER BY seq, op_index
  * event consequence by a later write of the session that fired the event
  * (serving-loop.md §3d). Only writes that replace what sits at their path
  * count: a `set` or `delete` revision reports the root path, and a `patch`
- * revision reports the paths of its `replace`, `add` and `remove` patches. A
- * patch that merges into existing content — an append, a splice, an increment
- * — overwrites nothing and is left out.
+ * revision reports the paths of its `replace`, `add` and `remove` patches and
+ * both paths of a `move`. A patch that merges into existing content — an
+ * append, a splice, an increment — overwrites nothing and is left out.
  */
 export const selectSessionOverwritePathsSince = (
   engine: Engine,
@@ -4152,6 +4152,9 @@ ORDER BY r.seq, r.op_index
         if (
           patch.op === "replace" || patch.op === "add" || patch.op === "remove"
         ) {
+          paths.push(parsePointer(patch.path));
+        } else if (patch.op === "move") {
+          paths.push(parsePointer(patch.from));
           paths.push(parsePointer(patch.path));
         }
       }

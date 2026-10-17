@@ -2098,6 +2098,33 @@ describe("stage D seal-into-wave", () => {
       expect(outcome.requeuedEventIds).toEqual([]);
     });
 
+    it("drops the consequence's writes to both paths of a value the firing session moved", async () => {
+      const lease = liveLease();
+      const docs = await seedDocs();
+      Engine.applyCommit(engine, {
+        sessionId: firing.session,
+        principal: firing.user,
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "patch",
+            id: docs.draft.getAsNormalizedFullLink().id,
+            patches: [{ op: "move", from: "/value/bio", path: "/value/name" }],
+          }],
+        },
+      });
+
+      const wave = newWave({ lease });
+      await sealConsequence(wave, docs);
+      const outcome = await wave.commitWave(newSink());
+      await wave.settled();
+
+      expect(stored(docs.draft)).toEqual({ value: { name: "" } });
+      expect(stored(docs.editing)).toEqual({ value: true });
+      expect(outcome.committedEventIds).toEqual(["e-edit"]);
+    });
+
     it("commits a consequence write to a path above the one the firing session overwrote", async () => {
       const lease = liveLease();
       const docs = await seedDocs();
