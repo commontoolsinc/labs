@@ -3363,7 +3363,9 @@ export interface ISpaceReplica extends ISpace {
    * is watched and delivered, no local write to it is pending, and its value
    * is neither a refused write folded locally nor an own write promoted past
    * what a push has covered. An absent document a push delivered is
-   * confirmed.
+   * confirmed, and so is a content-addressed document in space scope holding
+   * the content its id names that the replica's own accepted commit stored,
+   * whether or not a frame delivered it.
    */
   isConfirmedDocument?(
     id: URI,

@@ -711,6 +711,11 @@ export interface WaveLease {
 interface WaveContribution {
   /** Set only by the closure that invalidates reads of withdrawn state. */
   readDependencyWithdrawn?: true;
+
+  /** The withdrawn write that drew this run into the withdrawn-read
+   * closure, the first one found. Set only by that closure, and read only
+   * to name the cause when the run's withdrawal is reported. */
+  withdrawnRead?: WithdrawnRead;
   index: number;
   context: WaveRunContext;
 
@@ -857,6 +862,30 @@ export interface WaveCommitOutcome {
 
 const docInstanceKey = (id: string, scopeKey: string): string =>
   `${id} ${scopeKey}`;
+
+/** A run's identity as a wave log message names it. */
+function describeRunContext(context: WaveRunContext): string {
+  return `action=${context.actionId ?? "<unstamped>"} ` +
+    `kind=${context.kind ?? "<none>"} ` +
+    `eventId=${context.eventId ?? "<none>"}`;
+}
+
+/** One read of a sealed write the wave withdrew: whose write it was, and
+ * which doc instance it wrote. */
+interface WithdrawnRead {
+  /** The index of the contribution that wrote the doc. */
+  owner: number;
+  space: MemorySpace;
+
+  /** The doc instance read, as `docInstanceKey()` writes it. */
+  docKey: string;
+
+  /** Whether the read's own pending layer names `owner`'s write. A read in
+   * a space the run wrote nothing to carries no layer, and is matched to a
+   * writer of the same doc instance alone; that read may predate the
+   * write. */
+  observed: boolean;
+}
 
 /** The staged doc instances of one foreign provisioning batch — the
  * warm request's payload (see `WaveCommitOutcome.foreignCommits`).
@@ -1896,14 +1925,64 @@ export class WaveAccumulator
    * a space that then goes quiet the loss is permanent and previously
    * INVISIBLE (the r05/p11 profile-starvation stores each carried one
    * such cascade with a single logged symptom). Requeued events stay
-   * quiet — at-least-once redelivery is that class's normal path. */
-  #warnDropped(contribution: WaveContribution, message: string): void {
-    logger.warn("contribution-dropped", () => [
-      `wave ${this.#space} dropped contribution action=` +
-      `${contribution.context.actionId ?? "<unstamped>"} kind=` +
-      `${contribution.context.kind ?? "<none>"} eventId=` +
-      `${contribution.context.eventId ?? "<none>"}: ${message}`,
-    ]);
+   * quiet — at-least-once redelivery is that class's normal path.
+   * `detail`, when it returns text, follows the message: what the
+   * contribution read that drew it into the drop. */
+  #warnDropped(
+    contribution: WaveContribution,
+    message: string,
+    detail?: () => string | undefined,
+  ): void {
+    logger.warn("contribution-dropped", () => {
+      const why = detail?.();
+      return [
+        `wave ${this.#space} dropped contribution ` +
+        `${describeRunContext(contribution.context)}: ${message}` +
+        (why === undefined ? "" : ` ${why}`),
+      ];
+    });
+  }
+
+  /**
+   * The withdrawn writes that drew `contribution` into the withdrawn-read
+   * closure, one sentence per link, from the write it read back to the
+   * withdrawal that started the chain — the one the closure did not cause,
+   * which a requeue or a superseded write leaves unlogged. `undefined`
+   * when the contribution was not withdrawn for a read.
+   */
+  #describeWithdrawnReads(
+    contribution: WaveContribution,
+    requeued: ReadonlySet<number>,
+    droppedWhole: ReadonlySet<number>,
+  ): string | undefined {
+    const sentences: string[] = [];
+    const visited = new Set<number>();
+    let reader = contribution;
+    while (
+      reader.withdrawnRead !== undefined && !visited.has(reader.index)
+    ) {
+      visited.add(reader.index);
+      const { owner, space, docKey, observed } = reader.withdrawnRead;
+      const writer = this.#contributions[owner];
+      // A read reaches the closure only through a write its owner withdrew
+      // whole, or through that one doc's superseded write.
+      const fate = requeued.has(owner)
+        ? "was requeued"
+        : droppedWhole.has(owner)
+        ? "was dropped"
+        : "had that write superseded by a concurrent commit";
+      const read = `${sentences.length === 0 ? "It" : "That run"} read ` +
+        `\`${docKey}\`${space === this.#space ? "" : ` in ${space}`}`;
+      const run = describeRunContext(writer.context);
+      sentences.push(
+        observed
+          ? `${read}, written by ${run}, which ${fate}.`
+          : `${read}, which ${run} also wrote; that run ${fate}. The ` +
+            "match is by doc alone, so the read may predate that write.",
+      );
+      reader = writer;
+    }
+    return sentences.length === 0 ? undefined : sentences.join(" ");
   }
 
   /**
@@ -2221,7 +2300,7 @@ export class WaveAccumulator
       }
       const readOnlyReadSawWithdrawal = (
         contribution: WaveContribution,
-      ): boolean => {
+      ): WithdrawnRead | undefined => {
         for (const readKey of contribution.readOnlyReadKeys) {
           const owners = sealedWriters.get(readKey);
           if (owners === undefined) continue;
@@ -2235,11 +2314,11 @@ export class WaveAccumulator
               owner !== contribution.index &&
               readSawWithdrawnWrite(owner, docKey, readSpace)
             ) {
-              return true;
+              return { owner, space: readSpace, docKey, observed: false };
             }
           }
         }
-        return false;
+        return undefined;
       };
       let grew = true;
       while (grew) {
@@ -2273,11 +2352,12 @@ export class WaveAccumulator
             this.#contributions.some((c) =>
               requeued.has(c.index) && c.context.eventId === sameEvent
             );
-          const readWithdrawn = this.#readsWithdrawnContribution(
+          const withdrawnRead = this.#readsWithdrawnContribution(
             contribution,
             byLocalSeq,
             readSawWithdrawnWrite,
-          ) || readOnlyReadSawWithdrawal(contribution);
+          ) ?? readOnlyReadSawWithdrawal(contribution);
+          const readWithdrawn = withdrawnRead !== undefined;
           // The ORPHAN arm (stage C build W3, (α3); events.md §4's third
           // clause, RULED 2026-08-18): an event-handler run of an LT1
           // same-wave cascade whose durable entry rode an emitter write
@@ -2328,6 +2408,9 @@ export class WaveAccumulator
             !emitterWithdrawn && !eventOrphaned
           ) {
             continue;
+          }
+          if (withdrawnRead !== undefined) {
+            contribution.withdrawnRead = withdrawnRead;
           }
           if (contribution.context.kind === "event-handler") {
             if (
@@ -2977,16 +3060,16 @@ export class WaveAccumulator
     return emitters;
   }
 
-  /** Whether this contribution READ a sealed write that is being
-   * withdrawn — in ANY space it sealed into, resolving each space's
-   * pending-read layers against that space's own seals (localSeqs are
-   * per-space counters). A withdrawn writer's foreign write never lands
-   * (#buildForeignBatches excludes it), so a reader deriving from it
-   * must fold in exactly like a home reader (§3d: no blind derived
-   * writes). Bounded by what SEALS: the tx seals only spaces it wrote
-   * (or gated), so a read in a space the run wrote nothing to never
-   * reaches the accumulator — the third stage-D bound, documented at
-   * the sink (engine-wave-sink.ts). */
+  /** A sealed write that is being withdrawn which this contribution READ, the
+   * first one found, or `undefined` when it read none — in ANY space it sealed
+   * into, resolving each space's pending-read layers against that space's own
+   * seals (localSeqs are per-space counters). A withdrawn writer's foreign
+   * write never lands (#buildForeignBatches excludes it), so a reader deriving
+   * from it must fold in exactly like a home reader (§3d: no blind derived
+   * writes). Bounded by what SEALS: the tx seals only spaces it wrote (or
+   * gated), so a read in a space the run wrote nothing to never reaches the
+   * accumulator — the third stage-D bound, documented at the sink
+   * (engine-wave-sink.ts). */
   #readsWithdrawnContribution(
     contribution: WaveContribution,
     byLocalSeq: ReadonlyMap<MemorySpace, ReadonlyMap<number, number>>,
@@ -2995,7 +3078,7 @@ export class WaveAccumulator
       readDocKey: string,
       readSpace: MemorySpace,
     ) => boolean,
-  ): boolean {
+  ): WithdrawnRead | undefined {
     for (const spaceContribution of contribution.spaces) {
       const perSpace = byLocalSeq.get(spaceContribution.space);
       if (perSpace === undefined) continue;
@@ -3013,12 +3096,17 @@ export class WaveAccumulator
             owner !== undefined &&
             sawWithdrawnWrite(owner, readDocKey, spaceContribution.space)
           ) {
-            return true;
+            return {
+              owner,
+              space: spaceContribution.space,
+              docKey: readDocKey,
+              observed: true,
+            };
           }
         }
       }
     }
-    return false;
+    return undefined;
   }
 
   #survivors(
@@ -3577,7 +3665,12 @@ export class WaveAccumulator
             "rollback (serving-loop.md §3d)"
           : "contribution dropped from the wave commit " +
             "(serving-loop.md §3d)";
-        this.#warnDropped(contribution, message);
+        this.#warnDropped(
+          contribution,
+          message,
+          () =>
+            this.#describeWithdrawnReads(contribution, requeued, droppedWhole),
+        );
         this.#withdraw(contribution, message, "contribution-dropped");
         continue;
       }

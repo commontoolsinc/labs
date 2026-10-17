@@ -36,8 +36,10 @@ import {
   maxJitterSteps,
   midiToFrequency,
   MIN_TEMPO_BPM,
+  neighborCell,
   normalizeTempo,
   NOTE_COLORS,
+  noteAuthorName,
   noteFor,
   notesAtStep,
   padForKey,
@@ -163,6 +165,63 @@ describe("model", () => {
     });
   });
 
+  describe("neighborCell()", () => {
+    it("returns the next step clockwise, wrapping past the last", () => {
+      expect(
+        neighborCell(layout, { ringIndex: 0, step: 15, lane: 2 }, "clockwise"),
+      ).toEqual({ ringIndex: 0, step: 0, lane: 2 });
+    });
+
+    it("returns the step before anticlockwise, wrapping past the first", () => {
+      expect(
+        neighborCell(
+          layout,
+          { ringIndex: 1, step: 0, lane: 1 },
+          "anticlockwise",
+        ),
+      ).toEqual({ ringIndex: 1, step: 19, lane: 1 });
+    });
+
+    it("returns the next lane outward within the band", () => {
+      expect(
+        neighborCell(layout, { ringIndex: 2, step: 5, lane: 1 }, "outward"),
+      ).toEqual({ ringIndex: 2, step: 5, lane: 2 });
+    });
+
+    it("returns the lane before inward within the band", () => {
+      expect(
+        neighborCell(layout, { ringIndex: 2, step: 5, lane: 1 }, "inward"),
+      ).toEqual({ ringIndex: 2, step: 5, lane: 0 });
+    });
+
+    it("returns the first lane of the next ring, at the nearest angle, past the band's outer edge", () => {
+      // Step 8 of 16 is centered at 0.53 of a turn, which falls in step 10 of
+      // the next ring's 20.
+
+      expect(
+        neighborCell(layout, { ringIndex: 0, step: 8, lane: 4 }, "outward"),
+      ).toEqual({ ringIndex: 1, step: 10, lane: 0 });
+    });
+
+    it("returns the last lane of the ring inside, at the nearest angle, past the band's inner edge", () => {
+      // Step 10 of 20 is centered at 0.525 of a turn, which falls in step 8
+      // of the inner ring's 16.
+
+      expect(
+        neighborCell(layout, { ringIndex: 1, step: 10, lane: 0 }, "inward"),
+      ).toEqual({ ringIndex: 0, step: 8, lane: 4 });
+    });
+
+    it("returns the cell itself past the outermost and the innermost lane", () => {
+      const outermost = { ringIndex: 3, step: 5, lane: 4 };
+      const innermost = { ringIndex: 0, step: 3, lane: 0 };
+      expect([
+        neighborCell(layout, outermost, "outward"),
+        neighborCell(layout, innermost, "inward"),
+      ]).toEqual([outermost, innermost]);
+    });
+  });
+
   describe("cellAt()", () => {
     const [innermost] = ringBands(layout.rings.length);
 
@@ -262,6 +321,53 @@ describe("model", () => {
       expect(liveNotes(layout, { "drums:1:0": noteAt("drums", 0, 0) }))
         .toEqual([]);
     });
+
+    it("returns a stored note whose `authorName` is not a string without one", () => {
+      // Anyone with write access to the space can store a note, so a name of
+      // the wrong type must not reach the code that trims names.
+
+      const stored = {
+        ringId: "bass",
+        step: 3,
+        lane: 1,
+        authorId: "someone",
+        color: "#4dabf7",
+        authorName: 42,
+      };
+      const live = liveNotes(layout, { "bass:3:1": stored });
+      expect(live).toEqual([{
+        ringIndex: 2,
+        note: {
+          ringId: "bass",
+          step: 3,
+          lane: 1,
+          authorId: "someone",
+          color: "#4dabf7",
+        },
+      }]);
+      expect(authorNameOf(live[0].note)).toBe("Someone");
+    });
+
+    it("returns a stored note's `authorName` without control characters and cut to 80 code points", () => {
+      const stored = {
+        ...noteAt("bass", 3, 1),
+        authorName: `Agent\u0007 ${"x".repeat(500)}`,
+      };
+      const [{ note }] = liveNotes(layout, { "bass:3:1": stored });
+      expect(note.authorName).toBe(`Agent ${"x".repeat(74)}`);
+    });
+
+    it("returns a stored note whose `authorName` leaves nothing without one", () => {
+      const stored = { ...noteAt("bass", 3, 1), authorName: "\u0007 " };
+      const [{ note }] = liveNotes(layout, { "bass:3:1": stored });
+      expect(Object.hasOwn(note, "authorName")).toBe(false);
+    });
+
+    it("omits a stored value that lacks a field of a note", () => {
+      const stored = { ringId: "bass", step: 3, lane: 1, color: "#4dabf7" };
+      expect(liveNotes(layout, { "bass:3:1": stored, "bass:4:1": "bass" }))
+        .toEqual([]);
+    });
   });
 
   describe("noteFor()", () => {
@@ -337,6 +443,25 @@ describe("model", () => {
       const a = { ringIndex: 0, step: 1, lane: 0 };
       const b = { ringIndex: 2, step: 4, lane: 3 };
       expect(uniqueCells(layout, [a, b, { ...a }, b])).toEqual([a, b]);
+    });
+  });
+
+  describe("noteAuthorName()", () => {
+    it("returns the agent's name in preference to the viewer's", () => {
+      expect(noteAuthorName("Test Agent", "Ada")).toBe("Test Agent");
+    });
+
+    it("returns the viewer's name where the agent gives none", () => {
+      expect(noteAuthorName(undefined, " Ada ")).toBe("Ada");
+    });
+
+    it("returns at most 80 code points, with control characters removed", () => {
+      expect(noteAuthorName(`Agent\u0007 ${"x".repeat(500)}`, "Ada"))
+        .toBe(`Agent ${"x".repeat(74)}`);
+    });
+
+    it("returns the empty string where neither name leaves anything", () => {
+      expect(noteAuthorName("\u0007", "  ")).toBe("");
     });
   });
 

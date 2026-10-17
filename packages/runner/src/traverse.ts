@@ -518,6 +518,16 @@ function isPlainTypeSchema(schema: JSONSchemaObj, type: string): boolean {
 }
 
 /**
+ * Whether `value` satisfies a plain-schema plan's primitive `type`: the type
+ * `value` has, or `"number"` for a `bigint`, which is an integer and so a
+ * number under schemaTypeMatchesValueType's subtype rule.
+ */
+function matchesPlainType(value: unknown, type: PlainPrimitiveType): boolean {
+  const valueType = getPlainJsonType(value);
+  return valueType === type || (type === "number" && valueType === "integer");
+}
+
+/**
  * Return direct children only when the parent has no keywords for
  * schemaAtPath() to propagate or interpret.
  */
@@ -4986,6 +4996,13 @@ export class SchemaObjectTraverser<V extends FabricValue>
           this.#isValidType(schemaObj, "boolean")
         ? { ok: this.#traversePrimitive(doc, schemaObj) }
         : fail(TRAVERSE_FAILURES.invalidType);
+    } else if (typeof doc.value === "bigint") {
+      // A `bigint` is an integer, so a `number` schema accepts it too, by
+      // schemaTypeMatchesValueType's subtype rule.
+      return isPlainTypeSchema(schemaObj, "integer") ||
+          this.#isValidType(schemaObj, "integer")
+        ? { ok: this.#traversePrimitive(doc, schemaObj) }
+        : fail(TRAVERSE_FAILURES.invalidType);
     } else if (isSigilLink(doc.value)) {
       this.tx.read(doc.address, READ_FOR_SCHEDULING);
       // When traversing a pointer, use the unresolved schema, so we have
@@ -5163,7 +5180,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     if (isSigilLink(doc.value)) return undefined;
 
     if (plan.kind === "primitive") {
-      return getPlainJsonType(doc.value) === plan.type
+      return matchesPlainType(doc.value, plan.type)
         ? { ok: doc.value }
         : fail(TRAVERSE_FAILURES.invalidType);
     }
@@ -5184,7 +5201,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       let valid = true;
       doc.value.forEach((item, index) => {
         reads.paths.push(appendToPath(doc.address.path, index.toString()));
-        if (getPlainJsonType(item) === itemPlan.type) {
+        if (matchesPlainType(item, itemPlan.type)) {
           newValue[index] = item;
         } else if (itemPlan.type === "undefined") {
           newValue[index] = undefined;
@@ -5228,7 +5245,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       const propPath = appendToPath(doc.address.path, propKey);
       reads.paths.push(propPath);
       if (childPlan.kind === "primitive" && !isSigilLink(propValue)) {
-        if (getPlainJsonType(propValue) === childPlan.type) {
+        if (matchesPlainType(propValue, childPlan.type)) {
           newValue[propKey] = propValue;
         }
       } else {
@@ -6362,6 +6379,9 @@ function getPlainJsonType(
   if (value === undefined) return "undefined";
   if (isString(value)) return "string";
   if (typeof value === "number") return "number";
+  // A `bigint` is an integer, which schemaTypeMatchesValueType's subtype rule
+  // reads as a "number" too.
+  if (typeof value === "bigint") return "integer";
   if (isBoolean(value)) return "boolean";
   if (Array.isArray(value)) return "array";
   // A `FabricPrimitive` reports its specific type name; a schema saying

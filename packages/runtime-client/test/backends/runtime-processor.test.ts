@@ -2609,6 +2609,9 @@ describe("runtime-processor", () => {
       };
     }
 
+    /** A runner that holds no session pattern pointer for any document. */
+    const noSessionPointers = { sessionPatternPointerFor: () => undefined };
+
     function redirectRaw(ref: CellRef) {
       return {
         "/": {
@@ -2647,6 +2650,7 @@ describe("runtime-processor", () => {
           },
         },
         runtime: {
+          runner: noSessionPointers,
           getCellFromEntityId: (_space: unknown, entityId: unknown) => {
             lookedUp.push(String(entityId));
             return requestedCell;
@@ -2684,6 +2688,7 @@ describe("runtime-processor", () => {
       target: unknown,
     ) {
       return {
+        runner: noSessionPointers,
         getCellFromEntityId: () => slugCell,
         getCellFromLink: (link: CellRef) =>
           link.path.length === 0 && link.id === landing.ref.id
@@ -2971,6 +2976,7 @@ describe("runtime-processor", () => {
       };
       const processor = buildProcessor({
         runtime: {
+          runner: noSessionPointers,
           getCellFromEntityId: () => slugCell,
           getCellFromLink: () => pieceCell,
         },
@@ -3023,6 +3029,7 @@ describe("runtime-processor", () => {
       };
       const processor = buildProcessor({
         runtime: {
+          runner: noSessionPointers,
           getCellFromEntityId: () => slugCell,
           getCellFromLink: () => targetCell,
         },
@@ -3038,6 +3045,58 @@ describe("runtime-processor", () => {
       });
 
       expect(result.piece.cell).toMatchObject(targetRef);
+    });
+    it("loads a keyless piece whose root redirects as the piece, without following the redirect", async () => {
+      // A piece set up in this runtime from a pattern with no durable pointer
+      // has only the runner's session pointer. Its root redirecting to a
+      // child's result does not make it a slug.
+
+      const pieceRef: CellRef = {
+        id: `of:${fid("keyless-piece")}` as CellRef["id"],
+        space,
+        scope: "space",
+        path: [],
+      };
+      const childRef: CellRef = {
+        id: `of:${fid("keyless-child")}` as CellRef["id"],
+        space,
+        scope: "space",
+        path: [],
+      };
+      const pieceCell = mockCell(pieceRef, { raw: redirectRaw(childRef) });
+      const calls: unknown[][] = [];
+      const processor = buildProcessor({
+        runtime: {
+          runner: {
+            sessionPatternPointerFor: (cell: unknown) =>
+              cell === pieceCell
+                ? { identity: "keyless:piece", symbol: "default" }
+                : undefined,
+          },
+          getCellFromEntityId: () => pieceCell,
+          getCellFromLink: () => {
+            throw new Error("the piece's redirect should not be followed");
+          },
+        },
+        cc: {
+          getSpace: () => space,
+          getPieceCell: (...args: unknown[]) => {
+            calls.push(args);
+            return Promise.resolve(pieceCell);
+          },
+        },
+        space,
+      });
+
+      const result = await processor.handlePieceGet({
+        type: RequestType.PieceGet,
+        pieceId: fid("keyless-piece"),
+        space,
+        runIt: true,
+      });
+
+      expect(calls.map(([, runIt]) => runIt)).toEqual([true]);
+      expect(result.piece.cell).toMatchObject(pieceRef);
     });
   });
 

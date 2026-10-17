@@ -407,10 +407,12 @@ A run the next day's test-order workflow calls runs no `Status`, since the
 commit's own run already covers it.
 
 On a push, the jobs that build the `toolshed` and `cf` binaries run beside the
-lanes. `attest-binaries` waits for both builds and for `tests`,
-`deploy-shell-staging` waits for `tests`, and `deploy-rapids` waits for
-`attest-binaries`, so nothing is attested or deployed until every test has
-passed. A pull request builds nothing there: the `binaries` suites compile each
+lanes. `attest-binaries` waits for both builds and for `tests`, and
+`deploy-shell-staging` waits for `tests`, so nothing is attested or published
+until every test has passed. Rapids server deployment follows the coordinated
+infra candidate through `rapids-release.yml`; see
+[deploying](deploying.md#coordinated-rapids-releases). A pull request builds
+nothing there: the `binaries` suites compile each
 binary as a test that it still compiles. The servers the full run's lanes start
 are built by the lanes, from the same sources and the same build task, without
 the commit and the shell endpoints the release binaries carry; the jobs that
