@@ -7,7 +7,10 @@ import {
   cfcSchemaPoliciesEqual,
   mergeCfcSchemaEnvelopes,
 } from "../src/cfc/schema-merge.ts";
-import { canonicalizeCfcSchemaDocument } from "../src/cfc/schema-refs.ts";
+import {
+  canonicalizeCfcSchemaDocument,
+  resolveCfcSchemaRefs,
+} from "../src/cfc/schema-refs.ts";
 import { validateSchemaDefinition } from "../src/cfc/schema-sanitization.ts";
 import {
   storedCfcEnvelopeMergeIssue,
@@ -22,6 +25,124 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 
 describe("mergeCfcSchemaEnvelopes", () => {
+  describe("a recursion meeting itself", () => {
+    // A tree whose node names itself for its children, with a claim on each
+    // node's label. Two documents spelling that definition differently meet
+    // it again one level down, where the merge refers to the merged
+    // definition of the pair rather than to either side's own.
+
+    const tree = (labelClaim: unknown): JSONSchemaObj =>
+      ({
+        type: "object",
+        properties: { root: { $ref: "#/$defs/Node" } },
+        $defs: {
+          Node: {
+            type: "object",
+            properties: {
+              label: { type: "string", ifc: labelClaim },
+              children: { type: "array", items: { $ref: "#/$defs/Node" } },
+            },
+          },
+        },
+      }) as unknown as JSONSchemaObj;
+    const writer = (moduleIdentity?: string, path = ["pin"]) => ({
+      writeAuthorizedBy: {
+        __ctWriterIdentityOf: {
+          file: "/main.tsx",
+          path,
+          ...(moduleIdentity === undefined ? {} : { moduleIdentity }),
+        },
+      },
+    });
+    const resolved = (schema: JSONSchema, node: JSONSchema): JSONSchemaObj => {
+      const object = node as JSONSchemaObj;
+      return typeof object.$ref === "string"
+        ? resolveCfcSchemaRefs(object, schema) as JSONSchemaObj
+        : object;
+    };
+    /** The merged node at `path` (`*` for items), its references followed. */
+    const at = (schema: JSONSchema, path: readonly string[]): JSONSchemaObj =>
+      path.reduce(
+        (node, segment) =>
+          resolved(
+            schema,
+            (segment === "*"
+              ? node.items
+              : (node.properties as Record<string, JSONSchema>)[segment])!,
+          ),
+        resolved(schema, schema),
+      );
+    const stampAt = (schema: JSONSchema, path: readonly string[]) =>
+      ((at(schema, path).ifc as ReturnType<typeof writer>).writeAuthorizedBy
+        .__ctWriterIdentityOf as { moduleIdentity?: string }).moduleIdentity;
+
+    it("keeps the stored stamp at every level beneath the recurrence", () => {
+      const merged = mergeCfcSchemaEnvelopes(
+        tree(writer("m1")),
+        tree(writer("m2")),
+      );
+      expect(stampAt(merged, ["root", "label"])).toBe("m1");
+      expect(stampAt(merged, ["root", "children", "*", "label"])).toBe("m1");
+      expect(
+        stampAt(merged, ["root", "children", "*", "children", "*", "label"]),
+      ).toBe("m1");
+    });
+
+    it("holds both sides' claims at every level beneath the recurrence", () => {
+      const merged = mergeCfcSchemaEnvelopes(
+        tree(writer()),
+        tree({ requiredIntegrity: ["reviewed"] }),
+      );
+      const deep = at(merged, [
+        "root",
+        "children",
+        "*",
+        "children",
+        "*",
+        "label",
+      ]).ifc as Record<string, unknown>;
+      expect(deep.writeAuthorizedBy).toEqual(writer().writeAuthorizedBy);
+      expect(deep.requiredIntegrity).toEqual(["reviewed"]);
+    });
+
+    it("merges the same candidate into its own result unchanged", () => {
+      // The merged document names the pair's merged definition where the
+      // stored one wrote the recursion out, so merging the candidate again
+      // meets the same pair at the same place and writes nothing further out.
+
+      const candidate = tree(writer("m2"));
+      const merged = mergeCfcSchemaEnvelopes(tree(writer("m1")), candidate);
+      expect(mergeCfcSchemaEnvelopes(merged, candidate)).toEqual(merged);
+    });
+
+    it("throws for two references that do not resolve rather than minting a definition from them", () => {
+      // Where the policies differ, every reference is resolved before the
+      // merge, so a pair naming nothing never reaches the merge of two
+      // bodies.
+
+      const unresolved = (name: string): JSONSchemaObj => ({
+        type: "object",
+        properties: { pin: { $ref: `#/$defs/${name}` } },
+        $defs: { Other: { type: "string", ifc: writer() } },
+      });
+      expect(() =>
+        mergeCfcSchemaEnvelopes(
+          unresolved("Missing"),
+          unresolved("AlsoMissing"),
+        )
+      ).toThrow(/requires resolved schemas/);
+    });
+
+    it("throws for a definition that changes the stored writer inside the recursion", () => {
+      expect(() =>
+        mergeCfcSchemaEnvelopes(
+          tree(writer()),
+          tree(writer(undefined, ["other"])),
+        )
+      ).toThrow(/writeAuthorizedBy/);
+    });
+  });
+
   describe("observes through a merge", () => {
     // C5: `observes` is a scalar consumption class, not a set-like claim.
     // Agreement keeps the class through a merge; any disagreement (including
