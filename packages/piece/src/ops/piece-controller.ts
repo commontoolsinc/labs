@@ -4555,10 +4555,10 @@ export class PieceController<T = unknown> {
       }
       candidate = loaded;
       prepared = confirmed;
-      gatedRelease = isGatedReleaseStep(
+      gatedRelease = await isGatedReleaseStep(
         this.#pieces,
-        this.#cell,
         expected.pattern,
+        this.#cell,
         confirmed,
       );
       const currentReview = await pieceSourceCompatibilityReview(
@@ -4576,10 +4576,16 @@ export class PieceController<T = unknown> {
         confirmed.candidate,
         action.kind === "adopt",
       );
+      // A step that has become a gated release since it was reviewed waives
+      // the schema issue it was confirmed over, which the confirmation still
+      // answers.
+      const currentIssues = currentReview.waivedSchema === undefined
+        ? currentReview.issues
+        : { ...currentReview.issues, schema: currentReview.waivedSchema };
       if (
         currentReview.argumentEvidence !==
           confirmed.review.argumentEvidence ||
-        !deepEqual(currentReview.issues, confirmed.review.issues)
+        !deepEqual(currentIssues, confirmed.review.issues)
       ) {
         if (hasPieceSourceCompatibilityIssues(currentReview.issues)) {
           prepared = { ...confirmed, review: currentReview };
@@ -4734,10 +4740,10 @@ export class PieceController<T = unknown> {
         ...(selectedRevisionId === undefined ? {} : { selectedRevisionId }),
         ...(releasedAt === undefined ? {} : { releasedAt }),
       };
-      gatedRelease = isGatedReleaseStep(
+      gatedRelease = await isGatedReleaseStep(
         this.#pieces,
-        this.#cell,
         expected.pattern,
+        this.#cell,
         prepared,
       );
       const review = await pieceSourceCompatibilityReview(
@@ -5489,15 +5495,6 @@ function pieceSourceArgumentEvidence(
 }
 
 /**
- * The revision operations that take the source they record from the origin
- * they record: a creation from it, an update from it, and pointing the piece
- * at it. A `baseline` records whatever origin the piece carried when its log
- * began, which says nothing about where its source came from.
- */
-const TAKES_SOURCE_FROM_ORIGIN: ReadonlySet<PieceSourceRevision["operation"]> =
-  new Set(["create", "origin-update", "follow", "repoint"]);
-
-/**
  * The patterns route `origin` names on the host serving the piece's space, in
  * any spelling the lifecycle accepts for a deployment-served origin, or
  * `undefined` for an origin that names none.
@@ -5521,8 +5518,8 @@ function systemRoute(
 /**
  * Whether adopting `change.candidate` from `change.origin` is a step forward
  * from a release of the `system:` pattern `piece` runs, which is when the
- * candidate is reviewed as an automatic update from a gated origin is: without
- * comparing its schemas with the piece's.
+ * candidate is reviewed the way an automatic update from a gated origin is:
+ * without comparing its schemas with the piece's.
  *
  * The release gate proves each release of a `system:` pattern's default export
  * against every contract that export's earlier releases recorded, and names
@@ -5532,8 +5529,9 @@ function systemRoute(
  *
  * - the piece runs the default export, `running`, and the candidate is the
  *   default export too;
- * - a revision since the piece's source last changed took that source from
- *   the origin ({@link TAKES_SOURCE_FROM_ORIGIN});
+ * - the source the piece runs was compiled from the origin's file: its
+ *   retained entry is the origin's route, which a module's name and so its
+ *   identity carry (`patterns-route.deno.ts`);
  * - the deployment stated when it released the candidate, `change.releasedAt`,
  *   and that is later than the latest release time the piece knows for its
  *   running source (`knownPieceReleasedAt`).
@@ -5546,37 +5544,30 @@ function systemRoute(
  * judged is trusted for it here, as the automatic update from the origin
  * trusts it.
  */
-function isGatedReleaseStep(
+async function isGatedReleaseStep(
   pieces: PiecesController,
-  piece: Cell<unknown>,
   running: { identity: string; symbol: string },
+  piece: Cell<unknown>,
   change: Pick<
     PreparedPieceSourceChange,
     "candidate" | "origin" | "releasedAt"
   >,
-): boolean {
+): Promise<boolean> {
   if (running.symbol !== "default" || change.candidate.symbol !== "default") {
     return false;
   }
   if (change.origin === null || change.releasedAt === undefined) return false;
   const route = systemRoute(pieces, change.origin);
   if (route === undefined) return false;
-  const revisions = getPieceSourceRevisions(piece);
-  let first = revisions.length;
-  while (
-    first > 0 &&
-    revisions[first - 1].pattern.identity === running.identity &&
-    revisions[first - 1].pattern.symbol === running.symbol
-  ) first--;
-  const taken = revisions.slice(first).some((revision) =>
-    TAKES_SOURCE_FROM_ORIGIN.has(revision.operation) &&
-    revision.origin !== undefined &&
-    systemRoute(pieces, revision.origin) === route
-  );
-  if (!taken) return false;
   const runningReleasedAt = knownPieceReleasedAt(piece, running);
-  return runningReleasedAt !== undefined &&
-    change.releasedAt > runningReleasedAt;
+  if (
+    runningReleasedAt === undefined || change.releasedAt <= runningReleasedAt
+  ) {
+    return false;
+  }
+  const program = await pieces.runtime.patternManager
+    .getPatternSourceProgramByIdentity(running.identity, pieces.getSpace());
+  return program?.main === route;
 }
 
 /**

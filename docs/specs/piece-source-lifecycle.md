@@ -863,15 +863,19 @@ regardless, since it has nothing to keep. The loop and the header are in
 
 The same answer holds for a step taken by hand when it is the same step:
 repointing a piece at a `system:` origin, following one again from its
-history, or taking what its active origin offers now. The gate proves each
-release of a pattern's default export against the contracts that export's
-earlier releases recorded, the breaks it accepts by name included
+history, or taking what its active origin offers now. The contract half of the
+release testing is its first tier, the pattern-compat gate
+([pattern-update-testing.md](pattern-update-testing.md#tier-1--contract-compatibility)),
+which proves each release of a pattern's default export against the contracts
+that export's earlier releases recorded, the breaks it accepts by name included
 (`tasks/pattern-compat-accepted-breaks.ts`), and proves no other step. So the
 review leaves the schema comparison out only where the piece shows the step is
-one of those: it runs the default export, a revision since its source last
-changed took that source from the same origin and records when the deployment
-released it, and the deployment states a later release time beside the
-candidate's identity.
+one of those. It runs the default export, and the candidate is that export
+too. The source it runs was compiled from that origin's file: a module is
+named by its route path, which its identity covers, so the entry the piece's
+retained source names is the origin's route. The piece knows when that source
+was released, from a revision naming it or a confirmation of it. And the
+deployment states a later release time beside the candidate's identity.
 Every other step has its schemas compared and takes the explicit override, as
 any manual replacement does: an earlier release, a candidate or running source
 with no stated time, another export, and a piece whose source came from
@@ -881,7 +885,8 @@ automatic update. Either way the review validates the stored argument and the
 links it retains, and runs the CFC envelope merges the commit will make: those
 concern the piece's own data, which no release gate saw. A step taken by hand
 records the candidate's release time on its revision, as the automatic update
-does.
+does, and the commit checks again that the candidate is still the later
+release.
 
 Every other origin — another piece, exact pinned source — is somebody else's, and nobody promised anything about it. A candidate from one
 is adopted only if it is an acceptable replacement for what the piece runs,

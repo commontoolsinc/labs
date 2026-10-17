@@ -1839,6 +1839,97 @@ describe("piece source lifecycle", () => {
       expect(await piece.result.get(["version"])).toBe("candidate");
     });
 
+    it("returns an incompatibility warning when the running source came from another `system:` origin", async () => {
+      const piece = await pieces.create(versionProgram("v1"), { input: {} });
+      await repointTo(
+        piece,
+        "system:gated-first.tsx",
+        "/api/patterns/gated-first.tsx",
+        versionProgram("first-v1"),
+        earlier,
+      );
+      await piece.changeSource({ kind: "detach" });
+      await offer(
+        "/api/patterns/gated-second.tsx",
+        incompatibleSeedProgram("candidate"),
+        later,
+      );
+
+      const result = await piece.changeSource({
+        kind: "repoint",
+        url: "system:gated-second.tsx",
+      });
+
+      expect(result.status).toBe("incompatible");
+      expect(await piece.result.get(["version"])).toBe("first-v1");
+    });
+
+    it("returns an incompatibility warning when a supplied origin was claimed over source from another origin", async () => {
+      const second = "system:gated-claimed.tsx";
+      const piece = await pieces.create(versionProgram("v1"), { input: {} });
+      await repointTo(
+        piece,
+        "system:gated-claimed-from.tsx",
+        "/api/patterns/gated-claimed-from.tsx",
+        versionProgram("first-v1"),
+        earlier,
+      );
+      await piece.changeSource({ kind: "detach" });
+      await runtime.sourceReconciler.open(piece.getCell(), second);
+      expect(getPieceSourceRevisions(piece.getCell()).at(-1)).toMatchObject({
+        operation: "follow",
+        origin: second,
+      });
+      await offer(
+        "/api/patterns/gated-claimed.tsx",
+        incompatibleSeedProgram("candidate"),
+        later,
+      );
+
+      const result = await piece.changeSource({ kind: "repoint", url: second });
+
+      expect(result.status).toBe("incompatible");
+      expect(await piece.result.get(["version"])).toBe("first-v1");
+    });
+
+    it("applies a confirmed incompatibility once the step has become a later release", async () => {
+      const origin = "system:gated-became.tsx";
+      const route = "/api/patterns/gated-became.tsx";
+      const piece = await pieces.create(versionProgram("v1"), { input: {} });
+      await repointTo(
+        piece,
+        origin,
+        route,
+        versionProgram("origin-v1"),
+        undefined,
+      );
+      await offer(route, incompatibleSeedProgram("candidate"), later);
+      const warning = await piece.changeSource({ kind: "adopt" });
+      expect(warning.status).toBe("incompatible");
+      const written = await runtime.editWithRetry((tx) => {
+        setPieceReconciliation(piece.getCell(), tx, {
+          outcome: "followed",
+          at: Date.now(),
+          origin,
+          confirmed: {
+            identity: getPatternIdentityRef(piece.getCell())!.identity,
+            releasedAt: Date.parse(earlier),
+          },
+        });
+      });
+      expect(written.error).toBeUndefined();
+
+      expect(
+        await piece.changeSource({ kind: "adopt" }, {
+          confirmedChange: warning.status === "incompatible"
+            ? warning.prepared
+            : undefined,
+        }),
+      ).toEqual({ status: "applied" });
+
+      expect(await piece.result.get(["version"])).toBe("candidate");
+    });
+
     it("returns an incompatibility warning for a release with no stated time", async () => {
       const origin = "system:gated-untimed.tsx";
       const route = "/api/patterns/gated-untimed.tsx";

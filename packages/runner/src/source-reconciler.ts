@@ -227,8 +227,10 @@ function isEarlierRelease(
  * The release time of the source `resultCell` runs: the later of the one the
  * revision that adopted it records and the one its reconciliation record
  * confirms for it, or `undefined` when neither says. A revision says only when
- * it is the piece's last and adopted what the piece runs, and a record only
- * when it confirms that same source.
+ * it is the piece's last and names what the piece runs: the one that adopted
+ * it, or a later one that kept it in place and carries its time
+ * (`knownPieceReleasedAt`). A record says only when it confirms that same
+ * source.
  */
 function runningReleasedAt(
   resultCell: Cell<unknown>,
