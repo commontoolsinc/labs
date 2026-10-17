@@ -4,13 +4,13 @@
  *
  * WebKit draws such a child after its later siblings while the document holds
  * it where it was inserted, so a list the reconciler wraps in its array
- * element and a `cf-*` component slots draws out of order. The applicator
- * hides the element and shows it again within the batch, which has WebKit
- * build its boxes anew. deno-web-test runs these in Chromium, which lays the
- * tree out correctly either way, so the repair itself is what they observe —
- * as the two writes it makes to the element's `style` — beside everything the
- * repair must leave as it was. They run under deno-web-test, which registers
- * tests through `Deno.test`.
+ * element and a `cf-*` component slots draws out of order. Where the engine
+ * does that, the applicator hides the element and shows it again within the
+ * batch, which builds its boxes anew. deno-web-test runs these in Chromium,
+ * which draws the tree in order either way and so is left alone by default;
+ * they turn the repair on, observe it as the two writes it makes to the
+ * element's `style`, and check everything it must leave as it was. They run
+ * under deno-web-test, which registers tests through `Deno.test`.
  */
 
 import { assert, assertEquals } from "@std/assert";
@@ -47,8 +47,14 @@ const HOST = 1;
 const WRAPPER = 2;
 
 /** A list rendered as the reconciler renders an array: `rows` rows inside a
- * `display: contents` span, inside `hostTag`, and the node ids of the rows. */
-function renderList(hostTag: string, rows: number) {
+ * `display: contents` span, inside `hostTag`, and the node ids of the rows.
+ * The applicator repairs layout when `repair` is `true`, and for `"engine"`
+ * when the engine needs it. */
+function renderList(
+  hostTag: string,
+  rows: number,
+  repair: boolean | "engine" = true,
+) {
   const container = document.createElement("div");
   document.body.append(container);
   const applicator = new DomApplicator({
@@ -56,6 +62,7 @@ function renderList(hostTag: string, rows: number) {
     onError: (error) => {
       throw error;
     },
+    repairSlottedContentsLayout: repair === "engine" ? undefined : repair,
   });
   applicator.setContainer(container);
   const ops: VDomOp[] = [
@@ -95,7 +102,9 @@ function styleWrites(element: HTMLElement, act: () => void): number {
   return writes;
 }
 
-/** The rows' ids in the order they are drawn, top to bottom. */
+/** The rows' ids in the order they are drawn, top to bottom. Chromium draws
+ * them in document order with or without the repair, so here this checks only
+ * that the repair does not disturb the order. */
 function drawnOrder(wrapper: HTMLElement): string[] {
   return [...wrapper.children]
     .map((row) => ({ id: row.id, top: row.getBoundingClientRect().top }))
@@ -245,6 +254,147 @@ Deno.test("laying a slotted list out again keeps focus, the caret, scroll offset
     assertEquals([input.selectionStart, input.selectionEnd], [2, 7]);
     assertEquals(scroller.scrollTop, 50);
     assertEquals(DisconnectCounter.disconnected, disconnectedBefore);
+  } finally {
+    container.remove();
+  }
+});
+
+Deno.test("a mid-list insert into a list nested in a slotted list lays out only the inner list again", () => {
+  const { applicator, container, wrapper } = renderList(
+    "x-slotting-column",
+    1,
+  );
+  try {
+    const inner = 60;
+    applicator.applyBatch({
+      batchId: 2,
+      ops: [
+        { op: "create-element", nodeId: inner, tagName: "span" },
+        {
+          op: "set-prop",
+          nodeId: inner,
+          key: "style",
+          value: "display:contents",
+        },
+        {
+          op: "insert-child",
+          parentId: WRAPPER,
+          childId: inner,
+          beforeId: null,
+        },
+        { op: "create-element", nodeId: 61, tagName: "div" },
+        { op: "insert-child", parentId: inner, childId: 61, beforeId: null },
+      ],
+    });
+    const innerElement = applicator.getNode(inner) as HTMLElement;
+    let innerWrites = 0;
+    const outerWrites = styleWrites(wrapper, () => {
+      innerWrites = styleWrites(innerElement, () =>
+        applicator.applyBatch({
+          batchId: 3,
+          ops: [
+            { op: "create-element", nodeId: 62, tagName: "div" },
+            {
+              op: "insert-child",
+              parentId: inner,
+              childId: 62,
+              beforeId: 61,
+            },
+          ],
+        }));
+    });
+    assertEquals([innerWrites, outerWrites], [2, 0]);
+  } finally {
+    container.remove();
+  }
+});
+
+Deno.test("a mid-list insert into a plain element inside a slotted list leaves the list as it is", () => {
+  const { applicator, container, wrapper, rowIds } = renderList(
+    "x-slotting-column",
+    1,
+  );
+  try {
+    const row = applicator.getNode(rowIds[0]) as HTMLElement;
+    const writes = styleWrites(wrapper, () => {
+      const rowWrites = styleWrites(row, () =>
+        applicator.applyBatch({
+          batchId: 2,
+          ops: [
+            { op: "create-element", nodeId: 70, tagName: "b" },
+            {
+              op: "insert-child",
+              parentId: rowIds[0],
+              childId: 70,
+              beforeId: null,
+            },
+            { op: "create-element", nodeId: 71, tagName: "i" },
+            {
+              op: "insert-child",
+              parentId: rowIds[0],
+              childId: 71,
+              beforeId: 70,
+            },
+          ],
+        }));
+      assertEquals(rowWrites, 0);
+    });
+    assertEquals(writes, 0);
+  } finally {
+    container.remove();
+  }
+});
+
+Deno.test("a mid-list insert held until its row exists lays the list out again", () => {
+  const { applicator, container, wrapper, rowIds } = renderList(
+    "x-slotting-column",
+    2,
+  );
+  try {
+    const writes = styleWrites(wrapper, () =>
+      applicator.applyBatch({
+        batchId: 2,
+        ops: [
+          // The insert names a row created only later in the batch, so the
+          // applicator holds it and inserts it once the row exists.
+          {
+            op: "insert-child",
+            parentId: WRAPPER,
+            childId: 80,
+            beforeId: rowIds[0],
+          },
+          { op: "create-element", nodeId: 80, tagName: "div" },
+          { op: "set-prop", nodeId: 80, key: "id", value: "row-held" },
+        ],
+      }));
+    assertEquals(writes, 2);
+    assertEquals(drawnOrder(wrapper), ["row-held", "row-0", "row-1"]);
+  } finally {
+    container.remove();
+  }
+});
+
+Deno.test("an engine that draws a slotted list in order is left alone by default", () => {
+  // The lanes running these tests use Chromium and Gecko, which draw a mid-list
+  // insert into a slotted `display: contents` element where it was inserted.
+  const { applicator, container, wrapper, rowIds } = renderList(
+    "x-slotting-column",
+    3,
+    "engine",
+  );
+  try {
+    const writes = styleWrites(wrapper, () =>
+      applicator.applyBatch({
+        batchId: 2,
+        ops: [{
+          op: "insert-child",
+          parentId: WRAPPER,
+          childId: rowIds[2],
+          beforeId: rowIds[0],
+        }],
+      }));
+    assertEquals(writes, 0);
+    assertEquals(drawnOrder(wrapper), ["row-2", "row-0", "row-1"]);
   } finally {
     container.remove();
   }
