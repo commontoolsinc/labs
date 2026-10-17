@@ -834,7 +834,8 @@ describe("piece source reconciliation", () => {
        * A piece following the tracked pattern's system origin, running v1 with
        * no release time, and a function that makes its host offer `offer` and
        * reconciles the piece against it. Each returns the outcome and the
-       * marker of the source the piece then runs.
+       * marker of the source the piece then runs. `sourceRequests` lists the
+       * path of every request for source rather than for an identity.
        */
       async function followingPiece() {
         const identities = {
@@ -843,11 +844,16 @@ describe("piece source reconciliation", () => {
           v3: await identityFor(source("v3")),
         };
         let served: Offer = { marker: "v1" };
+        const sourceRequests: string[] = [];
         const piece = await preparePiece(
           servingFetch(
             () => identities[served.marker],
             () => source(served.marker),
-            undefined,
+            (url) => {
+              if (!url.searchParams.has("identity")) {
+                sourceRequests.push(url.pathname);
+              }
+            },
             () => served.releasedAt,
           ),
         );
@@ -867,7 +873,7 @@ describe("piece source reconciliation", () => {
           const outcome = await reconcile(piece);
           return { outcome, running: runningMarker() };
         };
-        return { piece, identities, offer };
+        return { piece, identities, offer, sourceRequests };
       }
 
       function originUpdates(piece: Cell<unknown>) {
@@ -1221,14 +1227,18 @@ describe("piece source reconciliation", () => {
         });
 
         it("keeps a later release whose move from the earlier one the history records", async () => {
-          const { piece, identities, offer } = await followingPiece();
+          const { piece, identities, offer, sourceRequests } =
+            await followingPiece();
           await offer({ marker: "v2", releasedAt: LATER });
           using _unloadable = cannotLoad(identities.v2);
+          sourceRequests.length = 0;
 
           expect(await offer({ marker: "v1", releasedAt: EARLIER })).toEqual({
             outcome: "ahead",
             running: "v2",
           });
+          // The identity's answer settles it: the earlier source is not fetched.
+          expect(sourceRequests).toEqual([]);
           expect(originUpdates(piece)).toHaveLength(1);
           expect(getPieceReconciliation(piece)).toMatchObject({
             outcome: "followed",
