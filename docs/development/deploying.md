@@ -156,7 +156,7 @@ toolshed whose environment does not set the time advertises identities alone.
 A piece it serves then follows whichever identity it was offered last, unless
 the source the piece runs carries a time from another release, adopted or
 confirmed: an offer with no time is earlier than that one, and the piece keeps
-its source. Without times, a host partway through a deploy and a deliberate
+its source unless it has nothing it can start. Without times, a host partway through a deploy and a deliberate
 rollback offer a piece the same earlier identity, so a piece cannot be kept
 from moving back and forth between the two releases until every instance runs
 one of them.

@@ -1075,6 +1075,52 @@ describe("opening a space root", () => {
     expect(getPatternIdentityRef(after)?.identity).toBe(pinned);
   });
 
+  it("rolls a root its history records no move to forward to an earlier official source", async () => {
+    // Nothing says any runtime loaded the pinned release from the official
+    // source, so this root may be dead rather than ahead, and the repair is
+    // its rescue, as the reconciler takes an earlier release the history
+    // records no move from.
+
+    await setup();
+    stub.setReleasedAt("2026-10-16T14:03:00Z");
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+    const officialV1 = await identityForSource(SOURCE_V1);
+    const pinned = await identityForSource(
+      patternSource("release-no-runtime-recorded-moving-to"),
+    );
+    await controller.stopPiece(root);
+    const { error } = await runtime.editWithRetry((tx) => {
+      const candidate = root.withTx(tx);
+      const space = root.getAsNormalizedFullLink().space;
+      candidate.setMetaRaw("pieceSourceHistory", [{
+        revisionId: "update-without-recorded-predecessor",
+        timestamp: Date.now(),
+        pattern: { identity: pinned, symbol: "default" },
+        source: runtime.getCell(space, `pattern:${pinned}`, undefined, tx)
+          .getAsLink(),
+        origin: getPatternSource(root)!,
+        operation: "origin-update",
+        releasedAt: Date.parse("2026-10-16T15:03:00Z"),
+      }], rawMetaWriteAuthorization);
+      for (const meta of ["patternIdentity", "patternSetupIdentity"] as const) {
+        candidate.setMetaRaw(
+          meta,
+          { identity: pinned, symbol: "default" },
+          rawMetaWriteAuthorization,
+        );
+      }
+    });
+    expect(error).toBeUndefined();
+
+    // Opened without following its origin, so the repair alone decides.
+    await controller.getDefaultPattern({ reconcile: false, start: true });
+    await runtime.idle();
+
+    const after = (await controller.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)?.identity).toBe(officialV1);
+  });
+
   it("rolls the root back to the source its history records moving from when its host offers it at a later release", async () => {
     // A deploy that rolls back states a later release time, which orders the
     // earlier source after the one the root holds.

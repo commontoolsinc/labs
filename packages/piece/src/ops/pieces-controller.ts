@@ -89,10 +89,6 @@ import {
 } from "@commonfabric/runner/entity-kind";
 import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 import {
-  parseReleaseTime,
-  RELEASED_AT_HEADER,
-} from "@commonfabric/runner/pattern-release-time";
-import {
   type NameSchema,
   nameSchema,
   pieceListSchema,
@@ -129,7 +125,10 @@ import {
   type JoinVisitDecision,
   joinVisitedRoomOf,
 } from "./join-visited-room.ts";
-import { reconcilePieceSource } from "./piece-origin.ts";
+import {
+  advertisedSystemRelease,
+  reconcilePieceSource,
+} from "./piece-origin.ts";
 import { ensurePrivateInboxOf } from "./private-inbox.ts";
 import { repairProfileRootsOf } from "./profile-space-root.ts";
 import { type ShareIntake, startShareIntakeOf } from "./share-intake.ts";
@@ -3053,31 +3052,6 @@ export class PiecesController<T = unknown> {
   }
 
   /**
-   * The release time the host serving `officialUrl` states beside the identity
-   * its `?identity` route advertises (`RELEASED_AT_HEADER`), when that
-   * identity is `identity`; otherwise, and when the route cannot be asked or
-   * states no time, `undefined`. The time describes the program the route
-   * advertises, so it says nothing about any other.
-   */
-  async #advertisedReleasedAt(
-    officialUrl: URL,
-    identity: string,
-  ): Promise<number | undefined> {
-    const url = new URL(officialUrl);
-    url.searchParams.set("identity", "");
-    try {
-      const response = await this.runtime.fetch(url, { cache: "no-cache" });
-      if (!response.ok) return undefined;
-      const advertised = (await response.text()).trim();
-      const header = response.headers.get(RELEASED_AT_HEADER);
-      if (advertised !== identity || header === null) return undefined;
-      return parseReleaseTime(header.trim());
-    } catch {
-      return undefined;
-    }
-  }
-
-  /**
    * Runnability backstop for `#startEnsuredDefaultPattern`'s cold-start
    * repair. Reached only when the pinned pattern's OWN setup repair failed in a
    * way that re-running it cannot fix — a root that loads but cannot run.
@@ -3237,8 +3211,10 @@ export class PiecesController<T = unknown> {
     // read again inside the swap's transaction. The revision a heal writes
     // records the official release time, as an adopting revision does, so the
     // root stays ordered against later offers.
-    const officialReleasedAt = await this.#advertisedReleasedAt(
-      officialUrl,
+    const officialReleasedAt = await advertisedSystemRelease(
+      runtime,
+      space,
+      officialUrlPath,
       officialRef.identity,
     );
     const behindPinnedRelease = (root: Cell<NameSchema>) =>
