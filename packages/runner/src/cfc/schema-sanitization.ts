@@ -650,14 +650,21 @@ const typeMatches = (
 
 /**
  * Whether `value` is a multiple of `multipleOf`. A `bigint` is measured
- * exactly against a whole `multipleOf`, and otherwise as the number nearest
- * it, since a fraction divides it as it divides any number.
+ * exactly, however large: a finite `multipleOf` is the dyadic rational
+ * `p / 2^k`, found by doubling it until it is whole, and `value` is a multiple
+ * of it when `value * 2^k` is a multiple of `p`. A number is measured within
+ * floating-point tolerance.
  */
 const isMultipleOf = (value: number | bigint, multipleOf: number): boolean => {
-  if (multipleOf <= 0) return false;
+  if (!(multipleOf > 0) || !Number.isFinite(multipleOf)) return false;
   if (typeof value === "bigint") {
-    if (Number.isInteger(multipleOf)) return value % BigInt(multipleOf) === 0n;
-    value = Number(value);
+    let whole = multipleOf;
+    let shift = 0n;
+    while (!Number.isInteger(whole)) {
+      whole *= 2;
+      shift++;
+    }
+    return (value << shift) % BigInt(whole) === 0n;
   }
   const quotient = value / multipleOf;
   const tolerance = Number.EPSILON * Math.max(1, Math.abs(quotient)) * 4;

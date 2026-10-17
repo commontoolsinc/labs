@@ -670,7 +670,7 @@ describe("cfc schema sanitization", () => {
       .toContain("value does not match type integer");
   });
 
-  it("holds a `bigint` to the numeric bounds and to an integral `multipleOf`", () => {
+  it("holds a `bigint` to the numeric bounds and to `multipleOf`", () => {
     expect(validateSchemaValue({ type: "integer", minimum: 0 }, 42n))
       .toBeUndefined();
     expect(validateSchemaValue({ type: "integer", minimum: 43 }, 42n))
@@ -685,6 +685,24 @@ describe("cfc schema sanitization", () => {
       .toBeUndefined();
     expect(validateSchemaValue({ type: "integer", multipleOf: 5 }, 42n))
       .toContain("value is not a multiple of 5");
+    // A fractional `multipleOf` is measured exactly too, beyond the range and
+    // the precision of a number.
+    expect(
+      validateSchemaValue({ type: "integer", multipleOf: 0.5 }, 10n ** 400n),
+    )
+      .toBeUndefined();
+    expect(
+      validateSchemaValue(
+        { type: "integer", multipleOf: 0.75 },
+        2n ** 60n + 2n,
+      ),
+    ).toBeUndefined();
+    expect(
+      validateSchemaValue(
+        { type: "integer", multipleOf: 0.75 },
+        2n ** 60n + 1n,
+      ),
+    ).toContain("value is not a multiple of 0.75");
     // A bound a `number` cannot state exactly still orders against a
     // `bigint` by value.
     expect(
