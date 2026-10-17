@@ -59,6 +59,13 @@ const EMOJI_REGEX =
 const RESIZE_DEBOUNCE_MS = 150;
 
 /**
+ * The inputs through which a person moves the map: a drag, pinch, double
+ * click, box zoom, or zoom-control press starts with a pointer press, a wheel
+ * zoom with a wheel turn, and keyboard pans and zooms with a key press.
+ */
+const USER_INPUT_EVENTS = ["pointerdown", "wheel", "keydown"] as const;
+
+/**
  * CFMap - Interactive map component with markers, circles, and polylines
  *
  * @element cf-map
@@ -71,7 +78,7 @@ const RESIZE_DEBOUNCE_MS = 150;
  * @attr {boolean} interactive - Enable pan/zoom (default: true)
  *
  * @fires cf-click - Map background click with { lat, lng }
- * @fires cf-bounds-change - Viewport change with { bounds, center, zoom }
+ * @fires cf-bounds-change - Viewport change with { bounds, center, zoom, userInitiated }
  * @fires cf-marker-click - Marker click with { marker, index, lat, lng }
  * @fires cf-marker-drag-end - Marker drag end with { marker, index, position, oldPosition }
  * @fires cf-circle-click - Circle click with { circle, index, lat, lng }
@@ -139,6 +146,23 @@ export class CFMap extends BaseElement {
   /** Whether a programmatic update is in progress; this prevents echo loops. */
   private _isUpdatingFromCell = false;
 
+  /**
+   * Whether the map's latest move began with a person's input on the map
+   * rather than with one of cf-map's own moves. A pointer press, wheel turn,
+   * or key press on the map sets it; each of cf-map's own moves clears it
+   * before it starts. It is not cleared when a move ends: Leaflet runs a
+   * wheel zoom on a timer and an inertial pan as an animation, both after the
+   * input that caused them, so a later `moveend` still belongs to the person
+   * until cf-map moves the map itself.
+   */
+  private _userMoved = false;
+
+  /**
+   * Bound bounds that arrived while the map had no size, so no zoom could fit
+   * them; they are fitted once the container has a size.
+   */
+  private _unsizedBounds: Bounds | null = null;
+
   /** A pending click event deferred during an animation, if any. */
   private _pendingClickEvent: L.LeafletMouseEvent | null = null;
 
@@ -190,6 +214,11 @@ export class CFMap extends BaseElement {
   /** Bound keydown handler, held so it can be removed on cleanup. */
   private _boundHandleKeydown = this._handleKeydown.bind(this);
 
+  /** Marks the map's next moves as a person's; see `_userMoved`. */
+  private _boundMarkUserInput = (): void => {
+    this._userMoved = true;
+  };
+
   constructor() {
     super();
     this.fitToBounds = false;
@@ -199,11 +228,24 @@ export class CFMap extends BaseElement {
   override connectedCallback(): void {
     super.connectedCallback();
     this.addEventListener("keydown", this._boundHandleKeydown);
+    // On the host, in the capture phase, so the mark is set before any
+    // handler inside the shadow root, Leaflet's or cf-map's, moves the map.
+    for (const type of USER_INPUT_EVENTS) {
+      this.addEventListener(type, this._boundMarkUserInput, {
+        capture: true,
+        passive: true,
+      });
+    }
   }
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     this.removeEventListener("keydown", this._boundHandleKeydown);
+    for (const type of USER_INPUT_EVENTS) {
+      this.removeEventListener(type, this._boundMarkUserInput, {
+        capture: true,
+      });
+    }
     this._cleanup();
   }
 
@@ -416,10 +458,14 @@ export class CFMap extends BaseElement {
     // Set up event handlers
     this._setupMapEventHandlers();
 
+    // Open on the bound bounds. Binding the bounds controller delivered them
+    // before the map existed, so that delivery could not apply them.
+    this._updateMapFromBounds(false);
+
     // Invalidate size after initialization to ensure proper tile loading
     // This is necessary when the map is rendered in Shadow DOM
     this._rafId = requestAnimationFrame(() => {
-      this._map?.invalidateSize();
+      this._resizeMap();
       this._rafId = null;
     });
 
@@ -431,7 +477,7 @@ export class CFMap extends BaseElement {
         clearTimeout(this._resizeTimeoutId);
       }
       this._resizeTimeoutId = setTimeout(() => {
-        this._map?.invalidateSize();
+        this._resizeMap();
         this._resizeTimeoutId = null;
       }, RESIZE_DEBOUNCE_MS);
     });
@@ -497,6 +543,7 @@ export class CFMap extends BaseElement {
           bounds: boundsData,
           center: centerData,
           zoom,
+          userInitiated: this._userMoved,
         };
         this.emit("cf-bounds-change", detail);
 
@@ -597,6 +644,7 @@ export class CFMap extends BaseElement {
       return;
     }
 
+    this._userMoved = false;
     this._isUpdatingFromCell = true;
     try {
       this._map.setView([center.lat, center.lng], this._map.getZoom(), {
@@ -618,6 +666,7 @@ export class CFMap extends BaseElement {
       return;
     }
 
+    this._userMoved = false;
     this._isUpdatingFromCell = true;
     try {
       this._map.setZoom(zoom, { animate: true });
@@ -626,7 +675,7 @@ export class CFMap extends BaseElement {
     }
   }
 
-  private _updateMapFromBounds(): void {
+  private _updateMapFromBounds(animate = true): void {
     if (!this._map) return;
 
     const bounds = this._getBounds();
@@ -642,16 +691,74 @@ export class CFMap extends BaseElement {
       return;
     }
 
+    // A map with no size fits any bounds at zoom 0, so wait for a size
+    if (!this._hasSize()) {
+      this._unsizedBounds = validatedBounds;
+      return;
+    }
+
+    this._fitMapToCellBounds(validatedBounds, animate);
+  }
+
+  /** Fit the map to bounds read from the bounds cell, without echoing them. */
+  private _fitMapToCellBounds(bounds: Bounds, animate: boolean): void {
+    if (!this._map) return;
+
+    this._unsizedBounds = null;
+    this._userMoved = false;
     this._isUpdatingFromCell = true;
     try {
       const leafletBounds = L.latLngBounds(
-        [validatedBounds.south, validatedBounds.west],
-        [validatedBounds.north, validatedBounds.east],
+        [bounds.south, bounds.west],
+        [bounds.north, bounds.east],
       );
-      this._map.fitBounds(leafletBounds, { animate: true });
+      this._map.fitBounds(leafletBounds, { animate });
     } finally {
       this._isUpdatingFromCell = false;
     }
+  }
+
+  private _hasSize(): boolean {
+    if (!this._map) return false;
+    const size = this._map.getSize();
+    return size.x > 0 && size.y > 0;
+  }
+
+  /**
+   * Tell Leaflet the container may have changed size, then fit bound bounds
+   * that arrived while the map had no size. The resize's own move is not
+   * reported then, so it cannot write the view the fit replaces into the
+   * bounds cell; the fit's move is reported instead, as cf-map's own.
+   */
+  private _resizeMap(): void {
+    if (!this._map) return;
+
+    // A resize that changes no size moves nothing, so it leaves the mark of
+    // a person's move still under way, such as a wheel zoom's animation.
+    const size = this._map.getSize();
+    const element = this._map.getContainer();
+    if (element.clientWidth !== size.x || element.clientHeight !== size.y) {
+      this._userMoved = false;
+    }
+    const bounds = this._unsizedBounds;
+    if (bounds === null) {
+      this._map.invalidateSize();
+      return;
+    }
+
+    this._isUpdatingFromCell = true;
+    try {
+      this._map.invalidateSize();
+    } finally {
+      this._isUpdatingFromCell = false;
+    }
+    if (!this._hasSize()) return;
+    this._unsizedBounds = null;
+    this._userMoved = false;
+    this._map.fitBounds(
+      L.latLngBounds([bounds.south, bounds.west], [bounds.north, bounds.east]),
+      { animate: false },
+    );
   }
 
   /**
@@ -669,16 +776,7 @@ export class CFMap extends BaseElement {
       this._pendingCenterUpdate = null;
       this._pendingZoomUpdate = null;
 
-      this._isUpdatingFromCell = true;
-      try {
-        const leafletBounds = L.latLngBounds(
-          [bounds.south, bounds.west],
-          [bounds.north, bounds.east],
-        );
-        this._map.fitBounds(leafletBounds, { animate: true });
-      } finally {
-        this._isUpdatingFromCell = false;
-      }
+      this._fitMapToCellBounds(bounds, true);
       return; // Let the next zoomend handle any remaining updates
     }
 
@@ -687,6 +785,7 @@ export class CFMap extends BaseElement {
       const center = this._pendingCenterUpdate;
       this._pendingCenterUpdate = null;
 
+      this._userMoved = false;
       this._isUpdatingFromCell = true;
       try {
         this._map.setView([center.lat, center.lng], this._map.getZoom(), {
@@ -703,6 +802,7 @@ export class CFMap extends BaseElement {
       const zoom = this._pendingZoomUpdate;
       this._pendingZoomUpdate = null;
 
+      this._userMoved = false;
       this._isUpdatingFromCell = true;
       try {
         this._map.setZoom(zoom, { animate: true });
@@ -1204,6 +1304,7 @@ export class CFMap extends BaseElement {
     // Fit bounds if we have points
     if (allPoints.length > 0) {
       const bounds = L.latLngBounds(allPoints);
+      this._userMoved = false;
       this._isUpdatingFromCell = true;
       try {
         this._map.fitBounds(bounds, {
@@ -1356,6 +1457,8 @@ export class CFMap extends BaseElement {
     this._pendingZoomUpdate = null;
     this._pendingBoundsUpdate = null;
     this._pendingFitToBounds = false;
+    this._unsizedBounds = null;
+    this._userMoved = false;
 
     // Note: CellControllers are automatically cleaned up by Lit's reactive
     // controller system. They implement ReactiveController with
@@ -1378,7 +1481,7 @@ export class CFMap extends BaseElement {
    * Invalidate the map size (call after container resize)
    */
   invalidateSize(): void {
-    this._map?.invalidateSize();
+    this._resizeMap();
   }
 
   /**
@@ -1393,6 +1496,7 @@ export class CFMap extends BaseElement {
    */
   panTo(lat: number, lng: number): void {
     if (!this._isMapStable()) return;
+    this._userMoved = false;
     this._map?.panTo([lat, lng]);
   }
 
@@ -1401,6 +1505,7 @@ export class CFMap extends BaseElement {
    */
   setView(lat: number, lng: number, zoom: number): void {
     if (!this._isMapStable()) return;
+    this._userMoved = false;
     this._map?.setView([lat, lng], zoom);
   }
 }
