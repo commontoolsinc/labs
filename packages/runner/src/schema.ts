@@ -27,6 +27,7 @@ import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import { schemaForSpaceCrossing, toMemorySpaceAddress } from "./link-utils.ts";
 import { opaqueReference, toCell } from "./back-to-cell.ts";
+import { literalMemberMatches } from "./schema-literal-match.ts";
 import { type JSONSchema, type SchemaScope } from "./builder/types.ts";
 import { createCell, isCell } from "./cell.ts";
 import {
@@ -304,13 +305,16 @@ const matchesConcreteValue = (
     return false;
   }
   if (
-    resolved.const !== undefined && !fabricAwareEqual(resolved.const, value)
+    resolved.const !== undefined &&
+    !literalMemberMatches(resolved.const, value, fabricAwareEqual)
   ) {
     return false;
   }
   if (
     Array.isArray(resolved.enum) &&
-    !resolved.enum.some((candidate) => fabricAwareEqual(candidate, value))
+    !resolved.enum.some((candidate) =>
+      literalMemberMatches(candidate, value, fabricAwareEqual)
+    )
   ) {
     return false;
   }
