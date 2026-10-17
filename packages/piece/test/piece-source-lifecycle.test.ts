@@ -1763,6 +1763,82 @@ describe("piece source lifecycle", () => {
       expect(result.status).toBe("incompatible");
     });
 
+    it("returns an incompatibility warning for a release earlier than one confirmed before the piece was detached", async () => {
+      const origin = "system:gated-detached-confirmed.tsx";
+      const route = "/api/patterns/gated-detached-confirmed.tsx";
+      const piece = await pieces.create(versionProgram("v1"), { input: {} });
+      await repointTo(
+        piece,
+        origin,
+        route,
+        versionProgram("origin-v1"),
+        earlier,
+      );
+      await offer(route, versionProgram("origin-v1"), latest);
+      expect(await piece.changeSource({ kind: "adopt" })).toEqual({
+        status: "applied",
+      });
+      await piece.changeSource({ kind: "detach" });
+      expect(getPieceSourceRevisions(piece.getCell()).at(-1)).toMatchObject({
+        operation: "detach",
+        releasedAt: Date.parse(latest),
+      });
+      await offer(route, incompatibleSeedProgram("candidate"), later);
+
+      const result = await piece.changeSource({ kind: "repoint", url: origin });
+
+      expect(result.status).toBe("incompatible");
+      expect(await piece.result.get(["version"])).toBe("origin-v1");
+    });
+
+    it("returns an incompatibility warning when the running source is confirmed at a later release while the update is set up", async () => {
+      const origin = "system:gated-overtaken.tsx";
+      const route = "/api/patterns/gated-overtaken.tsx";
+      const piece = await pieces.create(versionProgram("v1"), { input: {} });
+      await repointTo(
+        piece,
+        origin,
+        route,
+        versionProgram("origin-v1"),
+        earlier,
+      );
+      await offer(route, incompatibleSeedProgram("candidate"), later);
+      const running = getPatternIdentityRef(piece.getCell())!.identity;
+      const mutablePieces = pieces as unknown as {
+        runPatternUpdate: typeof pieces.runPatternUpdate;
+      };
+      const runPatternUpdate = pieces.runPatternUpdate.bind(pieces);
+      mutablePieces.runPatternUpdate = async (...args) => {
+        const written = await runtime.editWithRetry((tx) => {
+          setPieceReconciliation(piece.getCell(), tx, {
+            outcome: "followed",
+            at: Date.now(),
+            origin,
+            confirmed: { identity: running, releasedAt: Date.parse(latest) },
+          });
+        });
+        expect(written.error).toBeUndefined();
+        return await runPatternUpdate(...args);
+      };
+      let result: Awaited<ReturnType<typeof piece.changeSource>>;
+      try {
+        result = await piece.changeSource({ kind: "adopt" });
+      } finally {
+        mutablePieces.runPatternUpdate = runPatternUpdate;
+      }
+
+      expect(result.status).toBe("incompatible");
+      expect(await piece.result.get(["version"])).toBe("origin-v1");
+      expect(
+        await piece.changeSource({ kind: "adopt" }, {
+          confirmedChange: result.status === "incompatible"
+            ? result.prepared
+            : undefined,
+        }),
+      ).toEqual({ status: "applied" });
+      expect(await piece.result.get(["version"])).toBe("candidate");
+    });
+
     it("returns an incompatibility warning for a release with no stated time", async () => {
       const origin = "system:gated-untimed.tsx";
       const route = "/api/patterns/gated-untimed.tsx";

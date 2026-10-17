@@ -34,6 +34,7 @@ import {
   type JSONSchema,
   KeepAsCell,
   keepLaterConfirmation,
+  knownPieceReleasedAt,
   materializeStoredValueForValidation,
   type MemorySpace,
   mergeSchemaDefaults,
@@ -45,6 +46,7 @@ import {
   type Pattern,
   type PatternSetupCommitReceipt,
   PatternSetupPostCommitError,
+  PIECE_RELEASE_OVERTAKEN,
   PIECE_SOURCE_MOVED,
   type PieceReconciliation,
   type PieceSourceRevision,
@@ -507,6 +509,12 @@ export interface PreparedPieceSourceChange {
   review?: {
     argumentEvidence: string;
     issues: PieceSourceCompatibilityIssues;
+
+    /**
+     * The schema issue a gated release step left out of `issues`, which the
+     * review reports should the step turn out at commit not to be one.
+     */
+    waivedSchema?: string;
   };
 }
 
@@ -4520,6 +4528,9 @@ export class PieceController<T = unknown> {
     // piece runs, which leaves the contract comparison to the release gate
     // (`isGatedReleaseStep`).
     let gatedRelease = false;
+    // The review the change goes ahead on, whose `waivedSchema` is what an
+    // overtaken release step reports.
+    let reviewed: PreparedPieceSourceChange["review"];
     if (confirmed !== undefined) {
       if (confirmed.review === undefined) {
         throw new Error(
@@ -4557,6 +4568,7 @@ export class PieceController<T = unknown> {
         this.#pieces,
         { gatedRelease },
       );
+      reviewed = currentReview;
       await this.#refuseUnusableArgument(
         currentReview,
         expected,
@@ -4735,6 +4747,7 @@ export class PieceController<T = unknown> {
         this.#pieces,
         { gatedRelease },
       );
+      reviewed = review;
       await this.#refuseUnusableArgument(
         review,
         expected,
@@ -4769,6 +4782,9 @@ export class PieceController<T = unknown> {
       {
         selectedRevisionId: prepared.selectedRevisionId,
         releasedAt: prepared.releasedAt,
+        // A step whose review waived a schema issue rests on the candidate
+        // being the later release, so the commit checks it again.
+        requireLaterRelease: reviewed?.waivedSchema !== undefined,
       },
     );
     const mutationVersion = ++this.#mutationVersion;
@@ -4866,6 +4882,32 @@ export class PieceController<T = unknown> {
         return {
           status: "applied",
           executionWarning: pieceSourceErrorMessage(cause),
+        };
+      }
+      const waivedSchema = reviewed?.waivedSchema;
+      if (
+        reviewed !== undefined && waivedSchema !== undefined &&
+        pieceSourceErrorMessage(error).includes(PIECE_RELEASE_OVERTAKEN)
+      ) {
+        // The candidate stopped being the later release while it was set
+        // up, so the comparison its review left out applies after all.
+        const review = {
+          argumentEvidence: reviewed.argumentEvidence,
+          issues: { ...reviewed.issues, schema: waivedSchema },
+        };
+        prepared.review = review;
+        if (action.kind === "adopt" && prepared.origin !== null) {
+          await this.#recordReconciliation(expected, prepared.origin, {
+            outcome: "refused",
+            reason: "incompatible-schema",
+            offered: prepared.candidate,
+            detail: pieceSourceCompatibilityMessage(review.issues),
+          });
+        }
+        return {
+          status: "incompatible",
+          message: pieceSourceCompatibilityMessage(review.issues),
+          prepared,
         };
       }
       if (isOverridableArgumentCompatibilityError(error)) {
@@ -5491,17 +5533,18 @@ function systemRoute(
  * - the piece runs the default export, `running`, and the candidate is the
  *   default export too;
  * - a revision since the piece's source last changed took that source from
- *   the origin ({@link TAKES_SOURCE_FROM_ORIGIN}) and records when it was
- *   released, a time a reconciliation with the origin may since have confirmed
- *   at a later release;
+ *   the origin ({@link TAKES_SOURCE_FROM_ORIGIN});
  * - the deployment stated when it released the candidate, `change.releasedAt`,
- *   and that is later than the running source's release.
+ *   and that is later than the latest release time the piece knows for its
+ *   running source (`knownPieceReleasedAt`).
  *
  * A step short of any of these, an earlier release and one whose time either
  * side does not state among them, has its schemas compared and takes the
- * explicit override. Release times order deploys, not commits: a deployment
- * whose patterns route served source its gate never judged is trusted for it
- * here, as the automatic update from the origin trusts it.
+ * explicit override. The step's transition rechecks the order when it commits
+ * (`PieceSourceTransition.requireLaterRelease`). Release times order deploys,
+ * not commits: a deployment whose patterns route served source its gate never
+ * judged is trusted for it here, as the automatic update from the origin
+ * trusts it.
  */
 function isGatedReleaseStep(
   pieces: PiecesController,
@@ -5525,32 +5568,15 @@ function isGatedReleaseStep(
     revisions[first - 1].pattern.identity === running.identity &&
     revisions[first - 1].pattern.symbol === running.symbol
   ) first--;
-  let runningReleasedAt: number | undefined;
-  for (const revision of revisions.slice(first)) {
-    if (
-      TAKES_SOURCE_FROM_ORIGIN.has(revision.operation) &&
-      revision.origin !== undefined &&
-      revision.releasedAt !== undefined &&
-      systemRoute(pieces, revision.origin) === route
-    ) {
-      runningReleasedAt = Math.max(
-        runningReleasedAt ?? revision.releasedAt,
-        revision.releasedAt,
-      );
-    }
-  }
-  if (runningReleasedAt === undefined) return false;
-  const reconciliation = getPieceReconciliation(piece);
-  if (
-    reconciliation?.confirmed?.identity === running.identity &&
-    systemRoute(pieces, reconciliation.origin) === route
-  ) {
-    runningReleasedAt = Math.max(
-      runningReleasedAt,
-      reconciliation.confirmed.releasedAt,
-    );
-  }
-  return change.releasedAt > runningReleasedAt;
+  const taken = revisions.slice(first).some((revision) =>
+    TAKES_SOURCE_FROM_ORIGIN.has(revision.operation) &&
+    revision.origin !== undefined &&
+    systemRoute(pieces, revision.origin) === route
+  );
+  if (!taken) return false;
+  const runningReleasedAt = knownPieceReleasedAt(piece, running);
+  return runningReleasedAt !== undefined &&
+    change.releasedAt > runningReleasedAt;
 }
 
 /**
@@ -5561,9 +5587,10 @@ function isGatedReleaseStep(
  * release of the `system:` pattern the piece runs
  * ({@link isGatedReleaseStep}). The comparison of the two contracts is then
  * the release gate's, and the review leaves `schema` out, as an automatic
- * update from that origin does. The stored argument, the retained links, and
- * the CFC envelopes are this piece's own data, which no release gate saw, and
- * are reviewed either way.
+ * update from that origin does, keeping the issue it found as `waivedSchema`
+ * for the commit's recheck of the step to report. The stored argument, the
+ * retained links, and the CFC envelopes are this piece's own data, which no
+ * release gate saw, and are reviewed either way.
  *
  * `previous.pattern` is `undefined` for a piece whose current pattern does not
  * load. Nothing can then say whether the candidate keeps the contract the piece
@@ -5584,19 +5611,19 @@ async function pieceSourceCompatibilityReview(
   options: { gatedRelease: boolean },
 ): Promise<NonNullable<PreparedPieceSourceChange["review"]>> {
   const issues: PieceSourceCompatibilityIssues = {};
-  if (!options.gatedRelease) {
-    if (previous.pattern === undefined) {
-      issues.schema = `the piece's current pattern ` +
-        `\`${previous.ref.identity}#${previous.ref.symbol}\` cannot be ` +
-        `loaded, so the candidate cannot be compared with it`;
-    } else {
-      try {
-        assertPatternSchemasBackwardCompatible(previous.pattern, candidate);
-      } catch (error) {
-        issues.schema = error instanceof Error ? error.message : String(error);
-      }
+  let schema: string | undefined;
+  if (previous.pattern === undefined) {
+    schema = `the piece's current pattern ` +
+      `\`${previous.ref.identity}#${previous.ref.symbol}\` cannot be ` +
+      `loaded, so the candidate cannot be compared with it`;
+  } else {
+    try {
+      assertPatternSchemasBackwardCompatible(previous.pattern, candidate);
+    } catch (error) {
+      schema = error instanceof Error ? error.message : String(error);
     }
   }
+  if (schema !== undefined && !options.gatedRelease) issues.schema = schema;
 
   const argumentCell = pieces.getArgument(piece);
   // The candidate can select inputs the current pattern does not expose.
@@ -5637,6 +5664,9 @@ async function pieceSourceCompatibilityReview(
   return {
     argumentEvidence: pieceSourceArgumentEvidence(argumentCell, pieces),
     issues,
+    ...(schema !== undefined && options.gatedRelease
+      ? { waivedSchema: schema }
+      : {}),
   };
 }
 
@@ -5858,7 +5888,11 @@ function pieceSourceTransition(
   operation: PieceSourceTransition["operation"],
   origin: string | null,
   baseline: PieceSourceTransitionBaseline,
-  options: { selectedRevisionId?: string; releasedAt?: number } = {},
+  options: {
+    selectedRevisionId?: string;
+    releasedAt?: number;
+    requireLaterRelease?: boolean;
+  } = {},
 ): PieceSourceTransition {
   const timestamp = Date.now();
   return {
@@ -5874,6 +5908,7 @@ function pieceSourceTransition(
     ...(options.releasedAt === undefined
       ? {}
       : { releasedAt: options.releasedAt }),
+    ...(options.requireLaterRelease ? { requireLaterRelease: true } : {}),
   };
 }
 
