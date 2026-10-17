@@ -870,7 +870,8 @@ earlier releases recorded, the breaks it accepts by name included
 review leaves the schema comparison out only where the piece shows the step is
 one of those: it runs the default export, a revision since its source last
 changed took that source from the same origin and records when the deployment
-released it, and the deployment states a later release time for the candidate.
+released it, and the deployment states a later release time beside the
+candidate's identity.
 Every other step has its schemas compared and takes the explicit override, as
 any manual replacement does: an earlier release, a candidate or running source
 with no stated time, another export, and a piece whose source came from

@@ -166,15 +166,6 @@ function pinnedPatternIdentity(ref: FabricRef): string | undefined {
 export interface ResolvedPieceOriginSource {
   program: RuntimeProgram;
   pattern: { identity?: string; symbol: string };
-
-  /**
-   * When the deployment serving a `system:` origin released `program`, in
-   * milliseconds since the epoch (`pattern-release-time.ts`). Present only
-   * when every response that served the program stated the same time, so
-   * that a program assembled across two releases, as a deployment partway
-   * through restarting can serve one, states none.
-   */
-  releasedAt?: number;
 }
 
 type StableFabricRef = FabricRef & {
@@ -190,6 +181,41 @@ export function qualifyFabricOrigin(
   return ref === undefined || ref.space !== undefined
     ? recorded
     : formatFabricRef({ ...ref, space: sourceSpace });
+}
+
+/**
+ * When the deployment serving the `system:` origin `recorded` released the
+ * program whose content identity is `identity`, as its patterns route states
+ * beside the identity it advertises (`?identity`, `pattern-release-time.ts`).
+ *
+ * `undefined` when the origin is not a `system:` one, when the route
+ * advertises another identity or states no time, and when it cannot be asked
+ * at all. The time is about the program the route advertises, so it says
+ * nothing about any other, and a candidate it does not cover is one whose
+ * release is unknown.
+ */
+export async function advertisedSystemRelease(
+  runtime: Runtime,
+  space: MemorySpace,
+  recorded: string,
+  identity: string,
+): Promise<number | undefined> {
+  const origin = classifyOrigin(runtime, space, recorded);
+  if (origin.kind !== "system") return undefined;
+  const url = new URL(origin.url);
+  url.searchParams.set("identity", "");
+  let advertised: string;
+  let header: string | null;
+  try {
+    const response = await runtime.fetch(url, { cache: "no-cache" });
+    if (!response.ok) return undefined;
+    advertised = (await response.text()).trim();
+    header = response.headers.get(RELEASED_AT_HEADER);
+  } catch {
+    return undefined;
+  }
+  if (advertised !== identity || header === null) return undefined;
+  return parseReleaseTime(header.trim());
 }
 
 /**
@@ -210,32 +236,19 @@ export async function resolvePieceOriginSource(
 ): Promise<ResolvedPieceOriginSource> {
   const origin = classifyOrigin(runtime, destinationSpace, recorded);
   if (origin.kind === "system") {
-    const stated: (number | undefined)[] = [];
     const program = await runtime.harness.resolve(
       new HttpProgramResolver(
         origin.url,
-        async (input, init) => {
-          const response = await runtime.fetch(input, {
+        (input, init) =>
+          runtime.fetch(input, {
             ...init,
             cache: "no-cache",
-          });
-          if (response.ok) {
-            const header = response.headers.get(RELEASED_AT_HEADER);
-            stated.push(
-              header === null ? undefined : parseReleaseTime(header.trim()),
-            );
-          }
-          return response;
-        },
+          }),
       ),
     );
-    const releasedAt = stated[0];
-    const agreed = releasedAt !== undefined &&
-      stated.every((time) => time === releasedAt);
     return {
       program: { ...program, mainExport: historicalSymbol },
       pattern: { symbol: historicalSymbol },
-      ...(agreed ? { releasedAt } : {}),
     };
   }
 

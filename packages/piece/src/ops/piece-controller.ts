@@ -96,6 +96,7 @@ import { isCfcMigrationRejection } from "./cfc-migration-rejection.ts";
 import { assertPieceInputPath } from "./piece-input-path.ts";
 import {
   acceptEnteredOrigin,
+  advertisedSystemRelease,
   classifyOrigin,
   PieceOriginError,
   qualifyFabricOrigin,
@@ -497,8 +498,9 @@ export interface PreparedPieceSourceChange {
 
   /**
    * When the deployment serving a `system:` origin released `candidate`, where
-   * it stated one (`ResolvedPieceOriginSource.releasedAt`). The revision that
-   * adopts the candidate records it.
+   * its patterns route states one beside the candidate's identity
+   * (`advertisedSystemRelease`). The revision that adopts the candidate
+   * records it.
    */
   releasedAt?: number;
 
@@ -4600,7 +4602,6 @@ export class PieceController<T = unknown> {
       let origin: string | null;
       let operation: PieceSourceTransition["operation"];
       let selectedRevisionId: string | undefined;
-      let releasedAt: number | undefined;
       if (action.kind === "restore") {
         const selected = sourceRevision(revisions, action.revisionId);
         const retained = await this.#pieces.runtime.patternManager
@@ -4660,7 +4661,6 @@ export class PieceController<T = unknown> {
             { self: { space: this.#pieces.getSpace(), pieceId: this.id } },
           );
           program = resolved.program;
-          releasedAt = resolved.releasedAt;
         } catch (error) {
           // Only for `adopt`: the other two are being pointed at an origin the
           // piece does not follow yet, and an outcome recorded against one
@@ -4681,6 +4681,16 @@ export class PieceController<T = unknown> {
       if (candidateRef === undefined) {
         throw new Error("the candidate source has no pattern identity");
       }
+      // Only an origin says when what it serves was released; a restore
+      // adopts retained source, which no deployment is serving.
+      const releasedAt = origin === null
+        ? undefined
+        : await advertisedSystemRelease(
+          this.#pieces.runtime,
+          this.#pieces.getSpace(),
+          origin,
+          candidateRef.identity,
+        );
       if (
         action.kind === "adopt" &&
         candidateRef.identity === previousRef.identity &&
@@ -4691,9 +4701,14 @@ export class PieceController<T = unknown> {
         // result: it is what turns an unexamined origin into a current one.
         // `origin` is the active one, which the adopt branch above refused to
         // proceed without.
+        // A release time stated for the source the piece already runs is a
+        // later confirmation of it, as the reconciler records one.
         await this.#recordReconciliation(expected, origin!, {
           outcome: "followed",
           offered: candidateRef,
+          ...(releasedAt === undefined
+            ? {}
+            : { confirmed: { identity: candidateRef.identity, releasedAt } }),
         });
         return { status: "applied" };
       }

@@ -232,13 +232,14 @@ Running it more often than that is harmless: a repaired profile is reported as
 `cf piece follow --cell <piece> <origin>` adopts the origin’s current pattern
 and records the origin for future updates. It refuses incompatible schemas by
 default, except for a step the release gate already proved: the origin is a
-`system:` one, the piece runs its default export, a revision since the piece's
-source last changed took that source from the same origin and records when it
-was released, and the deployment states a later release for what it serves now.
-Such a step is taken as an automatic update from the origin takes it, without
-comparing schemas (`docs/specs/piece-source-lifecycle.md`), and the revision
-records the new release time. The stored argument, retained links, and stored
-CFC envelopes are checked either way. After reviewing the reported changes, pass
+`system:` one, the piece runs its default export and the candidate is that
+export too, a revision since the piece's source last changed took that source
+from the same origin and records when it was released, and the deployment states
+a later release for what it serves now, beside that candidate's identity. Such a
+step is taken as an automatic update from the origin takes it, without comparing
+schemas (`docs/specs/piece-source-lifecycle.md`), and the revision records the
+new release time. The stored argument, retained links, and stored CFC envelopes
+are checked either way. After reviewing the reported changes, pass
 `--dangerously-allow-incompatible-schema` to perform a fresh review and accept
 the candidate reviewed in that invocation. If the origin released between runs,
 this candidate and its incompatibilities can differ from the earlier report. The

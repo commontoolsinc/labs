@@ -217,6 +217,7 @@ function installFetchStub(
   sources: Record<string, RuntimeProgram>,
   onFetch: () => void = () => {},
   releases: Record<string, string> = {},
+  identities: Record<string, string> = {},
 ): () => void {
   const original = globalThis.fetch;
   globalThis.fetch = ((input: string | URL | Request) => {
@@ -228,6 +229,26 @@ function installFetchStub(
         : input.url,
     );
     onFetch();
+    // As the patterns route answers: `?identity` with the identity the
+    // program compiles to and the release time beside it, and the source
+    // itself with neither.
+    if (url.searchParams.has("identity")) {
+      const identity = identities[url.pathname];
+      const releasedAt = releases[url.pathname];
+      return Promise.resolve(
+        identity === undefined
+          ? new Response("not found", { status: 404 })
+          : new Response(identity, {
+            status: 200,
+            headers: {
+              "content-type": "text/plain",
+              ...(releasedAt === undefined
+                ? {}
+                : { "CF-Released-At": releasedAt }),
+            },
+          }),
+      );
+    }
     const program = sources[url.pathname];
     if (program === undefined) {
       return Promise.resolve(new Response("not found", { status: 404 }));
@@ -236,12 +257,7 @@ function installFetchStub(
     return Promise.resolve(
       new Response(entry?.contents ?? "not found", {
         status: entry === undefined ? 404 : 200,
-        headers: {
-          "content-type": "text/typescript-jsx",
-          ...(releases[url.pathname] === undefined
-            ? {}
-            : { "CF-Released-At": releases[url.pathname] }),
-        },
+        headers: { "content-type": "text/typescript-jsx" },
       }),
     );
   }) as typeof globalThis.fetch;
@@ -256,17 +272,20 @@ describe("piece source lifecycle", () => {
   let pieces: PiecesController;
   let webSources: Record<string, RuntimeProgram>;
   let webReleases: Record<string, string>;
+  let webIdentities: Record<string, string>;
   let webFetches: number;
   let restoreFetch: () => void;
 
   beforeEach(async () => {
     webSources = {};
     webReleases = {};
+    webIdentities = {};
     webFetches = 0;
     restoreFetch = installFetchStub(
       webSources,
       () => webFetches++,
       webReleases,
+      webIdentities,
     );
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
@@ -1584,21 +1603,28 @@ describe("piece source lifecycle", () => {
       program: RuntimeProgram,
       releasedAt: string | undefined,
     ): Promise<void> {
-      webSources[route] = program;
-      if (releasedAt === undefined) delete webReleases[route];
-      else webReleases[route] = releasedAt;
+      await offer(route, program, releasedAt);
       expect(await piece.changeSource({ kind: "repoint", url: origin }))
         .toEqual({ status: "applied" });
     }
 
-    // Serves `program` at `route`, released at `releasedAt`, or with no stated
-    // release time when it is undefined.
-    function offer(
+    // Serves `program` at `route` and advertises the identity it compiles to
+    // there, released at `releasedAt`, or with no stated release time when it
+    // is undefined.
+    async function offer(
       route: string,
       program: RuntimeProgram,
       releasedAt: string | undefined,
-    ): void {
+    ): Promise<void> {
+      const entry = program.files.find((file) => file.name === program.main)!;
+      const served = await runtime.patternManager.compilePattern(
+        { main: route, files: [{ name: route, contents: entry.contents }] },
+        { space: pieces.getSpace(), persist: false },
+      );
       webSources[route] = program;
+      webIdentities[route] = runtime.patternManager.getArtifactEntryRef(
+        served,
+      )!.identity;
       if (releasedAt === undefined) delete webReleases[route];
       else webReleases[route] = releasedAt;
     }
@@ -1622,7 +1648,7 @@ describe("piece source lifecycle", () => {
         earlier,
       );
       await piece.changeSource({ kind: "detach" });
-      offer(route, incompatibleSeedProgram("candidate"), later);
+      await offer(route, incompatibleSeedProgram("candidate"), later);
 
       expect(await piece.changeSource({ kind: "repoint", url: origin }))
         .toEqual({ status: "applied" });
@@ -1643,7 +1669,7 @@ describe("piece source lifecycle", () => {
         versionProgram("origin-v1"),
         earlier,
       );
-      offer(route, incompatibleSeedProgram("candidate"), later);
+      await offer(route, incompatibleSeedProgram("candidate"), later);
 
       expect(await piece.changeSource({ kind: "adopt" })).toEqual({
         status: "applied",
@@ -1667,7 +1693,7 @@ describe("piece source lifecycle", () => {
         earlier,
       );
       await piece.changeSource({ kind: "detach" });
-      offer(route, incompatibleSeedProgram("candidate"), later);
+      await offer(route, incompatibleSeedProgram("candidate"), later);
 
       expect(
         await piece.changeSource({
@@ -1688,7 +1714,7 @@ describe("piece source lifecycle", () => {
         earlier,
       );
       await piece.changeSource({ kind: "detach" });
-      offer(route, incompatibleSeedProgram("candidate"), later);
+      await offer(route, incompatibleSeedProgram("candidate"), later);
 
       expect(await piece.changeSource({ kind: "repoint", url: route }))
         .toEqual({ status: "applied" });
@@ -1699,7 +1725,7 @@ describe("piece source lifecycle", () => {
       const route = "/api/patterns/gated-earlier.tsx";
       const piece = await pieces.create(versionProgram("v1"), { input: {} });
       await repointTo(piece, origin, route, versionProgram("origin-v1"), later);
-      offer(route, incompatibleSeedProgram("candidate"), earlier);
+      await offer(route, incompatibleSeedProgram("candidate"), earlier);
 
       const result = await piece.changeSource({ kind: "adopt" });
 
@@ -1730,7 +1756,7 @@ describe("piece source lifecycle", () => {
         });
       });
       expect(written.error).toBeUndefined();
-      offer(route, incompatibleSeedProgram("candidate"), later);
+      await offer(route, incompatibleSeedProgram("candidate"), later);
 
       const result = await piece.changeSource({ kind: "adopt" });
 
@@ -1748,17 +1774,16 @@ describe("piece source lifecycle", () => {
         versionProgram("origin-v1"),
         earlier,
       );
-      offer(route, incompatibleSeedProgram("candidate"), undefined);
+      await offer(route, incompatibleSeedProgram("candidate"), undefined);
 
       const result = await piece.changeSource({ kind: "adopt" });
 
       expect(result.status).toBe("incompatible");
     });
 
-    it("returns an incompatibility warning for a release whose files state different release times", async () => {
-      const origin = "system:gated-mixed.tsx";
-      const route = "/api/patterns/gated-mixed.tsx";
-      const helper = "/api/patterns/gated-mixed-helper.ts";
+    it("returns an incompatibility warning when the origin states its release time beside another identity", async () => {
+      const origin = "system:gated-other-identity.tsx";
+      const route = "/api/patterns/gated-other-identity.tsx";
       const piece = await pieces.create(versionProgram("v1"), { input: {} });
       await repointTo(
         piece,
@@ -1767,31 +1792,35 @@ describe("piece source lifecycle", () => {
         versionProgram("origin-v1"),
         earlier,
       );
-      offer(route, {
-        main: route,
-        files: [{
-          name: route,
-          contents: [
-            "import { pattern } from 'commonfabric';",
-            "import { VERSION } from './gated-mixed-helper.ts';",
-            "export default pattern<{ seed?: number }>(() => ({",
-            "  version: VERSION,",
-            "}));",
-            "",
-          ].join("\n"),
-        }],
-      }, later);
-      offer(helper, {
-        main: helper,
-        files: [{
-          name: helper,
-          contents: 'export const VERSION = "candidate";\n',
-        }],
-      }, latest);
+      await offer(route, incompatibleSeedProgram("candidate"), later);
+      webIdentities[route] = "an-identity-the-candidate-does-not-have";
 
       const result = await piece.changeSource({ kind: "adopt" });
 
       expect(result.status).toBe("incompatible");
+    });
+
+    it("records the release time the origin states for the running source as confirmed", async () => {
+      const origin = "system:gated-reoffered.tsx";
+      const route = "/api/patterns/gated-reoffered.tsx";
+      const piece = await pieces.create(versionProgram("v1"), { input: {} });
+      await repointTo(
+        piece,
+        origin,
+        route,
+        versionProgram("origin-v1"),
+        earlier,
+      );
+      await offer(route, versionProgram("origin-v1"), later);
+
+      expect(await piece.changeSource({ kind: "adopt" })).toEqual({
+        status: "applied",
+      });
+
+      expect(getPieceReconciliation(piece.getCell())?.confirmed).toEqual({
+        identity: getPatternIdentityRef(piece.getCell())!.identity,
+        releasedAt: Date.parse(later),
+      });
     });
 
     it("returns an incompatibility warning when the running source records no release time", async () => {
@@ -1805,7 +1834,7 @@ describe("piece source lifecycle", () => {
         versionProgram("origin-v1"),
         undefined,
       );
-      offer(route, incompatibleSeedProgram("candidate"), later);
+      await offer(route, incompatibleSeedProgram("candidate"), later);
 
       const result = await piece.changeSource({ kind: "adopt" });
 
@@ -1818,7 +1847,7 @@ describe("piece source lifecycle", () => {
         input: {},
       });
       await clearSourceLog(piece);
-      offer(route, incompatibleSeedProgram("candidate"), later);
+      await offer(route, incompatibleSeedProgram("candidate"), later);
 
       const result = await piece.changeSource({
         kind: "repoint",
@@ -1854,7 +1883,7 @@ describe("piece source lifecycle", () => {
         twoExportProgram({ default: "number", other: "string" }, "origin-v2"),
         later,
       );
-      offer(
+      await offer(
         route,
         twoExportProgram({ default: "number", other: "string" }, "origin-v3"),
         latest,
@@ -1894,7 +1923,7 @@ describe("piece source lifecycle", () => {
         twoExportProgram({ default: "string", other: "number" }, "origin-v2"),
         later,
       );
-      offer(
+      await offer(
         route,
         twoExportProgram({ default: "string", other: "number" }, "origin-v3"),
         latest,
@@ -1920,7 +1949,7 @@ describe("piece source lifecycle", () => {
         versionProgram("origin-v1"),
         earlier,
       );
-      offer(route, incompatibleProgram(), later);
+      await offer(route, incompatibleProgram(), later);
 
       await expect(piece.changeSource({ kind: "adopt" })).rejects.toThrow(
         "missing required property required",
