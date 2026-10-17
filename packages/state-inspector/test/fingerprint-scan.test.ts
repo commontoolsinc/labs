@@ -1,5 +1,6 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
+
 import { Database } from "@db/sqlite";
 
 import { hashOf } from "@commonfabric/data-model";
@@ -165,6 +166,43 @@ describe("fingerprint-scan", () => {
         { id: "of:z", scope: "space" },
         { id: "of:a", scope: "space" },
       ]);
+    });
+  });
+
+  it("reports unhashable values in listing order after generated exclusions", () => {
+    let deep: unknown = null;
+    for (let i = 0; i < 5000; i++) deep = { a: deep };
+    const data = JSON.stringify({ value: deep });
+    withStore([
+      { id: "of:z", data },
+      { id: "of:z", data },
+      { id: "of:a", data },
+      { id: "of:g", data },
+      { id: "of:ok", data: '{"value":1}' },
+      { id: "of:owner", scope: "user:z", data: piece(["of:g"]) },
+    ], (space) => {
+      const report = contentFingerprint(space);
+      expect(report.unhashable.map((entry) => entry.id)).toEqual([
+        "of:z",
+        "of:a",
+      ]);
+      for (const entry of report.unhashable) {
+        expect(entry.reason).toMatch(/\S/);
+      }
+      expect(report.excludedGeneratedAddresses).toEqual([
+        { id: "of:g", scope: "space" },
+      ]);
+      expect(report.perEntity.map((entry) => entry.id)).toEqual([
+        "of:ok",
+        "of:owner",
+      ]);
+      const included = contentFingerprint(space, { includeGenerated: true });
+      expect(included.unhashable.map((entry) => entry.id)).toEqual([
+        "of:z",
+        "of:a",
+        "of:g",
+      ]);
+      expect(included.excludedGenerated).toBe(0);
     });
   });
 
