@@ -7,10 +7,11 @@ reason: "A census of the sinks the worker reconciler binds per rendered element 
 
 # What sinks the render binds per element on a FabriChat room's cold load, October 2026
 
-The sink-fire count of the day before (the record
-`2026-10-16-fabrichat-render-sink-fires.md`, made in a sibling investigation)
-found that the thirty-message room's cold load binds 5,584 sinks, that no two
-of them read one view, and that each pays a first fire: a descent of the view
+A count of sink fires made the day before in a sibling investigation, whose
+record (`2026-10-16-fabrichat-render-sink-fires.md`) was in a pull request of
+its own when this one was written, found that the thirty-message room's cold
+load binds 5,584 sinks, that no two of them read one view, and that each pays
+a first fire: a descent of the view
 tree from its document's root, the registration of its read set with the
 scheduler, and two transactions. It left "fewer sinks per element" as the
 lever inside the render. This record is the census that says which element
@@ -51,9 +52,9 @@ and which property each sink is bound for, and what one cut of them did.
 
 ## The census
 
-5,504 sinks per load are the reconciler's own, bound at six sites. The
-remaining 80 of the 5,584 are the host's `cell:subscribe` sinks and the
-reconciler's one root sink.
+5,504 sinks per load are the reconciler's own, its one root sink included,
+bound at six sites. The 80 that count found beyond them are bound outside
+the reconciler, the host's `cell:subscribe` sinks among them.
 
 | Site                                                   | Sinks | Share |
 | ------------------------------------------------------ | ----: | ----: |
