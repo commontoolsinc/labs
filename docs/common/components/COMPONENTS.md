@@ -890,12 +890,14 @@ interface MapPolyline {
 | Event | Detail | Description |
 |-------|--------|-------------|
 | `cf-click` | `{ lat, lng }` | Map background clicked |
-| `cf-bounds-change` | `{ bounds, center, zoom }` | Viewport changed |
+| `cf-bounds-change` | `{ bounds, center, zoom, userInitiated }` | Viewport changed; `userInitiated` is true when a person moved the map, false when cf-map did (bound values, fitting, resize) |
 | `cf-marker-click` | `{ marker, index, lat, lng }` | Marker clicked |
 | `cf-marker-drag-end` | `{ marker, index, position, oldPosition }` | Marker drag completed |
 | `cf-circle-click` | `{ circle, index, lat, lng }` | Circle clicked |
 
 **Note:** Polylines do not emit click events. For clickable segments, use circles as waypoints.
+
+**Who moves the map:** while a person is dragging, zooming, or gliding after a drag, cf-map holds its own moves (a feature fit, a bound `center`/`zoom`/ `bounds` value) until their move ends. The person's view then wins: a refit set off by changed features and any queued bound value are dropped, while a fit asked for meanwhile (turning `fitToBounds` on) still runs. The first bound `bounds` value the map is given, the stored view, applies ahead of a bound `center`/`zoom`, whether it is there at mount or loads later; while `fitToBounds` is on, the fit to the features wins over it. Later `bounds` values always apply.
 
 ### Usage
 
