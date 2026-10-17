@@ -141,6 +141,15 @@ a record: archive it to `docs/history/plans/` following the procedure in
   link schema and the module wrapper, and triggers the cold-start repairs on a
   structural mismatch instead of the missing marker. It names putting the
   owner into a stream's address as the follow-up it is written toward.
+- [A FabriChat message row as a view over its message](fabrichat-row-as-view.md)
+  prices what the room's cold load pays for thirty row instances — their
+  starts, their session derivations' commits, their pre-sync families, and the
+  CFC preparation of each run — against rendering each row as a view bound to
+  its message's cells, with the row's derivations moved into records the room
+  keys by message and its handlers bound once at the room. It names the one
+  runtime addition the view needs, an event prop that carries the row's
+  message to a shared handler, the list template that would remove the rest,
+  and the order to build them in.
 - [Cutting the resume pre-sync's cost](resume-presync-cost.md) removes what
   the pre-sync repeats or does not need: a child start re-planning the
   subtree its parent named, every plan's inputs cell re-inlining its
