@@ -3234,10 +3234,13 @@ export class PiecesController<T = unknown> {
     // the root keeps it, as the reconciler keeps it against the same offer.
     // A host offering the source at a later release, or with no order between
     // the two, may be a rollback, which the heal takes as before. The order is
-    // read again inside the swap's transaction.
-    const officialReleasedAt = reason === "unloadable"
-      ? await this.#advertisedReleasedAt(officialUrl, officialRef.identity)
-      : undefined;
+    // read again inside the swap's transaction. The revision a heal writes
+    // records the official release time, as an adopting revision does, so the
+    // root stays ordered against later offers.
+    const officialReleasedAt = await this.#advertisedReleasedAt(
+      officialUrl,
+      officialRef.identity,
+    );
     const behindPinnedRelease = (root: Cell<NameSchema>) =>
       reason === "unloadable" &&
       pieceSourceMovedPast(root, officialRef, pinnedRef) &&
@@ -3267,6 +3270,9 @@ export class PiecesController<T = unknown> {
       operation: "origin-update",
       origin: officialUrlPath,
       expected: sourceSnapshot,
+      ...(officialReleasedAt === undefined
+        ? {}
+        : { releasedAt: officialReleasedAt }),
     };
     let movedBack = false;
     const swapResult = await runtime.editWithRetry((tx) => {

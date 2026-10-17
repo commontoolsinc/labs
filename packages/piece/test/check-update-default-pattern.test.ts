@@ -1008,6 +1008,10 @@ describe("opening a space root", () => {
 
     const after = (await controller.getDefaultPattern(false))!;
     expect(getPatternIdentityRef(after)?.identity).toBe(officialV1);
+    // The healing revision records the release it took.
+    expect(getPieceSourceRevisions(after).at(-1)?.releasedAt).toBe(
+      Date.parse("2026-10-16T16:03:00Z"),
+    );
   });
 
   it("rolls the root back to the source its history records moving from when no release time orders the two", async () => {
