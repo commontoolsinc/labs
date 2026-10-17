@@ -567,10 +567,12 @@ a data file that no module's source names, such as one read by a computed path
 ([`sourcePackageOwners`][c17] assigns the owners). Unlike a retention
 link, these participate in the owning module's identity, and through it in the
 identity of every module that reaches the owner, so changing the package
-changes the revision. A module reading a data file therefore has one identity
-whichever program compiled it, and a load entered at that module by its own
-identity, as a sub-pattern referenced by `{ identity, symbol }` is loaded,
-reaches the file. Neither link resolves a module record. A data
+changes the revision. A load entered at a module that reads a data file, by
+its own identity, as a sub-pattern referenced by `{ identity, symbol }` is
+loaded, therefore reaches the file. Whether that module is a program's entry
+or a child of it changes its identity only by what the entry alone owns: the
+program's source roots and the data files no module's source names. Neither
+link resolves a module record. A data
 document is hashed as a leaf over its own bytes and filename rather than through
 a parse of its contents, which is what lets a data file hold bytes that are not
 TypeScript. Both namespaces are reserved against authored imports. The compiled

@@ -82,10 +82,11 @@ export async function attachDeclaredDataFiles(
  * file, so the module's identity covers the bytes it reads and its stored
  * documents link to them. A load entered at that module by its own identity,
  * as a sub-pattern referenced by `{ identity, symbol }` is loaded, then
- * reaches the file, and the module has the same identity whichever program it
- * was compiled in. The entry owns every attached source root, and every data
+ * reaches the file. The entry owns every attached source root, and every data
  * file no module's source names: one read by a computed path, or one nothing
- * reads.
+ * reads. Those are the only edges whose owner depends on which module is the
+ * entry, so a module compiled as the entry and as a child gets one identity
+ * when the program carries neither.
  *
  * `modules` are the code modules whose identities are being computed, and only
  * those can own an edge, so a reader the program's roots never reach leaves
