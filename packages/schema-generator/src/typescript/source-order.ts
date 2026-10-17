@@ -509,19 +509,33 @@ function aliasKeyArgument(
  * so an order read from it would too.
  */
 export function compareTypesBySource(left: ts.Type, right: ts.Type): number {
-  return compareTypes(left, right, 0);
+  return compareTypes(left, right, {
+    active: new Map(),
+    done: new Map(),
+    reentries: 0,
+  });
 }
 
 /**
- * How many levels into what two types are made of `compareStructure()`
- * reads before it takes them for equal. Types that agree this deep are
- * schemas that agree as deep, near enough, and every comparison stops at the
- * same depth, so the order stays one order.
+ * What one `compareTypesBySource()` call has compared of what two types are
+ * made of (`compareStructure()`), so that a structure met twice is read
+ * once and a recursive one ends.
  */
-const MAX_STRUCTURE_DEPTH = 8;
+type Comparison = {
+  /** The pairs being compared further up. */
+  readonly active: Map<ts.Type, Set<ts.Type>>;
+  /** The pairs compared to the end, by the answer. */
+  readonly done: Map<ts.Type, Map<ts.Type, number>>;
+  /** How many times a pair being compared further up was met again. */
+  reentries: number;
+};
 
-/** `compareTypesBySource()`, `depth` levels into what types are made of. */
-function compareTypes(left: ts.Type, right: ts.Type, depth: number): number {
+/** `compareTypesBySource()`, within the comparison `state`. */
+function compareTypes(
+  left: ts.Type,
+  right: ts.Type,
+  state: Comparison,
+): number {
   if (left === right) return 0;
   const leftTier = tierOf(left);
   const rightTier = tierOf(right);
@@ -544,20 +558,29 @@ function compareTypes(left: ts.Type, right: ts.Type, depth: number): number {
       );
     case Tier.Declared:
       return compareDeclaredTypes(left, right) ||
-        compareStructure(left, right, depth);
+        compareStructure(left, right, state);
     default:
-      return compareStructure(left, right, depth);
+      return compareStructure(left, right, state);
   }
 }
 
 /** The kinds of type `compareStructure()` orders, in its order. */
 enum Structure {
   Reference,
+  Instantiation,
   Object,
   Intersection,
   Union,
   Other,
 }
+
+/** A type mapper as the checker holds it. */
+type TypeMapperWithInternals = {
+  readonly kind: number;
+  readonly target?: ts.Type;
+  readonly targets?: readonly ts.Type[];
+  readonly mapper1?: TypeMapperWithInternals;
+};
 
 /** A type as the checker holds it: what it gave the type on creating it. */
 type TypeWithInternals = ts.Type & {
@@ -567,7 +590,7 @@ type TypeWithInternals = ts.Type & {
     readonly elementFlags?: readonly number[];
   };
   readonly node?: ts.Node;
-  readonly mapper?: unknown;
+  readonly mapper?: TypeMapperWithInternals;
   readonly resolvedTypeArguments?: readonly ts.Type[];
   readonly types?: readonly ts.Type[];
 };
@@ -581,21 +604,52 @@ type SymbolWithInternals = ts.Symbol & {
  * Compares two types `compareTypes()` leaves equal by what they are made of,
  * read only where the checker gave it to them on creating them: an alias's
  * instantiations by their alias arguments; a reference by its target, a
- * tuple's arity and element kinds, and its arguments, unless it is a
- * deferred reference, whose arguments are resolved only when something asks
- * for them; an intersection or a union by its members; and an object no
- * source declares, as the checker builds for a spread, by its properties'
- * names and then their types. Each part is compared by `compareTypes()`, one
- * level deeper, up to `MAX_STRUCTURE_DEPTH`.
+ * tuple's arity and element kinds, and its arguments, those of a deferred
+ * reference, which are resolved only when something asks for them, by the
+ * node writing it and what instantiated it; an instantiation of an object
+ * type a source declares, as a generic function's return type is, by what
+ * instantiated it (`instantiationArguments()`); an intersection or a union
+ * by its members; and an object no source declares, as the checker builds
+ * for a spread, by its properties' names and then their types.
+ *
+ * Each part is compared by `compareTypes()` in `state`, however deep: a pair
+ * met again inside its own comparison is equal so far, which ends a
+ * recursive structure, and a pair compared to the end without meeting one
+ * is answered from `state.done` after, which keeps a structure that shares
+ * its parts from being read once per path to them.
  */
 function compareStructure(
   left: ts.Type,
   right: ts.Type,
-  depth: number,
+  state: Comparison,
 ): number {
-  if (depth >= MAX_STRUCTURE_DEPTH) return 0;
-  const inner = depth + 1;
-  const byAlias = compareAliases(left, right, inner);
+  if (state.active.get(left)?.has(right)) {
+    state.reentries++;
+    return 0;
+  }
+  const known = state.done.get(left)?.get(right);
+  if (known !== undefined) return known;
+  let active = state.active.get(left);
+  if (active === undefined) state.active.set(left, active = new Set());
+  active.add(right);
+  const reentriesBefore = state.reentries;
+  const answer = compareStructureOnce(left, right, state);
+  active.delete(right);
+  if (state.reentries === reentriesBefore) {
+    let done = state.done.get(left);
+    if (done === undefined) state.done.set(left, done = new Map());
+    done.set(right, answer);
+  }
+  return answer;
+}
+
+/** `compareStructure()` for a pair not met before in `state`. */
+function compareStructureOnce(
+  left: ts.Type,
+  right: ts.Type,
+  state: Comparison,
+): number {
+  const byAlias = compareAliases(left, right, state);
   if (byAlias !== 0) return byAlias;
   const leftKind = structureOf(left);
   const rightKind = structureOf(right);
@@ -604,20 +658,44 @@ function compareStructure(
   const r = right as TypeWithInternals;
   switch (leftKind) {
     case Structure.Reference:
-      return compareReferences(l, r, inner);
+      return compareReferences(l, r, state);
+    case Structure.Instantiation:
+      return compareTypeLists(
+        instantiationArguments(l) ?? [],
+        instantiationArguments(r) ?? [],
+        state,
+      );
     case Structure.Intersection:
-      return compareTypeLists(l.types ?? [], r.types ?? [], inner);
+      return compareTypeLists(l.types ?? [], r.types ?? [], state);
     case Structure.Union:
       return compareTypeLists(
-        sortedTypes(l.types ?? [], inner),
-        sortedTypes(r.types ?? [], inner),
-        inner,
+        sortedTypes(l.types ?? [], state),
+        sortedTypes(r.types ?? [], state),
+        state,
       );
     case Structure.Object:
-      return compareUndeclaredObjects(left, right, inner);
+      return compareUndeclaredObjects(left, right, state);
     default:
       return 0;
   }
+}
+
+/**
+ * The type arguments the checker instantiated `type` with, as the mapper it
+ * gave the instantiation holds them: the arguments for its declaration's
+ * outer type parameters, in their order, which the checker builds afresh
+ * for each instantiation, so they do not depend on how the instantiation
+ * was reached. A mapper that composes another reads the one it starts from,
+ * which is that one. Returns `undefined` for a type with no such mapper.
+ */
+function instantiationArguments(
+  type: TypeWithInternals,
+): readonly ts.Type[] | undefined {
+  let mapper = type.mapper;
+  while (mapper?.mapper1 !== undefined) mapper = mapper.mapper1;
+  if (mapper === undefined) return undefined;
+  if (mapper.target !== undefined) return [mapper.target];
+  return mapper.targets;
 }
 
 /**
@@ -629,7 +707,7 @@ function compareStructure(
 function compareAliases(
   left: ts.Type,
   right: ts.Type,
-  depth: number,
+  state: Comparison,
 ): number {
   const leftAlias = left.aliasSymbol;
   const rightAlias = right.aliasSymbol;
@@ -646,7 +724,7 @@ function compareAliases(
   return compareTypeLists(
     left.aliasTypeArguments ?? [],
     right.aliasTypeArguments ?? [],
-    depth,
+    state,
   );
 }
 
@@ -657,22 +735,29 @@ function structureOf(type: ts.Type): Structure {
   if (type.flags & ts.TypeFlags.Object) {
     const objectFlags = (type as ts.ObjectType).objectFlags;
     if (objectFlags & ts.ObjectFlags.Reference) return Structure.Reference;
-    const declared = (type.getSymbol()?.declarations?.length ?? 0) > 0;
     const instantiated = (type as TypeWithInternals).mapper !== undefined;
+    if (
+      instantiated && (objectFlags & ts.ObjectFlags.Mapped) === 0 &&
+      instantiationArguments(type as TypeWithInternals) !== undefined
+    ) {
+      return Structure.Instantiation;
+    }
+    const declared = (type.getSymbol()?.declarations?.length ?? 0) > 0;
     if (!declared && !instantiated) return Structure.Object;
   }
   return Structure.Other;
 }
 
 /**
- * Compares two references, neither deferred, by their targets' names and
- * declarations, a tuple's arity and element kinds, and then their
- * arguments. A deferred reference is compared by the node writing it alone.
+ * Compares two references by their targets' names and declarations, a
+ * tuple's arity and element kinds, and then their arguments: a deferred
+ * reference's by the node writing it and what instantiated it
+ * (`instantiationArguments()`), any other's as the checker gave them.
  */
 function compareReferences(
   left: TypeWithInternals,
   right: TypeWithInternals,
-  depth: number,
+  state: Comparison,
 ): number {
   const leftTarget = left.target;
   const rightTarget = right.target;
@@ -696,12 +781,17 @@ function compareReferences(
       right.node as ts.Declaration | undefined,
     );
     return compareStrings(leftNode?.file ?? "", rightNode?.file ?? "") ||
-      (leftNode?.pos ?? -1) - (rightNode?.pos ?? -1);
+      (leftNode?.pos ?? -1) - (rightNode?.pos ?? -1) ||
+      compareTypeLists(
+        instantiationArguments(left) ?? [],
+        instantiationArguments(right) ?? [],
+        state,
+      );
   }
   return compareTypeLists(
     left.resolvedTypeArguments ?? [],
     right.resolvedTypeArguments ?? [],
-    depth,
+    state,
   );
 }
 
@@ -714,7 +804,7 @@ function compareReferences(
 function compareUndeclaredObjects(
   left: ts.Type,
   right: ts.Type,
-  depth: number,
+  state: Comparison,
 ): number {
   const leftProperties = left.getProperties();
   const rightProperties = right.getProperties();
@@ -728,26 +818,26 @@ function compareUndeclaredObjects(
     const rightType = (rightProperties[index] as SymbolWithInternals).links
       ?.type;
     if (leftType === undefined || rightType === undefined) continue;
-    const byType = compareTypes(leftType, rightType, depth);
+    const byType = compareTypes(leftType, rightType, state);
     if (byType !== 0) return byType;
   }
   return 0;
 }
 
-/** `types` in the order `compareTypes()` gives them, `depth` levels in. */
-function sortedTypes(types: readonly ts.Type[], depth: number): ts.Type[] {
-  return [...types].sort((left, right) => compareTypes(left, right, depth));
+/** `types` in the order `compareTypes()` gives them in `state`. */
+function sortedTypes(types: readonly ts.Type[], state: Comparison): ts.Type[] {
+  return [...types].sort((left, right) => compareTypes(left, right, state));
 }
 
 /** Compares two lists of types member by member, a shorter one first. */
 function compareTypeLists(
   left: readonly ts.Type[],
   right: readonly ts.Type[],
-  depth: number,
+  state: Comparison,
 ): number {
   const shared = Math.min(left.length, right.length);
   for (let index = 0; index < shared; index++) {
-    const byMember = compareTypes(left[index]!, right[index]!, depth);
+    const byMember = compareTypes(left[index]!, right[index]!, state);
     if (byMember !== 0) return byMember;
   }
   return left.length - right.length;

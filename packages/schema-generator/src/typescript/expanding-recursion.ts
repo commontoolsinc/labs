@@ -80,7 +80,7 @@ export const expansionDepth = (
         let lastSize = -1;
         for (const outer of [...path, type]) {
           if (!recursionIdentities(outer, checker).includes(identity)) continue;
-          const size = argumentSize(outer, 0);
+          const size = argumentSize(outer);
           if (size >= lastSize) count++;
           lastSize = size;
         }
@@ -90,22 +90,26 @@ export const expansionDepth = (
   );
 
 /**
- * How many levels of arguments `argumentSize()` reads before it counts what
- * lies below as one type. A recursion that instantiates its declaration
- * without end grows its arguments by a level a reading, so readings this
- * deep compare as equal and are counted, as growth is.
+ * The sizes `argumentSize()` has found, by type. A type's size is read only
+ * from what the checker gave it on creating it, which never changes, so it
+ * is found once.
  */
-const MAX_ARGUMENT_DEPTH = 64;
+const argumentSizes = new WeakMap<ts.Type, number>();
 
 /**
  * How large the arguments `type` was instantiated with are: one for the type,
- * and the sizes of its arguments, `depth` levels down. It reads only the
- * arguments the checker gave the type on creating it: an alias's
- * instantiation's alias arguments, or a reference's own, except a deferred
- * reference's, which are resolved only when something asks for them.
+ * and the sizes of its arguments, an argument written twice counted twice,
+ * up to `Number.MAX_SAFE_INTEGER`, past which sizes compare as equal. It
+ * reads only the arguments the checker gave the type on creating it: an
+ * alias's instantiation's alias arguments, or a reference's own, except a
+ * deferred reference's, which are resolved only when something asks for
+ * them. A type's arguments are created before it, so none is the type
+ * itself or holds it, and each type's size is found once
+ * (`argumentSizes`), as `Dup<[T, T]>`'s two shared arguments need.
  */
-const argumentSize = (type: ts.Type, depth: number): number => {
-  if (depth >= MAX_ARGUMENT_DEPTH) return 1;
+const argumentSize = (type: ts.Type): number => {
+  const known = argumentSizes.get(type);
+  if (known !== undefined) return known;
   const reference = type as ts.Type & {
     readonly node?: ts.Node;
     readonly resolvedTypeArguments?: readonly ts.Type[];
@@ -118,7 +122,10 @@ const argumentSize = (type: ts.Type, depth: number): number => {
       : undefined) ??
     [];
   let size = 1;
-  for (const arg of args) size += argumentSize(arg, depth + 1);
+  for (const arg of args) {
+    size = Math.min(size + argumentSize(arg), Number.MAX_SAFE_INTEGER);
+  }
+  argumentSizes.set(type, size);
   return size;
 };
 

@@ -965,12 +965,16 @@ Default paths of §7:
     declared types by the name of their symbol and then by declaration, a TS
     enum's members as the enum declares them, then every other type. Types
     that order leaves equal are compared by what they are made of, as far as
-    the checker gave it to them on creating them: an alias's instantiations
-    by their alias arguments, a reference by its target and its arguments
-    (a deferred reference by the node writing it), an intersection or a union
-    by its members, and an object no source declares by its properties. A
-    union the checker builds, as `keyof T` or an inferred `cond ? "x" : "y"`
-    is, is listed this way.
+    the checker gave it to them on creating them, however deep: an alias's
+    instantiations by their alias arguments, a reference by its target and
+    its arguments (a deferred reference by the node writing it and the
+    arguments it was instantiated with), an instantiation of an object type a
+    source declares, as a generic function's return type is, by its type
+    arguments, an intersection or a union by its members, and an object no
+    source declares by its properties. A structure met again inside its own
+    comparison is equal so far, which ends a recursive one. A union the
+    checker builds, as `keyof T` or an inferred `cond ? "x" : "y"` is, is
+    listed this way.
   - A union read without its type, at a node a transform built, keeps the
     node's order where a source file writes the node or the node it was
     copied from. Otherwise its keyword members keep their places, which a

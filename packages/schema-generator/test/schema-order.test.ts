@@ -433,6 +433,50 @@ describe("schema-order", () => {
       expect(checkedFirst).toEqual(lazy);
     });
 
+    it("emits an inferred union of two deeply nested instantiations in one order", async () => {
+      const deep = (inner: string) =>
+        `Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<${inner}>>>>>>>>>>`;
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          "export interface Box<T> { v: T; }",
+          `export const early: ${deep("number")} | undefined = undefined;`,
+          `declare const a: ${deep("string")};`,
+          `declare const b: ${deep("number")};`,
+          "export const pick = Math.random() > 0.5 ? a : b;",
+          "export interface Wrap { p: typeof pick; }",
+        ].join("\n"),
+        interfaceSchema("Wrap"),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+    });
+
+    it("emits an inferred union of two instantiations of a generic function's return type in one order", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          "function make<T>(v: T) { return { v }; }",
+          "export const early = make(1);",
+          "declare const a: ReturnType<typeof make<string>>;",
+          "declare const b: ReturnType<typeof make<number>>;",
+          "export const pick = Math.random() > 0.5 ? a : b;",
+          "export interface Wrap { p: typeof pick; }",
+        ].join("\n"),
+        interfaceSchema("Wrap"),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+      expect(lazy).toMatchObject({
+        properties: {
+          p: {
+            anyOf: [
+              { properties: { v: { type: "number" } } },
+              { properties: { v: { type: "string" } } },
+            ],
+          },
+        },
+      });
+    });
+
     it("emits an inferred union of two intersections in one order", async () => {
       const { lazy, checkedFirst } = await bothReadings(
         [
@@ -534,6 +578,18 @@ describe("schema-order", () => {
         [
           "export type Tup<T> = [T, Tup<T[]>?];",
           "export interface Wrap<T> { n: Tup<T>; deep: Tup<T[][][][][]>; }",
+        ].join("\n"),
+        interfaceSchema("Wrap"),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+    });
+
+    it("cuts a recursion whose arguments repeat a type at one depth whatever else the program instantiates", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          "export interface Dup<T> { next: Dup<[T, T]>; }",
+          "export interface Wrap<T> { n: Dup<T>; }",
         ].join("\n"),
         interfaceSchema("Wrap"),
       );
