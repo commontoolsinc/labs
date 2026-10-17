@@ -197,11 +197,36 @@ row; the view has one stream for all rows and must name the row in the event.
 The addition: an event prop may hold a stream together with arguments,
 `{ stream, with: { message } }`, which `h()` writes with the arguments
 resolved to links as it resolves `$`-props, and the reconciler's registered
-handler sends `{ …event, …with }`. It touches `h.ts`, the view-node schema
-in `runner`, the reconciler's event-prop arms, and the harness's render of a
-view's events in `cf test`. The handlers need no change: `RoomStreamEvent`
-already carries `message`, and `isInRoomOf` already refuses a message outside
-the room.
+handler adds the arguments to the event before sending it. It touches `h.ts`,
+the view-node schema in `runner`, the reconciler's event-prop arms, and the
+harness's render of a view's events in `cf test`. The handlers need no
+change: `RoomStreamEvent` already carries `message`, and `isInRoomOf` already
+refuses a message outside the room.
+
+How the arguments join the event is the part that decides whether the
+gesture's trust survives, and a spread does not do it. The reconciler marks
+the event object the browser delivered as renderer-trusted
+(`Reconciler.dispatchEvent()` calls `markRendererTrustedEvent`), that mark is
+membership of the exact object in a weak set
+(`packages/runner/src/cfc/ui-contract.ts`), and `Cell.send()` carries it
+only from the object handed to it to the converted event it delivers. An
+event built as `{ …event, …with }` is a new object the renderer never
+marked, so every handler gated on a trusted gesture, FabriChat's edits,
+reactions and deletions among them, would refuse it. And in that spelling an argument named
+`provenance` would replace the renderer's. So the merge is defined the other
+way round: the registered handler sets each argument on the event object the
+renderer marked, and never over a field the event already carries; `h()`
+refuses at build time an argument whose name is one the renderer's event
+reserves (`provenance`, `detail`, `target`, `type` and the rest of
+`SerializedEvent`), so the collision is a compile-time error at the view and
+not a dispatch-time choice. The reconciler is a render boundary the CFC
+correspondence procedure governs
+(`../development/cfc-spec-correspondence.md`), so the change is classified
+there first; it reads as host arrangement, since it moves no decision, but
+the classification is the procedure's to make. The test is the gated path
+itself: a `TrustedActionWrite`-protected handler bound once, reached through
+two view nodes carrying different arguments, admits both gestures and acts on
+each node's own argument.
 
 The argument is a link the pattern wrote into its own view, so it has the
 view's provenance and not the gesture's; the gesture's integrity is minted
@@ -327,9 +352,12 @@ describes.
 Build it, as A, in this order.
 
 1. The event prop that carries arguments: `h()`, the view-node schema, the
-   reconciler's event arms, the harness's render. A runner test that a
-   stream prop with `with` sends the merged event; a reconciler test that two
-   nodes sharing a stream deliver different arguments.
+   reconciler's event arms, the harness's render, classified under the CFC
+   correspondence procedure first. A runner test that a stream prop with
+   `with` sends the event with its arguments; a reconciler test that two
+   nodes sharing a stream deliver different arguments; and the gated test
+   above, that a trusted-gesture handler admits an event the arguments were
+   added to.
 2. The room: `facts.rows`, the `rights`, `editorDisplay` and `tallies`
    records, the keyed `pickerOpen`, sixteen room-level handler bindings, and
    the list computed for the main conversation and the thread. The row
