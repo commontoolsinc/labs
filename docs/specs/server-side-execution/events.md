@@ -747,6 +747,20 @@ loop's duty).
   test reads whether the piece has a graph installed, not what its
   start reported.
 
+  A served event's piece can also be one that an EARLIER arrival's
+  handler creates. A handler that instantiates a piece hands the
+  sender's speculative echo the new piece's streams before the server
+  has run that handler, so the sender's next event can target a stream
+  no stored document holds yet. A not-started verdict for that event
+  is then reached against state that §2's arrival order has not
+  produced: the run raced the earlier event, and this predicate does
+  not apply. So a deferral spends the deferral budget only when no
+  entry that arrived earlier in the same space is still pending. Held
+  behind one, the entry re-drains as any deferral does and keeps the
+  budget it had. The earliest pending entry always spends it, so an
+  event addressing a piece that nothing creates still hardens into this
+  drop once the events ahead of it have their consequences.
+
   With server execution off, a CLIENT event — one with no served
   carriage, so no durable entry for a later pass to re-drain, and no
   server delivering it — whose piece cannot be started yet waits

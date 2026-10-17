@@ -57,6 +57,12 @@ import type { JSONSchema } from "../src/builder/types.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 import { deriveEventKey } from "../src/scheduler/event-identity.ts";
+import { EVENT_DEFERRAL_DROP_THRESHOLD } from "../src/scheduler/constants.ts";
+import {
+  ensurePieceRunningVerdict,
+  type EnsurePieceVerdict,
+} from "../src/ensure-piece-running.ts";
+import type { NormalizedFullLink } from "../src/link-types.ts";
 import { readWatermarkSeq } from "../src/executor/watermark.ts";
 import type {
   WaveCommitRejection,
@@ -70,6 +76,7 @@ import {
 } from "../src/cfc/ui-contract.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 import {
+  admittedCommits,
   ArrivalLog,
   awaitAdmitted,
   awaitEach,
@@ -261,6 +268,13 @@ const bobSigner = await Identity.fromPassphrase("events down bob");
 const profileSpace = (await Identity.fromPassphrase("events down profiles"))
   .did() as MemorySpace;
 
+/** The scheduler's piece-start seam: how a queued event whose stream has no
+ * handler yet starts the piece behind it. */
+type LoadPieceForEvent = (
+  runtime: Runtime,
+  eventLink: NormalizedFullLink,
+) => Promise<EnsurePieceVerdict>;
+
 /** The TRUE sidecar doc ids in the store (the client derives the id
  * from the RESOLVED stream link — a pattern's stream resolves into an
  * internal fid doc, so tests read the ids back from the head prefix
@@ -446,6 +460,27 @@ const ORDERED_LOG_PATTERN = [
   ">(({ log }) => ({ log, a: pushA({ log }), b: pushB({ log }) }));",
 ].join("\n");
 
+/** A parent whose `create` handler instantiates a child piece, so that the
+ * child's `bump` stream exists only once that handler has run — the shape of
+ * a board whose `addTopic` creates the topic the next event addresses. */
+const CREATE_CHILD_PATTERN = [
+  "import { Default, handler, pattern, Stream, Writable } from 'commonfabric';",
+  "type ChildResult = { value: number; bump: Stream<unknown> };",
+  "const bump = handler<unknown, { value: Writable<number> }>(",
+  "  (_ev, { value }) => { value.set((value.get() ?? 0) + 1); },",
+  ");",
+  "const Child = pattern<{ value: Default<number, 0> }, ChildResult>(",
+  "  ({ value }) => ({ value, bump: bump({ value }) }),",
+  ");",
+  "const create = handler<unknown, { child: Writable<ChildResult | null> }>(",
+  "  (_ev, { child }) => { child.set(Child({ value: 0 })); },",
+  ");",
+  "export default pattern<",
+  "  { child: Writable<ChildResult | null> },",
+  "  { child: ChildResult | null; create: Stream<unknown> }",
+  ">(({ child }) => ({ child, create: create({ child }) }));",
+].join("\n");
+
 /** The ORDERED_LOG_PATTERN's sibling with DISJOINT handler closures: `pushA`
  * additionally reads `gate`, which the test links to a SEPARATE doc, while
  * `pushB` reads only the shared log. Arming the load-park failure on the gate
@@ -598,6 +633,12 @@ describe("Phase 3 events-down (serving side)", () => {
   let failServingCommitSequence: ServingCommitFailure[];
   let failServingCommitActionPrefix: string | undefined;
 
+  /** The serving scheduler's piece-start seam, installed on each serving
+   * runtime as it is created when set: a pin that must hold one event's
+   * piece start open while the drain re-delivers another sets it before the
+   * host comes up. */
+  let servingLoadPieceForEvent: LoadPieceForEvent | undefined;
+
   const decorateWaveCommitSink = (sink: WaveCommitSink): WaveCommitSink => ({
     currentHeads: (space, docs) => sink.currentHeads(space, docs),
     concurrentWritePaths: (space, doc, sinceSeq) =>
@@ -695,6 +736,11 @@ describe("Phase 3 events-down (serving side)", () => {
           };
           return tx;
         };
+        if (servingLoadPieceForEvent !== undefined) {
+          (runtime.scheduler.accessForTestingOnly.eventQueueState as {
+            loadPieceForEvent?: LoadPieceForEvent;
+          }).loadPieceForEvent = servingLoadPieceForEvent;
+        }
         servingRuntime = runtime;
         servingManager = manager;
         return {
@@ -740,6 +786,7 @@ describe("Phase 3 events-down (serving side)", () => {
     failNextServingCommit = undefined;
     failServingCommitSequence = [];
     failServingCommitActionPrefix = undefined;
+    servingLoadPieceForEvent = undefined;
   });
 
   afterEach(async () => {
@@ -3507,6 +3554,135 @@ describe("Phase 3 events-down (serving side)", () => {
     // loop's own bookkeeping produced. Back-to-back waves spend the
     // whole budget in one quiet moment and the drop lands at once.
     expect(elapsed).toBeGreaterThanOrEqual(1_000);
+  });
+
+  it("delivers an event to a piece an earlier arrival's handler creates, however many re-drains outlast that handler's piece start (events.md §5: a piece not yet created by an arrival still pending ahead is the run racing, not an unrunnable handler)", async () => {
+    // The live shape is a board's `addTopic` and the first comment on the
+    // topic it creates: the client's own echo hands it the new topic's stream
+    // before the serving side has run `addTopic`, and on a cold server that
+    // run waits on the board's piece start. Here the serving scheduler's
+    // piece-start seam holds the parent's start open while the drain keeps
+    // re-delivering the child's event, past the deferral budget.
+
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const compiled = await clientRuntime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: CREATE_CHILD_PATTERN }],
+    }, { space });
+    const argument = clientRuntime.getCell<{ child: unknown }>(
+      space,
+      "create-child-arg",
+      undefined,
+    );
+    const result = clientRuntime.getCell<Record<string, unknown>>(
+      space,
+      "create-child-result",
+      compiled.resultSchema,
+    );
+    await argument.sync();
+    await result.sync();
+    {
+      const seed = clientRuntime.edit();
+      argument.withTx(seed).set({ child: null });
+      expect((await seed.commit().settled).error).toBeUndefined();
+    }
+    {
+      const tx = clientRuntime.edit();
+      clientRuntime.run(tx, compiled, argument, result);
+      expect((await tx.commit().settled).error).toBeUndefined();
+    }
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+    const resolvedLinkOf = (cell: Cell<unknown>): NormalizedFullLink =>
+      resolveLink(
+        clientRuntime,
+        clientRuntime.readTx(),
+        cell.getAsNormalizedFullLink(),
+      );
+    const send = (cell: Cell<unknown>) =>
+      (cell as unknown as { send(value: unknown): unknown }).send({});
+
+    // Both events are appended before any host serves the space, so the
+    // activation's drain finds them pending together, in arrival order.
+    const createCell = result.key("create") as Cell<unknown>;
+    const createLink = resolvedLinkOf(createCell);
+    send(createCell);
+    await clientRuntime.idle();
+    const bumpCell = result.key("child").key("bump") as Cell<unknown>;
+    const bumpLink = resolvedLinkOf(bumpCell);
+    expect(bumpLink.id).not.toBe(createLink.id);
+    send(bumpCell);
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+    await awaitAdmitted(server, () => sidecarIdsIn(engine).length === 2);
+    const bumpEntry = () =>
+      sidecarIdsIn(engine)
+        .flatMap((id) =>
+          (Engine.read(engine, { id })?.value as
+            | StreamEventsDocValue
+            | undefined)?.entries ?? []
+        )
+        .find((entry) => entry?.stream?.id === bumpLink.id);
+    expect(bumpEntry()?.consequenced).toBeUndefined();
+
+    const createStarts = new ArrivalLog<string>();
+    const bumpStarts = new ArrivalLog<EnsurePieceVerdict>();
+    const createStartGate = Promise.withResolvers<void>();
+    servingLoadPieceForEvent = async (runtime, eventLink) => {
+      if (eventLink.id === createLink.id) {
+        createStarts.record(eventLink.id);
+        await createStartGate.promise;
+        return await ensurePieceRunningVerdict(runtime, eventLink);
+      }
+      const verdict = await ensurePieceRunningVerdict(runtime, eventLink);
+      if (eventLink.id === bumpLink.id) bumpStarts.record(verdict);
+      return verdict;
+    };
+    // A short flush deadline: the parent's held start keeps the scheduler
+    // busy, so each re-drain waits for the deadline to end its cycle.
+    host = newHost({ flushDeadlineMs: 100, idleParkMs: 600_000 });
+    {
+      // An authored poke activates the space, standing in for the
+      // reconnect a real restart's clients make.
+      const poke = clientRuntime.edit();
+      clientRuntime.getCell<number>(space, "create-child-activate", undefined)
+        .withTx(poke).set(1);
+      expect((await poke.commit().settled).error).toBeUndefined();
+    }
+
+    try {
+      // More failed starts of the child's piece than the deferral budget
+      // allows, or the drop that spends the budget: whichever comes first.
+      await awaitEdges(
+        [bumpStarts.edge, admittedCommits(server)],
+        () =>
+          bumpStarts.entries.length > EVENT_DEFERRAL_DROP_THRESHOLD ||
+          bumpEntry()?.consequenced === true,
+      );
+      expect(createStarts.entries).toEqual([createLink.id]);
+      for (const verdict of bumpStarts.entries) {
+        expect(verdict.started).toBe(false);
+        expect(verdict.reason).toBe("no-pattern-meta");
+      }
+      expect(bumpEntry()?.consequenced).toBeUndefined();
+      expect(host!.stats().events.arrivalHeldDeferrals)
+        .toBeGreaterThanOrEqual(EVENT_DEFERRAL_DROP_THRESHOLD);
+    } finally {
+      createStartGate.resolve();
+    }
+    await awaitAdmitted(server, () => bumpEntry()?.consequenced === true);
+    const entry = bumpEntry();
+    expect(entry?.status).toBeUndefined();
+    expect(entry?.reason).toBeUndefined();
+    const valueLink = resolvedLinkOf(
+      result.key("child").key("value") as Cell<unknown>,
+    );
+    const stored = valueLink.path.reduce<unknown>(
+      (value, key) => (value as Record<string, unknown> | undefined)?.[key],
+      Engine.read(engine, { id: valueLink.id })?.value,
+    );
+    expect(stored).toBe(1);
   });
 
   it("reactivates the space on an event-only admission RACING a park: the fire-time gate honors the undelivered-events criterion, not just live sessions", async () => {

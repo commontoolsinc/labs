@@ -1175,7 +1175,9 @@ export class SpaceServer implements TransactionSealDestination {
    * resolves within a few input-driven cycles, while a permanently
    * unstartable piece would otherwise re-drain forever (no notice, no
    * park). Cleared on activation (a fresh runtime re-tries from
-   * scratch) and on any non-deferred outcome. */
+   * scratch) and on any non-deferred outcome. A deferral reached while an
+   * earlier arrival in the space is still pending is not counted: the
+   * creation the race waits on may be that arrival's own consequence. */
   readonly #eventDeferrals = new Map<string, number>();
 
   /** Lease-local mirrors of durable OW54 processing checkpoints. A mirror is
@@ -3479,6 +3481,21 @@ export class SpaceServer implements TransactionSealDestination {
     );
   }
 
+  /**
+   * Whether the store holds a pending entry in this space that arrived before
+   * `seq`, across every stream. Always `false` for a seq-less entry, which
+   * holds no arrival position.
+   */
+  #earlierArrivalPending(seq: number | undefined): boolean {
+    if (seq === undefined) return false;
+    return Engine.selectPendingStreamEventDocs(this.#options.engine).some(
+      (doc) =>
+        doc.entries.some((pending) =>
+          typeof pending.seq === "number" && pending.seq < seq
+        ),
+    );
+  }
+
   #stageDeliveryCheckpoint(
     runtime: Runtime,
     entry: StreamEventEntry,
@@ -4489,8 +4506,18 @@ export class SpaceServer implements TransactionSealDestination {
                       this.#options.stats.events.handlerNotRunDeferrals += 1;
                       this.#options.onEventDeferred?.();
                     }
+                    // events.md §5: an entry is judged against the state
+                    // its earlier arrivals leave, and one of those may be
+                    // what creates its piece. While any is still pending,
+                    // this deferral is the run racing it and spends none of
+                    // the budget; the earliest pending entry always does.
+                    const arrivalHeld = this.#earlierArrivalPending(entry.seq);
+                    if (arrivalHeld) {
+                      this.#options.stats.events.arrivalHeldDeferrals += 1;
+                    }
                     const deferrals =
-                      (this.#eventDeferrals.get(entry.eventId) ?? 0) + 1;
+                      (this.#eventDeferrals.get(entry.eventId) ?? 0) +
+                      (arrivalHeld ? 0 : 1);
                     this.#eventDeferrals.set(entry.eventId, deferrals);
                     if (deferrals < EVENT_DEFERRAL_DROP_THRESHOLD) {
                       if (

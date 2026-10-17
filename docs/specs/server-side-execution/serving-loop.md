@@ -1806,8 +1806,8 @@ pushGrowthWakes, watchWakes, warmWakes}, settle:
 drainInFlightSkips, visibilityBarriers, visibilityRecoveries,
 visibilityDeferrals, deferredRescansArmed, deferredRescansFired,
 lt1LeftoversPurged, lt1LateSealsRefused, orphanDeliveriesRefused,
-handlerNotRunDeferrals, loadParkDeferrals, loadParkFailures,
-deliveryDeferralsActive, deliveryFailuresActive,
+handlerNotRunDeferrals, arrivalHeldDeferrals, loadParkDeferrals,
+loadParkFailures, deliveryDeferralsActive, deliveryFailuresActive,
 maxAccumulatedDeliveryFailureMs, deliveryFailureWakesArmed,
 deliveryFailureWakesFired, needsAttention: {total, byPhase},
 needsAttentionSealFailures, deliveryCheckpointWriteFailures, explicitRetries,
@@ -2019,6 +2019,11 @@ The `events` block's DISPOSITION counters:
   withdrawal or a piece-start deferral (events.md §5: every deferral
   arm carries §2's barrier); `loadParkFailures` counts only heads
   whose required load actually failed.
+- `arrivalHeldDeferrals` counts the drain deferrals that spent none of
+  the deferral budget because an earlier arrival in the space was still
+  pending (events.md §5). Growing while `processed` does not, it names
+  an earlier event that is not completing and the events held behind
+  it.
 - `deliveryDeferralsActive`, `deliveryFailuresActive`, and
   `maxAccumulatedDeliveryFailureMs` expose the current durable
   checkpoint population without treating settlement as failure.
