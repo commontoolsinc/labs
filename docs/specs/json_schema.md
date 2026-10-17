@@ -263,8 +263,11 @@ Deliberate extensions beyond the 2020-12 vocabulary:
 - `{ "type": "integer" }` accepts a `bigint` as well as a whole `number`: a
   `bigint` is an integer, and `"integer"` is a subtype of `"number"`, so a
   `number` schema accepts one too. The schema generator types a TypeScript
-  `bigint` as `integer`. A `FabricPrimitive` wrapping one, such as a
-  `FabricEpochNsec`, is its own type below, not an integer.
+  `bigint` as `integer`. An `enum` or `const` member is compared by exact
+  value, so a number member does not match a bigint, and a bigint literal
+  type, which the generator writes as a number member, admits no stored
+  value. A `FabricPrimitive` wrapping one, such as a `FabricEpochNsec`, is its
+  own type below, not an integer.
 - `FabricPrimitive` types — `"FabricBytes"`, `"FabricDurationDay"`,
   `"FabricDurationNsec"`, `"FabricEpochDay"`, `"FabricEpochNsec"`,
   `"FabricHash"`, `"FabricKeyPair"`, `"FabricRegExp"`, `"FabricUnavailable"` —
