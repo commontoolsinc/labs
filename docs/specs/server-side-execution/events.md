@@ -756,10 +756,12 @@ loop's duty).
   produced: the run raced the earlier event, and this predicate does
   not apply. So a deferral spends the deferral budget only when no
   entry that arrived earlier in the same space is still pending. Held
-  behind one, the entry re-drains as any deferral does and keeps the
-  budget it had. The earliest pending entry always spends it, so an
-  event addressing a piece that nothing creates still hardens into this
-  drop once the events ahead of it have their consequences.
+  behind one, the entry keeps the budget it had and arms no backstop:
+  it is re-drained by input, or by the wave that commits the earlier
+  entry's consequence while it is still pending. The earliest pending
+  entry always spends the budget, so an event addressing a piece that
+  nothing creates still hardens into this drop once the events ahead
+  of it have their consequences.
 
   With server execution off, a CLIENT event — one with no served
   carriage, so no durable entry for a later pass to re-drain, and no

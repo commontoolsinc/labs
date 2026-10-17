@@ -3556,14 +3556,16 @@ describe("Phase 3 events-down (serving side)", () => {
     expect(elapsed).toBeGreaterThanOrEqual(1_000);
   });
 
-  it("delivers an event to a piece an earlier arrival's handler creates, however many re-drains outlast that handler's piece start (events.md §5: a piece not yet created by an arrival still pending ahead is the run racing, not an unrunnable handler)", async () => {
-    // The live shape is a board's `addTopic` and the first comment on the
-    // topic it creates: the client's own echo hands it the new topic's stream
-    // before the serving side has run `addTopic`, and on a cold server that
-    // run waits on the board's piece start. Here the serving scheduler's
-    // piece-start seam holds the parent's start open while the drain keeps
-    // re-delivering the child's event, past the deferral budget.
-
+  /**
+   * Stands up `CREATE_CHILD_PATTERN` on a fresh client and appends its
+   * `create` event while no host serves the space, so that a later append is
+   * drained behind it. Every serving runtime then holds the parent's piece
+   * start open until `releaseCreate()`, and records the verdict of every
+   * other piece start by the stream it was for. `bringUp()` starts the host
+   * and activates the space. `kickUntil()` commits authored writes, each one
+   * input that re-drains a deferred event, until `done()` holds.
+   */
+  const standUpHeldCreate = async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
     const compiled = await clientRuntime.patternManager.compilePattern({
@@ -3602,32 +3604,26 @@ describe("Phase 3 events-down (serving side)", () => {
       );
     const send = (cell: Cell<unknown>) =>
       (cell as unknown as { send(value: unknown): unknown }).send({});
-
-    // Both events are appended before any host serves the space, so the
-    // activation's drain finds them pending together, in arrival order.
-    const createCell = result.key("create") as Cell<unknown>;
-    const createLink = resolvedLinkOf(createCell);
-    send(createCell);
-    await clientRuntime.idle();
-    const bumpCell = result.key("child").key("bump") as Cell<unknown>;
-    const bumpLink = resolvedLinkOf(bumpCell);
-    expect(bumpLink.id).not.toBe(createLink.id);
-    send(bumpCell);
-    await clientRuntime.idle();
-    await clientRuntime.storageManager.synced();
-    await awaitAdmitted(server, () => sidecarIdsIn(engine).length === 2);
-    const bumpEntry = () =>
+    const entryFor = (streamId: string) =>
       sidecarIdsIn(engine)
         .flatMap((id) =>
           (Engine.read(engine, { id })?.value as
             | StreamEventsDocValue
             | undefined)?.entries ?? []
         )
-        .find((entry) => entry?.stream?.id === bumpLink.id);
-    expect(bumpEntry()?.consequenced).toBeUndefined();
+        .find((entry) => entry?.stream?.id === streamId);
+
+    const createCell = result.key("create") as Cell<unknown>;
+    const createLink = resolvedLinkOf(createCell);
+    send(createCell);
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+    await awaitAdmitted(server, () => entryFor(createLink.id) !== undefined);
 
     const createStarts = new ArrivalLog<string>();
-    const bumpStarts = new ArrivalLog<EnsurePieceVerdict>();
+    const starts = new ArrivalLog<
+      { id: string; verdict: EnsurePieceVerdict }
+    >();
     const createStartGate = Promise.withResolvers<void>();
     servingLoadPieceForEvent = async (runtime, eventLink) => {
       if (eventLink.id === createLink.id) {
@@ -3636,53 +3632,151 @@ describe("Phase 3 events-down (serving side)", () => {
         return await ensurePieceRunningVerdict(runtime, eventLink);
       }
       const verdict = await ensurePieceRunningVerdict(runtime, eventLink);
-      if (eventLink.id === bumpLink.id) bumpStarts.record(verdict);
+      starts.record({ id: eventLink.id, verdict });
       return verdict;
     };
-    // A short flush deadline: the parent's held start keeps the scheduler
-    // busy, so each re-drain waits for the deadline to end its cycle.
-    host = newHost({ flushDeadlineMs: 100, idleParkMs: 600_000 });
-    {
-      // An authored poke activates the space, standing in for the
-      // reconnect a real restart's clients make.
+    const startsOf = (streamId: string) =>
+      starts.entries.filter((start) => start.id === streamId);
+
+    const bringUp = async () => {
+      // A short flush deadline: the parent's held start keeps the scheduler
+      // busy, so each cycle ends at the deadline.
+      host = newHost({ flushDeadlineMs: 100, idleParkMs: 600_000 });
+      // An authored poke activates the space, standing in for the reconnect
+      // a real restart's clients make.
       const poke = clientRuntime.edit();
       clientRuntime.getCell<number>(space, "create-child-activate", undefined)
         .withTx(poke).set(1);
       expect((await poke.commit().settled).error).toBeUndefined();
-    }
+    };
 
+    const kickUntil = async (done: () => boolean) => {
+      while (!done()) {
+        const seen = starts.entries.length;
+        kicks += 1;
+        const kick = clientRuntime.edit();
+        clientRuntime.getCell<{ n: number }>(
+          space,
+          "create-child-kick",
+          undefined,
+        ).withTx(kick).set({ n: kicks });
+        expect((await kick.commit().settled).error).toBeUndefined();
+        await awaitEdges(
+          [starts.edge, admittedCommits(server)],
+          () => starts.entries.length > seen || done(),
+        );
+      }
+    };
+
+    return {
+      engine,
+      result,
+      createLink,
+      createStarts,
+      resolvedLinkOf,
+      send,
+      entryFor,
+      startsOf,
+      bringUp,
+      kickUntil,
+      releaseCreate: () => createStartGate.resolve(),
+    };
+  };
+
+  it("delivers an event to a piece an earlier arrival's handler creates, re-drained by that arrival's consequence however many re-drains came before it (events.md §5: a piece not yet created by an arrival still pending ahead is the run racing, not an unrunnable handler)", async () => {
+    // The live shape is a board's `addTopic` and the first comment on the
+    // topic it creates: the client's own echo hands it the new topic's stream
+    // before the serving side has run `addTopic`, and on a cold server that
+    // run waits on the board's piece start. Input keeps re-draining the
+    // child's event past the deferral budget while the parent's start is
+    // held; once it is released, nothing else arrives.
+
+    const held = await standUpHeldCreate();
+    const bumpCell = held.result.key("child").key("bump") as Cell<unknown>;
+    const bumpLink = held.resolvedLinkOf(bumpCell);
+    expect(bumpLink.id).not.toBe(held.createLink.id);
+    held.send(bumpCell);
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+    await awaitAdmitted(
+      server,
+      () => held.entryFor(bumpLink.id) !== undefined,
+    );
+    const bumpEntry = () => held.entryFor(bumpLink.id);
+
+    await held.bringUp();
     try {
-      // More failed starts of the child's piece than the deferral budget
-      // allows, or the drop that spends the budget: whichever comes first.
-      await awaitEdges(
-        [bumpStarts.edge, admittedCommits(server)],
-        () =>
-          bumpStarts.entries.length > EVENT_DEFERRAL_DROP_THRESHOLD ||
-          bumpEntry()?.consequenced === true,
+      await held.kickUntil(() =>
+        held.startsOf(bumpLink.id).length > EVENT_DEFERRAL_DROP_THRESHOLD ||
+        bumpEntry()?.consequenced === true
       );
-      expect(createStarts.entries).toEqual([createLink.id]);
-      for (const verdict of bumpStarts.entries) {
+      expect(held.createStarts.entries).toEqual([held.createLink.id]);
+      for (const { verdict } of held.startsOf(bumpLink.id)) {
         expect(verdict.started).toBe(false);
         expect(verdict.reason).toBe("no-pattern-meta");
       }
       expect(bumpEntry()?.consequenced).toBeUndefined();
       expect(host!.stats().events.arrivalHeldDeferrals)
-        .toBeGreaterThanOrEqual(EVENT_DEFERRAL_DROP_THRESHOLD);
+        .toBeGreaterThan(EVENT_DEFERRAL_DROP_THRESHOLD);
     } finally {
-      createStartGate.resolve();
+      held.releaseCreate();
     }
+
     await awaitAdmitted(server, () => bumpEntry()?.consequenced === true);
     const entry = bumpEntry();
     expect(entry?.status).toBeUndefined();
     expect(entry?.reason).toBeUndefined();
-    const valueLink = resolvedLinkOf(
-      result.key("child").key("value") as Cell<unknown>,
+    const valueLink = held.resolvedLinkOf(
+      held.result.key("child").key("value") as Cell<unknown>,
     );
     const stored = valueLink.path.reduce<unknown>(
       (value, key) => (value as Record<string, unknown> | undefined)?.[key],
-      Engine.read(engine, { id: valueLink.id })?.value,
+      Engine.read(held.engine, { id: valueLink.id })?.value,
     );
     expect(stored).toBe(1);
+    // No backstop was ever armed, so what re-drained the child's event after
+    // the release was the parent's committed consequence.
+    expect(host!.stats().events.deferredRescansArmed).toBe(0);
+  });
+
+  it("drops an event whose piece nothing creates once the earlier arrival it was held behind has its consequence (events.md §5: the earliest pending entry spends the deferral budget)", async () => {
+    const held = await standUpHeldCreate();
+    const neverAPieceStream = { id: "of:no-such-child", path: ["stream"] };
+    const delivered = await server.commitDelegatedAppend({
+      targetSpace: space,
+      targetStream: streamEntriesDocId(neverAPieceStream),
+      targetStreamLink: neverAPieceStream,
+      eventId: "evt-held-unrunnable",
+      payload: {},
+      actingPrincipal: aliceSigner.did(),
+      actingSession: "held-drop-session",
+      capabilityRef: "cap-held-drop",
+      sessionId: `service:${space}`,
+      localSeq: 990_300,
+    });
+    expect(delivered.deduped).toBe(false);
+    const neverEntry = () => held.entryFor(neverAPieceStream.id);
+    const createEntry = () => held.entryFor(held.createLink.id);
+    expect(neverEntry()?.seq).toBeGreaterThan(createEntry()?.seq ?? 0);
+
+    await held.bringUp();
+    try {
+      await held.kickUntil(() =>
+        held.startsOf(neverAPieceStream.id).length >
+          EVENT_DEFERRAL_DROP_THRESHOLD ||
+        neverEntry()?.consequenced === true
+      );
+      expect(neverEntry()?.consequenced).toBeUndefined();
+    } finally {
+      held.releaseCreate();
+    }
+
+    await awaitAdmitted(server, () => neverEntry()?.consequenced === true);
+    expect(createEntry()?.consequenced).toBe(true);
+    expect(createEntry()?.status).toBeUndefined();
+    const entry = neverEntry();
+    expect(entry?.status).toBe("dropped");
+    expect(entry?.reason).toContain("no runnable handler");
   });
 
   it("reactivates the space on an event-only admission RACING a park: the fire-time gate honors the undelivered-events criterion, not just live sessions", async () => {

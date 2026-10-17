@@ -4559,10 +4559,15 @@ export class SpaceServer implements TransactionSealDestination {
                       // re-drain waits for input or the backstop tick
                       // (the cold-view creation race — OW19's
                       // conflation caution), NEVER a synchronous spin.
-                      // The copy left no mark: release the guard so the
-                      // rescan can queue it again.
+                      // A held entry arms no backstop: what it waits on
+                      // is the earlier entry, whose committed consequence
+                      // re-arms the scan at its wave outcome while this
+                      // one is still pending, and whose own deferral arms
+                      // the backstop it shares. The copy left no mark:
+                      // release the guard so the rescan can queue it
+                      // again.
                       this.#drainInFlight.delete(eventId);
-                      this.#armDeferredRescan();
+                      if (!arrivalHeld) this.#armDeferredRescan();
                       return;
                     }
                     // The race window is long past — events.md §5's
