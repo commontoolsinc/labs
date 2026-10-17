@@ -71,12 +71,14 @@ row writes nothing of its own but the picker.
 the message, the room's messages, the viewer's profile, the composer, the
 picker and the manager stream. A handler re-runs only on a stale-read
 rejection, so the binding is what the instance stores: a stream document and
-an argument document per handler per row, pre-synced as owned cells. Every
-one of these handlers already takes its message from the event before the
-binding, as `(event?.message ?? message)?.resolveAsCell()` in
-`commitSendReaction`, and guards it with `isInRoomOf(room, target)`, because
+an argument document per handler per row, pre-synced as owned cells. All
+but one of these handlers already take their message from the event before
+the binding, as `(event?.message ?? message)?.resolveAsCell()` in
+`commitSendReaction`, and guard it with `isInRoomOf(room, target)`, because
 the room's tests send `{ message }` to room-level streams. `RoomStreamEvent`
-declares the field.
+declares the field. The one is `commitReply`, which hands its bound message
+to `sendInto()` and reads nothing of the event's; `commitSend`, bound once at
+the room already, reads the same reply from `event.replyTo`.
 
 **Its labels.** Each per-row derivation is a document whose label is minted
 at commit from what the run read: the message's document and, for `rights`,
@@ -114,27 +116,41 @@ The row's derivations fall into three groups, and each group has a home at
 the room, keyed by the message's view key the way `places` already is.
 
 **Shared facts, one record for the room.** `isDeletedNow`, `isEdited`,
-`quote`, `replies`, `threadLabel` and `threadLinkDisplay` read the message
-alone, or the message and `places`. They join the record `messageFacts()`
-already derives in one walk of the messages (`facts.places` is this shape
-today), as `facts.rows: Record<key, RowFacts>`. The view binds
+`replies`, `threadLabel` and `threadLinkDisplay` read the message alone, or
+the message and `places`. They join the record `messageFacts()` already
+derives in one walk of the messages (`facts.places` is this shape today), as
+`facts.rows: Record<key, RowFacts>`. The view binds
 `facts.rows.key(key).key("threadLinkDisplay")` where the row today bound its
-own computed. The body text stays bound to `message.key("body")` directly,
-under `cf-cfc-authorship` as now, so the authorship it shows keeps the
-message's own integrity rather than a derived record's; only the deleted
-message's stand-in text comes from the record.
+own computed. The record carries booleans and display strings and no
+message's text. The body stays bound to `message.key("body")` directly, under
+`cf-cfc-authorship` as now, so the authorship it shows keeps the message's
+own integrity rather than a derived record's. The quote is another message's
+body, so it binds through the reply link,
+`message.key("replyTo").key("message").key("body")`, which the sink follows
+to the replied-to message and reads under that message's own label; what the
+record carries for it is the quote's display, shown for a reply the main
+conversation shows and hidden otherwise. The two stand-in texts, for a
+deleted message and for a deleted message quoted, are static strings each
+shown by a display prop from the record.
 
 **Viewer facts, one record per user and one per session.** `rights` and the
 three displays it decides become `rights: PerUser<Record<key, RowRights>>`,
 computed once at the room from the viewer's profile and each message's
 author. `isEditing` and `editorDisplay` become
 `editorDisplay: PerSession<Record<key, ChatDisplay>>`, one run when
-`composer.editing` changes instead of thirty. `tallies`, which carries the
-viewer's own reaction cell and each reactor's cell, becomes
-`tallies: PerUser<Record<key, ReactionTally[]>>`; the view renders
-`tallies.key(key)` as cell-valued children, which the reconciler sinks and
-re-renders on change (`reconciler.ts`, the `isCell(children)` arm of its
-children update).
+`composer.editing` changes instead of thirty. `tallies` is the one derivation
+whose result is rendered as a list of its own, each tally a button, a remove
+control and a card of reactors, so a record of tally data is not enough: the
+reconciler renders view nodes, not `ReactionTally[]`. It becomes
+`tallies: PerUser<Record<key, VNode[]>>`, one per-user computed that tallies
+every message's reactions and builds each tally's controls as view nodes,
+their event props the shared reaction streams with `{ message, emoji }` and
+`{ message, reaction }` as arguments, their reactor badges bound to the
+reactors' profile cells. The view binds `tallies.key(key)` as the reactions
+element's children, which the reconciler sinks and re-renders on change
+(`reconciler.ts`, the `isCell(children)` arm of its children update). The
+computed reads every reaction in the room, which is the trade the next
+section prices.
 
 **The picker, one writable per session.**
 `pickerOpen: Writable.perSession<Record<key, boolean>>({})`; the view binds
@@ -144,11 +160,14 @@ simpler, from the component: `cf-hover-reveal` already takes the open state
 as a prop, and the label can be two static spans shown and hidden by it.
 
 **Handlers, one binding each at the room.** The eleven handlers and five
-actions become sixteen room-level bindings that take the message from the
-event, which the handlers already do. The actions become handlers of
-`{ message }`. The two per-tally handlers take `{ message, emoji }` and
-`{ message, reaction }` the same way. This is the one place the view needs
-something the runtime does not have today, covered below.
+actions become room-level bindings that take the message from the event,
+which all but `commitReply` already do. The three reply controls send the
+room's `commitSend`, with `replyTo: { message, shownIn }` as their arguments,
+which it reads from the event today; `commitReply` and its three bindings go.
+The actions become handlers of `{ message }`. The two per-tally handlers take
+`{ message, emoji }` and `{ message, reaction }` the same way. Thirteen
+bindings in all. This is the one place the view needs something the runtime
+does not have today, covered below.
 
 What remains per row is the view: about twenty-five bound props, each a sink.
 That is the 24% the sinks cost today, and this design does not touch it.
@@ -212,15 +231,15 @@ membership of the exact object in a weak set
 only from the object handed to it to the converted event it delivers. An
 event built as `{ …event, …with }` is a new object the renderer never
 marked, so every handler gated on a trusted gesture, FabriChat's edits,
-reactions and deletions among them, would refuse it. And in that spelling an argument named
-`provenance` would replace the renderer's. So the merge is defined the other
-way round: the registered handler sets each argument on the event object the
-renderer marked, and never over a field the event already carries; `h()`
-refuses at build time an argument whose name is one the renderer's event
-reserves (`provenance`, `detail`, `target`, `type` and the rest of
-`SerializedEvent`), so the collision is a compile-time error at the view and
-not a dispatch-time choice. The reconciler is a render boundary the CFC
-correspondence procedure governs
+reactions and deletions among them, would refuse it. And in that spelling an
+argument named `provenance` would replace the renderer's. So the merge is
+defined the other way round: the registered handler sets each argument on the
+event object the renderer marked, and never over a field the event already
+carries; `h()` refuses at build time an argument whose name is one the
+renderer's event reserves (`provenance`, `detail`, `target`, `type` and the
+rest of `SerializedEvent`), so the collision is a compile-time error at the
+view and not a dispatch-time choice. The reconciler is a render boundary the
+CFC correspondence procedure governs
 (`../development/cfc-spec-correspondence.md`), so the change is classified
 there first; it reads as host arrangement, since it moves no decision, but
 the classification is the procedure's to make. The test is the gated path
@@ -359,7 +378,7 @@ Build it, as A, in this order.
    above, that a trusted-gesture handler admits an event the arguments were
    added to.
 2. The room: `facts.rows`, the `rights`, `editorDisplay` and `tallies`
-   records, the keyed `pickerOpen`, sixteen room-level handler bindings, and
+   records, the keyed `pickerOpen`, thirteen room-level handler bindings, and
    the list computed for the main conversation and the thread. The row
    pattern and its module go. The eighteen tests move to room streams.
 3. Measure on the cold-load rig in the investigation notes, counts first:
