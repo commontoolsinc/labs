@@ -1957,6 +1957,8 @@ describe("stage D seal-into-wave", () => {
     const sealConsequence = async (
       wave: WaveAccumulator,
       docs: Awaited<ReturnType<typeof seedDocs>>,
+      writeDraft: (tx: IExtendedStorageTransaction) => void = (tx) =>
+        docs.draft.withTx(tx).set({ name: "Ada", bio: "Countess" }),
     ) => {
       runtime.installSealDestination(wave);
       const tx = runtime.edit();
@@ -1971,7 +1973,7 @@ describe("stage D seal-into-wave", () => {
           seq: docs.eventSeq,
         },
       });
-      docs.draft.withTx(tx).set({ name: "Ada", bio: "Countess" });
+      writeDraft(tx);
       docs.editing.withTx(tx).set(true);
       expect((await tx.commit().settled).error).toBeUndefined();
       runtime.clearSealDestination();
@@ -2057,13 +2059,63 @@ describe("stage D seal-into-wave", () => {
       expect(outcome.committedEventIds).toEqual(["e-edit"]);
     });
 
-    it("commits the consequence over a doc the firing session overwrote only part of", async () => {
+    it("drops only the patches of the consequence the firing session overwrote, and commits its other patches to the doc", async () => {
       const lease = liveLease();
       const docs = await seedDocs();
       overwriteDraft(docs, firing.session, "/value/name", "Grace");
 
       const wave = newWave({ lease });
       await sealConsequence(wave, docs);
+      const outcome = await wave.commitWave(newSink());
+      await wave.settled();
+
+      expect(stored(docs.draft)).toEqual({
+        value: { name: "Grace", bio: "Countess" },
+      });
+      expect(stored(docs.editing)).toEqual({ value: true });
+      expect(outcome.dispositions[0]).toEqual({
+        kind: "partially-dropped",
+        droppedOps: 1,
+      });
+      expect(outcome.committedEventIds).toEqual(["e-edit"]);
+    });
+
+    it("rebases the patches the firing session did not overwrite when its write lands mid-wave, rather than requeueing the event", async () => {
+      const lease = liveLease();
+      const docs = await seedDocs();
+
+      const wave = newWave({ lease });
+      await sealConsequence(wave, docs);
+      overwriteDraft(docs, firing.session, "/value/name", "Grace");
+      const outcome = await wave.commitWave(newSink());
+      await wave.settled();
+
+      expect(stored(docs.draft)).toEqual({
+        value: { name: "Grace", bio: "Countess" },
+      });
+      expect(stored(docs.editing)).toEqual({ value: true });
+      expect(outcome.committedEventIds).toEqual(["e-edit"]);
+      expect(outcome.requeuedEventIds).toEqual([]);
+    });
+
+    it("commits a consequence write to a path above the one the firing session overwrote", async () => {
+      const lease = liveLease();
+      const docs = await seedDocs();
+      overwriteDraft(docs, firing.session, "/value/name", "Grace");
+
+      const wave = newWave({ lease });
+      // A raw write of the whole value, which commits as one write at
+      // `/value` rather than as a patch per field.
+      await sealConsequence(wave, docs, (tx) =>
+        tx.writeOrThrow(
+          {
+            space,
+            id: docs.draft.getAsNormalizedFullLink().id,
+            type: "application/json",
+            path: ["value"],
+          },
+          { name: "Ada", bio: "Countess" },
+        ));
       const outcome = await wave.commitWave(newSink());
       await wave.settled();
 

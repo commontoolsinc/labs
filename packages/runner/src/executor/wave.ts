@@ -35,6 +35,7 @@ import {
   type ConfirmedRead,
   type DerivedWriteAnnotation,
   type Operation,
+  type PatchOp,
   resolveScopeKey,
   type ScopeKey,
   type ScopeKeyIdentity,
@@ -801,10 +802,12 @@ interface SealedSpaceContribution {
 /** How the wave commit step disposed of one contribution. */
 export type ContributionDisposition =
   | { kind: "committed" }
-  /** Some ops dropped as superseded — a pure derivation's, or an event
+  /** Some writes dropped as superseded — a pure derivation's, or an event
    * consequence's that the firing session overwrote; survivors rode the
-   * wave commit. The sealed commit's local overlay rolls back whole and
-   * reconverges from the wave commit arriving as confirmed state. */
+   * wave commit. `droppedOps` counts each dropped op, and each dropped
+   * patch of an op whose other patches committed. The sealed commit's
+   * local overlay rolls back whole and reconverges from the wave commit
+   * arriving as confirmed state. */
   | { kind: "partially-dropped"; droppedOps: number }
   /** All ops withdrawn: a fully superseded derivation or event
    * consequence, or a derivation that read a withdrawn contribution's
@@ -2113,6 +2116,12 @@ export class WaveAccumulator
     /** per contribution: home doc-instance keys whose ops are dropped */
     const droppedDocs: Set<string>[] = this.#contributions.map(() => new Set());
 
+    /** per contribution: home doc-instance key → the patches dropped from
+     * that doc's ops, where the event's firing session overwrote some of the
+     * handler's patches on the doc and not the rest (§3d). */
+    const droppedPatches: Map<string, ReadonlySet<PatchOp>>[] = this
+      .#contributions.map(() => new Map());
+
     /** per contribution: conflicted docs whose non-re-derivable ops
      * rebase — the disposition is PER (contribution, doc): one handler's
      * commuting patches never absolve another contribution's writes to
@@ -2213,27 +2222,31 @@ export class WaveAccumulator
       return observed ? head : undefined;
     };
 
-    /** Whether every write an event-handler contribution holds on `doc` is
+    /** The writes an event-handler contribution holds on `doc` that are
      * SUPERSEDED: the session that fired the event committed an authored
-     * write to the doc after the event's durable entry, overwriting each path
-     * the handler wrote there (§3d). That session fired the event, rendered
-     * its speculative echo, and wrote over the echo, so its write is the
-     * later one in causal order however late the consequence lands — the
-     * handler ran after it (a requeue, a deferred drain), or the write landed
-     * mid-wave. Dropping the doc's writes from the consequence leaves the
-     * store as applying them at the event's position and the session's write
-     * on top would, and nothing could have read the dropped values in
-     * between, since they commit after the write that overwrites them.
+     * write to the doc after the event's durable entry, overwriting the path
+     * the handler wrote (§3d). Returns `"doc"` when that holds for every
+     * write on the doc, the superseded patches when it holds for some, and
+     * `undefined` when it holds for none.
+     *
+     * That session fired the event, rendered its speculative echo, and wrote
+     * over the echo, so its write is the later one in causal order however
+     * late the consequence lands — the handler ran after it (a requeue, a
+     * deferred drain), or the write landed mid-wave. Dropping the superseded
+     * writes leaves the store as applying them at the event's position and
+     * the session's write on top would, and nothing could have read the
+     * dropped values in between, since they commit after the writes that
+     * overwrite them.
      *
      * Only the firing session's writes supersede: another session's write is
      * concurrent with the event, not after it, and keeps commit order. A
-     * handler write the session's writes cover only in part keeps its rebase
-     * or requeue, as does an in-process copy, which has no durable entry to
-     * order against. */
+     * handler write to a path above the one the session overwrote keeps its
+     * rebase or requeue, as does an in-process copy, which has no durable
+     * entry to order against. */
     const supersededByFiringSession = async (
       contribution: WaveContribution,
       doc: { id: string; scope?: CellScope; scopeKey: string },
-    ): Promise<boolean> => {
+    ): Promise<"doc" | Set<PatchOp> | undefined> => {
       const { context } = contribution;
       const session = context.acting?.session;
       if (
@@ -2242,20 +2255,23 @@ export class WaveAccumulator
         session === undefined || session === "server" ||
         sink.sessionOverwritePathsSince === undefined
       ) {
-        return false;
+        return undefined;
       }
       const home = this.#homeSealed(contribution);
-      if (home === undefined) return false;
+      if (home === undefined) return undefined;
       const overwritten = await sink.sessionOverwritePathsSince(
         this.#space,
         doc,
         context.streamEntry.seq,
         { principal: context.acting.user, sessionId: session },
       );
-      if (overwritten.length === 0) return false;
-      const covered = (path: readonly string[]): boolean =>
-        overwritten.some((prefix) => isPrefixPath(prefix, path));
-      let wrote = false;
+      if (overwritten.length === 0) return undefined;
+      const covered = (path: string): boolean => {
+        const parsed = parsePointer(path);
+        return overwritten.some((prefix) => isPrefixPath(prefix, parsed));
+      };
+      const patches = new Set<PatchOp>();
+      let whole = true;
       for (const operation of home.sealed.commit.operations) {
         if (operation.op === "sqlite") continue;
         if (
@@ -2264,21 +2280,26 @@ export class WaveAccumulator
         ) {
           continue;
         }
-        wrote = true;
-        if (operation.op === "set" || operation.op === "delete") {
-          if (!covered([])) return false;
-        } else if (operation.op === "patch") {
+        if (operation.op === "patch") {
           for (const patch of operation.patches) {
-            if (!covered(parsePointer(patch.path))) return false;
-            if (patch.op === "move" && !covered(parsePointer(patch.from))) {
-              return false;
+            if (
+              covered(patch.path) &&
+              (patch.op !== "move" || covered(patch.from))
+            ) {
+              patches.add(patch);
+            } else {
+              whole = false;
             }
           }
-        } else {
-          return false;
+        } else if (
+          (operation.op !== "set" && operation.op !== "delete") ||
+          !covered("")
+        ) {
+          whole = false;
         }
       }
-      return wrote;
+      if (whole) return "doc";
+      return patches.size === 0 ? undefined : patches;
     };
 
     const resolveConflicts = async (): Promise<void> => {
@@ -2297,12 +2318,20 @@ export class WaveAccumulator
           ) {
             continue;
           }
-          if (await supersededByFiringSession(contribution, doc)) {
-            // The firing session wrote over this consequence after the
-            // event: drop it, and let the withdrawal closure below fold in
-            // whatever read it.
+          // The firing session wrote over this consequence after the event:
+          // drop what it overwrote, and let the withdrawal closure below
+          // fold in whatever read it. What survives on the doc goes through
+          // the conflict check like any other write.
+          const superseded = await supersededByFiringSession(
+            contribution,
+            doc,
+          );
+          if (superseded === "doc") {
             droppedDocs[contribution.index].add(key);
             continue;
+          }
+          if (superseded !== undefined) {
+            droppedPatches[contribution.index].set(key, superseded);
           }
           if (!await conflictsFor(contribution, key, doc)) continue;
           const observed = observedOwnCommit(key, contribution);
@@ -2337,7 +2366,14 @@ export class WaveAccumulator
               doc,
               this.#basisSeq,
             );
-            if (this.#rebases(contribution, doc, concurrent)) {
+            if (
+              this.#rebases(
+                contribution,
+                doc,
+                concurrent,
+                droppedPatches[contribution.index].get(key),
+              )
+            ) {
               rebasedDocs[contribution.index].add(key);
               rebasedHeads.set(key, heads.get(key) ?? 0);
             } else if (contribution.context.kind === "event-handler") {
@@ -2359,16 +2395,18 @@ export class WaveAccumulator
       // that READ a withdrawn sealed write — whether its owner withdrew
       // whole (requeue, dependency drop) or exactly that doc's write was
       // dropped as superseded. A write derived from withdrawn state must
-      // not commit. The per-doc droppedDocs clause is scoped to the HOME
-      // space: superseded drops are only ever resolved for home docs,
-      // and doc-instance keys carry no space component.
+      // not commit. The per-doc droppedDocs and droppedPatches clauses are
+      // scoped to the HOME space: superseded drops are only ever resolved
+      // for home docs, and doc-instance keys carry no space component.
       const readSawWithdrawnWrite = (
         ownerIndex: number,
         readDocKey: string,
         readSpace: MemorySpace,
       ): boolean =>
         requeued.has(ownerIndex) || droppedWhole.has(ownerIndex) ||
-        (readSpace === this.#space && droppedDocs[ownerIndex].has(readDocKey));
+        (readSpace === this.#space &&
+          (droppedDocs[ownerIndex].has(readDocKey) ||
+            droppedPatches[ownerIndex].has(readDocKey)));
       // Sealed writers per `${space}\0${docInstanceKey}` — the doc-identity
       // index the read-only-space closure folds through (a read handed
       // over by sealSpaceReads carries no layer provenance, so the fold
@@ -2690,6 +2728,7 @@ export class WaveAccumulator
         requeued,
         droppedWhole,
         droppedDocs,
+        droppedPatches,
         rebasedHeads,
       );
 
@@ -2711,6 +2750,7 @@ export class WaveAccumulator
           requeued,
           droppedWhole,
           droppedDocs,
+          droppedPatches,
           homeWrites,
           0,
           foreignSeqs,
@@ -2729,6 +2769,7 @@ export class WaveAccumulator
           requeued,
           droppedWhole,
           droppedDocs,
+          droppedPatches,
           homeWrites,
           result.ok.seq,
           foreignSeqs,
@@ -3076,11 +3117,13 @@ export class WaveAccumulator
   /** Field-level merge check (§3d): every op this contribution holds on
    * the conflicted doc must be a patch whose value paths are disjoint
    * from the concurrent commits' written paths. A whole-doc set or delete
-   * never commutes; overlapping paths are a semantic conflict. */
+   * never commutes; overlapping paths are a semantic conflict. A patch in
+   * `dropped` leaves the commit, and so is not judged. */
   #rebases(
     contribution: WaveContribution,
     doc: { id: string; scope?: CellScope; scopeKey: string },
     concurrentPaths: ReadonlyArray<readonly string[]>,
+    dropped?: ReadonlySet<PatchOp>,
   ): boolean {
     const home = this.#homeSealed(contribution);
     if (home === undefined) return true;
@@ -3095,6 +3138,7 @@ export class WaveAccumulator
       }
       if (operation.op !== "patch") return false;
       for (const patch of operation.patches) {
+        if (dropped?.has(patch)) continue;
         const patchPath = parsePointer(patch.path);
         for (const concurrent of concurrentPaths) {
           if (!pathsOverlap(patchPath, concurrent)) continue;
@@ -3218,6 +3262,9 @@ export class WaveAccumulator
     requeued: ReadonlySet<number>,
     droppedWhole: ReadonlySet<number>,
     droppedDocs: ReadonlyArray<ReadonlySet<string>>,
+    droppedPatches: ReadonlyArray<
+      ReadonlyMap<string, ReadonlySet<PatchOp>>
+    >,
     rebasedHeads: ReadonlyMap<string, number>,
   ): WaveSpaceCommit {
     const operations: Operation[] = [];
@@ -3261,13 +3308,22 @@ export class WaveAccumulator
       }
       const home = this.#homeSealed(contribution);
       if (home === undefined) continue;
-      for (const operation of home.sealed.commit.operations) {
+      for (const sealedOperation of home.sealed.commit.operations) {
+        let operation = sealedOperation;
         if (operation.op !== "sqlite") {
           const key = docInstanceKey(
             operation.id,
             this.#scopeKeyFor(operation.scope, context),
           );
           if (droppedDocs[contribution.index].has(key)) continue;
+          const dropped = droppedPatches[contribution.index].get(key);
+          if (dropped !== undefined && operation.op === "patch") {
+            const patches = operation.patches.filter((patch) =>
+              !dropped.has(patch)
+            );
+            if (patches.length === 0) continue;
+            operation = { ...operation, patches };
+          }
         }
         const opIndex = operations.length;
         operations.push(operation);
@@ -3720,6 +3776,9 @@ export class WaveAccumulator
     requeued: ReadonlySet<number>,
     droppedWhole: ReadonlySet<number>,
     droppedDocs: ReadonlyArray<ReadonlySet<string>>,
+    droppedPatches: ReadonlyArray<
+      ReadonlyMap<string, ReadonlySet<PatchOp>>
+    >,
     homeWrites: ReadonlyArray<
       ReadonlyMap<string, { id: string; scope?: CellScope; scopeKey: string }>
     >,
@@ -3770,13 +3829,16 @@ export class WaveAccumulator
         this.#withdraw(contribution, message, "contribution-dropped");
         continue;
       }
-      if (droppedDocs[idx].size > 0) {
+      if (droppedDocs[idx].size > 0 || droppedPatches[idx].size > 0) {
         let droppedOps = 0;
         for (const key of droppedDocs[idx]) {
           const doc = homeWrites[idx].get(key);
           if (doc !== undefined) {
             droppedOps += this.#homeOpCountFor(contribution, doc);
           }
+        }
+        for (const [key, patches] of droppedPatches[idx]) {
+          if (!droppedDocs[idx].has(key)) droppedOps += patches.size;
         }
         const allDropped = droppedDocs[idx].size === homeWrites[idx].size &&
           contribution.spaces.length === 1;
