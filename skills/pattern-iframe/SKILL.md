@@ -39,11 +39,12 @@ Keep the authored surface small:
   React and the guest bridge.
 - `main.tsx` is generated glue. Do not hand-edit it.
 - A contract that declares `streams` makes each one a required input of the
-  wrapper, so generate the wrapper to `frame.tsx` and write `main.tsx` by hand
-  to declare the verbs and pass them in. When the pattern exposes an action as a
-  verb, prefer having the guest send that verb an event over making the same
-  change through its own cell writes. The general guide's "Optional streams"
-  section covers this, including LLM built-ins.
+  wrapper, so pass `--out .../frame.tsx` to the command below instead, and write
+  `main.tsx` by hand to declare the verbs and pass them in; `cf check` on
+  `main.tsx` then checks both. When the pattern exposes an action as a verb,
+  prefer having the guest send that verb an event over making the same change
+  through its own cell writes. The general guide's "Optional streams" section
+  covers this, including LLM built-ins.
 - One joint initial `pull()` barrier owns readiness for every resource an action
   uses. Keep action controls disabled until it resolves; an individual
   synchronous `sink()` callback must never declare the guest ready.
@@ -58,7 +59,7 @@ deno run -A tools/write-iframe-wrapper.ts \
 ```
 
 Add `--react` when the authored guest is React TSX, as required by the React
-guide.
+guide. For a contract that declares `streams`, the output is `frame.tsx`.
 
 Add `--html packages/patterns/iframe-<name>/guest.html` when the guest needs a
 custom document shell, and `--force` only when regenerating the named output.

@@ -68,6 +68,11 @@ export default pattern<VerbListInput, VerbListOutput>(({ items }) => {
     if (typeof id !== "string" || id === "") {
       throw new Error("An item needs an id.");
     }
+    // The frame keys check marks by item id, and the runtime refuses these
+    // two names as record keys, so an item under one could never be checked.
+    if (id === "__proto__" || id === "constructor") {
+      throw new Error(`An item id cannot be "${id}".`);
+    }
     const trimmed = typeof text === "string" ? text.trim() : "";
     if (trimmed === "") throw new Error("An item needs text.");
     const existing = items.get().find((item) => item.id === id);

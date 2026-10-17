@@ -141,19 +141,28 @@ async function submit(): Promise<void> {
   }
 }
 
+// A write first stores the resource's default if it holds none, so the child
+// write has a parent to land in. That happens here rather than at startup, so
+// a viewer who changes nothing writes nothing. A write that fails changes no
+// value and so reaches no sink, so the catch redraws from what is stored.
+
 async function setChecked(id: string, value: boolean): Promise<void> {
   try {
+    await state.initialize(DEFAULT_STATE);
     await state.key("checked").key(id).set(value);
   } catch (cause) {
     showError(cause);
+    render();
   }
 }
 
 async function setHideChecked(value: boolean): Promise<void> {
   try {
+    await output.initialize(DEFAULT_OUTPUT);
     await output.key("hideChecked").set(value);
   } catch (cause) {
     showError(cause);
+    render();
   }
 }
 
@@ -171,8 +180,6 @@ const stops = [input.sink(render), state.sink(render), output.sink(render)];
 void (async () => {
   try {
     await Promise.all([input.pull(), state.pull(), output.pull()]);
-    await state.initialize(DEFAULT_STATE);
-    await output.initialize(DEFAULT_OUTPUT);
     hydrated = true;
     render();
   } catch (cause) {

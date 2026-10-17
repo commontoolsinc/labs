@@ -300,8 +300,10 @@ with the reason when the runtime refuses the event or the run, including an
 error the handler throws. It resolves with no value, so a verb's declared result
 does not reach the guest; the guest reads the effect through a cell. The event
 is not a trusted gesture, since guest code sent it rather than a control the
-host draws. A send waits in the same queue as the guest's cell operations, so a
-`pull()` made after it reads what the handler wrote.
+host draws. The guest sends the event only once every cell operation it made
+before the send has settled, so the handler reads what they wrote, and the host
+handles the send in the same queue as the guest's cell operations, so a `pull()`
+made after it reads what the handler wrote.
 
 `packages/patterns/integration/iframe-verb-list.test.ts` drives a guest that
 adds to a pattern's list only through the pattern's verb, in a browser.

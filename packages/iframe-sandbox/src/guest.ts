@@ -591,13 +591,15 @@ export class RemoteStream<T = FabricValue> {
   }
 
   /**
-   * Sends `event` to the stream's handler. What the promise waits for is the
-   * host's to say; the `cf-iframe` host resolves it once the handler's run has
-   * committed, and rejects it with the reason when the runtime refuses the
-   * event or that run.
+   * Sends `event` to the stream's handler, after every cell operation this
+   * guest made before the call has settled, so the handler reads what those
+   * operations wrote. What the promise waits for then is the host's to say;
+   * the `cf-iframe` host resolves it once the handler's run has committed, and
+   * rejects it with the reason when the runtime refuses the event or that run.
    */
   async send(event: T): Promise<void> {
-    await this.#client.call(this.#name, "send", event as FabricValue);
+    const snapshot = cloneIfNecessary(event as FabricValue, { frozen: false });
+    await this.#client.callAfterCellOperations(this.#name, "send", snapshot);
   }
 }
 
@@ -994,6 +996,24 @@ export class FabricClient {
     value?: FabricValue,
   ): Promise<FabricValue | undefined> {
     return this.request("call", { resource, method, value });
+  }
+
+  /**
+   * As {@link call}, once every cell operation queued before this call has
+   * settled. Each cell holds its operations back until the one before has
+   * settled, so without this wait a call can reach the host ahead of a cell
+   * write the guest made first.
+   */
+  async callAfterCellOperations(
+    resource: string,
+    method: string,
+    value?: FabricValue,
+  ): Promise<FabricValue | undefined> {
+    const tails = [...this.#cellOperationQueues.values()].flatMap((queue) =>
+      queue.tail === undefined ? [] : [queue.tail]
+    );
+    await Promise.all(tails);
+    return await this.call(resource, method, value);
   }
 
   request(

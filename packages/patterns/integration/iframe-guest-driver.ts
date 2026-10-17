@@ -66,57 +66,65 @@ export class GuestDomDriver {
       bootstrap.#rejectPending("Browser CDP connection closed.");
     });
 
-    const { targetInfos } = await bootstrap.#send("Target.getTargets") as {
-      targetInfos: Array<{ targetId: string; type: string; url: string }>;
-    };
-    const candidates = targetInfos.filter((target) =>
-      target.type === "page" || target.type === "iframe"
-    );
-    const inspected: string[] = [];
-    for (const target of candidates) {
-      const { sessionId } = await bootstrap.#send(
-        "Target.attachToTarget",
-        { targetId: target.targetId, flatten: true },
-      ) as { sessionId: string };
-      const { frameTree } = await bootstrap.#send(
-        "Page.getFrameTree",
-        {},
-        sessionId,
-      ) as { frameTree: FrameTree };
-      for (const frameId of GuestDomDriver.#frameIds(frameTree)) {
-        try {
-          const { executionContextId } = await bootstrap.#send(
-            "Page.createIsolatedWorld",
-            {
-              frameId,
-              worldName: `iframe-guest-driver-${crypto.randomUUID()}`,
-            },
-            sessionId,
-          ) as { executionContextId: number };
-          const value = await bootstrap.#evaluateIn(
-            sessionId,
-            executionContextId,
-            `Boolean(document.querySelector(${JSON.stringify(guestSelector)}))`,
-          );
-          if (value === true) {
-            return new GuestDomDriver(socket, sessionId, executionContextId)
-              .#adopt(bootstrap);
+    // A failed discovery closes the socket, as a finished driver's close()
+    // does, so no CDP connection outlives the test that opened it.
+    try {
+      const { targetInfos } = await bootstrap.#send("Target.getTargets") as {
+        targetInfos: Array<{ targetId: string; type: string; url: string }>;
+      };
+      const candidates = targetInfos.filter((target) =>
+        target.type === "page" || target.type === "iframe"
+      );
+      const inspected: string[] = [];
+      for (const target of candidates) {
+        const { sessionId } = await bootstrap.#send(
+          "Target.attachToTarget",
+          { targetId: target.targetId, flatten: true },
+        ) as { sessionId: string };
+        const { frameTree } = await bootstrap.#send(
+          "Page.getFrameTree",
+          {},
+          sessionId,
+        ) as { frameTree: FrameTree };
+        for (const frameId of GuestDomDriver.#frameIds(frameTree)) {
+          try {
+            const { executionContextId } = await bootstrap.#send(
+              "Page.createIsolatedWorld",
+              {
+                frameId,
+                worldName: `iframe-guest-driver-${crypto.randomUUID()}`,
+              },
+              sessionId,
+            ) as { executionContextId: number };
+            const value = await bootstrap.#evaluateIn(
+              sessionId,
+              executionContextId,
+              `Boolean(document.querySelector(${
+                JSON.stringify(guestSelector)
+              }))`,
+            );
+            if (value === true) {
+              return new GuestDomDriver(socket, sessionId, executionContextId)
+                .#adopt(bootstrap);
+            }
+          } catch (error) {
+            inspected.push(
+              `${target.type}:${target.url}:${frameId}:` +
+                (error instanceof Error ? error.message : String(error)),
+            );
           }
-        } catch (error) {
-          inspected.push(
-            `${target.type}:${target.url}:${frameId}:` +
-              (error instanceof Error ? error.message : String(error)),
-          );
         }
+        inspected.push(`${target.type}:${target.url}`);
       }
-      inspected.push(`${target.type}:${target.url}`);
+      throw new Error(
+        `Could not find a guest frame holding ${guestSelector}. Inspected ${
+          inspected.join(" | ")
+        }`,
+      );
+    } catch (error) {
+      socket.close();
+      throw error;
     }
-    socket.close();
-    throw new Error(
-      `Could not find a guest frame holding ${guestSelector}. Inspected ${
-        inspected.join(" | ")
-      }`,
-    );
   }
 
   #adopt(bootstrap: GuestDomDriver): GuestDomDriver {
@@ -158,6 +166,9 @@ export class GuestDomDriver {
     params: Record<string, unknown> = {},
     sessionId?: string,
   ): Promise<CdpResult> {
+    if (this.#socket.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error("Browser CDP connection is not open."));
+    }
     const id = this.#nextId++;
     return new Promise((resolve, reject) => {
       this.#pending.set(id, { resolve, reject });

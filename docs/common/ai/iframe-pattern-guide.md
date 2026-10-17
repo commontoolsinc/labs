@@ -523,8 +523,9 @@ reaches every caller at once. This is a preference, not a requirement: a direct
 write stays correct for an action the pattern exposes no verb for, and for one
 whose verb does not fit the interaction.
 
-The last case above is how a guest calls `agent()`, `generateText()`,
-`generateObject()`, and the other LLM built-ins in a user-triggered way. Each
+Work that only the pattern can start is how a guest calls `agent()`,
+`generateText()`, `generateObject()`, and the other LLM built-ins in a
+user-triggered way. Each
 built-in is a reactive node in the pattern body, which the guest cannot call,
 and it makes a new request whenever its inputs change. A verb makes the user's
 action the trigger: the guest sends the event when the user clicks, the
@@ -570,7 +571,22 @@ and write `main.tsx` by hand:
 
 ```tsx
 // Shown at module scope.
-import { type AddItemEvent, type ListItem } from "./contract.ts";
+import {
+  action,
+  type Default,
+  NAME,
+  pattern,
+  type Stream,
+  UI,
+  type VNode,
+  type Writable,
+} from "commonfabric";
+import {
+  type AddItemEvent,
+  type IframeOutputData,
+  type IframeStateData,
+  type ListItem,
+} from "./contract.ts";
 import Frame from "./frame.tsx";
 
 interface VerbListInput {
@@ -581,6 +597,8 @@ interface VerbListOutput {
   [NAME]: string;
   [UI]: VNode;
   items: ListItem[];
+  state: IframeStateData;
+  output: IframeOutputData;
   addItem: Stream<AddItemEvent>;
 }
 
@@ -591,18 +609,21 @@ export default pattern<VerbListInput, VerbListOutput>(({ items }) => {
     if (items.get().some((item) => item.id === id)) return;
     items.push({ id, text: trimmed });
   });
-  const { [UI]: view } = Frame({ input: { items }, addItem });
-  return { [NAME]: "Verb list", [UI]: view, items, addItem };
+  const { state, output, [UI]: view } = Frame({ input: { items }, addItem });
+  return { [NAME]: "Verb list", [UI]: view, items, state, output, addItem };
 });
 ```
 
 The items belong to this pattern: the guest reads them as `input` and changes
 them only through the verb, and a caller with no browser, such as
-`cf piece call`, sends the same verb. Destructure what you use from the frame's
-result rather than reading `frame.state`, which would put a derived copy in the
+`cf piece call`, sends the same verb. Return the frame's `state` and `output`
+as a generated wrapper would, and destructure them from the frame's result
+rather than reading `frame.state`, which would put a derived copy in the
 piece's result instead of the frame's cell.
 
-The guest sends through `fabric.stream(name)`:
+The guest sends through `fabric.stream(name)`, from the handler of the user's
+action, so an event goes out only when someone acts and never on a load or
+reload of the frame:
 
 ```typescript
 // Shown at module scope.
@@ -611,11 +632,20 @@ import { type AddItemEvent } from "./contract.ts";
 
 const fabric = connectFabric();
 const addItem = fabric.stream<AddItemEvent>("addItem");
+const add = document.querySelector<HTMLButtonElement>("#add")!;
+const field = document.querySelector<HTMLInputElement>("#new-item")!;
 
-await addItem.send({ id: crypto.randomUUID(), text: "Milk" });
+add.addEventListener("click", () => {
+  const text = field.value.trim();
+  void addItem.send({ id: crypto.randomUUID(), text }).then(() => {
+    if (field.value.trim() === text) field.value = "";
+  }).catch((cause) => console.warn(cause));
+});
 ```
 
-`send()` resolves once the handler's run has committed, with no value: a verb's
+`send()` goes out once every cell operation the guest made before it has
+settled, so the handler reads what they wrote. It resolves once the handler's
+run has committed, with no value: a verb's
 declared result does not reach the guest, so read the effect through `input`
 or `state`. It rejects with the reason when the runtime refuses the event or
 the run, including an error the handler throws, so show that message where the
@@ -633,6 +663,15 @@ task: asking the same question again is then a new request.
 
 ```tsx
 // Shown at module scope.
+import {
+  action,
+  agent,
+  computed,
+  NAME,
+  pattern,
+  UI,
+  Writable,
+} from "commonfabric";
 import Frame from "./frame.tsx";
 
 export default pattern(() => {

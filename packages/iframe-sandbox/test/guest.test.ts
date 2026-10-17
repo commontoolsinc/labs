@@ -1089,6 +1089,38 @@ describe("guest", () => {
       }
     });
 
+    it("sends a stream event after a cell write the guest made first", async () => {
+      const fabric = connectFabric();
+      try {
+        const host = handOffPort();
+        const state = fabric.cell<{ draft: string }>("state");
+        const pulled = state.pull();
+        // The write waits behind the pull on the same cell, and the send is
+        // made while it does.
+        const written = state.set({ draft: "Milk" });
+        const sent = fabric.stream<{ text: string }>("addItem").send({
+          text: "Milk",
+        });
+
+        const pull = await receive(host);
+        expect(pull.operation).toBe("pull");
+        send(host, response(pull.id, { draft: "" }));
+        const set = await receive(host);
+        expect(set.operation).toBe("set");
+        send(host, response(set.id));
+        const call = await receive(host);
+        expect(call).toMatchObject({
+          operation: "call",
+          resource: "addItem",
+          method: "send",
+        });
+        send(host, response(call.id));
+        await Promise.all([pulled, written, sent]);
+      } finally {
+        fabric.disconnect();
+      }
+    });
+
     it("rejects a stream send with the error the host answers", async () => {
       const fabric = connectFabric();
       try {
