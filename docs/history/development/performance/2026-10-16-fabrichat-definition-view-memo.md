@@ -2,7 +2,7 @@
 status: historical
 created: 2026-10-16
 archived: 2026-10-16
-reason: "Counts from a thirty-message FabriChat room's cold load, October 2026, of what interning a resolved definition view hashes: minting the view once per definition body and map removes no hashing, because three quarters of the views hashed carry a map already hashed by identity; and the finding that the value hash is a single digest over the tree's encoded bytes, so no cached hash of a sub-object can shorten it."
+reason: "Counts from a thirty-message FabriChat room's cold load, October 2026, of what interning a resolved definition view hashes: minting the view once per definition body and map removes no hashing, because three fifths of the map-carrying views hashed carry a map already hashed by identity; and the finding that the value hash is a single digest over the tree's encoded bytes, so no cached hash of a sub-object can shorten it."
 ---
 
 # What interning a resolved definition view hashes on a FabriChat room's cold load, October 2026
