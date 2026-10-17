@@ -195,6 +195,18 @@ describe("resolveSchema", () => {
       expect(narrowed.ifc).toEqual({ integrity: ["two"] });
     });
 
+    it("selects the `enum` branch holding the `bigint`'s value", () => {
+      const schema: JSONSchema = {
+        anyOf: [
+          { type: "integer", enum: [1, 2], ifc: { integrity: ["low"] } },
+          { type: "integer", enum: [3, 4], ifc: { integrity: ["high"] } },
+        ],
+      };
+
+      const narrowed = expectNontrivial(resolveSchemaForValue(schema, 2n));
+      expect(narrowed.ifc).toEqual({ integrity: ["low"] });
+    });
+
     it("narrows tuple (prefixItems) branches by slot values", () => {
       // CT-1895: a prefixItems-only branch matched ANY array (the matcher
       // fell through to true), so the wrong union branch could be selected
