@@ -137,7 +137,8 @@ export const cfcSchemaResolvedRoot = (
     ? resolved
     : owningRoot;
 
-const encodedLocalDefinitionRef = (name: string): string =>
+/** The `#/$defs/<name>` reference naming the local definition `name`. */
+export const encodedLocalDefinitionRef = (name: string): string =>
   encodeJsonPointer(["#", "$defs", name]);
 
 const localDefinitionNamesInScope = (
@@ -765,6 +766,14 @@ const pruneCfcSchemaDefinitionsInternal = (
  */
 export const pruneCfcSchemaDefinitions = (schema: JSONSchema): JSONSchema =>
   pruneCfcSchemaDefinitionsInternal(schema, true);
+
+/**
+ * `schema` as a definition body: every `$defs` in it removed, since a map
+ * below a document's root is inert, and one carried by a body stored in the
+ * root's own map would hold that map inside itself.
+ */
+export const pruneCfcSchemaDefinitionBody = (schema: JSONSchema): JSONSchema =>
+  pruneCfcSchemaDefinitionsInternal(schema, false);
 
 // A name the hoist mints: `__cfc_<tag>_<n>_<name>` (`namespaceLocalDefinitionScope`).
 const MINTED_DEFINITION_NAME = /^__cfc_[a-z_]+_\d+_/;
