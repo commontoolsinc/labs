@@ -61,6 +61,24 @@ const programOf = (contents: string): RuntimeProgram => ({
   files: [{ name: "/main.tsx", contents }],
 });
 
+// A second identity no store holds, for the release between the running
+// pattern and the unloadable one.
+const INTERMEDIATE_SOURCE = [
+  "import { pattern } from 'commonfabric';",
+  "export default pattern<Record<string, never>, { marker: string }>(() => {",
+  "  return { marker: 'intermediate-release' };",
+  "});",
+  "",
+].join("\n");
+
+const intermediateIdentityPromise = resolveEntryIdentity(
+  "/main.tsx",
+  (name) =>
+    name === "/main.tsx"
+      ? Promise.resolve(INTERMEDIATE_SOURCE)
+      : Promise.reject(new Error(`not found: ${name}`)),
+);
+
 const unloadableIdentityPromise = resolveEntryIdentity(
   "/main.tsx",
   (name) =>
@@ -250,11 +268,11 @@ describe("unloadable patternIdentity pointer vs a running pattern", () => {
     expect(rt.runner.isRunning(cell)).toBe(false);
   });
 
-  it("rolls the pointer back when the displaced pattern belongs to an earlier transition", async () => {
+  it("rolls the pointer back when the displaced pattern matches no recorded revision", async () => {
     // A `displacedPattern` record names the predecessor of the transition
-    // that wrote it. One stamped with another transition's time says nothing
-    // about the latest revision, so the repair rolls the pointer back as it
-    // would without any history.
+    // that wrote it, stamped with that transition's time. One whose time no
+    // revision in the history carries is tied to no recorded transition, so
+    // the repair rolls the pointer back as it would without any history.
 
     rt = newRuntime();
     const { cell, v1Ref } = await runV1("unloadable-pointer-stale-displaced");
@@ -271,6 +289,54 @@ describe("unloadable patternIdentity pointer vs a running pattern", () => {
 
     expect(getPatternIdentityRef(cell)?.identity).toBe(v1Ref.identity);
     expect(rt.runner.isRunning(cell)).toBe(true);
+  });
+
+  it("stops the piece when a later update follows the one that displaced the running pattern", async () => {
+    // The running pattern A was displaced without a baseline by the update
+    // to B at T1, and a second update moved B to C at T2 with B as its
+    // baseline. The displacement record still names A at T1, the time B's
+    // revision carries, so A is two updates behind the pointer.
+
+    rt = newRuntime();
+    const { cell, v1Ref } = await runV1("unloadable-pointer-displaced-twice");
+    const intermediateIdentity = await intermediateIdentityPromise;
+    const unloadableIdentity = await unloadableIdentityPromise;
+    const t1 = Date.now();
+    const t2 = t1 + 1;
+    const tx = rt.edit();
+    const sourceOf = (identity: string) =>
+      rt.getCell(space, `pattern:${identity}`, undefined, tx).getAsLink();
+    const revision = (
+      revisionId: string,
+      timestamp: number,
+      identity: string,
+      operation: string,
+    ) => ({
+      revisionId,
+      timestamp,
+      pattern: { identity, symbol: "default" },
+      source: sourceOf(identity),
+      operation,
+    });
+    cell.withTx(tx).setMetaRaw("pieceSourceHistory", [
+      revision("update-b", t1, intermediateIdentity, "origin-update"),
+      revision("baseline-b", t2, intermediateIdentity, "baseline"),
+      revision("update-c", t2, unloadableIdentity, "origin-update"),
+    ], rawMetaWriteAuthorization);
+    cell.withTx(tx).setMetaRaw("displacedPattern", {
+      identity: v1Ref.identity,
+      symbol: v1Ref.symbol,
+      displacedAt: t1,
+    }, rawMetaWriteAuthorization);
+    cell.withTx(tx).setMetaRaw("patternIdentity", {
+      identity: unloadableIdentity,
+      symbol: "default",
+    }, rawMetaWriteAuthorization);
+    await tx.commit().settled;
+    await settlePointerMaintenance();
+
+    expect(getPatternIdentityRef(cell)?.identity).toBe(unloadableIdentity);
+    expect(rt.runner.isRunning(cell)).toBe(false);
   });
 
   it("stops the piece when the update is recorded while its rollback is pending", async () => {

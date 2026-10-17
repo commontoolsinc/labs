@@ -15002,11 +15002,14 @@ export function getPieceSourceRevisions(
 /**
  * Whether the piece's recorded source history moved it from `running` to
  * `pointer`: its latest revision names `pointer`, and either an earlier
- * revision names `running` or the transition that recorded the latest
- * revision displaced `running`. A transition whose predecessor's source is not
- * retained records no baseline revision for it; it names that predecessor in
- * the `displacedPattern` meta, stamped with the transition's own timestamp. A
- * history this runtime cannot read answers `false`.
+ * revision names `running` or a recorded transition displaced `running`. A
+ * transition whose predecessor's source is not retained records no baseline
+ * revision for it; it names that predecessor in the `displacedPattern` meta,
+ * stamped with the transition's own timestamp, which its revisions carry too.
+ * A later transition leaves that record in place, so a record whose timestamp
+ * matches a revision still in the history shows `running` was displaced
+ * before the latest revision was recorded. A history this runtime cannot read
+ * answers `false`.
  */
 function pieceSourceMovedPast(
   resultCell: Cell<unknown>,
@@ -15041,7 +15044,7 @@ function pieceSourceMovedPast(
   return displacedRef !== undefined &&
     patternIdentityKey(displacedRef) === runningKey &&
     isObjectOrArray(displaced) &&
-    displaced.displacedAt === latest.timestamp;
+    history.some((revision) => revision.timestamp === displaced.displacedAt);
 }
 
 /**
