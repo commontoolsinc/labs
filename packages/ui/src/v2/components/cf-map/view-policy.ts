@@ -114,7 +114,7 @@ export function validateBounds(bounds: Bounds): Bounds | null {
  * The points a fit to the features frames: every marker's position, every
  * circle's center, and every polyline point. A feature that throws when read,
  * as a reactive proxy can while its data is still loading, or that has no
- * numeric position, is skipped.
+ * finite position, is skipped.
  */
 export function featurePoints(value: MapValue): LatLng[] {
   const allPoints: LatLng[] = [];
@@ -122,7 +122,7 @@ export function featurePoints(value: MapValue): LatLng[] {
     if (!point) return;
     const lat = point.lat;
     const lng = point.lng;
-    if (typeof lat === "number" && typeof lng === "number") {
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
       allPoints.push({ lat, lng });
     }
   };

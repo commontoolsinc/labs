@@ -786,6 +786,14 @@ export class CFMap extends BaseElement {
       this._moves.resize(sizeChanged, () => map.invalidateSize());
       return;
     }
+    if (this._moves.personMoving) {
+      // What waited for a size now waits for the person's move instead
+      this._moves.resize(sizeChanged, () => map.invalidateSize());
+      const { bounds, fit } = this._waitingForSize.take();
+      if (bounds !== null) this._pending.bounds(bounds);
+      if (fit !== null) this._pending.fit(fit);
+      return;
+    }
 
     // The resize and the fits that waited for it are one move, reported
     // once, as cf-map's own, with the view they end on.

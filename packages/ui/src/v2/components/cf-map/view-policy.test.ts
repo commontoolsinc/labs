@@ -119,6 +119,7 @@ describe("featurePoints", () => {
         undefined,
         { position: undefined },
         { position: { lat: "1", lng: 2 } },
+        { position: { lat: 1, lng: null } },
         { position: { lat: 1, lng: 2 } },
       ],
       circles: [{ center: undefined, radius: 1 }],
@@ -129,6 +130,17 @@ describe("featurePoints", () => {
     expect(featurePoints(arrived)).toEqual([
       { lat: 1, lng: 2 },
     ]);
+  });
+
+  it("skips a point whose coordinates are not finite", () => {
+    const value: MapValue = {
+      markers: [
+        { position: { lat: Number.NaN, lng: 2 } },
+        { position: { lat: 1, lng: Number.POSITIVE_INFINITY } },
+        { position: { lat: 1, lng: 2 } },
+      ],
+    };
+    expect(featurePoints(value)).toEqual([{ lat: 1, lng: 2 }]);
   });
 
   it("skips a feature that throws when read, as a loading proxy can", () => {
