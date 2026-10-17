@@ -514,7 +514,16 @@ that runs in the pattern rather than in the iframe. Use one when the change
 belongs to the pattern: data the pattern owns and checks, an operation other
 callers reach through the same verb, or work that only the pattern can start.
 
-That last case is how a guest calls `agent()`, `generateText()`,
+When the pattern exposes an action as a verb, have the guest perform that
+action by sending the verb an event wherever it can, rather than making the
+same change through its own cell writes. One handler then decides what the
+action does, whether a person clicks in the frame or `cf piece call`, another
+pattern, or an agent sends it, and a change to the action's checks or effects
+reaches every caller at once. This is a preference, not a requirement: a direct
+write stays correct for an action the pattern exposes no verb for, and for one
+whose verb does not fit the interaction.
+
+The last case above is how a guest calls `agent()`, `generateText()`,
 `generateObject()`, and the other LLM built-ins in a user-triggered way. Each
 built-in is a reactive node in the pattern body, which the guest cannot call,
 and it makes a new request whenever its inputs change. A verb makes the user's

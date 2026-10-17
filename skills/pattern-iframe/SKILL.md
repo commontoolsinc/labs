@@ -40,7 +40,9 @@ Keep the authored surface small:
 - `main.tsx` is generated glue. Do not hand-edit it.
 - A contract that declares `streams` makes each one a required input of the
   wrapper, so generate the wrapper to `frame.tsx` and write `main.tsx` by hand
-  to declare the verbs and pass them in. The general guide's "Optional streams"
+  to declare the verbs and pass them in. When the pattern exposes an action as a
+  verb, prefer having the guest send that verb an event over making the same
+  change through its own cell writes. The general guide's "Optional streams"
   section covers this, including LLM built-ins.
 - One joint initial `pull()` barrier owns readiness for every resource an action
   uses. Keep action controls disabled until it resolves; an individual
