@@ -43,6 +43,7 @@ import {
   type IExtendedStorageTransaction,
   inSpaceRootCause,
   isCell,
+  isEarlierRelease,
   isLink,
   isPieceRoot,
   isStoredArgumentSchemaRefusal,
@@ -63,6 +64,7 @@ import {
   pieceSourceMovedPast,
   type PieceSourceTransition,
   preparePieceSourceTransitionBaseline,
+  runningReleasedAt,
   Runtime,
   runtimePresets,
   RuntimeProgram,
@@ -86,6 +88,10 @@ import {
   hashStringForEntityAddress,
 } from "@commonfabric/runner/entity-kind";
 import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
+import {
+  parseReleaseTime,
+  RELEASED_AT_HEADER,
+} from "@commonfabric/runner/pattern-release-time";
 import {
   type NameSchema,
   nameSchema,
@@ -3047,6 +3053,31 @@ export class PiecesController<T = unknown> {
   }
 
   /**
+   * The release time the host serving `officialUrl` states beside the identity
+   * its `?identity` route advertises (`RELEASED_AT_HEADER`), when that
+   * identity is `identity`; otherwise, and when the route cannot be asked or
+   * states no time, `undefined`. The time describes the program the route
+   * advertises, so it says nothing about any other.
+   */
+  async #advertisedReleasedAt(
+    officialUrl: URL,
+    identity: string,
+  ): Promise<number | undefined> {
+    const url = new URL(officialUrl);
+    url.searchParams.set("identity", "");
+    try {
+      const response = await this.runtime.fetch(url, { cache: "no-cache" });
+      if (!response.ok) return undefined;
+      const advertised = (await response.text()).trim();
+      const header = response.headers.get(RELEASED_AT_HEADER);
+      if (advertised !== identity || header === null) return undefined;
+      return parseReleaseTime(header.trim());
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Runnability backstop for `#startEnsuredDefaultPattern`'s cold-start
    * repair. Reached only when the pinned pattern's OWN setup repair failed in a
    * way that re-running it cannot fix — a root that loads but cannot run.
@@ -3195,17 +3226,27 @@ export class PiecesController<T = unknown> {
       );
     }
 
-    // A root whose history records its move from the official source to the
-    // pinned one is ahead of this runtime, not dead: some runtime loaded the
-    // pinned release, and this one serves or compiles an earlier one, as a
-    // host a deploy has not yet restarted does. Swapping back would undo the
-    // update, and every runtime that can load it would make it again, so the
-    // root keeps it. The check is read again inside the swap's transaction.
+    // A root this runtime cannot load is ahead of it rather than dead when its
+    // history records its move from the official source to the pinned one and
+    // the host offers that source at an earlier release than the pinned one:
+    // the host is one a deploy has not yet restarted. Swapping back would undo
+    // the update, and every runtime that can load it would make it again, so
+    // the root keeps it, as the reconciler keeps it against the same offer.
+    // A host offering the source at a later release, or with no order between
+    // the two, may be a rollback, which the heal takes as before. The order is
+    // read again inside the swap's transaction.
+    const officialReleasedAt = reason === "unloadable"
+      ? await this.#advertisedReleasedAt(officialUrl, officialRef.identity)
+      : undefined;
+    const behindPinnedRelease = (root: Cell<NameSchema>) =>
+      reason === "unloadable" &&
+      pieceSourceMovedPast(root, officialRef, pinnedRef) &&
+      isEarlierRelease(officialReleasedAt, runningReleasedAt(root, pinnedRef));
     const movedBackReason = () =>
       `would move the root back to ${officialRef.identity}#` +
-      `${officialRef.symbol}, the release its history records moving from ` +
-      `to the pinned one, which this runtime is behind`;
-    if (pieceSourceMovedPast(rootToStart, officialRef, pinnedRef)) {
+      `${officialRef.symbol}, an earlier release than the pinned one, which ` +
+      `its history records moving from and this runtime is behind`;
+    if (behindPinnedRelease(rootToStart)) {
       throw clearError(movedBackReason(), migrationError);
     }
 
@@ -3238,7 +3279,7 @@ export class PiecesController<T = unknown> {
       ) {
         return false;
       }
-      if (pieceSourceMovedPast(rootTx, officialRef, pinnedRef)) {
+      if (behindPinnedRelease(rootTx)) {
         movedBack = true;
         return false;
       }

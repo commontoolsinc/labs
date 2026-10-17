@@ -1273,47 +1273,22 @@ describe("piece source reconciliation", () => {
         });
 
         describe("when no offer states a release time", () => {
-          // Deployments that set no release time offer sources unordered, and
-          // a host a deploy has not restarted yet still offers the source the
-          // piece moved from. The history orders the two all the same.
+          // Without release times nothing orders the offer against what the
+          // piece runs. A host a deploy has not restarted yet and a deliberate
+          // rollback across a runtime too old to load the later source offer
+          // the same thing, the source the history records moving from, and
+          // only the rollback leaves no runtime that can start the later one.
 
-          it("keeps a source whose move from the offered one the history records", async () => {
+          it("adopts the source its history records moving from, as a rollback", async () => {
             const { piece, identities, offer } = await followingPiece();
             await offer({ marker: "v2" });
             using _unloadable = cannotLoad(identities.v2);
 
-            expect((await offer({ marker: "v1" })).running).toBe("v2");
-            expect(originUpdates(piece)).toHaveLength(1);
-          });
-
-          it("adopts a source the history records no move from", async () => {
-            // Nothing says any runtime loaded the running source, so the
-            // offer is taken as any unordered offer is.
-
-            const { piece, identities, offer } = await followingPiece();
-            await offer({ marker: "v2" });
-            using _unloadable = cannotLoad(identities.v2);
-
-            expect(await offer({ marker: "v3" })).toEqual({
+            expect(await offer({ marker: "v1" })).toEqual({
               outcome: "updated",
-              running: "v3",
+              running: "v1",
             });
             expect(originUpdates(piece)).toHaveLength(2);
-          });
-
-          it("stays on the later source while a runtime that can load it shares the piece", async () => {
-            const { piece, identities, offer } = await followingPiece();
-            await offer({ marker: "v2" });
-            let stale = false;
-            using _unloadable = cannotLoad(identities.v2, () => stale);
-            for (let cycle = 0; cycle < 2; cycle++) {
-              stale = true;
-              await offer({ marker: "v1" });
-              stale = false;
-              await offer({ marker: "v2" });
-            }
-
-            expect(originUpdates(piece)).toHaveLength(1);
           });
         });
 

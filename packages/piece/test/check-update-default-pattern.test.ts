@@ -877,25 +877,17 @@ describe("opening a space root", () => {
     expect(getPatternIdentityRef(updated.getCell())?.symbol).toBe("default");
   });
 
-  it("keeps a root on a release the history records moving to while its host still serves the earlier one", async () => {
-    // A runtime older than the root's release cannot load it, and the host it
-    // reaches is one a deploy has not yet restarted, still serving the
-    // release the root moved from. The history records that move, so the
-    // reconciler keeps the root's release; the root then fails to start here,
-    // and the repair must not swap it back to the earlier official source,
-    // which every runtime that can load the later release would move forward
-    // again.
-
-    await setup();
-    stub.setReleasedAt("2026-10-16T14:03:00Z");
-    const piece = await controller.ensureDefaultPattern();
-    const root = piece.getCell();
-    const officialV1 = await identityForSource(SOURCE_V1);
-    expect(getPatternIdentityRef(root)?.identity).toBe(officialV1);
-    const laterRelease = await identityForSource(
-      patternSource("release-this-runtime-cannot-load"),
-    );
-    await controller.stopPiece(root);
+  // Records on `root` what a runtime that adopted `to` over `from` writes:
+  // the two revisions, with `to`'s release time when one is given, and the
+  // pointer naming `to`, with the setup marker too unless `stageSetup` is
+  // false.
+  async function recordAdoption(
+    root: Cell<unknown>,
+    from: string,
+    to: string,
+    toReleasedAt?: string,
+    stageSetup = true,
+  ) {
     const { error } = await runtime.editWithRetry((tx) => {
       const candidate = root.withTx(tx);
       const space = root.getAsNormalizedFullLink().space;
@@ -909,38 +901,128 @@ describe("opening a space root", () => {
       candidate.setMetaRaw("pieceSourceHistory", [
         ...history,
         {
-          revisionId: "baseline-official-v1",
+          revisionId: `baseline-${from}`,
           timestamp,
-          pattern: { identity: officialV1, symbol: "default" },
-          source: sourceOf(officialV1),
+          pattern: { identity: from, symbol: "default" },
+          source: sourceOf(from),
           origin,
           operation: "baseline",
         },
         {
-          revisionId: "update-to-later-release",
+          revisionId: `update-${to}`,
           timestamp,
-          pattern: { identity: laterRelease, symbol: "default" },
-          source: sourceOf(laterRelease),
+          pattern: { identity: to, symbol: "default" },
+          source: sourceOf(to),
           origin,
           operation: "origin-update",
-          releasedAt: Date.parse("2026-10-16T15:03:00Z"),
+          ...(toReleasedAt === undefined
+            ? {}
+            : { releasedAt: Date.parse(toReleasedAt) }),
         },
       ], rawMetaWriteAuthorization);
-      for (const meta of ["patternIdentity", "patternSetupIdentity"] as const) {
+      const metas = stageSetup
+        ? ["patternIdentity", "patternSetupIdentity"] as const
+        : ["patternIdentity"] as const;
+      for (const meta of metas) {
         candidate.setMetaRaw(
           meta,
-          { identity: laterRelease, symbol: "default" },
+          { identity: to, symbol: "default" },
           rawMetaWriteAuthorization,
         );
       }
     });
     expect(error).toBeUndefined();
+  }
 
-    await controller.ensureDefaultPattern().catch(() => undefined);
+  // A root running the official V1 that a newer runtime moved to a release
+  // this runtime cannot load, recorded at `pinnedAt`, with the host serving
+  // V1 at `officialAt`.
+  async function rootAheadOfThisRuntime(
+    pinnedAt: string | undefined,
+    officialAt: string | undefined,
+  ) {
+    await setup();
+    stub.setReleasedAt(officialAt);
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+    const officialV1 = await identityForSource(SOURCE_V1);
+    expect(getPatternIdentityRef(root)?.identity).toBe(officialV1);
+    const pinned = await identityForSource(
+      patternSource("release-this-runtime-cannot-load"),
+    );
+    await controller.stopPiece(root);
+    await recordAdoption(root, officialV1, pinned, pinnedAt);
+    return { officialV1, pinned };
+  }
+
+  it("keeps a root on a release the history records moving to while its host still serves the earlier one", async () => {
+    // A runtime older than the root's release cannot load it, and the host it
+    // reaches is one a deploy has not yet restarted, still serving the
+    // release the root moved from. The reconciler keeps the root's release;
+    // the root then fails to start here, and the repair must not swap it back
+    // to the earlier official source, which every runtime that can load the
+    // later release would move forward again.
+
+    const { pinned } = await rootAheadOfThisRuntime(
+      "2026-10-16T15:03:00Z",
+      "2026-10-16T14:03:00Z",
+    );
+
+    let thrown: unknown;
+    await controller.ensureDefaultPattern().catch((error) => (thrown = error));
+    await runtime.idle();
+
+    expect(String(thrown)).toContain("would move the root back");
+    const after = (await controller.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)?.identity).toBe(pinned);
+  });
+
+  it("keeps the root on that release when the registry opens it", async () => {
+    // The registry opens the root without following its origin first, so
+    // only the repair's own check stands between it and the earlier release.
+
+    const { pinned } = await rootAheadOfThisRuntime(
+      "2026-10-16T15:03:00Z",
+      "2026-10-16T14:03:00Z",
+    );
+
+    await controller.getPieceRegistry().catch(() => undefined);
     await runtime.idle();
 
     const after = (await controller.getDefaultPattern(false))!;
-    expect(getPatternIdentityRef(after)?.identity).toBe(laterRelease);
+    expect(getPatternIdentityRef(after)?.identity).toBe(pinned);
+  });
+
+  it("rolls the root back to the source its history records moving from when its host offers it at a later release", async () => {
+    // A deploy that rolls back states a later release time, which orders the
+    // earlier source after the one the root holds.
+
+    const { officialV1 } = await rootAheadOfThisRuntime(
+      "2026-10-16T15:03:00Z",
+      "2026-10-16T16:03:00Z",
+    );
+
+    // Opened without following its origin, so the repair alone decides.
+    await controller.getDefaultPattern({ reconcile: false, start: true });
+    await runtime.idle();
+
+    const after = (await controller.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)?.identity).toBe(officialV1);
+  });
+
+  it("rolls the root back to the source its history records moving from when no release time orders the two", async () => {
+    // With no release times a host still serving the earlier source and a
+    // rollback to it look alike, and only the rollback leaves no runtime that
+    // can start the later one, so the repair takes the official source.
+
+    const { officialV1 } = await rootAheadOfThisRuntime(undefined, undefined);
+
+    // Opened without following its origin, so the repair alone decides.
+    await controller.getDefaultPattern({ reconcile: false, start: true });
+    await runtime.idle();
+
+    const after = (await controller.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)?.identity).toBe(officialV1);
   });
 
   it("follows a custom origin when the pattern a root holds cannot load, given `reconcile: false`", async () => {
@@ -2618,6 +2700,39 @@ describe("opening a space root", () => {
       rt.runSynced = real;
     };
   };
+
+  it("rolls a root whose pinned pattern loads but cannot migrate back to an earlier official source its history records moving from", async () => {
+    // This runtime loads the pinned pattern, so it is not behind it: the
+    // pinned pattern's setup cannot take the root's document, and the repair
+    // is the only way the space opens. The history and release order that
+    // keep a root this runtime cannot load do not apply.
+
+    const { root, oldRef, officialId } = await pinOldRequiredHome();
+    stub.setReleasedAt("2026-10-16T13:03:00Z");
+    // The setup marker stays on the version `pinOldRequiredHome()` left, so
+    // the start is refused and the setup repair runs.
+    await recordAdoption(
+      root,
+      officialId,
+      oldRef.identity,
+      "2026-10-16T14:03:00Z",
+      false,
+    );
+    const restore = patchRunSynced((opts) =>
+      opts?.expectedPatternIdentity?.identity === oldRef.identity
+        ? Promise.reject(new Error(MIGRATION_REJECTION))
+        : "real"
+    );
+    try {
+      await controller.ensureDefaultPattern({ reconcile: false });
+    } finally {
+      restore();
+    }
+    await runtime.idle();
+
+    const after = (await controller.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)?.identity).toBe(officialId);
+  });
 
   it("fails clearly when a root loses its source state during repair", async () => {
     const { oldRef } = await pinOldRequiredHome();

@@ -244,7 +244,9 @@ export {
   type PieceOriginKind as PieceOriginClassification,
 } from "./piece-origin-kind.ts";
 export {
+  isEarlierRelease,
   type ReconcileOutcome,
+  runningReleasedAt,
   SourceReconciler,
 } from "./source-reconciler.ts";
 export {

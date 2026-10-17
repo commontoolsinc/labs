@@ -134,9 +134,7 @@ const logger = getLogger("runner.source-reconcile", {
  *   running pattern cannot load takes the earlier release as a rescue, since
  *   it has nothing to start, unless its history records its move from that
  *   release to the one it runs: then this runtime is behind the running
- *   release, and the piece keeps it. That history keeps it against an offer
- *   no release time orders too, which a runtime that can load what it runs
- *   would adopt.
+ *   release, and the piece keeps it.
  * - `incompatible`: the origin offered source that cannot replace what the
  *   piece runs, and its owner has not said to take it anyway.
  * - `rejected`: the write that adopts the origin's source was refused for
@@ -215,14 +213,12 @@ function reconciliationFor(
  * compared only where the running source has one: a piece adopted from a host
  * stating none has nothing to order an offer against until a release offering
  * that same source confirms it at a stated time, and until then takes any
- * offer as before, except one its history records moving from while this
- * runtime cannot load what it runs (`keepsRunningSource()`). An offer stating
- * none is earlier than any running release
+ * offer as before. An offer stating none is earlier than any running release
  * that has one, so a host that states no release time cannot move a piece
  * another host has placed on a stated one. An offer stating the same time as
  * the running release is not earlier.
  */
-function isEarlierRelease(
+export function isEarlierRelease(
   offered: number | undefined,
   running: number | undefined,
 ): boolean {
@@ -237,7 +233,7 @@ function isEarlierRelease(
  * it is the piece's last and adopted what the piece runs, and a record only
  * when it confirms that same source.
  */
-function runningReleasedAt(
+export function runningReleasedAt(
   resultCell: Cell<unknown>,
   running: { identity: string; symbol: string },
 ): number | undefined {
@@ -257,40 +253,22 @@ function runningReleasedAt(
 }
 
 /**
- * Whether `offered` is a later release than `running`: both state a release
- * time, and the offer's is later. Such an offer is adopted whatever the piece's
- * history says.
- */
-function isLaterRelease(
-  offered: number | undefined,
-  running: number | undefined,
-): boolean {
-  return offered !== undefined && running !== undefined && offered > running;
-}
-
-/**
- * Whether a piece keeps the source it runs, `running`, against `offered`, an
- * offer that is not a later release: an earlier one (`earlier`), or one the
- * release times leave unordered.
- *
- * When the piece's history records its move from `offered` to `running`
- * (`pieceSourceMovedPast()`), some runtime loaded `running`, so a runtime
- * that cannot load it (`loadable` false) is behind it rather than holding a
- * dead source. Taking `offered` there would undo the move, and every runtime
- * that can load `running` would make it again, so the piece keeps it. Against
- * an earlier release the piece also keeps a source this runtime can load.
- * Otherwise it takes the offer: an unordered one as any offer is taken, and
- * an earlier one as a rescue, since the piece has nothing it can start.
+ * Whether a piece keeps the source it runs, `running`, against an earlier
+ * release offering `offered`. It does when this runtime can load `running`
+ * (`loadable`), or when the piece's history records its move from `offered`
+ * to `running` (`pieceSourceMovedPast()`): then a runtime loaded `running`,
+ * and this one is behind that release rather than holding a dead one. Taking
+ * the earlier release there would undo the move, and every runtime that can
+ * load the later release would make it again. Otherwise the piece has nothing
+ * it can start, and the earlier release is a rescue.
  */
 function keepsRunningSource(
   resultCell: Cell<unknown>,
   running: { identity: string; symbol: string },
   offered: { identity: string; symbol: string },
   loadable: boolean,
-  earlier: boolean,
 ): boolean {
-  if (earlier && loadable) return true;
-  return !loadable && pieceSourceMovedPast(resultCell, offered, running);
+  return loadable || pieceSourceMovedPast(resultCell, offered, running);
 }
 
 async function abortable<T>(
@@ -1033,26 +1011,18 @@ export class SourceReconciler {
       advertised === state.running.identity &&
       await this.#loadPattern(state.running, state.space) !== undefined
     ) return "current";
-    // Against an offer that is not a later release, the piece may keep what
-    // it runs. Only an earlier release, or a history that records the move
-    // from the offer, can keep it, so the running pattern is loaded only
-    // then.
-    const earlier = isEarlierRelease(answer.releasedAt, runningRelease);
     if (
       advertised !== state.running.identity &&
-      !isLaterRelease(answer.releasedAt, runningRelease) &&
-      (earlier || pieceSourceMovedPast(resultCell, offered, state.running)) &&
+      isEarlierRelease(answer.releasedAt, runningRelease) &&
       keepsRunningSource(
         resultCell,
         state.running,
         offered,
         await this.#loadPattern(state.running, state.space) !== undefined,
-        earlier,
       )
     ) {
       logger.debug("reconcile-earlier-release", () => [
-        "not adopting an earlier release than the one this piece runs, or",
-        "the source its history records moving from",
+        "not adopting an earlier release than the one this piece runs",
         state.space,
         resultCell.sourceURI,
         offered,
@@ -1620,8 +1590,8 @@ export class SourceReconciler {
     // can confirm the running source at a later release while this one
     // prepares. The order is read again inside the commit, so a confirmation
     // that lands first makes this commit stale and its retry decline. Whether
-    // the piece keeps its running source against a candidate that is not a
-    // later release is decided there too, by the history the commit reads.
+    // the piece keeps its running source against an earlier candidate is
+    // decided there too, by the history the commit reads.
     const ordered = origin.kind === "system";
     const loadable = ordered &&
       await this.#loadPattern(state.running, state.space) !== undefined;
@@ -1629,18 +1599,17 @@ export class SourceReconciler {
     const failure = await this.#commit(resultCell, state, signal, (tx) => {
       overtaken = false;
       if (!argumentUnchanged(resultCell.withTx(tx))) return false;
-      const runningRelease = ordered
-        ? runningReleasedAt(resultCell.withTx(tx), state.running)
-        : undefined;
       if (
         ordered &&
-        !isLaterRelease(advertised?.releasedAt, runningRelease) &&
+        isEarlierRelease(
+          advertised?.releasedAt,
+          runningReleasedAt(resultCell.withTx(tx), state.running),
+        ) &&
         keepsRunningSource(
           resultCell.withTx(tx),
           state.running,
           candidateRef,
           loadable,
-          isEarlierRelease(advertised?.releasedAt, runningRelease),
         )
       ) {
         overtaken = true;
@@ -1674,10 +1643,9 @@ export class SourceReconciler {
       return true;
     }, sourceUpdate);
     if (overtaken) {
-      // The piece keeps what it runs: the candidate became an earlier release
-      // while this pass prepared, or the history read inside the commit
-      // records the move from it. Where the running source has a release
-      // time, the record confirms that source at it.
+      // The piece keeps what it runs, as an earlier offer leaves it, and the
+      // record confirms that source at the release time that overtook this
+      // candidate.
       const confirmedAt = runningReleasedAt(resultCell, state.running);
       state.offered = { ...state.running };
       if (confirmedAt !== undefined) {
