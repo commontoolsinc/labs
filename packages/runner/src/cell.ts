@@ -138,7 +138,11 @@ import { actingForEmission, waveRunContextOf } from "./executor/wave.ts";
 import { immutableCellsFor, pinImmutableCell } from "./immutable-cell.ts";
 import { areLinksSame } from "./link-equality.ts";
 import { type LastNode, resolveLink } from "./link-resolution.ts";
-import { areNormalizedLinksSame, isPrimitiveCellLink } from "./link-types.ts";
+import {
+  addressKey,
+  areNormalizedLinksSame,
+  isPrimitiveCellLink,
+} from "./link-types.ts";
 import {
   createSigilLinkFromParsedLink,
   declareStreamSchema,
@@ -5430,6 +5434,15 @@ type CellLinkOptions = {
 
   /** Which `asCell` entries survive in a carried schema; see `KeepAsCell`. */
   keepAsCell?: KeepAsCell;
+
+  /**
+   * Whether a query result read under no schema, whose cell an earlier
+   * position of the same value already carries, becomes a link to that cell
+   * rather than a second copy of what it holds. Applies only alongside
+   * `doNotConvertCellResults`, the one option under which a query result is
+   * walked at all.
+   */
+  linkRepeatedResults?: boolean;
 };
 
 /**
@@ -5469,6 +5482,7 @@ export function convertCellsToLinks(
     options,
     [],
     new IndexTrackingStack<object>(),
+    options.linkRepeatedResults ? new Set<string>() : undefined,
   );
 }
 
@@ -5476,7 +5490,11 @@ export function convertCellsToLinks(
  * A cell's value in the form the worker hands it to a host: each cell inside
  * it as the link it names, carrying the display form of that cell's label
  * view with every caveat's source redacted, and each query result read out
- * into the data behind it, following its links. A sigil link already in the
+ * into the data behind it, following its links. A query result read under no
+ * schema is read out once: where the value reaches the same cell again, by
+ * another path or from inside itself, that position holds a link to the
+ * cell, so a value whose parts share documents is sent at the size of what
+ * it holds rather than once per path. A sigil link already in the
  * value is rebuilt as the container it is, view and all; stored data carries
  * no view on a link, the persist seam having stripped it, so the minted links
  * are where a view crosses. What a host is sent is
@@ -5489,6 +5507,7 @@ export function hostValueOf(value: unknown): FabricValue {
     keepAsCell: KeepAsCell.All,
     doNotConvertCellResults: true,
     includeCfcLabelView: true,
+    linkRepeatedResults: true,
   });
 }
 
@@ -5563,6 +5582,15 @@ export function sinkProjected<R>(
  * two are pushed and popped together, so an ancestor's index in the one is its
  * depth into the other.
  *
+ * `emitted`, present under `linkRepeatedResults`, holds the address of every
+ * query result read under no schema that the walk has begun to convert. Such
+ * a result is converted in full at the first position the walk visits it, and
+ * becomes a link to its cell at every later one. The walk visits positions depth
+ * first, in each container's own order, so which position is first is a
+ * property of the value and the same on every conversion of it. A result
+ * read under a schema keeps a copy at every position, since the schema is
+ * what said to read it inline.
+ *
  * Each container is frozen as the walk returns it, and each link as it is
  * minted, which is what makes the whole answer deeply frozen.
  */
@@ -5571,6 +5599,7 @@ function convertOneToLinks(
   options: CellLinkOptions,
   stack: string[],
   ancestors: IndexTrackingStack<object>,
+  emitted: Set<string> | undefined,
 ): FabricValue {
   switch (typeof value) {
     case "object": {
@@ -5611,6 +5640,17 @@ function convertOneToLinks(
     return linkToCell(getCellOrThrow(value), options);
   } else if (isCell(value)) {
     return linkToCell(value, options);
+  } else if (emitted !== undefined && isCellResultForDereferencing(value)) {
+    const cell = getCellOrThrow(value);
+    const link = cell.getAsNormalizedFullLink();
+    if (
+      link.schema === undefined ||
+      ContextualFlowControl.isTrueSchema(link.schema)
+    ) {
+      const address = addressKey(link);
+      if (emitted.has(address)) return linkToCell(cell, options);
+      emitted.add(address);
+    }
   }
 
   // What goes onto `ancestors` -- and comes off again on the way back out --
@@ -5720,6 +5760,7 @@ function convertOneToLinks(
           options,
           stack,
           ancestors,
+          emitted,
         );
 
         stack.pop();
@@ -5742,6 +5783,7 @@ function convertOneToLinks(
           options,
           stack,
           ancestors,
+          emitted,
         );
 
         stack.pop();

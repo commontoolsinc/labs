@@ -16,6 +16,14 @@ Everything a client shows is read under the person's own access. A client MUST
 NOT read a room through any identity other than the person's, and MUST NOT show
 a room to anyone its space doesn't admit.
 
+A client reads what it draws under a schema. Read with no schema, the manager's
+value reaches every room it lists, every profile on each room's roster, and
+every message in each room's window, and the runtime reads all of it out, each
+document once, to answer the read. A client SHOULD read the manager as a link,
+under a schema marking it `asCell`, and then each field it draws under a schema
+marking the rooms and profiles there `asCell`, reading a room's own fields the
+same way when it draws that room.
+
 ## Finding conversations
 
 - **All of the person's rooms** are the manager's `rooms`.

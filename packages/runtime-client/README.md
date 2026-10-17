@@ -29,6 +29,24 @@ subscriber that was given a value learns that the cell now holds nothing. A
 `sync()` waits for no loads, and one that finds nothing leaves a value the
 handle holds in place, telling no subscriber.
 
+## What a read returns
+
+A read's value is the cell's value as the schema the read is made under shapes
+it. A position the schema marks `asCell` holds a `CellHandle` on the cell there.
+A position the schema leaves untyped, and every position of a read made with no
+schema, holds the data behind it, the worker following each link to read it out,
+with one exception: the worker reads each document out once. A later position
+reaching a cell an earlier position already holds, by another path or from
+inside itself, holds a `CellHandle` on that cell instead of a second copy, so a
+value whose parts share documents arrives at the size of what it holds rather
+than once per path. The earlier position is the first one a depth-first walk
+visits, taking each object's and array's members in their own order, so the same
+value always puts its copy at the same position.
+
+A host that needs a shared document's data at every position it appears says so
+with a schema that reads that position inline: a position read under a schema
+keeps its copy wherever it appears.
+
 ## Refused reads
 
 The worker builds every answer to a host's read of a cell's value, whether
