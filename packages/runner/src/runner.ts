@@ -6208,6 +6208,23 @@ export class Runner {
                   "pointer as written",
                 ]);
               }
+              // A piece whose history records an update from `running` to
+              // the pointer is stopped here instead of rolled back. The
+              // check runs twice: before the rollback opens a transaction,
+              // and again through that transaction, so an update recorded
+              // between the two is honored too.
+              const standDown = (
+                running: { identity: string; symbol: string },
+              ) => {
+                logger.warn("pattern-pointer-ahead-of-runtime", () => [
+                  `durable patternIdentity ${newRef.identity}#${newRef.symbol}`,
+                  "is a recorded update from the running pattern",
+                  `${running.identity}#${running.symbol}, and this runtime`,
+                  "cannot load it; stopping the piece here rather than",
+                  "rolling the update back",
+                ]);
+                this.stop(resultCell);
+              };
               if (
                 this.#runtime.cfcEnforcementMode !== "disabled" &&
                 revertTarget !== undefined &&
@@ -6224,14 +6241,7 @@ export class Runner {
                 // every runtime that can load it, and keeps this runtime from
                 // writing the piece's documents under a version they have
                 // moved past.
-                logger.warn("pattern-pointer-ahead-of-runtime", () => [
-                  `durable patternIdentity ${newRef.identity}#${newRef.symbol}`,
-                  "is a recorded update from the running pattern",
-                  `${revertTarget.identity}#${revertTarget.symbol}, and this`,
-                  "runtime cannot load it; stopping the piece here rather",
-                  "than rolling the update back",
-                ]);
-                this.stop(resultCell);
+                standDown(revertTarget);
                 return;
               }
               if (
@@ -6240,7 +6250,9 @@ export class Runner {
                 patternIdentityKey(revertTarget) !== newKey
               ) {
                 const revertRef = revertTarget;
+                let recordedUpdateAtCommit = false;
                 const rollForward = this.#runtime.editWithRetry((tx) => {
+                  recordedUpdateAtCommit = false;
                   // Async pointer repair from the meta watcher's load
                   // promise — no scheduler run stamps it; bookkeeping
                   // per serving-loop.md §3d.
@@ -6257,12 +6269,31 @@ export class Runner {
                   if (!cur || patternIdentityKey(cur) !== newKey) {
                     return false;
                   }
+                  if (
+                    pieceSourceMovedPast(
+                      resultCell.withTx(tx),
+                      revertRef,
+                      newRef,
+                    )
+                  ) {
+                    recordedUpdateAtCommit = true;
+                    return false;
+                  }
                   resultCell.withTx(tx).setMetaRaw("patternIdentity", {
                     identity: revertRef.identity,
                     symbol: revertRef.symbol,
                   }, rawMetaWriteAuthorization);
                   return true;
                 }).then((result) => {
+                  if (recordedUpdateAtCommit) {
+                    if (
+                      active && startLifecycleEpoch === this.#lifecycleEpoch &&
+                      currentPatternKey === newKey
+                    ) {
+                      standDown(revertRef);
+                    }
+                    return;
+                  }
                   // Only reclaim the observed key while it is STILL the
                   // failed one — a valid repoint that raced this rollback
                   // has already advanced the watcher state, and clobbering
@@ -14970,8 +15001,12 @@ export function getPieceSourceRevisions(
 
 /**
  * Whether the piece's recorded source history moved it from `running` to
- * `pointer`: its latest revision names `pointer`, and an earlier revision
- * names `running`. A history this runtime cannot read answers `false`.
+ * `pointer`: its latest revision names `pointer`, and either an earlier
+ * revision names `running` or the transition that recorded the latest
+ * revision displaced `running`. A transition whose predecessor's source is not
+ * retained records no baseline revision for it; it names that predecessor in
+ * the `displacedPattern` meta, stamped with the transition's own timestamp. A
+ * history this runtime cannot read answers `false`.
  */
 function pieceSourceMovedPast(
   resultCell: Cell<unknown>,
@@ -14992,9 +15027,21 @@ function pieceSourceMovedPast(
     return false;
   }
   const runningKey = patternIdentityKey(running);
-  return history.slice(0, -1).some((revision) =>
-    patternIdentityKey(revision.pattern) === runningKey
-  );
+  if (
+    history.slice(0, -1).some((revision) =>
+      patternIdentityKey(revision.pattern) === runningKey
+    )
+  ) {
+    return true;
+  }
+  const displaced = resultCell.getMetaRaw("displacedPattern", {
+    meta: ignoreReadForScheduling,
+  });
+  const displacedRef = asPatternIdentityRef(displaced);
+  return displacedRef !== undefined &&
+    patternIdentityKey(displacedRef) === runningKey &&
+    isObjectOrArray(displaced) &&
+    displaced.displacedAt === latest.timestamp;
 }
 
 /**

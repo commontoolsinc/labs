@@ -141,48 +141,169 @@ describe("unloadable patternIdentity pointer vs a running pattern", () => {
     expect((cell.getAsQueryResult() as { marker: string }).marker).toBe("v1");
   });
 
+  // What a newer runtime's adoption writes, staged into `tx`: the update's
+  // revision, preceded by a baseline revision for the running pattern when
+  // its source was retained, or else a `displacedPattern` record stamped
+  // with `displacedAt`; and, unless `movePointer` is false, the pointer.
+  const stageRecordedUpdate = (
+    tx: ReturnType<Runtime["edit"]>,
+    cell: ReturnType<Runtime["getCell"]>,
+    running: { identity: string; symbol: string },
+    identity: string,
+    options: {
+      baseline: boolean;
+      timestamp: number;
+      displacedAt?: number;
+      movePointer?: boolean;
+    },
+  ) => {
+    const sourceOf = (id: string) =>
+      rt.getCell(space, `pattern:${id}`, undefined, tx).getAsLink();
+    const update = {
+      revisionId: `update-${options.timestamp}`,
+      timestamp: options.timestamp,
+      pattern: { identity, symbol: "default" },
+      source: sourceOf(identity),
+      operation: "origin-update",
+    };
+    const history = options.baseline
+      ? [{
+        revisionId: `baseline-${options.timestamp}`,
+        timestamp: options.timestamp,
+        pattern: { identity: running.identity, symbol: running.symbol },
+        source: sourceOf(running.identity),
+        operation: "baseline",
+      }, update]
+      : [update];
+    cell.withTx(tx).setMetaRaw(
+      "pieceSourceHistory",
+      history,
+      rawMetaWriteAuthorization,
+    );
+    if (options.displacedAt !== undefined) {
+      cell.withTx(tx).setMetaRaw("displacedPattern", {
+        identity: running.identity,
+        symbol: running.symbol,
+        displacedAt: options.displacedAt,
+      }, rawMetaWriteAuthorization);
+    }
+    if (options.movePointer !== false) {
+      cell.withTx(tx).setMetaRaw("patternIdentity", {
+        identity,
+        symbol: "default",
+      }, rawMetaWriteAuthorization);
+    }
+  };
+
+  const settlePointerMaintenance = async () => {
+    await rt.idle();
+    await rt.runner.idlePointerMaintenance();
+    await rt.idle();
+    await rt.runner.idlePointerMaintenance();
+  };
+
   it("stops the piece and keeps a pointer a recorded update moved past the running pattern", async () => {
     // Another runtime, newer than this one, adopted a release this runtime
     // cannot load: its transition records the running pattern as the
     // baseline and the new identity as the update, and moves the pointer in
     // the same commit. This runtime is the one behind. Writing its running
     // identity back would undo the adoption, and the next start of the newer
-    // runtime would adopt again, without end.
+    // runtime would adopt again, without end. This runtime stops its own copy
+    // of the piece instead, which writes nothing.
+
     rt = newRuntime();
     const { cell, v1Ref } = await runV1(
       "unloadable-pointer-recorded-transition",
     );
     const unloadableIdentity = await unloadableIdentityPromise;
     const tx = rt.edit();
-    const sourceOf = (identity: string) =>
-      rt.getCell(space, `pattern:${identity}`, undefined, tx).getAsLink();
-    const now = Date.now();
-    cell.withTx(tx).setMetaRaw("pieceSourceHistory", [
-      {
-        revisionId: "baseline-v1",
-        timestamp: now,
-        pattern: { identity: v1Ref.identity, symbol: v1Ref.symbol },
-        source: sourceOf(v1Ref.identity),
-        operation: "baseline",
-      },
-      {
-        revisionId: "update-to-unloadable",
-        timestamp: now,
-        pattern: { identity: unloadableIdentity, symbol: "default" },
-        source: sourceOf(unloadableIdentity),
-        operation: "origin-update",
-      },
-    ], rawMetaWriteAuthorization);
-    cell.withTx(tx).setMetaRaw("patternIdentity", {
-      identity: unloadableIdentity,
-      symbol: "default",
-    }, rawMetaWriteAuthorization);
+    stageRecordedUpdate(tx, cell, v1Ref, unloadableIdentity, {
+      baseline: true,
+      timestamp: Date.now(),
+    });
     await tx.commit().settled;
-    await rt.idle();
-    await rt.runner.idlePointerMaintenance();
-    await rt.idle();
-    await rt.runner.idlePointerMaintenance();
+    await settlePointerMaintenance();
 
+    expect(getPatternIdentityRef(cell)?.identity).toBe(unloadableIdentity);
+    expect(rt.runner.isRunning(cell)).toBe(false);
+  });
+
+  it("stops the piece when the recorded update displaced the running pattern without a baseline", async () => {
+    // An adoption whose predecessor's source is not retained records no
+    // baseline revision; the transition names the predecessor in
+    // `displacedPattern`, stamped with its own timestamp.
+
+    rt = newRuntime();
+    const { cell, v1Ref } = await runV1("unloadable-pointer-displaced");
+    const unloadableIdentity = await unloadableIdentityPromise;
+    const timestamp = Date.now();
+    const tx = rt.edit();
+    stageRecordedUpdate(tx, cell, v1Ref, unloadableIdentity, {
+      baseline: false,
+      timestamp,
+      displacedAt: timestamp,
+    });
+    await tx.commit().settled;
+    await settlePointerMaintenance();
+
+    expect(getPatternIdentityRef(cell)?.identity).toBe(unloadableIdentity);
+    expect(rt.runner.isRunning(cell)).toBe(false);
+  });
+
+  it("rolls the pointer back when the displaced pattern belongs to an earlier transition", async () => {
+    // A `displacedPattern` record names the predecessor of the transition
+    // that wrote it. One stamped with another transition's time says nothing
+    // about the latest revision, so the repair rolls the pointer back as it
+    // would without any history.
+
+    rt = newRuntime();
+    const { cell, v1Ref } = await runV1("unloadable-pointer-stale-displaced");
+    const unloadableIdentity = await unloadableIdentityPromise;
+    const timestamp = Date.now();
+    const tx = rt.edit();
+    stageRecordedUpdate(tx, cell, v1Ref, unloadableIdentity, {
+      baseline: false,
+      timestamp,
+      displacedAt: timestamp - 1,
+    });
+    await tx.commit().settled;
+    await settlePointerMaintenance();
+
+    expect(getPatternIdentityRef(cell)?.identity).toBe(v1Ref.identity);
+    expect(rt.runner.isRunning(cell)).toBe(true);
+  });
+
+  it("stops the piece when the update is recorded while its rollback is pending", async () => {
+    // The pointer moves with no record first, so the watcher decides to roll
+    // it back. The update's record lands before the rollback's transaction
+    // runs; the transaction reads it and writes nothing.
+
+    rt = newRuntime();
+    const { cell, v1Ref } = await runV1("unloadable-pointer-in-flight");
+    const unloadableIdentity = await unloadableIdentityPromise;
+    const editWithRetry = rt.editWithRetry.bind(rt);
+    let recorded = false;
+    rt.editWithRetry =
+      (async (...args: Parameters<Runtime["editWithRetry"]>) => {
+        if (!recorded) {
+          recorded = true;
+          const recordTx = rt.edit();
+          stageRecordedUpdate(recordTx, cell, v1Ref, unloadableIdentity, {
+            baseline: true,
+            timestamp: Date.now(),
+            movePointer: false,
+          });
+          await recordTx.commit().settled;
+        }
+        return await editWithRetry(...args);
+      }) as Runtime["editWithRetry"];
+    try {
+      await repointTo(cell, unloadableIdentity);
+    } finally {
+      rt.editWithRetry = editWithRetry;
+    }
+
+    expect(recorded).toBe(true);
     expect(getPatternIdentityRef(cell)?.identity).toBe(unloadableIdentity);
     expect(rt.runner.isRunning(cell)).toBe(false);
   });
