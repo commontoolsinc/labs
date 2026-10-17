@@ -208,12 +208,20 @@ export function unionMembersInSourceOrder(
   union: ts.UnionType,
   siteNode: ts.TypeNode | undefined,
   checker: ts.TypeChecker,
+  tupleItems?: GenerationContext["tupleItems"],
 ): Array<{ member: ts.Type; node: ts.TypeNode | undefined }> {
   const members = union.types;
   const unionNode = readUnionTypeNode(siteNode, checker);
   const paired = unionNode &&
     pairWrittenMemberNodes(members, unionNode.types, checker, () => false);
-  return sourceOrderOfMembers(union, members, paired, siteNode, checker).map((
+  return sourceOrderOfMembers(
+    union,
+    members,
+    paired,
+    siteNode,
+    checker,
+    tupleItems,
+  ).map((
     index,
   ) => ({
     member: members[index]!,
@@ -268,11 +276,24 @@ function sourceOrderOfMembers(
   paired: ReturnType<typeof pairWrittenMemberNodes> | undefined,
   siteNode: ts.TypeNode | undefined,
   checker: ts.TypeChecker,
+  tupleItems?: GenerationContext["tupleItems"],
 ): number[] {
-  const ranking = paired?.memberNodes.some(isWrittenNode)
+  const written = paired?.memberNodes.some(isWrittenNode)
     ? paired
-    : indexedAccessPairing(siteNode, members, checker) ??
-      declaredPairing(union, members, checker);
+    : indexedAccessPairing(siteNode, members, checker);
+  if (written === undefined && tupleItems?.items === union) {
+    // Every member, an intrinsic one included, goes where the tuple lists
+    // it; members one element holds, as a `boolean`'s two do, keep the
+    // order `inSourceOrder()` gives them.
+    const place = (index: number) =>
+      tupleElementPlace(members[index]!, tupleItems.elements) ??
+        Number.POSITIVE_INFINITY;
+    return inSourceOrder(
+      members.map((_, index) => index),
+      (index) => members[index]!,
+    ).sort((left, right) => place(left) - place(right));
+  }
+  const ranking = written ?? declaredPairing(union, members, checker);
   const rankOfNode = new Map<ts.TypeNode, number>();
   ranking?.memberNodes.forEach((node, index) => {
     if (isWrittenNode(node)) rankOfNode.set(node, index);
@@ -291,6 +312,22 @@ function sourceOrderOfMembers(
     (index) => members[index]!,
     rankOf,
   );
+}
+
+/**
+ * Where among a tuple's element types `elements` the member `member` of the
+ * union of them is first listed: an element that is the member, or a union
+ * that holds it. Returns `undefined` for a member no element lists.
+ */
+function tupleElementPlace(
+  member: ts.Type,
+  elements: readonly ts.Type[],
+): number | undefined {
+  const place = elements.findIndex((element) =>
+    element === member ||
+    (element.isUnion() && element.types.includes(member))
+  );
+  return place < 0 ? undefined : place;
 }
 
 /**
@@ -348,8 +385,8 @@ function indexedAccessPairing(
  * Only an alias without type parameters is read. Pairing reads the type of
  * each declared member, which the checker already holds for such an alias,
  * having resolved it to reach `union`; for a generic one it would
- * instantiate the members anew, and the generator's recursion bounds read
- * how old a type is.
+ * instantiate the members anew, types a generation would otherwise never
+ * create.
  */
 function declaredPairing(
   union: ts.Type,
@@ -487,6 +524,7 @@ export class UnionFormatter implements TypeFormatter {
       paired,
       context.typeNode,
       context.typeChecker,
+      context.tupleItems,
     );
     const members = order.map((index) => checkerMembers[index]!);
     const orderedMemberNodes = paired &&
