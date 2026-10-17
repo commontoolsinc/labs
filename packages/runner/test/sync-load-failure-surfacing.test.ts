@@ -243,6 +243,9 @@ describe("sync load failure surfacing", () => {
     expect((failure as ReplicaLoadFailureError).failure.failureClass).toBe(
       "connection",
     );
+    expect((failure as ReplicaLoadFailureError).message).toBe(
+      "memory client closed",
+    );
   });
 
   it("logs distinct failures for distinct spaces", async () => {
