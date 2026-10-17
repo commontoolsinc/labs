@@ -864,6 +864,33 @@ what the piece runs, and is behind it rather than holding a dead pattern, so the
 piece keeps its source. The loop and the header are in
 [pattern-updates.md](pattern-imports/pattern-updates.md#system-source-patterns--the-loop).
 
+The same answer holds for a step taken by hand when it is the same step:
+repointing a piece at a `system:` origin, following one again from its
+history, or taking what its active origin offers now. The contract half of the
+release testing is its first tier, the pattern-compat gate
+([pattern-update-testing.md](pattern-update-testing.md#tier-1--contract-compatibility)),
+which proves each release of a pattern's default export against the contracts
+that export's earlier releases recorded, the breaks it accepts by name included
+(`tasks/pattern-compat-accepted-breaks.ts`), and proves no other step. So the
+review leaves the schema comparison out only where the piece shows the step is
+one of those. It runs the default export, and the candidate is that export
+too. The source it runs was compiled from that origin's file: a module is
+named by its route path, which its identity covers, so the entry the piece's
+retained source names is the origin's route. The piece knows when that source
+was released, from a revision naming it or a confirmation of it. And the
+deployment states a later release time beside the candidate's identity.
+Every other step has its schemas compared and takes the explicit override, as
+any manual replacement does: an earlier release, a candidate or running source
+with no stated time, another export, and a piece whose source came from
+anywhere else. Release times order deploys, not commits, so a deployment
+serving source its gate never judged is trusted for it the same as by the
+automatic update. Either way the review validates the stored argument and the
+links it retains, and runs the CFC envelope merges the commit will make: those
+concern the piece's own data, which no release gate saw. A step taken by hand
+records the candidate's release time on its revision, as the automatic update
+does, and the commit checks again that the candidate is still the later
+release.
+
 Every other origin — another piece, exact pinned source — is somebody else's, and nobody promised anything about it. A candidate from one
 is adopted only if it is an acceptable replacement for what the piece runs,
 under the same relation a replacement made by hand has to satisfy: the
@@ -933,6 +960,7 @@ of a schema warning does not waive this root-interface contract.
 | Structural schema comparison | Compare argument and result schemas and validate retained inputs when replacing an existing piece's source | **Implemented** for `PieceController.setPattern` |
 | Manual incompatible replacement | Warn about an incompatible pattern contract or retained link and require explicit confirmation or a command-line flag. Reject a candidate that cannot use the actual retained input | **Partial**: source-history actions return a one-use confirmation bound to the reviewed candidate and guarded state. `setPattern` rejects unless `dangerouslyAllowIncompatibleSchema` is supplied, and the command line exposes that flag without a first-class warning and confirmation flow |
 | Automatic update from a gated origin | Adopt a `system:` candidate as it stands; the release that produced it was gated by golden replays over representative state | **Implemented** |
+| Manual step to a gated origin | Review a later `system:` release of the pattern a piece took its source from without comparing schemas, and compare them for every other step | **Implemented**: a repoint, a follow from history, and taking the active origin's offer judge the step by the piece's source log, the export, and both release times, and record the candidate's release time on the revision |
 | Automatic update from an ungated origin | Compare the candidate with the accepted source in both directions, and adopt only an acceptable replacement | **Partial**: a candidate from an ungated origin must leave the piece's argument and result schemas exactly as they are, which refuses changes the piece could take. `PieceController.setPattern` already applies the relation this asks for |
 | Overriding a refused automatic update | Name the refusal and its reason on the source panel, and offer to adopt that exact candidate anyway, keeping the active origin | **Partial**: reconciliation records each refusal and its reason as durable state, the source panel names both, and its override resolves the active origin again and adopts what it offers through the one-use confirmation, keeping the origin. The override is offered only where a contract mismatch caused the refusal. Asking to override resolves the origin again, so an origin that moved since the refusal supplies the later candidate, and the confirmation binds to the one that override's own check reviewed |
 | Migrating a piece's data across a contract change | Migrate rather than refuse, so a contract change does not stop a piece following its origin | **Migration required**: an unaccepted refusal leaves the piece on its last accepted state |
