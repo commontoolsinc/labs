@@ -99,7 +99,10 @@ import {
   diagnosticPrefix,
   type PendingCommitContext,
   type SpaceStorageDiagnostic,
+  type SpaceStorageSizes,
   type StorageDiagnostics,
+  type StorageSizes,
+  sumSpaceStorageSizes,
 } from "./diagnostics.ts";
 import type { Cell } from "../cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
@@ -2705,6 +2708,22 @@ export class StorageManager implements IStorageManager {
     };
   }
 
+  /** @inheritDoc */
+  getSizes(): StorageSizes {
+    return {
+      ...sumSpaceStorageSizes(
+        [...this.#providers.values()].map((provider) =>
+          provider.replica.getSizes()
+        ),
+      ),
+      spaces: this.#providers.size,
+      pendingCommits: this.#pendingCommits.size,
+      pendingLoads: this.#pendingLoads.size,
+      pendingCrossingLoads: this.#pendingCrossingLoads.size,
+      pendingCrossSpace: this.#crossSpacePromises.size,
+    };
+  }
+
   hasPendingCommits(): boolean {
     return this.#pendingCommits.size > 0;
   }
@@ -2901,12 +2920,20 @@ export class StorageManager implements IStorageManager {
    * server's own words: for an ACL denial that includes the principal and
    * space (`Principal <did> lacks READ on space <did>`), which is exactly
    * what a caller staring at an unexplained `undefined` needs.
+   *
+   * `heldProvider` is the provider this manager held for the space when the
+   * load started, or undefined when it held none. A failure that reaches a
+   * provider whose teardown has begun is not logged: tearing it down closes
+   * its client, which rejects every request in flight, so the failure says
+   * nothing about the read. The load's waiters still receive it.
    */
   #logSyncLoadFailure(
     space: MemorySpace,
     id: URI,
     failure: unknown,
+    heldProvider: Provider | undefined,
   ): void {
+    if (heldProvider?.destroyed) return;
     // Pull errors arrive as plain result objects (IConnectionError et al.),
     // not Error instances — read the fields structurally.
     const named = failure as { name?: unknown; message?: unknown } | undefined;
@@ -3031,6 +3058,7 @@ export class StorageManager implements IStorageManager {
     }
 
     const provider = this.open(space);
+    const heldProvider = this.#providers.get(space);
     // The runner's explicit-instance read (server-execution v2 stage A):
     // a served per-instance run's load of a scoped doc NAMES that
     // principal's instance — the load registers, travels, and lands per
@@ -3079,7 +3107,7 @@ export class StorageManager implements IStorageManager {
       // into the same silent undefined. Surface the failure; the pending-load
       // ledger below still carries it to scheduler waiters.
       if (loadFailure !== undefined) {
-        this.#logSyncLoadFailure(space, id, loadFailure);
+        this.#logSyncLoadFailure(space, id, loadFailure, heldProvider);
       }
       return cell;
     } catch (error) {
@@ -3149,19 +3177,22 @@ export class StorageManager implements IStorageManager {
       this.#pendingCrossingLoads.set(ledgerKey, entry);
       const load = (async () => {
         let loadFailure: unknown;
+        let heldProvider: Provider | undefined;
         try {
-          const result = await this.open(space).sync(
+          const provider = this.open(space);
+          heldProvider = this.#providers.get(space);
+          const result = await provider.sync(
             id,
             { path: crossing.path, schema: crossing.schema ?? false },
             crossing.scope,
           );
           loadFailure = result.error;
           if (loadFailure !== undefined) {
-            this.#logSyncLoadFailure(space, id, loadFailure);
+            this.#logSyncLoadFailure(space, id, loadFailure, heldProvider);
           }
         } catch (error) {
           loadFailure = error;
-          this.#logSyncLoadFailure(space, id, error);
+          this.#logSyncLoadFailure(space, id, error, heldProvider);
         } finally {
           if (loadFailure !== undefined) this.#crossingKicks.delete(key);
           releaseLoad(loadFailure);
@@ -3194,6 +3225,7 @@ export class StorageManager implements IStorageManager {
     const scope = normalizeCellScope(address.scope);
     const instance = this.#foreignInstanceKey(scope, identity);
     const provider = this.open(address.space);
+    const heldProvider = this.#providers.get(address.space);
     const releaseLoad = this.#registerPendingLoad({
       space: address.space,
       scope,
@@ -3210,7 +3242,12 @@ export class StorageManager implements IStorageManager {
       );
       loadFailure = result.error;
       if (loadFailure !== undefined) {
-        this.#logSyncLoadFailure(address.space, address.id, loadFailure);
+        this.#logSyncLoadFailure(
+          address.space,
+          address.id,
+          loadFailure,
+          heldProvider,
+        );
         this.retractDocPullKick(address.space, address.id, scope, identity);
       }
     } catch (error) {
@@ -3283,11 +3320,18 @@ export class StorageManager implements IStorageManager {
       throw error;
     };
 
+    // `start` opened the space's provider before it returned.
+    const heldProvider = this.#providers.get(address.space);
     return work.then((result) => {
       // Same silent-collapse hazard as syncCell: a link-target pull that
       // resolves while carrying an error reads as an absent target.
       if (result.error !== undefined) {
-        this.#logSyncLoadFailure(address.space, address.id, result.error);
+        this.#logSyncLoadFailure(
+          address.space,
+          address.id,
+          result.error,
+          heldProvider,
+        );
       }
       releaseLoad(result.error);
       return result;
@@ -3798,6 +3842,11 @@ class Provider
     readonly options: ProviderOptions,
   ) {
     this.replica = this.#createReplica();
+  }
+
+  /** Whether `destroy()` or `destroyNow()` has begun tearing this down. */
+  get destroyed(): boolean {
+    return this.#destroyed;
   }
 
   #createReplica(): SpaceReplica {
@@ -4556,6 +4605,9 @@ export class SpaceReplica
     string,
     Set<(document: EntityDocument | undefined) => void>
   >();
+
+  /** How many callbacks `#sinks` holds across every document. */
+  #sinkCount = 0;
   readonly #operationSinks = new Map<
     string,
     Set<(snapshot: OperationFieldSnapshot) => void>
@@ -4966,6 +5018,23 @@ export class SpaceReplica
     };
   }
 
+  /** @inheritDoc */
+  getSizes(): SpaceStorageSizes {
+    return {
+      documents: this.#docs.size,
+      subscribedDocuments: this.#sinks.size,
+      subscriptions: this.#sinkCount,
+      watchedDocuments: this.#watchedIds.size,
+      operationSinks: this.#operationSinks.size,
+      inFlightCommits: this.#commitPromises.size,
+      unsettledCommits: this.#commitOutcomeBySeq.size,
+      repairingCommits: this.#rejectedPendingLayers.size,
+      parkedAccepts: this.#parkedAccepts.size,
+      syncTasks: this.#syncTasks.size,
+      pendingReads: this.#syncPromises.size,
+    };
+  }
+
   /**
    * The scope INSTANCE key a local address keys under (see `docKey`):
    * the address's explicit `scopeKey` when it names one; else the scope
@@ -5150,11 +5219,12 @@ export class SpaceReplica
       subscribers = new Set();
       this.#sinks.set(key, subscribers);
     }
+    if (!subscribers.has(callback)) this.#sinkCount += 1;
     subscribers.add(callback);
     void this.sync(uri);
     return () => {
       const current = this.#sinks.get(key);
-      current?.delete(callback);
+      if (current?.delete(callback)) this.#sinkCount -= 1;
       if (current && current.size === 0) {
         this.#sinks.delete(key);
       }
@@ -7802,9 +7872,17 @@ export class SpaceReplica
         !this.#isLocalSessionDocument(read)
       ),
     };
+    // A commit that writes only this replica's session documents settles
+    // here, whatever it read. A shared read names a document the replica
+    // holds, so a write that outdates the read reaches the replica as a
+    // frame, and the frame runs the derivation that read it again; a
+    // verdict refusing the read as stale would re-run the same derivation
+    // after the same frame. A read through a pending layer settles with
+    // that layer's commit below. A precondition on a shared document is a
+    // check on the server's head rather than on this replica's view, so a
+    // commit carrying one still travels, as a validation-only commit.
     const localOnly = this.#localSessionDocuments() &&
-      remoteOperations.length === 0 && !remotePreconditions?.length &&
-      remoteReads.confirmed.length === 0 && remoteReads.pending.length === 0;
+      remoteOperations.length === 0 && !remotePreconditions?.length;
     // Record local origins before the first rejection checkpoint: a later
     // guard must validate their failed verdict without contacting the server.
     if (localOnly) this.#localSessionCommitAccepted.set(localSeq, false);
@@ -7853,7 +7931,10 @@ export class SpaceReplica
       }
       // A local session read can depend on a mixed commit awaiting its
       // verdict or local application. Promote that dependency before its
-      // consumer can replace the confirmed base.
+      // consumer can replace the confirmed base. A commit settling here
+      // waits for every pending layer it read through, shared ones
+      // included: the server is not asked about them, so a rejected one
+      // has to be found by the checkpoint below before the settle.
       if (this.#localSessionDocuments()) {
         const origins = (commit.preconditions ?? []).flatMap((pin) =>
           pin.kind === "origin-committed" ? [pin.originLocalSeq] : []

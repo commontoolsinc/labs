@@ -172,6 +172,13 @@ export interface PullRequestView {
   /** The identities the packing over that manifest reached. */
   selected: ReadonlySet<string>;
 
+  /**
+   * Every unit the packing placed anything of, as `"<suite>\t<unit>"`.
+   * A test the manifest does not hold runs wherever its unit runs, so
+   * this is what says whether it was to have run.
+   */
+  placed: ReadonlySet<string>;
+
   /** The identities that manifest held back, against the reason. */
   withheld: ReadonlyMap<string, WithheldReason>;
 
@@ -196,15 +203,19 @@ export interface PullRequestView {
    */
   flakes: ReadonlyMap<string, FlakeEvidence | undefined>;
 
-  /** The weighted catches behind each identity the store knows. */
-  catches: ReadonlyMap<string, number>;
+  /**
+   * The weighted new real test failures behind each identity the store
+   * knows.
+   */
+  newRealTestFailures: ReadonlyMap<string, number>;
 
   /**
-   * The invocation unit each identity the store knows lives in, as
-   * `"<suite>\t<unit>"`. What it answers is whether a unit ran at all:
-   * records exist only for tests that ran, so a test missing from a run
-   * whose unit produced no records at all is a test nothing judged
-   * rather than a test that left.
+   * The invocation unit each identity lives in, as `"<suite>\t<unit>"`:
+   * where the manifest places it, and for one the manifest does not hold,
+   * where this tree places the record the run under report wrote of it.
+   * What it answers is whether a unit ran at all: records exist only for
+   * tests that ran, so a test missing from a run whose unit produced no
+   * records at all is a test nothing judged rather than a test that left.
    */
   units: ReadonlyMap<string, string>;
 }
@@ -214,12 +225,13 @@ export function unknownPullRequest(): PullRequestView {
   return {
     manifest: false,
     selected: new Set(),
+    placed: new Set(),
     withheld: new Map(),
     heldWithUnit: new Set(),
     unschedulable: new Set(),
     crowded: false,
     flakes: new Map(),
-    catches: new Map(),
+    newRealTestFailures: new Map(),
     units: new Map(),
   };
 }
@@ -331,8 +343,8 @@ export interface RenameSuggestion {
   from: TestIdentity;
   to: TestIdentity;
 
-  /** The weighted catches the bridge would bring back. */
-  catches: number;
+  /** The weighted new real test failures the bridge would bring back. */
+  newRealTestFailures: number;
 
   /** The line to append to the alias file, exactly as it must be written. */
   aliasLine: string;
@@ -418,7 +430,9 @@ function identityOf(key: string): TestIdentity {
  *
  * Its own records decide first, because whether it ran a test is a fact
  * about what it did rather than a projection of what it would have done.
- * The manifest only says why it did not.
+ * The plan packed over the manifest only says why it did not: a test the
+ * manifest holds by what the plan did with it, and one the manifest does
+ * not hold by what the plan did with its unit.
  */
 export function selectionOf(
   view: PullRequestView,
@@ -435,10 +449,14 @@ export function selectionOf(
   const withheld = view.withheld.get(key);
   if (withheld === "flaky") return "withheld-flaky";
   if (view.heldWithUnit.has(key)) return "withheld-unit";
-  // With a manifest, the packing says whether the test was to have run:
-  // an identity the packing reached, and one the store has never seen,
-  // are both identities that run.
-  if (view.manifest && view.flakes.has(key) && !view.selected.has(key)) {
+  // With a manifest, the packing says whether the test was to have run.
+  // One the manifest holds runs where the packing reached it, and one the
+  // manifest does not hold runs wherever its unit runs.
+  const unit = view.units.get(key);
+  const passedOver = view.flakes.has(key)
+    ? !view.selected.has(key)
+    : unit !== undefined && !view.placed.has(unit);
+  if (view.manifest && passedOver) {
     if (view.unschedulable.has(key)) return "unschedulable";
     return view.crowded ? "crowded-out" : "not-selected";
   }
@@ -458,9 +476,9 @@ export function selectionOf(
  *
  * A test that both passed and failed in this run produces nothing
  * either. That is the test disagreeing with itself at one commit, which
- * is what the scorer calls flake evidence rather than a catch, and
- * calling it a first failure would say the change broke something that
- * broke on its own.
+ * is what the scorer calls flake evidence rather than a new real test
+ * failure. Calling it a first failure would say the change broke
+ * something that broke on its own.
  *
  * Nor does a test the pull request's own run failed. This comment
  * carries what a later run found that the pull request's run could not
@@ -723,21 +741,21 @@ function subsequenceShare(left: string, right: string): number {
 
 /**
  * The renames that discarded history, each with the line that brings it
- * back and the catches that line is worth.
+ * back and the new real test failures that line is worth.
  *
- * A rename is never inferred into the alias file: this suggests a line
- * and says what it would restore, and somebody appends it. Three things
- * have to hold before one is offered, because a wrong bridge silently
- * credits one test with another's record and the whole score rests on
- * catch attribution. The departing test must have caught something, or
- * there is nothing to bring back. The arriving name must be one the
- * store has never seen, or it is not a new name at all. And the pairing
- * must be clear: alike past `RENAME_SIMILARITY`, and ahead of every
- * other candidate by `RENAME_MARGIN`, because two candidates the same
- * distance away is a question rather than an answer, and an arrival two
- * departures both point at answers for neither. And the unit the
- * departing test lived in has to have run here, or its absence is a
- * suite that did not run rather than a test that left.
+ * A rename is never inferred into the alias file: this suggests a line and says
+ * what it would restore, and somebody appends it. Three things have to hold
+ * before one is offered, because a wrong bridge silently credits one test with
+ * another's record and the whole score rests on attributing each new real test
+ * failure to the right test. The departing test must have had new real test
+ * failures, or there is nothing to bring back. The arriving name must be one
+ * the store has never seen, or it is not a new name at all. And the pairing
+ * must be clear: alike past `RENAME_SIMILARITY`, and ahead of every other
+ * candidate by `RENAME_MARGIN`, because two candidates the same distance away
+ * is a question rather than an answer, and an arrival two departures both point
+ * at answers for neither. And the unit the departing test lived in has to have
+ * run here, or its absence is a suite that did not run rather than a test that
+ * left.
  *
  * At most `RENAME_SUGGESTIONS` are offered. A change that ends a whole
  * area produces as many departures as it removed tests, and a wall of
@@ -746,7 +764,8 @@ function subsequenceShare(left: string, right: string): number {
 export function renames(input: ReportInput): RenameSuggestion[] {
   const ranHere = unitsThatRan(input);
   const gone = [...input.previous.keys()].filter((key) =>
-    !input.current.has(key) && (input.pullRequest.catches.get(key) ?? 0) > 0 &&
+    !input.current.has(key) &&
+    (input.pullRequest.newRealTestFailures.get(key) ?? 0) > 0 &&
     ranHere.has(input.pullRequest.units.get(key) ?? "")
   );
   const arrived = [...input.current.keys()].filter((key) =>
@@ -773,7 +792,7 @@ export function renames(input: ReportInput): RenameSuggestion[] {
     suggestions.push({
       from,
       to: best.test,
-      catches: input.pullRequest.catches.get(key)!,
+      newRealTestFailures: input.pullRequest.newRealTestFailures.get(key)!,
       aliasLine: aliasLineFor(from, best.test, input.day),
     });
   }
@@ -880,8 +899,9 @@ const SELECTION_PROSE: Record<ReportedSelection, string> = {
     "tests, and this was not one of them.",
   "crowded-out": "This pull request did not run it, and nothing about " +
     "this test decided that. The tests that had to run, which are the " +
-    "ones the change's edits reach and the ones the store has never seen, " +
-    "left no room in the lanes for anything else.",
+    "ones the change's edits reach and the units nothing had measured " +
+    "that the default branch had not already gained, left no room in the " +
+    "lanes for anything else.",
   "withheld-unit": "This pull request did not run it: its unit runs as " +
     "a whole, and the store holds back another test in that unit as too " +
     "flaky to judge a change by, so a pull request runs the unit only " +
@@ -1092,8 +1112,8 @@ export function renderReport(
     out.push("### A rename that discarded a test's history");
     out.push("");
     out.push(
-      "A test's score is built on what it has caught, over unbounded " +
-        "history, so a renamed test drops to the floor. A line in " +
+      "A test's score is built on its new real test failures, over " +
+        "unbounded history, so a renamed test drops to the floor. A line in " +
         `\`${ALIAS_DIRECTORY}/\`, in the file named after the test's file, ` +
         "bridges the two halves. A rename is never inferred, so this is a " +
         "suggestion rather than a change: append the line if the pairing " +
@@ -1104,7 +1124,8 @@ export function renderReport(
       out.push(
         `- ${shownIdentity(rename.from)} appears to have become ` +
           `${shownIdentity(rename.to)}, which would bring back ` +
-          `${rename.catches.toFixed(1)} weighted catches.`,
+          `${rename.newRealTestFailures.toFixed(1)} weighted new real test ` +
+          "failures.",
       );
       out.push("");
       out.push("  ```json");

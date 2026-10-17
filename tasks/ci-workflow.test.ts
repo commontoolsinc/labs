@@ -22,10 +22,8 @@ import {
 import { measuredSetDirectory } from "./test-topology/coverage-gates.ts";
 import {
   FULL_LANE_BOUND_SECONDS,
-  FULL_LANES_MAX,
-  FULL_RUN_LABEL,
   LANE_BOUND_SECONDS,
-  LANES,
+  LANES_MAX,
   RERUN_BUDGET_SECONDS,
 } from "./test-selection/policy.ts";
 
@@ -237,8 +235,8 @@ Deno.test("the first CI wave leaves runner capacity for another run", async () =
       `two overlapping runs must fit within GitHub's ` +
       `${githubParallelRunnerLimit}-runner limit`,
   );
-  // The full run's lanes are held to the same limit by the cap on them.
-  assert(FULL_LANES_MAX <= githubParallelRunnerLimit / 2);
+  // Every run's lanes are held to the same limit by the cap on them.
+  assert(LANES_MAX <= githubParallelRunnerLimit / 2);
 });
 
 Deno.test("every step we name carries a phase marker", async () => {
@@ -379,14 +377,16 @@ Deno.test("each comment job selects runs by the triggering run's own facts", asy
 // it reads is the change itself. That commit is on the default branch,
 // which is what makes it safe to run in a job holding a write token; a
 // pull request head in the same job would be running fork-authored code
-// with permission to comment as the repository.
+// with permission to comment as the repository. Its whole history is
+// there because the report lists what the default branch gained since
+// the commit a manifest was published from, as the lanes do.
 Deno.test("the run report checks out the commit it reports on", async () => {
   const comment = await workflow("pull-request-comments.yml");
   assertStringIncludes(
     comment,
     "ref: ${{ github.event.workflow_run.head_sha }}",
   );
-  assertStringIncludes(comment, "fetch-depth: 2");
+  assertStringIncludes(comment, "fetch-depth: 0");
 });
 
 //
@@ -523,50 +523,31 @@ function assertStepFailed(run: StepRun, what: string): void {
   assert(run.code !== 0, withStderr(what, run));
 }
 
-Deno.test("the lanes run every test when the full run is planned, and a selection otherwise", async () => {
-  // A pull request runs its lanes over a selection, and anything else,
-  // including a pull request carrying the full-run label, runs every test.
-  // `plan-full` is the one place that decides which: the lanes read its
-  // outputs, and fall back to a pull request's lanes where it was skipped.
+Deno.test("the lanes run as many lanes, and with the arguments, the plan says", async () => {
+  // Every run counts its lanes before they start, and the lanes read the
+  // count and their arguments from the plan and from nowhere else.
   const ci = await parsedWorkflow("deno.yml");
-  const plan = ci.jobs["plan-full"];
+  const plan = ci.jobs.plan;
   const tests = ci.jobs.tests;
-  assertEquals(
-    plan.if,
-    "github.event_name != 'pull_request' || " +
-      `contains(github.event.pull_request.labels.*.name, '${FULL_RUN_LABEL}')`,
-  );
+  assertEquals(plan.if, undefined);
   assertEquals(plan.outputs, {
     of: "${{ steps.count.outputs.of }}",
     lanes: "${{ steps.count.outputs.lanes }}",
-    args: "--full",
+    args: "${{ steps.count.outputs.args }}",
   });
-  assertEquals(needsOf(tests), ["plan-full"]);
-  // A skipped plan is how a pull request's lanes start at once; a failed or
-  // cancelled one is a run that cannot know its lanes.
-  assertEquals(
-    tests.if,
-    "!cancelled() && (needs.plan-full.result == 'success' || " +
-      "needs.plan-full.result == 'skipped')",
-  );
-
-  // A pull request's lane count is the dial, written where the plan is
-  // skipped, and this holds it to the dial.
-  const selected = Array.from({ length: LANES }, (_, index) => index + 1);
-  const of = `\${{ needs.plan-full.outputs.of || ${LANES} }}`;
+  assertEquals(needsOf(tests), ["plan"]);
+  // A failed or cancelled plan is a run that cannot know its lanes.
+  assertEquals(tests.if, undefined);
+  const of = "${{ needs.plan.outputs.of }}";
   assertEquals(
     tests.strategy?.matrix?.lane,
-    `\${{ fromJSON(needs.plan-full.outputs.lanes || '[${
-      selected.join(", ")
-    }]') }}`,
+    "${{ fromJSON(needs.plan.outputs.lanes) }}",
   );
   assertEquals(tests.name, `Tests (\${{ matrix.lane }}/${of})`);
   assertEquals(tests.env?.LANE_JOB, `Tests (\${{ matrix.lane }}/${of})`);
   assertEquals(
     tests.env?.LANE_ARGS,
-    `--lane \${{ matrix.lane }} --of ${of} ` +
-      "${{ needs.plan-full.outputs.args || " +
-      "format('--base origin/{0}', github.base_ref) }}",
+    `--lane \${{ matrix.lane }} --of ${of} \${{ needs.plan.outputs.args }}`,
   );
 });
 
@@ -613,30 +594,95 @@ Deno.test("a lane runs the lane runner and holds the token alone", async () => {
   }
 });
 
-Deno.test("the full run's count reaches the lanes as a list of lanes", async () => {
-  const plan = (await parsedWorkflow("deno.yml")).jobs["plan-full"];
-  const count = namedStep(plan, "🗺️ Count the lanes the full run needs");
-  assertStringIncludes(
-    count.run ?? "",
-    "deno run -A tasks/ci-lane.ts --full --lane-count",
+Deno.test("the plan reaches the lanes as a count, a list of lanes, and arguments", async () => {
+  const plan = (await parsedWorkflow("deno.yml")).jobs.plan;
+  const count = namedStep(plan, "🗺️ Count the lanes the run needs");
+  assertEquals(count.env, {
+    EVENT: "${{ github.event_name }}",
+    BASE_REF: "${{ github.base_ref }}",
+    LABELS: "${{ toJSON(github.event.pull_request.labels.*.name) }}",
+  });
+  // A pull request's plan reads the diff against its merge base.
+  assertEquals(
+    namedStep(plan, "📥 Checkout repository").with?.["fetch-depth"],
+    "${{ github.event_name == 'pull_request' && '0' || '1' }}",
   );
 
-  const answering = (body: string) =>
-    runStep(count.run ?? "", {}, {
-      deno: body,
-    });
-  const three = await answering("echo 3");
-  assertStepCode(three, 0, "a count of three fails");
+  // The stand-in says what it was asked on the error stream, one word to
+  // a line, and answers with `answer`.
+  const counted = (event: string, answer: string, labels = "null") =>
+    runStep(
+      count.run ?? "",
+      { EVENT: event, BASE_REF: "main", LABELS: labels },
+      {
+        deno: `printf '%s\\n' "$@" >&2\n${answer}`,
+      },
+    );
+  const answer = (of: number, args: string[]) =>
+    `echo '${JSON.stringify({ of, args })}'`;
+
+  // Anything but a pull request runs everything, a called run included.
+  for (const event of ["push", "workflow_dispatch", "schedule"]) {
+    const full = await counted(event, answer(3, ["--full"]));
+    assertStepCode(full, 0, `a ${event} run's count fails`);
+    assertEquals(
+      full.stderr,
+      "run\n-A\ntasks/ci-lane.ts\n--lane-count\n--full\n",
+    );
+    assertEquals(
+      full.output,
+      "of=3\nlanes=[1,2,3]\nargs=--full\n",
+      withStderr(`a ${event} run's count`, full),
+    );
+  }
+
+  // A pull request's count is told its base and each of its labels, whole,
+  // and hands the lanes what it decided.
+  const change = await counted(
+    "pull_request",
+    answer(7, ["--base", "origin/main", "--scale", "2.5"]),
+    JSON.stringify(["ci: 2.5x", "a label with spaces"]),
+  );
+  assertStepCode(change, 0, "a pull request's count fails");
   assertEquals(
-    three.output,
-    "of=3\nlanes=[1,2,3]\n",
-    withStderr("a count of three", three),
+    change.stderr,
+    "run\n-A\ntasks/ci-lane.ts\n--lane-count\n--base\norigin/main\n" +
+      "--label\nci: 2.5x\n--label\na label with spaces\n",
+  );
+  assertEquals(
+    change.output,
+    "of=7\nlanes=[1,2,3,4,5,6,7]\nargs=--base origin/main --scale 2.5\n",
+  );
+  const unlabelled = await counted(
+    "pull_request",
+    answer(5, ["--base", "origin/main", "--scale", "1"]),
+    "[]",
+  );
+  assertStepCode(unlabelled, 0, "an unlabelled pull request's count fails");
+  assertEquals(
+    unlabelled.stderr,
+    "run\n-A\ntasks/ci-lane.ts\n--lane-count\n--base\norigin/main\n",
+  );
+
+  // Labels that cannot be read fail the step rather than reading as none.
+  assertStepFailed(
+    await counted("pull_request", answer(5, ["--full"]), "not json"),
+    "unreadable labels pass",
   );
 
   // A planner that failed, or that answered with something other than a
-  // count, fails the step rather than handing the lanes an empty matrix.
-  assertStepFailed(await answering("exit 1"), "a failed count passes");
-  assertStepFailed(await answering("echo three"), "a word passes");
+  // count and arguments, fails the step rather than handing the lanes an
+  // empty matrix.
+  for (const failing of ["exit 1", "echo three", `echo '{"args": []}'`]) {
+    assertStepFailed(
+      await counted("push", failing),
+      `a count answering \`${failing}\` passes`,
+    );
+  }
+  assertStepFailed(
+    await counted("push", `echo '{"of": 3}'`),
+    "a count without arguments passes",
+  );
 });
 
 Deno.test("a lane keeps each binary under an exact key and its compile cache by compiler", async () => {
@@ -869,31 +915,29 @@ Deno.test("Status fails unless every job passed and the lanes ran", async () => 
       what,
     );
 
-  const selected = { "plan-full": "skipped", tests: "success" };
-  const full = { "plan-full": "success", tests: "success" };
-  await verdict(selected, 0, "a passing selected run fails");
-  await verdict(full, 0, "a passing full run fails");
+  const passed = { plan: "success", tests: "success" };
+  await verdict(passed, 0, "a passing run fails");
 
   // A lane that failed, or was cancelled, fails the run.
   await verdict(
-    { ...selected, tests: "failure" },
+    { ...passed, tests: "failure" },
     1,
     "a failed lane passes",
   );
   await verdict(
-    { ...full, tests: "cancelled" },
+    { ...passed, tests: "cancelled" },
     1,
     "a cancelled lane passes",
   );
+  // A failed plan skips the lanes, which is a run that tested nothing and
+  // would otherwise pass.
   await verdict(
-    { ...full, "plan-full": "failure", tests: "skipped" },
+    { plan: "failure", tests: "skipped" },
     1,
     "a failed plan passes",
   );
-  // The lanes skipped, which is a run that tested nothing and would
-  // otherwise pass.
   await verdict(
-    { "plan-full": "skipped", tests: "skipped" },
+    { plan: "skipped", tests: "skipped" },
     1,
     "a run that tested nothing passes",
   );
@@ -909,10 +953,9 @@ Deno.test("Status judges the coverage gates of every run", async () => {
   assertEquals(gate.env?.JOB_RESULTS, "${{ toJSON(needs) }}");
   // A push reads what its parent commit's run measured through the API.
   assertEquals(gate.env?.GITHUB_TOKEN, "${{ secrets.GITHUB_TOKEN }}");
-  assertEquals(
-    gate.env?.FULL,
-    "${{ needs.plan-full.outputs.args == '--full' }}",
-  );
+  // The gate packs the plan the lanes packed, from what `plan` handed them.
+  assertEquals(gate.env?.OF, "${{ needs.plan.outputs.of }}");
+  assertEquals(gate.env?.PLAN_ARGS, "${{ needs.plan.outputs.args }}");
   // The gate asks git which baselines' commits the branch holds.
   assertEquals(
     namedStep(status, "📥 Checkout repository").with?.["fetch-depth"],
@@ -926,14 +969,14 @@ Deno.test("Status judges the coverage gates of every run", async () => {
   // gates.
   const words = async (
     event: string,
-    full: string,
+    planArgs: string,
     tests: string,
     gh = "echo '$DESCRIPTION'",
   ) =>
     await runStep(gate.run ?? "", {
-      BASE_REF: "main",
       EVENT: event,
-      FULL: full,
+      OF: "7",
+      PLAN_ARGS: planArgs,
       GITHUB_REPOSITORY: "commonfabric/labs",
       GITHUB_SHA: "c".repeat(40),
       JOB_RESULTS: JSON.stringify({ tests: { result: tests } }),
@@ -948,49 +991,71 @@ Deno.test("Status judges the coverage gates of every run", async () => {
         `esac\n` +
         gh.replace("'$DESCRIPTION'", '"$DESCRIPTION"'),
     });
-  const passing = await words("pull_request", "false", "success");
+  const budgeted = "--base origin/main --scale 2.5";
+  const passing = await words("pull_request", budgeted, "success");
   assertStepCode(passing, 0, "a passing run's gate fails");
   const pullRequest = [
     "run",
     "-A",
     "tasks/coverage-gate.ts",
-    "--base",
-    "origin/main",
     "--body",
     "ACCEPT_COVERAGE_DEBT: packages/memory +1 lines",
     "--comment",
     "coverage-comment.json",
     "--pr",
     "42",
+    "--of",
+    "7",
   ];
   assertEquals(
     passing.stdout.trim().split("\n"),
-    [...pullRequest, "--reports", "lane-coverage"],
+    [
+      ...pullRequest,
+      "--base",
+      "origin/main",
+      "--scale",
+      "2.5",
+      "--reports",
+      "lane-coverage",
+    ],
     withStderr("a passing run's gate", passing),
   );
-  const full = await words("pull_request", "true", "success");
+  const full = await words(
+    "pull_request",
+    "--base origin/main --full",
+    "success",
+  );
   assertEquals(
     full.stdout.trim().split("\n"),
-    [...pullRequest, "--full", "--reports", "lane-coverage"],
+    [
+      ...pullRequest,
+      "--base",
+      "origin/main",
+      "--full",
+      "--reports",
+      "lane-coverage",
+    ],
     withStderr("a full run's gate", full),
   );
-  const failed = await words("pull_request", "false", "failure");
+  const failed = await words("pull_request", budgeted, "failure");
   assertEquals(
     failed.stdout.trim().split("\n"),
     [...passing.stdout.trim().split("\n"), "--tests-failed"],
     withStderr("a failed run's gate", failed),
   );
-  const pushed = await words("push", "true", "success");
+  const pushed = await words("push", "--full", "success");
   assertEquals(
     pushed.stdout.trim().split("\n"),
     [
       "run",
       "-A",
       "tasks/coverage-gate.ts",
-      "--full",
       "--default-branch",
       "--body",
       "ACCEPT_COVERAGE_DEBT: packages/memory +1 lines",
+      "--of",
+      "7",
+      "--full",
       "--reports",
       "lane-coverage",
     ],
@@ -1000,10 +1065,10 @@ Deno.test("Status judges the coverage gates of every run", async () => {
   // than gating against an empty one. The default branch fails for no gate,
   // so there it judges them as though nothing were accepted, and warns.
   assertStepFailed(
-    await words("pull_request", "false", "success", "exit 1"),
+    await words("pull_request", budgeted, "success", "exit 1"),
     "an unread description passes",
   );
-  const unread = await words("push", "true", "success", "exit 1");
+  const unread = await words("push", "--full", "success", "exit 1");
   assertStepCode(unread, 0, "a push whose description is unread fails");
   assertEquals(
     unread.stdout.trim().split("\n").filter((line) => !line.startsWith("::")),
@@ -1011,10 +1076,12 @@ Deno.test("Status judges the coverage gates of every run", async () => {
       "run",
       "-A",
       "tasks/coverage-gate.ts",
-      "--full",
       "--default-branch",
       "--body",
       "",
+      "--of",
+      "7",
+      "--full",
       "--reports",
       "lane-coverage",
     ],
@@ -1572,13 +1639,9 @@ Deno.test("the run in tomorrow's order runs the CI suites and ships nothing", as
       "github.event_name == 'push')",
     "status can run in a called run",
   );
-  // A called run is not a pull request, so it runs every test.
-  assertEquals(
-    ci.jobs["plan-full"].if?.startsWith(
-      "github.event_name != 'pull_request' ||",
-    ),
-    true,
-  );
+  // A called run is not a pull request, so it runs every test: the plan's
+  // count says `--full` for any event but a pull request, which the test of
+  // that step holds.
 
   // The relay follows a workflow by its own name, and a called run belongs to
   // its caller, so the relay names this workflow as well as the CI workflow

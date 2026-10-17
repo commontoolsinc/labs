@@ -31,7 +31,7 @@ import {
   EXCLUDED_FROM_COVERAGE_GATE,
   exclusionKind,
   LANE_BUDGET_SECONDS,
-  LANES,
+  LANES_MAX,
   LOCAL_COVERAGE_MAX_SECONDS,
 } from "./policy.ts";
 
@@ -223,7 +223,7 @@ function lanesHolding(
   setup: number,
 ): { lanes: number; seconds: number } | undefined {
   if (cost.largest + setup > LANE_BUDGET_SECONDS) return undefined;
-  for (let lanes = 1; lanes <= LANES; lanes++) {
+  for (let lanes = 1; lanes <= LANES_MAX; lanes++) {
     const seconds = cost.spread + lanes * (cost.overhead + setup) +
       cost.units.reduce(
         (sum, unit) => sum + unit.overhead * Math.min(lanes, unit.entries),
@@ -313,8 +313,8 @@ export function measuredCostLines(
       continue;
     }
     const costs = held === undefined
-      ? `more with coverage on than the run's ${LANES} lanes of ` +
-        `${duration(LANE_BUDGET_SECONDS)} hold`
+      ? `more with coverage on than the ${LANES_MAX} lanes of ` +
+        `${duration(LANE_BUDGET_SECONDS)} a pull request may take hold`
       : `${duration(held.seconds)} with coverage on`;
     lines.push(
       `${measuredSetName(ref)} costs ${costs}, past ` +
@@ -346,8 +346,9 @@ export function measuredCostLines(
     lines.push(
       `${member} is on EXCLUDED_FROM_COVERAGE_GATE for its size, and its ` +
         `tests now cost ${duration(held.seconds)} with coverage on ` +
-        `across ${held.lanes} lane(s), inside the run's ${LANES} lanes of ` +
-        `${duration(LANE_BUDGET_SECONDS)}, so its line can come off.`,
+        `across ${held.lanes} lane(s), inside the ${LANES_MAX} lanes of ` +
+        `${duration(LANE_BUDGET_SECONDS)} a pull request may take, so its ` +
+        `line can come off.`,
     );
   }
   if (unjudged > 0) {

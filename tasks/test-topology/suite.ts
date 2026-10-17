@@ -215,12 +215,12 @@ export interface Suite {
    * running.
    *
    * It is absent too where what a unit covers is a large part of the
-   * repository, since a declaration for such a unit comes to most
-   * changes and places it in most lanes by declaration rather than by
-   * what it has caught. Such a unit reaches a lane on what it is worth,
-   * or because nothing has a record of it. The type check is the exception:
-   * a change reaches every type-check group importing what it touches,
-   * however many that is, since no `deno test` checks types.
+   * repository, since a declaration for such a unit comes to most changes and
+   * places it in most lanes by declaration rather than by its new real test
+   * failures. Such a unit reaches a lane on what it is worth, or because
+   * nothing has a record of it. The type check is the exception: a change
+   * reaches every type-check group importing what it touches, however many that
+   * is, since no `deno test` checks types.
    */
   unitsForChange?(changed: ReadonlySet<string>): readonly Unit[];
 

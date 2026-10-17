@@ -37,7 +37,6 @@ import {
   DIALS,
   EXCLUDED_FROM_COVERAGE_GATE,
   LANE_BUDGET_SECONDS,
-  LANES,
 } from "./test-selection/policy.ts";
 import { fetchManifest } from "./test-selection/store.ts";
 import {
@@ -98,7 +97,7 @@ export function laneArgument(
   const at = args.indexOf("--lane");
   if (at < 0) return undefined;
   const lane = Number(args[at + 1]);
-  if (!Number.isInteger(lane) || lane < 1 || lane > LANES) return "invalid";
+  if (!Number.isInteger(lane) || lane < 1) return "invalid";
   return lane;
 }
 
@@ -305,11 +304,12 @@ export function explainLines(
     `${key}`,
     `  suite ${entry.suite}, in ${entry.unit}`,
     `  score ${entry.score.toFixed(3)}, costing ${duration(entry.cost)}`,
-    `  ${entry.inputs.catches.toFixed(1)} weighted catches, across ` +
-    `${entry.inputs.sources} sources`,
+    `  ${entry.inputs.catches.toFixed(1)} weighted new real test failures, ` +
+    `across ${entry.inputs.sources} sources`,
     entry.inputs.lastCatch === undefined
-      ? "  it has never caught anything"
-      : `  the most recent catch was on ${entry.inputs.lastCatch}`,
+      ? "  it has never had a new real test failure"
+      : `  the most recent new real test failure was on ` +
+        `${entry.inputs.lastCatch}`,
     `  churn ${entry.inputs.churn.toFixed(4)}, flake rate ` +
     `${entry.flakeRate.toFixed(4)}`,
   ];
@@ -440,7 +440,9 @@ export function planLines(
         `${duration(entry.cost)}, past a lane's whole budget`,
     );
   }
-  lines.push(`${LANES} lanes, ${duration(LANE_BUDGET_SECONDS)} of work each`);
+  lines.push(
+    `${laid.lanes.length} lanes, ${duration(LANE_BUDGET_SECONDS)} of work each`,
+  );
   return lines;
 }
 
@@ -635,7 +637,6 @@ async function commitPlan(
 ): Promise<LanePlan | undefined> {
   const options: LaneOptions = {
     lane: 1,
-    of: LANES,
     full: false,
     dryRun: true,
     laneCount: false,
@@ -734,7 +735,7 @@ export async function dispatch(
       // Silently filtering every lane would exit zero having printed
       // nothing, which reads as "this lane runs no tests".
       if (laneNumber === "invalid") {
-        fail(`--lane takes a whole number from 1 to ${LANES}`);
+        fail("--lane takes a whole number from 1");
       }
       if (args.includes("--verify")) {
         const manifest = await commitManifest(root, at, sources);
@@ -748,6 +749,10 @@ export async function dispatch(
       }
       const planned = await commitPlan(root, at, sources);
       if (planned === undefined) return 1;
+      const lanes = planned.laid.lanes.length;
+      if (laneNumber !== undefined && laneNumber > lanes) {
+        fail(`--lane names lane ${laneNumber}, and this plan has ${lanes}`);
+      }
       for (const line of planLines(planned, laneNumber)) console.log(line);
       return 0;
     }

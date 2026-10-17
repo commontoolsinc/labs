@@ -3,9 +3,10 @@
  * nothing else.
  *
  * Every lane calls this over the same inputs and takes its own share of
- * the answer, so the five agree by construction and no job sits ahead of
- * them deciding. That only holds while this is a pure function: no clock,
- * no unseeded randomness, no dependence on anything but its arguments.
+ * the answer, so the lanes agree by construction, and the job ahead of
+ * them decides only how many there are. That only holds while this is a
+ * pure function: no clock, no unseeded randomness, no dependence on
+ * anything but its arguments.
  * The exploration draw's seed comes from the manifest.
  */
 
@@ -16,16 +17,16 @@ import {
 } from "@commonfabric/test-support/records";
 import { maxOf } from "@commonfabric/utils/math";
 import {
+  DISCRETIONARY_SECONDS,
   FILL_DENSITY_SHARE,
   FILL_EXPLORATION_SHARE,
   FILL_VALUE_SHARE,
   FLAKE_EXCLUSION_RATE,
   FULL_LANE_BOUND_SECONDS,
   FULL_LANE_BUDGET_SECONDS,
-  FULL_LANES_MAX,
   LANE_BOUND_SECONDS,
   LANE_BUDGET_SECONDS,
-  LANES,
+  LANES_MAX,
   NAMED_UNSCHEDULABLE,
 } from "./policy.ts";
 import type {
@@ -138,11 +139,25 @@ export interface Plan {
   nonGating: Manifest["withheld"];
 
   /**
+   * Seconds of room the value, density and exploration passes want: the
+   * run's discretionary target, or what one lane holding every identity
+   * they could choose would be charged where that is less. Zero for a full
+   * run, which leaves nothing to choose.
+   */
+  discretionaryTargetSeconds: number;
+
+  /**
+   * Seconds those passes were given to fill between them: the run's
+   * discretionary target, or what the mandatory pass left of the lanes'
+   * budgets where that was less.
+   */
+  discretionarySeconds: number;
+
+  /**
    * Seconds by which the mandatory pass alone put the longest lane past a
    * lane's budget, and zero where every lane held what it was given. The
    * longest lane is what a pull request waits on, which is why this is
-   * that figure rather than the amount the five lanes' total was overrun
-   * by.
+   * that figure rather than the amount the lanes' total was overrun by.
    */
   overBudgetSeconds: number;
 
@@ -259,8 +274,19 @@ export interface PlanInput {
   /** How much of the manifest to run. Defaults to `budgeted`. */
   policy?: Policy;
 
-  /** How many lanes to fill, at least one. Defaults to the dial. */
+  /**
+   * How many lanes to fill, at least one. Defaults to the fewest
+   * `laneCount` finds hold the run.
+   */
   lanes?: number;
+
+  /**
+   * Seconds the value, density and exploration passes may fill between
+   * them, or fewer where the lanes have less room left. Defaults to
+   * `DISCRETIONARY_SECONDS`. Under `everything` it is zero whatever this
+   * says, since that leaves nothing to choose.
+   */
+  discretionarySeconds?: number;
 
   /**
    * Seconds each lane may fill. Defaults to the dial the policy belongs
@@ -587,11 +613,11 @@ export interface Folding {
  * The merged entry combines its tests as follows:
  *
  * - Cost is the sum, because running the unit runs every test in it.
- * - Catches are the sum, because the unit catches whenever any of its tests
- *   does. Two tests catching one commit count twice, which favors running
- *   the unit.
+ * - New real test failures are the sum, because the unit has one whenever
+ *   any of its tests does. Two tests with a new real test failure at one
+ *   commit count twice, which favors running the unit.
  * - Sources and churn are the largest, because an entry records how many
- *   distinct sources saw a catch, not which ones.
+ *   distinct sources saw a new real test failure, not which ones.
  * - Flake rate and repeat count are the largest, because a test disagreeing
  *   with itself makes the whole invocation disagree.
  * - The last run is the oldest of the tests' last runs, and absent when any
@@ -1168,9 +1194,10 @@ function inKeyOrder(
  * ordering. Then exploration, so the unselected corpus keeps producing
  * data.
  *
- * What the last three passes may spend is a share of the whole run's
- * budget rather than of each lane's, so an expensive test can have a lane
- * to itself while the others carry the tail. What keeps any one lane from
+ * What the last three passes may spend is a share of the run's
+ * discretionary target, taken over the whole run rather than per lane, so
+ * an expensive test can have a lane to itself while the others carry the
+ * tail. What keeps any one lane from
  * running long is separate from the shares: those three passes put no
  * work in a lane past that lane's budget, and the lane that carries an
  * identity costing more than a whole lane's budget carries that identity
@@ -1186,6 +1213,16 @@ function inKeyOrder(
  * the change does not reach is never chosen.
  */
 export function plan(input: PlanInput): Plan {
+  return packed(input, true);
+}
+
+/**
+ * Helper for `plan` and `laneCount`, which packs the run, and places
+ * nothing past the mandatory pass unless `choosing`. Whether a count of
+ * lanes holds a run is settled by the end of that pass, and the passes
+ * after it, gates among them, are most of the work.
+ */
+function packed(input: PlanInput, choosing: boolean): Plan {
   const gateKeys = new Set(
     (input.gates ?? []).map((gate) => testIdentityKey(gate.entry.test)),
   );
@@ -1205,23 +1242,23 @@ export function plan(input: PlanInput): Plan {
   const manifest: Manifest = { ...input.manifest, entries: folding.entries };
   /** The key under which the packer places an identity. */
   const placedAs = (key: string): string => folding.standsFor.get(key) ?? key;
-  const laneCount = input.lanes ?? LANES;
+  const count = input.lanes ?? laneCount(input).lanes;
   // Every pass below reaches for a lane to put work in, so there has to
   // be one.
-  if (laneCount < 1) {
+  if (count < 1) {
     throw new RangeError(
-      `a plan needs a lane to fill, and was asked for ${laneCount}`,
+      `a plan needs a lane to fill, and was asked for ${count}`,
     );
   }
   const everything = input.policy === "everything";
   const laneBudget = input.budgetSeconds ??
     (everything ? FULL_LANE_BUDGET_SECONDS : LANE_BUDGET_SECONDS);
-  const budget = laneBudget * laneCount;
+  const budget = laneBudget * count;
   // Read from the corpus as folded, where a whole unit's entry already costs
   // every test of the unit, the tests around the others included.
   const around = aroundIn(manifest.entries);
   const lanes: Filling[] = Array.from(
-    { length: laneCount },
+    { length: count },
     (_, i) => emptyLane(i + 1, around),
   );
 
@@ -1280,6 +1317,8 @@ export function plan(input: PlanInput): Plan {
   // its suite's correction or its own time, whichever is more, because
   // that is what the time will actually be.
   const unschedulable: UnschedulableEntry[] = [];
+  // Every identity the discretionary passes could choose, by suite.
+  const choosable = new Map<string, Selection[]>();
   // Per suite, the identities its own charge is the whole of what stops,
   // and how many of those no lane can hold. One held back for a reason of
   // its own is in neither, because it is not running whatever the charge
@@ -1307,7 +1346,14 @@ export function plan(input: PlanInput): Plan {
     // tests around it, and capabilities together put the lane past the
     // bound it is packed to finish inside.
     const cost = loneCost(manifest, input, around, entry);
-    if (cost <= bound) continue;
+    if (cost <= bound) {
+      if (counted) {
+        const suite = choosable.get(entry.suite) ?? [];
+        suite.push({ entry, reason: "value", repeats: entry.repeats });
+        choosable.set(entry.suite, suite);
+      }
+      continue;
+    }
     // That whole figure is what is reported, so whoever reads it is told
     // the number the bound was compared against.
     // A whole unit is reported as each of its tests, at the cost of the whole
@@ -1343,8 +1389,9 @@ export function plan(input: PlanInput): Plan {
   crowding.sort((a, b) => b.fixed - a.fixed);
 
   const taken = new Set<string>();
+  // What the value, density and exploration passes may choose from.
   const remaining = (): ManifestEntry[] =>
-    manifest.entries.filter((entry) => {
+    !choosing ? [] : manifest.entries.filter((entry) => {
       const key = testIdentityKey(entry.test);
       return !taken.has(key) && !excluded.has(key);
     });
@@ -1451,7 +1498,7 @@ export function plan(input: PlanInput): Plan {
   // is not among them. The full policy chooses every gate and needs none
   // of this, since every identity a gate could run is already placed.
   const open = new Map<string, OpenGate>();
-  for (const gate of everything ? [] : input.gates ?? []) {
+  for (const gate of everything || !choosing ? [] : input.gates ?? []) {
     const key = testIdentityKey(gate.entry.test);
     if (!gate.reached || withheldKeys.has(key)) continue;
     if (gate.entry.flakeRate > FLAKE_EXCLUSION_RATE) continue;
@@ -1489,10 +1536,11 @@ export function plan(input: PlanInput): Plan {
       ),
     );
 
-  // The three shares are of what the mandatory pass left, so a change
-  // that forced a great deal of work in does not then get a full budget
-  // of discretionary tests on top of it.
-  const left = Math.max(0, budget - mandatoryLoad);
+  // The three shares are of the discretionary target, or of what the
+  // mandatory pass left where that is less: lanes too few to hold both
+  // give the passes what room there is.
+  const target = discretionaryTarget(input);
+  const left = Math.min(target, Math.max(0, budget - mandatoryLoad));
   /** A discretionary pass stopping at `share` of what the mandatory left. */
   const pass = (reason: SelectionReason, share: number): Pass => ({
     input,
@@ -1601,6 +1649,13 @@ export function plan(input: PlanInput): Plan {
     nonGating: excused(manifest).filter((held) =>
       everything || judged.has(testIdentityKey(held.test))
     ),
+    // A target past what there is to choose from needs no more room than
+    // that.
+    discretionaryTargetSeconds: Math.min(
+      target,
+      oneLaneHolding(manifest, input, choosable),
+    ),
+    discretionarySeconds: left,
     overBudgetSeconds: overBudget,
     overflowed,
     unschedulable,
@@ -1712,62 +1767,95 @@ export function fixedCharges(
   return charges;
 }
 
-/** How many lanes the full run takes, and whether it wanted more. */
-export interface FullLaneCount {
+/** How many lanes a run takes, and whether it wanted more. */
+export interface LaneCount {
   lanes: number;
 
-  /** Whether the run overflows even the most lanes it may take. */
+  /** Whether the run needs more than even the most lanes it may take. */
   capped: boolean;
 }
 
 /**
- * How many lanes the full run takes: the fewest at which a bisection
- * finds that nothing mandatory overflows, so that each identity either
- * fits a lane's budget or runs alone in a lane of its own, or `most`
- * where even that many lanes overflow.
- *
- * A pull request has a fixed number of lanes, so each one works out its
- * own share and no job sits ahead of them. `main` cannot: the number
- * depends on how much work there is, and the job matrix has to be known
- * before anything starts. So one job answers this, and an integer is the
- * whole of what it hands the lanes. The lanes then call `plan` over the
- * same manifest and take their own share of it, exactly as the
- * pull-request lanes do, so there is no second packing anywhere that
- * could disagree with the first.
- *
- * Each count is judged by whether its own plan overflowed, which needs
- * no other count to compare against, so no count past `most` is ever
- * packed. The count is found by bisection, which takes a lane added to
- * leave nothing overflowing that did not before. Where that fails, the
- * answer can be more lanes than the run needs, but never fewer: every
- * count the bisection settles on below `most` is one it saw overflow
- * nothing.
+ * Seconds a plan's value, density and exploration passes are to fill
+ * between them, before the lanes' room is considered.
  */
-export function fullLaneCount(
-  input: Omit<PlanInput, "policy" | "lanes" | "mandatory">,
-  most: number = FULL_LANES_MAX,
-): FullLaneCount {
-  const fits = (lanes: number) =>
-    plan({
-      ...input,
-      // Under `everything` every identity is required, so there is
-      // nothing a caller could add to this that would change the answer.
-      mandatory: new Map(),
-      policy: "everything",
-      lanes,
-    }).overflowed === 0;
+function discretionaryTarget(input: PlanInput): number {
+  return input.policy === "everything"
+    ? 0
+    : input.discretionarySeconds ?? DISCRETIONARY_SECONDS;
+}
+
+/**
+ * How many lanes a run takes: the fewest at which a bisection finds that
+ * the plan holds the run, or `most` where even that many lanes do not. A
+ * plan holds the run where nothing mandatory overflows, so that each
+ * mandatory identity either fits a lane's budget or runs alone in a lane
+ * of its own, and where the room the mandatory pass leaves is at least
+ * the discretionary target, `Plan.discretionaryTargetSeconds`. Under
+ * `everything` the target is zero, and the count is the fewest lanes at
+ * which nothing overflows.
+ *
+ * The job matrix has to be known before any lane starts, and the number
+ * of lanes depends on how much work there is. So one job answers this,
+ * and an integer is the whole of what it hands the lanes. The lanes then
+ * call `plan` over the same inputs and take their own share of it, so
+ * there is no second packing anywhere that could disagree with the first.
+ *
+ * Each count is judged by its own plan alone, which needs no other count
+ * to compare against, so no count past `most` is ever packed. The count
+ * is found by bisection, which takes a lane added to leave nothing
+ * overflowing that did not before, and to leave no less room. Where that
+ * fails, the answer can be more lanes than the run needs, but never
+ * fewer: every count the bisection settles on below `most` is one it saw
+ * hold the run.
+ */
+export function laneCount(
+  input: Omit<PlanInput, "lanes">,
+  most: number = LANES_MAX,
+): LaneCount {
+  const holds = (lanes: number) => {
+    const laid = packed({ ...input, lanes }, false);
+    return laid.overflowed === 0 &&
+      laid.discretionarySeconds >= laid.discretionaryTargetSeconds;
+  };
   // A lane per identity leaves an empty lane for each one as it is
-  // placed, so nothing overflows there and no more lanes are needed.
+  // placed, so nothing overflows there, and every identity could run in
+  // a lane of its own, so more lanes could hold nothing more.
   let low = 1;
   let high = Math.max(1, Math.min(most, input.manifest.entries.length));
   while (low < high) {
     const middle = Math.floor((low + high) / 2);
-    if (fits(middle)) high = middle;
+    if (holds(middle)) high = middle;
     else low = middle + 1;
   }
   // The bisection never packs the count it started from, which is the
   // cap when the cap is below a lane per identity.
-  return { lanes: high, capped: high === most && !fits(high) };
+  return { lanes: high, capped: high === most && !holds(high) };
+}
+
+/**
+ * What one lane holding every one of `selections`, grouped by suite, would
+ * be charged: each suite and each unit opened once, and each capability set
+ * up once. Spread over several lanes the same work costs more, since each
+ * lane opens what it holds again.
+ */
+function oneLaneHolding(
+  manifest: Manifest,
+  input: PlanInput,
+  selections: ReadonlyMap<string, readonly Selection[]>,
+): number {
+  let seconds = 0;
+  const capabilities = new Set<string>();
+  for (const [suite, held] of selections) {
+    seconds += suiteCharge(manifest, suite, held);
+    for (const capability of input.capabilities.get(suite) ?? []) {
+      capabilities.add(capability);
+    }
+  }
+  for (const capability of capabilities) {
+    seconds += capabilityCost(manifest, capability);
+  }
+  return seconds;
 }
 
 function laneLoad(lanes: readonly Filling[]): number {

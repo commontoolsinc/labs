@@ -77,6 +77,7 @@ describe("what a lane must run whatever the score says", () => {
       [bakery],
       manifest,
       new Set(),
+      new Set(),
     );
     const key = testIdentityKey(
       unknownIdentity(bakery, "packages/bakery/proof.test.ts"),
@@ -91,8 +92,57 @@ describe("what a lane must run whatever the score says", () => {
     expect(standing?.suite).toBe("workspace-unit");
   });
 
+  it("leaves a unit the default branch already held to the score", () => {
+    // The default branch's full run runs every unit it holds, so a unit
+    // that landed there has records the manifest has not caught up with.
+
+    const proof = "packages/bakery/proof.test.ts";
+    const seen = census(
+      [bakery],
+      manifestOf([{}]),
+      new Set(),
+      new Set([proof]),
+    );
+    const key = testIdentityKey(unknownIdentity(bakery, proof));
+    expect(seen.mandatory.has(key)).toBe(false);
+    // It keeps its stand-in, so a discretionary pass can still place it.
+    expect(seen.manifest.entries.map((entry) => testIdentityKey(entry.test)))
+      .toContain(key);
+    expect(seen.unmeasured).toBe(1);
+  });
+
+  it("runs a unit the change touched, whatever the default branch held", () => {
+    const proof = "packages/bakery/proof.test.ts";
+    const seen = census(
+      [bakery],
+      manifestOf([{}]),
+      new Set([proof]),
+      new Set([proof]),
+    );
+    expect(seen.mandatory.get(testIdentityKey(unknownIdentity(bakery, proof))))
+      .toBe("changed");
+  });
+
+  it("runs a unit whose name is no path the default branch held", () => {
+    // A gate is named rather than found at a path, so whether the
+    // change brought it is not something a listing of files can say.
+
+    const gates = suite({
+      id: "repo-gates",
+      recordSurfaces: [{ kind: "gate", scope: "repo" }],
+      units: ["deno-fmt"],
+    });
+    const seen = census(
+      [gates],
+      undefined,
+      new Set(),
+      new Set(["packages/bakery/proof.test.ts"]),
+    );
+    expect([...seen.mandatory.values()]).toEqual(["unknown"]);
+  });
+
   it("runs every unit when there is no manifest at all", () => {
-    const { mandatory } = census([bakery], undefined, new Set());
+    const { mandatory } = census([bakery], undefined, new Set(), new Set());
     expect(mandatory.size).toBe(2);
     expect([...mandatory.values()]).toEqual(["unknown", "unknown"]);
   });
@@ -106,6 +156,7 @@ describe("what a lane must run whatever the score says", () => {
       [bakery],
       manifest,
       new Set(["packages/bakery/glaze.test.ts"]),
+      new Set(),
     );
     expect(
       mandatory.get(
@@ -146,6 +197,7 @@ describe("what a lane must run whatever the score says", () => {
       [binaries],
       manifest,
       new Set(["packages/shell/index.ts"]),
+      new Set(),
     );
     expect(
       mandatory.get(
@@ -161,7 +213,8 @@ describe("what a lane must run whatever the score says", () => {
 
   it("leaves a gate the corpus already knows to the score", () => {
     // A gate is a test of the tree like any other: what it is worth is
-    // what decides, so a gate that catches nothing stops being paid for.
+    // what decides, so a gate that has no new real test failures stops
+    // being paid for.
 
     const gates = suite({
       id: "repo-gates",
@@ -173,12 +226,14 @@ describe("what a lane must run whatever the score says", () => {
       suite: "repo-gates",
       unit: "deno-fmt",
     }]);
-    expect(census([gates], manifest, new Set()).mandatory.size).toBe(0);
+    expect(census([gates], manifest, new Set(), new Set()).mandatory.size).toBe(
+      0,
+    );
     // A gate's unit is a name rather than a path and its suite maps no
     // change onto its units, so the rule that reaches it is the corpus
     // having no record of it.
     expect([
-      ...census([gates], undefined, new Set()).mandatory.values(),
+      ...census([gates], undefined, new Set(), new Set()).mandatory.values(),
     ]).toEqual(["unknown"]);
   });
 
@@ -192,7 +247,7 @@ describe("what a lane must run whatever the score says", () => {
         reason: "the surface it exercises has not landed",
       }],
     });
-    const seen = census([on], undefined, new Set());
+    const seen = census([on], undefined, new Set(), new Set());
     expect(seen.mandatory.size).toBe(0);
     expect(seen.manifest.entries).toEqual([]);
   });
@@ -210,7 +265,9 @@ describe("what a lane must run whatever the score says", () => {
         reason: "the surface that step exercises has not landed",
       }],
     });
-    expect(census([on], undefined, new Set()).mandatory.size).toBe(1);
+    expect(census([on], undefined, new Set(), new Set()).mandatory.size).toBe(
+      1,
+    );
   });
 });
 
@@ -234,7 +291,7 @@ describe("the identity a unit nothing has recorded stands on", () => {
     // surfaces with separate histories. Were the stand-ins to collide,
     // one entry would stand for both, one of the two would be placed in
     // no lane, and the lane would exit zero having never run it.
-    const seen = census([off, on], undefined, new Set());
+    const seen = census([off, on], undefined, new Set(), new Set());
     expect(seen.manifest.entries.length).toBe(2);
     expect(new Set(seen.mandatory.keys()).size).toBe(2);
     expect(seen.manifest.entries.map((entry) => entry.suite).toSorted())
@@ -254,7 +311,9 @@ describe("the identity a unit nothing has recorded stands on", () => {
       },
       unit: "packages/oven/somewhere-else.test.ts",
     }]);
-    expect(() => census([off], collides, new Set())).toThrow("run nowhere");
+    expect(() => census([off], collides, new Set(), new Set())).toThrow(
+      "run nowhere",
+    );
   });
 
   it("gives the whole topology as many stand-ins as it has units", async () => {
@@ -262,7 +321,7 @@ describe("the identity a unit nothing has recorded stands on", () => {
     // over a pair built to show it. A gate's unit is a verdict rather than
     // lane work, so it is offered as a gate and never stands in.
     const suites = await loadTopology(REPOSITORY);
-    const seen = census(suites, undefined, new Set());
+    const seen = census(suites, undefined, new Set(), new Set());
     const available = suites
       .filter((suite) => suite.judges === undefined)
       .reduce(
@@ -304,7 +363,7 @@ describe("what the tree says and the manifest does not", () => {
         unit: "packages/bakery/deleted.test.ts",
       },
     ]);
-    const seen = census([bakery], stale, new Set());
+    const seen = census([bakery], stale, new Set(), new Set());
     expect(seen.manifest.entries.map((entry) => entry.unit).toSorted())
       .toEqual([
         "packages/bakery/glaze.test.ts",
@@ -326,7 +385,7 @@ describe("what the tree says and the manifest does not", () => {
         reason: "flaky",
       },
     ];
-    const seen = census([bakery], stale, new Set());
+    const seen = census([bakery], stale, new Set(), new Set());
     expect(seen.manifest.withheld.map((held) => held.test.n))
       .toEqual(["glaze > sets"]);
   });
@@ -346,8 +405,8 @@ describe("what the tree says and the manifest does not", () => {
       unit: units[at]!,
       cost,
     })));
-    return census([wide], manifest, new Set()).manifest.entries.find((entry) =>
-      entry.unit === "packages/bakery/rest.test.ts"
+    return census([wide], manifest, new Set(), new Set()).manifest.entries.find(
+      (entry) => entry.unit === "packages/bakery/rest.test.ts",
     )?.cost;
   }
 
@@ -404,7 +463,7 @@ describe("what the tree says and the manifest does not", () => {
         cost: 50,
       },
     ]);
-    const seen = census([wide], manifest, new Set());
+    const seen = census([wide], manifest, new Set(), new Set());
     const standing = seen.manifest.entries.find((entry) =>
       entry.unit === "packages/bakery/rest.test.ts"
     );
@@ -425,7 +484,7 @@ describe("what the tree says and the manifest does not", () => {
     const manifest = manifestOf([
       { unit: "packages/bakery/glaze.test.ts", cost: 7 },
     ]);
-    const seen = census([wide], manifest, new Set());
+    const seen = census([wide], manifest, new Set(), new Set());
     expect(
       seen.manifest.entries.filter((entry) =>
         entry.unit !== "packages/bakery/glaze.test.ts"
@@ -446,7 +505,7 @@ describe("what the tree says and the manifest does not", () => {
       suite: "workspace-unit",
       cost: 900,
     }];
-    const seen = census([bakery], published, new Set());
+    const seen = census([bakery], published, new Set(), new Set());
     expect(seen.manifest.unavailable.map((entry) => entry.unit))
       .toEqual(["packages/bakery/gone.test.ts"]);
     // A packing over a corpus this is not answers a different question.
@@ -459,7 +518,7 @@ describe("what the tree says and the manifest does not", () => {
   });
 
   it("charges a suite with nothing measured the unmeasured figure", () => {
-    const seen = census([bakery], undefined, new Set());
+    const seen = census([bakery], undefined, new Set(), new Set());
     expect(seen.manifest.entries.map((entry) => entry.cost))
       .toEqual([UNMEASURED_COST_SECONDS, UNMEASURED_COST_SECONDS]);
   });
@@ -486,7 +545,7 @@ describe("an entry whose unit its suite has re-grained", () => {
       { test: { k: "unit", s: "bakery", n: "glaze > sets" }, unit: "bakery" },
     ]);
 
-    const seen = census([split], before, new Set());
+    const seen = census([split], before, new Set(), new Set());
 
     // Placed, so the unit it belongs to is recorded rather than new, and
     // nothing about it is mandatory.
@@ -513,7 +572,7 @@ describe("an entry whose unit its suite has re-grained", () => {
       { test: { k: "unit", s: "bakery", n: "proof > rises" }, unit: "gone" },
     ]);
 
-    const seen = census([split], before, new Set());
+    const seen = census([split], before, new Set(), new Set());
 
     expect(seen.unmeasured).toBe(2);
     expect(
@@ -568,6 +627,7 @@ describe("what a measured set's gate offers a change", () => {
       suites,
       manifest,
       new Set(["packages/bakery/src/oven.ts"]),
+      new Set(),
     );
     expect(seen.mandatory.size).toBe(0);
     expect(seen.gates).toHaveLength(1);
@@ -580,7 +640,12 @@ describe("what a measured set's gate offers a change", () => {
   });
 
   it("does not offer the gate of a set the change does not reach", () => {
-    const seen = census(suites, manifest, new Set(["docs/README.md"]));
+    const seen = census(
+      suites,
+      manifest,
+      new Set(["docs/README.md"]),
+      new Set(),
+    );
     expect(seen.mandatory.size).toBe(0);
     expect(seen.gates.map((gate) => gate.reached)).toEqual([false]);
   });
@@ -590,6 +655,7 @@ describe("what a measured set's gate offers a change", () => {
       suites,
       manifest,
       new Set(["packages/bakery/glaze.test.ts"]),
+      new Set(),
     );
     expect([...seen.mandatory]).toEqual([
       [testIdentityKey({ k: "unit", s: "bakery", n: "glaze" }), "changed"],
@@ -604,7 +670,7 @@ describe("what a measured set's gate offers a change", () => {
       test: gateIdentity,
       score: 0.6,
     }]);
-    const seen = census(suites, recorded, new Set());
+    const seen = census(suites, recorded, new Set(), new Set());
     expect(
       seen.manifest.entries.some((entry) => entry.suite === "coverage-gate"),
     ).toBe(false);
@@ -613,7 +679,7 @@ describe("what a measured set's gate offers a change", () => {
   });
 
   it("offers a gate nothing has recorded at the floor, under its identity", () => {
-    const seen = census(suites, manifest, new Set());
+    const seen = census(suites, manifest, new Set(), new Set());
     expect(seen.gates[0]!.entry.test).toEqual(gateIdentity);
     expect(seen.gates[0]!.entry.score).toBe(VALUE_FLOOR);
     expect(seen.unmeasured).toBe(0);
@@ -640,6 +706,7 @@ describe("what a measured set's gate offers a change", () => {
         test: { k: "unit", s: name, n: name },
       }))),
       new Set(["packages/a/x.ts", "packages/b/x.ts", "packages/c/x.ts"]),
+      new Set(),
     );
     expect(seen.mandatory.size).toBe(0);
     expect(seen.gates.map((gate) => gate.reached)).toEqual([true, true, true]);

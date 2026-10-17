@@ -4,16 +4,17 @@
  * The script every pull-request lane runs, and the script every lane of
  * the full run on `main` runs.
  *
- * Lanes call this with their own lane number and nothing else. There is
- * no job ahead of them deciding what each will do: packing is a pure
- * function of the working tree, the manifest, the diff, and the lane
- * number, so every lane computes the same plan over the same inputs and
- * takes its own share of it. That only holds while every lane resolves
+ * Lanes call this with their own lane number, how many lanes the run has,
+ * and how much it runs, and nothing else. Nothing tells a lane what to
+ * run: packing is a pure function of the working tree, the manifest, the
+ * diff, and those numbers, so every lane computes the same plan over the
+ * same inputs and takes its own share of it. That only holds while every lane resolves
  * the same manifest, which is why the moment they resolve it at is when
  * the commit under test was made rather than anything about the run.
  *
  * The full run differs in two values: it runs the whole corpus rather
- * than a budgeted part of it, and it has no diff. Everything else — what
+ * than a budgeted part of it, and it has no diff. A pull request's labels
+ * can make its run the full one, or scale how much it chooses by score. Everything else — what
  * the tree holds, what each test costs, how the work groups into lanes,
  * which identities inside a unit are skipped — is the same code, so the
  * two runs cannot come to different answers about the same tree.
@@ -23,11 +24,12 @@
  * ships what those reruns record. That is evidence for the publisher, and
  * it changes neither the plan nor the verdict.
  *
- * `main` cannot fix its number of lanes ahead of time the way a pull
- * request does, because the number depends on how much work there is and
- * the job matrix has to exist before anything starts. So one job asks
- * `--lane-count` and emits an integer, and that integer and the `--full`
- * the lanes are handed are the whole of what passes from it to them.
+ * No run can fix its number of lanes ahead of time, because the number
+ * depends on how much work there is and the job matrix has to exist
+ * before anything starts. So one job asks `--lane-count`, which reads a
+ * pull request's labels and answers with the count and the arguments
+ * every lane takes, and those are the whole of what passes from it to
+ * them.
  *
  * A job prints its lane's plan in a step of its own, with `--dry-run`,
  * and then runs the lane with `--described`, which packs the same plan
@@ -85,11 +87,12 @@ import {
   costliestUnschedulable,
   crowdingLine,
   type CrowdingSuite,
-  type FullLaneCount,
-  fullLaneCount,
   type GateChoice,
+  type LaneCount,
+  laneCount,
   type Plan,
   plan,
+  type PlanInput,
   type Selection,
   type SelectionReason,
   suiteCharge,
@@ -98,6 +101,7 @@ import {
   unholdableSuites,
 } from "./test-selection/plan.ts";
 import {
+  type Census,
   census,
   isStandIn,
   type PricedCensus,
@@ -122,9 +126,10 @@ import type {
   WithheldReason,
 } from "./test-selection/manifest.ts";
 import {
-  FULL_LANES_MAX,
+  DISCRETIONARY_SECONDS,
+  FULL_RUN_LABEL,
   LANE_PROLOGUE_SECONDS,
-  LANES,
+  LANES_MAX,
   RERUN_BUDGET_SECONDS,
   RERUN_EXECUTIONS,
 } from "./test-selection/policy.ts";
@@ -145,10 +150,29 @@ import {
 /** What the lane was asked to do. */
 export interface LaneOptions {
   lane: number;
-  of: number;
+
+  /**
+   * How many lanes the run has, which the job ahead of the lanes counts.
+   * Where it is not given, the lane counts them itself, the same way.
+   */
+  of?: number;
 
   /** Run everything the topology holds, which is what `main` does. */
   full: boolean;
+
+  /**
+   * What multiplies `DISCRETIONARY_SECONDS`, the seconds a pull request
+   * spends on tests chosen by score. One where not given.
+   */
+  scale?: number;
+
+  /**
+   * The labels the pull request carries, one `--label` each, which say
+   * whether it runs everything and how much it runs otherwise. Only the
+   * job counting the lanes reads them, and it hands the lanes what they
+   * decided as `--full` or `--scale`.
+   */
+  labels?: string[];
 
   /** Print the plan and run nothing. */
   dryRun: boolean;
@@ -164,10 +188,10 @@ export interface LaneOptions {
   described?: boolean;
 
   /**
-   * Print how many lanes the full run needs, and nothing else. This is
-   * what the job ahead of the full run asks, and it asks it of this
-   * script rather than of one of its own so that the number and the
-   * lanes that will honor it come from the same code.
+   * Print how many lanes the run needs and what to tell each of them, and
+   * nothing else. This is what the job ahead of the lanes asks, and it
+   * asks it of this script rather than of one of its own so that the
+   * number and the lanes that will honor it come from the same code.
    */
   laneCount: boolean;
 
@@ -268,7 +292,6 @@ export function parseLaneArgs(
 ): LaneOptions | undefined {
   const options: LaneOptions = {
     lane: 1,
-    of: LANES,
     full: false,
     dryRun: false,
     laneCount: false,
@@ -302,6 +325,17 @@ export function parseLaneArgs(
       case "--of":
         options.of = Number(value);
         break;
+      case "--scale": {
+        const scale = Number(value);
+        if (value.trim() === "" || !Number.isFinite(scale) || scale < 0) {
+          return undefined;
+        }
+        options.scale = scale;
+        break;
+      }
+      case "--label":
+        options.labels = [...options.labels ?? [], value];
+        break;
       case "--base":
         options.base = value;
         break;
@@ -316,18 +350,78 @@ export function parseLaneArgs(
     }
   }
   if (!Number.isInteger(options.lane) || options.lane < 1) return undefined;
-  if (!Number.isInteger(options.of) || options.of < options.lane) {
+  if (
+    options.of !== undefined &&
+    (!Number.isInteger(options.of) || options.of < options.lane)
+  ) {
     return undefined;
   }
-  // Only the full run has a lane count to work out; a pull request's is
-  // the dial. Accepting the question without `--full` would answer the
-  // full run's question for a command line that did not ask it, and a
-  // workflow edit dropping the flag would still get a plausible integer.
-  if (options.laneCount && !options.full) return undefined;
+  // The labels decide what `--full` and `--scale` say, so a command line
+  // naming either beside them would be saying it twice, and only the
+  // count reads them.
+  if (
+    options.labels !== undefined &&
+    (!options.laneCount || options.full || options.scale !== undefined)
+  ) {
+    return undefined;
+  }
+  // A full run spends nothing on tests chosen by score, so a scale beside
+  // it would be one nothing honored.
+  if (options.full && options.scale !== undefined) return undefined;
   // A dry run does nothing but describe, so one told the plan was
   // described already has nothing to do.
   if (options.described && options.dryRun) return undefined;
   return options;
+}
+
+/** A label that says how much a pull request runs. */
+const SCALE_LABEL = /^ci: (\d+(?:\.\d+)?|\.\d+)x$/;
+
+/** A label in the namespace the run's labels are in, however spelled. */
+const RUN_LABEL = /^\s*ci\s*:/i;
+
+/** What a pull request's labels ask of its run. */
+export type RequestedRun =
+  | { ok: true; full: boolean; scale: number }
+  | { ok: false; problem: string };
+
+/**
+ * What a pull request's labels ask of its run: everything, under
+ * `FULL_RUN_LABEL`; `n` times `DISCRETIONARY_SECONDS` of tests chosen by
+ * score, under `ci: <n>x`; and the default where neither is there.
+ *
+ * A label beginning `ci:` in any spelling is one of these. Any such label
+ * this cannot read, and more than one of them, is a problem: running the
+ * default instead would run something the label did not ask for, and say
+ * nothing.
+ */
+export function requestedRun(labels: readonly string[]): RequestedRun {
+  const asking = labels.filter((label) => RUN_LABEL.test(label)).sort();
+  if (asking.length > 1) {
+    return {
+      ok: false,
+      problem: `the labels ${
+        asking.map((label) => `\`${label}\``)
+          .join(" and ")
+      } each say how much this pull request runs, so ` +
+        `remove all but one`,
+    };
+  }
+  const label = asking[0];
+  if (label === undefined) return { ok: true, full: false, scale: 1 };
+  if (label === FULL_RUN_LABEL) return { ok: true, full: true, scale: 1 };
+  const scale = SCALE_LABEL.exec(label)?.[1];
+  if (scale === undefined) {
+    return {
+      ok: false,
+      problem: `the label \`${label}\` says how much this pull request ` +
+        `runs in no form this reads: \`${FULL_RUN_LABEL}\` runs ` +
+        `everything, and \`ci: <n>x\`, where <n> is a non-negative ` +
+        `decimal such as 0.5 or 2, runs n times the tests chosen by score ` +
+        `a pull request runs by default`,
+    };
+  }
+  return { ok: true, full: false, scale: Number(scale) };
 }
 
 /**
@@ -376,32 +470,116 @@ export function manifestMoment(
   return moment.toISOString();
 }
 
+/**
+ * What a git command prints in `root`, or an error opening with
+ * `failure` and carrying what git said.
+ */
+async function gitOutput(
+  root: string,
+  args: readonly string[],
+  failure: string,
+): Promise<string> {
+  const result = await new Deno.Command("git", {
+    args: [...args],
+    cwd: root,
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  if (!result.success) {
+    throw new Error(
+      `${failure}: ${new TextDecoder().decode(result.stderr).trim()}`,
+    );
+  }
+  return new TextDecoder().decode(result.stdout);
+}
+
+/** A full git object id, in either hash a repository can use. */
+const OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
+
+/** The paths in what `git … -z` printed. */
+function pathsOf(listing: string): Set<string> {
+  return new Set(listing.split("\0").filter((path) => path.length > 0));
+}
+
 /** The files this change touched, as the repository names them. */
 export async function changedFiles(
   root: string,
   base: string | undefined,
 ): Promise<Set<string>> {
   if (base === undefined) return new Set();
-  const result = await new Deno.Command("git", {
-    args: ["diff", "--name-only", `${base}...HEAD`],
-    cwd: root,
-    stdout: "piped",
-    stderr: "piped",
-  }).output();
-  if (!result.success) {
-    // Treating this as a change-free pull request would drop every unit
-    // the change touched out of the mandatory set without saying so, and
-    // the lane would pass having run none of them.
-    throw new Error(
-      `cannot diff against ${base}: ` +
-        new TextDecoder().decode(result.stderr).trim(),
-    );
-  }
-  return new Set(
-    new TextDecoder().decode(result.stdout).split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0),
+  // A diff that fails throws rather than reading as a change-free pull
+  // request, which would drop every unit the change touched out of the
+  // mandatory set without saying so, and the lane would pass having run
+  // none of them.
+  return pathsOf(
+    await gitOutput(
+      root,
+      ["diff", "-z", "--name-only", `${base}...HEAD`],
+      `cannot diff against ${base}`,
+    ),
   );
+}
+
+/**
+ * The files `until` gained after `since`, through a `git` that throws
+ * when git fails. Where `since` is not an ancestor of `until`, only what
+ * `until` gained after the two parted counts, so a file that `until`
+ * still holds and `since` deleted is not one of them.
+ *
+ * `since` comes from a manifest, which is untrusted, so it reaches git
+ * only as a full object id. One that is not an object id, or that names
+ * no commit `git` can find, gives nothing.
+ */
+export async function gainedSince(
+  git: (...args: string[]) => Promise<string>,
+  since: string,
+  until: string,
+): Promise<Set<string>> {
+  if (!OBJECT_ID.test(since)) return new Set();
+  const found = await git("rev-list", "--no-walk", "--ignore-missing", since);
+  if (found.trim() === "") return new Set();
+  return pathsOf(
+    await git(
+      "diff",
+      "-z",
+      "--name-only",
+      "--no-renames",
+      "--diff-filter=A",
+      `${since}...${until}`,
+    ),
+  );
+}
+
+/**
+ * The files the default branch gained after `since`, the commit a
+ * manifest was published from, and before this change branched off from
+ * it at the merge base `changedFiles` diffs against.
+ *
+ * A unit no manifest has seen is forced into a run unless it is one of
+ * these. The default branch's full run runs every unit it holds, so a
+ * unit that landed there after the manifest's commit has records the
+ * manifest is too old to hold. A unit the change brings with it has none,
+ * and neither does one the manifest's own commit already held.
+ *
+ * A manifest naming no commit this checkout holds leaves nothing known to
+ * have landed since it.
+ */
+export async function landedFiles(
+  root: string,
+  base: string | undefined,
+  since: string | undefined,
+): Promise<Set<string>> {
+  if (base === undefined || since === undefined) return new Set();
+  // A lane that read fewer files than its siblings would pack a plan they
+  // are not following, so a listing that fails throws.
+  const git = (...args: string[]) =>
+    gitOutput(
+      root,
+      args,
+      `cannot list the files ${base} gained after ${since}`,
+    );
+  const mergeBase = (await git("merge-base", base, "HEAD")).trim();
+  return await gainedSince(git, since, mergeBase);
 }
 
 /** One suite's share of a lane, and what runs inside it. */
@@ -2019,6 +2197,12 @@ interface Reading {
   /** The files the change touched, and none for the full run. */
   changed: ReadonlySet<string>;
 
+  /**
+   * The files the default branch gained between the manifest's commit and
+   * where the change branched off, and none for the full run.
+   */
+  landed: ReadonlySet<string>;
+
   /** Which object the manifest was read from, or why there is none. */
   fetched: { objectName?: string; absent?: string };
 }
@@ -2028,7 +2212,7 @@ interface Reading {
  * touched.
  *
  * Everything that plans anything starts here — a lane, and the job that
- * counts the full run's lanes — so the tree and the manifest are
+ * counts a run's lanes — so the tree and the manifest are
  * resolved one way. Two readers of the same tree that resolved it
  * differently would be the drift this whole path exists to remove,
  * appearing one level above the packer instead of inside it.
@@ -2059,6 +2243,11 @@ async function read(
     changed: options.full
       ? new Set<string>()
       : await changedFiles(options.root, options.base),
+    landed: options.full ? new Set<string>() : await landedFiles(
+      options.root,
+      options.base,
+      manifest.manifest?.commit,
+    ),
     fetched: {
       ...(manifest.objectName === undefined
         ? {}
@@ -2084,16 +2273,36 @@ export interface PlanOver {
   coverage: CoverageGateSelection;
 }
 
+/** What a run is asked to do with a tree, beside the tree itself. */
+interface RunInput {
+  suites: readonly Suite[];
+  manifest: Manifest | undefined;
+  changed: ReadonlySet<string>;
+
+  /**
+   * The files the default branch gained between the manifest's commit and
+   * where the change branched off, and none for the full run.
+   */
+  landed: ReadonlySet<string>;
+
+  full: boolean;
+
+  /** What multiplies `DISCRETIONARY_SECONDS`. One where not given. */
+  scale?: number;
+}
+
 /**
  * What a run packs a tree into, given the manifest it resolved, what its
- * change touched, whether it is the full run, and how many lanes it has.
- * Pure: the lanes of a run and anything describing what they did compute
- * it here, so the two cannot come to different answers.
+ * change touched, whether it is the full run, how much it spends on tests
+ * chosen by score, and how many lanes it has: where that is not given, as
+ * many as the job ahead of the lanes counts. Pure: the lanes of a run and
+ * anything describing what they did compute it here, so the two cannot
+ * come to different answers.
  *
- * Whether the run is the full one is the whole of what the two runs
- * differ by here. Under `everything` every identity is required, so the
- * exclusions and the value, density and exploration passes have nothing
- * left to act on and the packer behaves the same way for both.
+ * Whether the run is the full one is the whole of what the two kinds of
+ * run differ by here. Under `everything` every identity is required, so
+ * the exclusions and the value, density and exploration passes have
+ * nothing left to act on and the packer behaves the same way for both.
  *
  * A suite is priced as measured when the run measures it, and a pull
  * request measures the suites of the gates its plan chose, which pricing
@@ -2103,16 +2312,17 @@ export interface PlanOver {
  * priced as measured and only their gates offered, and again with fewer
  * for as long as it then chooses no gate of some of those suites. The
  * suites it may choose from shrink each time, so this ends, and it ends
- * with every suite priced the way the lanes will run it.
+ * with every suite priced the way the lanes will run it. Every packing
+ * has the same number of lanes.
  */
-export function planOver(input: {
-  suites: readonly Suite[];
-  manifest: Manifest | undefined;
-  changed: ReadonlySet<string>;
-  full: boolean;
-  lanes: number;
-}): PlanOver {
-  const read = census(input.suites, input.manifest, input.changed);
+export function planOver(input: RunInput & { lanes?: number }): PlanOver {
+  const read = census(
+    input.suites,
+    input.manifest,
+    input.changed,
+    input.landed,
+  );
+  const lanes = input.lanes ?? lanesNeeded(input, read).lanes;
   const packed = (
     gates: readonly GateChoice[],
     measured: ReadonlySet<string>,
@@ -2122,18 +2332,7 @@ export function planOver(input: {
       input.suites,
       (suite) => input.full || measured.has(suite),
     );
-    return {
-      seen,
-      laid: plan({
-        manifest: seen.manifest,
-        mandatory: seen.mandatory,
-        capabilities: capabilitiesBySuite(input.suites),
-        wholeUnits: wholeUnits(input.suites),
-        lanes: input.lanes,
-        gates,
-        ...(input.full ? { policy: "everything" as const } : {}),
-      }),
-    };
+    return { seen, laid: plan({ ...packingOf(input, seen, gates), lanes }) };
   };
   const judging = new Map(
     read.gates.map((gate) => [testIdentityKey(gate.entry.test), gate.judges]),
@@ -2170,6 +2369,24 @@ export function planOver(input: {
   };
 }
 
+/** Helper for `planOver` and the lane count: what the packer is given. */
+function packingOf(
+  input: RunInput,
+  seen: PricedCensus,
+  gates: readonly GateChoice[],
+): Omit<PlanInput, "lanes"> {
+  return {
+    manifest: seen.manifest,
+    mandatory: seen.mandatory,
+    capabilities: capabilitiesBySuite(input.suites),
+    wholeUnits: wholeUnits(input.suites),
+    gates,
+    ...(input.full
+      ? { policy: "everything" as const }
+      : { discretionarySeconds: (input.scale ?? 1) * DISCRETIONARY_SECONDS }),
+  };
+}
+
 /** What every lane of a run works out before taking its own share. */
 export interface LanePlan extends PlanOver {
   /** Which object the manifest was read from, or why there is none. */
@@ -2179,7 +2396,8 @@ export interface LanePlan extends PlanOver {
 /**
  * The plan every lane of a run computes over this tree: the manifest
  * this commit belongs to, the tree read against it, and what the tree
- * holds packed into `options.of` lanes.
+ * holds packed into `options.of` lanes, or into as many as the job ahead
+ * of the lanes would count where that is not given.
  *
  * A lane runs its own share of this. Anything that describes what a lane
  * would do computes it here rather than packing the tree again, so the
@@ -2190,89 +2408,125 @@ export async function lanePlan(
   suites: readonly Suite[],
   deps: Pick<LaneDeps, "manifest">,
 ): Promise<LanePlan> {
-  const { manifest, changed, fetched } = await read(options, deps);
+  const { manifest, changed, landed, fetched } = await read(options, deps);
   return {
     fetched,
     ...planOver({
       suites,
       manifest,
       changed,
+      landed,
       full: options.full,
-      lanes: options.of,
+      scale: options.scale,
+      ...(options.of === undefined ? {} : { lanes: options.of }),
     }),
   };
 }
 
+/** What the job ahead of the lanes hands them. */
+export interface RunLanes {
+  /** How many lanes the run has. */
+  of: number;
+
+  /**
+   * What every lane is told besides its own number and `of`, as words
+   * for a command line: the base a pull request's change is measured
+   * against, and `--full` or the scale its labels asked for. The job that
+   * judges the run's coverage gates is told the same.
+   */
+  args: string[];
+}
+
 /**
- * How many lanes the full run on `main` takes: as many as it needs, up to
- * `FULL_LANES_MAX`.
+ * How many lanes a run takes, and what to tell each of them: as many as
+ * it needs, up to `LANES_MAX`.
  *
- * This is the whole of what the job ahead of the full run decides, and an
- * integer is the whole of what it answers. The lanes then read the same
- * tree against the same manifest and take their own share, the way the
- * pull-request lanes do, so nothing about what runs passes through a job
- * output and there is no second packing to disagree with theirs.
+ * This is the whole of what the job ahead of the lanes decides. The lanes
+ * then read the same tree against the same manifest and take their own
+ * share, so nothing about what runs passes through a job output and there
+ * is no second packing to disagree with theirs.
  *
  * Everything else goes to the error stream, because this answers on the
  * standard one and a job reads the answer from there: notes about what
  * the count rests on, and what each lane at that count is projected to
  * take, which also goes to the job summary.
  */
-export async function fullLanes(
+export async function runLanes(
   options: LaneOptions,
   deps: LaneDeps,
-): Promise<number> {
+): Promise<RunLanes> {
   const suites = await (deps.topology ?? loadTopology)(options.root);
-  const { manifest, changed } = await read(options, deps);
-  const { lanes, capped } = fullLanesNeeded(
+  const { manifest, changed, landed } = await read(options, deps);
+  const input: RunInput = {
     suites,
     manifest,
     changed,
-    options.full,
+    landed,
+    full: options.full,
+    scale: options.scale,
+  };
+  const { lanes, capped } = lanesNeeded(
+    input,
+    census(suites, manifest, changed, landed),
   );
+  const { laid } = planOver({ ...input, lanes });
   if (capped) {
+    const short = [
+      ...(laid.overflowed > 0 ? ["a lane may run past its budget"] : []),
+      ...(laid.discretionarySeconds < laid.discretionaryTargetSeconds
+        ? [
+          `its tests chosen by score get ` +
+          `${duration(laid.discretionarySeconds)} of the ` +
+          `${duration(laid.discretionaryTargetSeconds)} it asked for`,
+        ]
+        : []),
+    ];
     console.error(
-      `ci-lane: the full run needs more than ${FULL_LANES_MAX} lanes and ` +
-        `takes ${FULL_LANES_MAX}, the most FULL_LANES_MAX allows, so a lane ` +
-        `may run past its budget`,
+      `ci-lane: this run needs more than ${LANES_MAX} lanes and takes ` +
+        `${LANES_MAX}, the most LANES_MAX allows` +
+        (short.length === 0 ? "" : `, so ${short.join(", and ")}`),
     );
   }
-  const { laid } = planOver({
-    suites,
-    manifest,
-    changed,
-    full: options.full,
-    lanes,
-  });
   // Where the store gave no manifest, nothing was calibrated, and the
   // prologue is the figure the lanes' budget was derived from.
-  describeFullLanes(
+  describeLanes(
     laid,
     manifest?.calibration.prologue ?? LANE_PROLOGUE_SECONDS,
   );
-  return lanes;
+  return {
+    of: lanes,
+    args: [
+      ...(options.base === undefined ? [] : ["--base", options.base]),
+      ...(options.full ? ["--full"] : ["--scale", String(options.scale ?? 1)]),
+      ...(options.at === undefined ? [] : ["--at", options.at]),
+    ],
+  };
 }
 
 /**
- * What each lane of the full run is projected to take, on the error
- * stream and in the job summary, since the count is the whole of what
- * this answers on the standard one. The lanes pack this same plan, so
- * what a lane is projected to take here is what it projects for itself.
+ * What each lane of a run is projected to take, on the error stream and
+ * in the job summary, since the count is the whole of what this answers
+ * on the standard one. The lanes pack this same plan, so what a lane is
+ * projected to take here is what it projects for itself.
  */
-export function describeFullLanes(laid: Plan, prologue: number): void {
+export function describeLanes(laid: Plan, prologue: number): void {
   const longest = Math.max(
     0,
     maxOf(laid.lanes.map((lane) => lane.projectedSeconds)),
   );
   say([
-    `## The full run's ${laid.lanes.length} lane(s)`,
+    `## The run's ${laid.lanes.length} lane(s)`,
     "",
     `Each is packed against ${duration(laid.budgetSeconds)} of work, and ` +
     `the job around it takes about ${duration(prologue)} more to set up ` +
     `and ship. The longest is projected to take ` +
-    `${duration(longest + prologue)} in all. A lane holding a test that ` +
-    `failed every time may start up to ${duration(RERUN_BUDGET_SECONDS)} ` +
-    `of reruns after that.`,
+    `${duration(longest + prologue)} in all. ` +
+    (laid.discretionarySeconds > 0
+      ? `Tests chosen by score take up to ` +
+        `${duration(laid.discretionarySeconds)} of the work. `
+      : "") +
+    `A lane holding a test that failed every time may start up to ` +
+    `${duration(RERUN_BUDGET_SECONDS)} of reruns after that.`,
     "",
     "| Lane | Tests | Projected work | Projected job |",
     "| --- | --- | --- | --- |",
@@ -2284,18 +2538,14 @@ export function describeFullLanes(laid: Plan, prologue: number): void {
   ], console.error);
 }
 
-/** How many lanes the full run takes, up to `FULL_LANES_MAX`. */
-function fullLanesNeeded(
-  suites: readonly Suite[],
-  manifest: Manifest | undefined,
-  changed: ReadonlySet<string>,
-  full: boolean,
-): FullLaneCount {
-  const seen = pricedForRun(
-    census(suites, manifest, changed),
-    suites,
-    () => full,
-  );
+/**
+ * How many lanes a run takes, up to `LANES_MAX`, counted over the tree
+ * priced with no suite measured, which is how its plan is first packed.
+ */
+function lanesNeeded(input: RunInput, read: Census): LaneCount {
+  const { suites } = input;
+  const seen = pricedForRun(read, suites, () => input.full);
+  const packing = packingOf(input, seen, read.gates);
   if (seen.unmeasured === seen.manifest.entries.length) {
     // Nothing at all has a measured cost, so a cost model here would be
     // arithmetic over a figure this invented, and the answer would be
@@ -2324,11 +2574,7 @@ function fullLanesNeeded(
       const unavailable = unavailableUnits(suite);
       return suite.units.some((unit) => !unavailable.has(unit));
     });
-    const byCost = fullLaneCount({
-      manifest: seen.manifest,
-      capabilities: capabilitiesBySuite(suites),
-      wholeUnits: wholeUnits(suites),
-    });
+    const byCost = laneCount(packing);
     const wanted = Math.max(1, running.length, byCost.lanes);
     console.error(
       `ci-lane: nothing in this tree has a measured cost, so the lane ` +
@@ -2337,15 +2583,11 @@ function fullLanesNeeded(
         `than a projection from costs nobody has measured`,
     );
     return {
-      lanes: Math.min(wanted, FULL_LANES_MAX),
-      capped: byCost.capped || wanted > FULL_LANES_MAX,
+      lanes: Math.min(wanted, LANES_MAX),
+      capped: byCost.capped || wanted > LANES_MAX,
     };
   }
-  return fullLaneCount({
-    manifest: seen.manifest,
-    capabilities: capabilitiesBySuite(suites),
-    wholeUnits: wholeUnits(suites),
-  });
+  return laneCount(packing);
 }
 
 /**
@@ -2378,7 +2620,8 @@ export async function runLane(
     // a set no lane ran, which is the one failure of this design
     // that would be silent.
     throw new RangeError(
-      `lane ${options.lane} has no share of a plan for ${options.of} lanes`,
+      `lane ${options.lane} has no share of a plan for ` +
+        `${laid.lanes.length} lanes`,
     );
   }
   const batches = batchesOf(suites, seen.manifest, mine.selections);
@@ -2391,7 +2634,8 @@ export async function runLane(
     // the two ever differ, and what it was projected to take beside the
     // batches' own timings.
     console.log(
-      `ci-lane: running lane ${options.lane} of ${options.of} as described: ` +
+      `ci-lane: running lane ${options.lane} of ${laid.lanes.length} as ` +
+        `described: ` +
         `${batches.length} batch(es) of ` +
         `${batches.map((batch) => batch.suite.id).join(", ") || "nothing"}, ` +
         `projected at ${duration(mine.projectedSeconds)} of ` +
@@ -2411,7 +2655,7 @@ export async function runLane(
       );
     }
     describePlan(
-      options,
+      { ...options, of: laid.lanes.length },
       batches,
       [...needs].sort(),
       fetched,
@@ -2754,13 +2998,29 @@ export async function main(
   const options = parseLaneArgs(args, root);
   if (options === undefined) {
     console.error(
-      "usage: ci-lane.ts [--lane N] [--of M] [--full] [--dry-run] " +
-        "[--described] [--lane-count] [--base <ref>] [--at <iso>] [--coverage-dir <dir>]",
+      "usage: ci-lane.ts [--lane N] [--of M] [--full] [--scale <n>] " +
+        "[--dry-run] [--described] [--lane-count [--label <name>]...] " +
+        "[--base <ref>] [--at <iso>] [--coverage-dir <dir>]",
     );
     return 2;
   }
   if (options.laneCount) {
-    console.log(String(await fullLanes(options, deps)));
+    // A pull request's labels decide whether it is the full run and how
+    // much it spends on tests chosen by score. One this cannot read stops
+    // the run here, before any lane starts, and says why.
+    const requested = options.labels === undefined
+      ? { ok: true as const, full: options.full, scale: options.scale ?? 1 }
+      : requestedRun(options.labels);
+    if (!requested.ok) {
+      console.error(`::error::${requested.problem}`);
+      return 1;
+    }
+    const run = await runLanes({
+      ...options,
+      full: requested.full,
+      scale: requested.scale,
+    }, deps);
+    console.log(JSON.stringify(run));
     return 0;
   }
   return await runLane(options, deps) ? 0 : 1;

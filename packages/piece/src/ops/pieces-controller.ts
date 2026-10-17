@@ -2720,13 +2720,16 @@ export class PiecesController<T = unknown> {
       // so start() observes the committed patternIdentity rather than the
       // pre-transaction snapshot held by the caller's cell.
       rootToStart = await this.getDefaultPattern(false) ?? root;
-      // Only when the origin CONFIRMED the pinned pattern. Then a disagreeing
+      // Only when the origin CONFIRMED the pinned pattern, or offered an
+      // earlier release than it, which the root keeps. Then a disagreeing
       // setup marker says the document is staged by another version while the
       // right one is pinned, which is a stale document rather than a stale
       // pattern. A root the origin did not confirm may be pinned to a pattern
       // that is simply wrong for it, and re-staging that one buys nothing the
       // repair below cannot do with the failure in hand.
-      if (outcome === "current" || outcome === "migrated") {
+      if (
+        outcome === "current" || outcome === "migrated" || outcome === "ahead"
+      ) {
         rootToStart = await this.#restageRootSetupIfStale(rootToStart);
       }
     }

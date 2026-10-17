@@ -377,16 +377,37 @@ describe("report", () => {
       expect(selectionOf(itself, key("kneads"))).toBe("skipped-there");
     });
 
-    // An identity the packing reached, and one the store has never seen,
-    // are both identities that run. A run with no record of either
-    // recorded less than it ran rather than running less than it should
-    // have, and saying there is no manifest would deny one there is.
+    // An identity the packing reached, and one the manifest does not hold
+    // whose unit it placed, are both identities that run. A run with no
+    // record of either recorded less than it ran rather than running less
+    // than it should have, and saying there is no manifest would deny one
+    // there is.
     it("separates a test that was to have run from one nothing knows", () => {
       const selected = knows(["kneads"], {
         selected: new Set([key("kneads")]),
       });
       expect(selectionOf(selected, key("kneads"))).toBe("unrecorded");
       expect(selectionOf(knows([]), key("kneads"))).toBe("unrecorded");
+      const placed = knows([], {
+        units: inOneUnit("kneads"),
+        placed: new Set(["workspace-unit\tbakery"]),
+      });
+      expect(selectionOf(placed, key("kneads"))).toBe("unrecorded");
+    });
+
+    // A test the manifest does not hold runs wherever its unit runs, so a
+    // unit the packing left out is the packing's decision about the test.
+    it("reports a test the manifest does not hold by what became of its unit", () => {
+      const passedOver = knows([], { units: inOneUnit("kneads") });
+      expect(selectionOf(passedOver, key("kneads"))).toBe("not-selected");
+      expect(selectionOf({ ...passedOver, crowded: true }, key("kneads")))
+        .toBe("crowded-out");
+      expect(
+        selectionOf(
+          { ...passedOver, unschedulable: new Set([key("kneads")]) },
+          key("kneads"),
+        ),
+      ).toBe("unschedulable");
     });
   });
 
@@ -473,7 +494,7 @@ describe("report", () => {
 
     // A test that both passed and failed at this commit is disagreeing
     // with itself, which is what the scorer calls flake evidence rather
-    // than a catch.
+    // than a new real test failure.
     it("says nothing about a test that disagreed with itself here", () => {
       expect(firstFailures(input({
         previous: run([["kneads", "pass"]]),
@@ -912,17 +933,17 @@ describe("report", () => {
 
   describe("renames()", () => {
     /**
-     * A view where one departing test has caught things, and every test
-     * a case names shares one invocation unit with it.
+     * A view where one departing test has had new real test failures, and
+     * every test a case names shares one invocation unit with it.
      */
-    const withCatches = (
+    const withNewRealTestFailures = (
       name: string,
-      catches: number,
+      newRealTestFailures: number,
       ...others: readonly string[]
     ): PullRequestView => ({
       ...unknownPullRequest(),
       manifest: true,
-      catches: new Map([[key(name), catches]]),
+      newRealTestFailures: new Map([[key(name), newRealTestFailures]]),
       units: inOneUnit(name, ...others),
     });
 
@@ -930,11 +951,11 @@ describe("report", () => {
       const suggestions = renames(input({
         previous: run([["kneads the dough", "pass"], ["proves", "pass"]]),
         current: run([["kneads the dougk", "pass"], ["proves", "pass"]]),
-        pullRequest: withCatches("kneads the dough", 4.5, "proves"),
+        pullRequest: withNewRealTestFailures("kneads the dough", 4.5, "proves"),
       }));
       expect(suggestions.length).toBe(1);
       expect(suggestions[0]!.to.n).toBe("kneads the dougk");
-      expect(suggestions[0]!.catches).toBe(4.5);
+      expect(suggestions[0]!.newRealTestFailures).toBe(4.5);
       expect(JSON.parse(suggestions[0]!.aliasLine)).toEqual({
         date: "2026-09-07",
         from: { k: "unit", s: "bakery", n: "kneads the dough" },
@@ -942,11 +963,11 @@ describe("report", () => {
       });
     });
 
-    it("offers nothing when the departing test caught nothing", () => {
+    it("offers nothing when the departing test had no new real test failure", () => {
       expect(renames(input({
         previous: run([["kneads the dough", "pass"], ["proves", "pass"]]),
         current: run([["kneads the dougk", "pass"], ["proves", "pass"]]),
-        pullRequest: withCatches("kneads the dough", 0, "proves"),
+        pullRequest: withNewRealTestFailures("kneads the dough", 0, "proves"),
       }))).toEqual([]);
     });
 
@@ -954,7 +975,7 @@ describe("report", () => {
       expect(renames(input({
         previous: run([["kneads the dough", "pass"], ["proves", "pass"]]),
         current: run([["lights the oven", "pass"], ["proves", "pass"]]),
-        pullRequest: withCatches("kneads the dough", 4, "proves"),
+        pullRequest: withNewRealTestFailures("kneads the dough", 4, "proves"),
       }))).toEqual([]);
     });
 
@@ -972,7 +993,7 @@ describe("report", () => {
           ["census > drops a unit the tree no longer had", "pass"],
           ["census > keeps a unit the tree no longer has", "pass"],
         ]),
-        pullRequest: withCatches(
+        pullRequest: withNewRealTestFailures(
           "census > drops a unit the tree no longer has",
           4,
         ),
@@ -984,7 +1005,7 @@ describe("report", () => {
         previous: run([["kneads the dough", "pass"], ["proves", "pass"]]),
         current: run([["kneads the dougk", "pass"], ["proves", "pass"]]),
         pullRequest: {
-          ...withCatches("kneads the dough", 4, "proves"),
+          ...withNewRealTestFailures("kneads the dough", 4, "proves"),
           flakes: new Map([[key("kneads the dougk"), undefined]]),
         },
       }))).toEqual([]);
@@ -1004,7 +1025,7 @@ describe("report", () => {
         pullRequest: {
           ...unknownPullRequest(),
           manifest: true,
-          catches: new Map([[gone, 4]]),
+          newRealTestFailures: new Map([[gone, 4]]),
           units: new Map([
             [gone, "workspace-unit\tbakery"],
             [arrived, "workspace-unit\tbakery"],
@@ -1028,7 +1049,7 @@ describe("report", () => {
         pullRequest: {
           ...unknownPullRequest(),
           manifest: true,
-          catches: new Map([
+          newRealTestFailures: new Map([
             [key("kneads the dough"), 4],
             [key("lights the oven"), 2],
           ]),
@@ -1058,7 +1079,7 @@ describe("report", () => {
         pullRequest: {
           ...unknownPullRequest(),
           manifest: true,
-          catches: new Map([[gone, 4]]),
+          newRealTestFailures: new Map([[gone, 4]]),
           units: new Map([[gone, "workspace-unit\toven"]]),
         },
       }))).toEqual([]);
@@ -1078,7 +1099,7 @@ describe("report", () => {
         pullRequest: {
           ...unknownPullRequest(),
           manifest: true,
-          catches: new Map([
+          newRealTestFailures: new Map([
             [key("kneads the dough"), 4],
             [key("kneads the dougx"), 3],
           ]),
@@ -1103,7 +1124,7 @@ describe("report", () => {
         pullRequest: {
           ...unknownPullRequest(),
           manifest: true,
-          catches: new Map([[key("kneads the dough"), 4]]),
+          newRealTestFailures: new Map([[key("kneads the dough"), 4]]),
           units: new Map([[key("kneads the dough"), "workspace-unit\tbakery"]]),
         },
       }))).toEqual([]);
@@ -1173,7 +1194,7 @@ describe("report", () => {
         ]),
         nonGating: new Map([[key("glazes"), { flakes: 7, runs: 900 }]]),
         pullRequest: knows(["proves", "bakes"], {
-          catches: new Map([[key("kneads the dough"), 6]]),
+          newRealTestFailures: new Map([[key("kneads the dough"), 6]]),
           flakes: new Map([
             [key("proves"), { flakes: 5, runs: 80 }],
             [key("bakes"), undefined],

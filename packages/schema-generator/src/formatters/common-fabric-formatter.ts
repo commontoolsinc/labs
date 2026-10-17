@@ -99,6 +99,7 @@ import {
   bindWrittenArgument,
   usesParameterUnreachably,
 } from "../type-parameter-bindings.ts";
+import { unionMembersInSourceOrder } from "./union-formatter.ts";
 
 type WrapperKind = CellWrapperKind;
 const CFC_ALIAS_NAMES: ReadonlySet<string> = new Set(CFC_CANONICAL_ALIAS_NAMES);
@@ -4889,21 +4890,17 @@ export class CommonFabricFormatter implements TypeFormatter {
     unionType: ts.UnionType,
     context: GenerationContext,
   ): MutableJSONSchema {
-    const members = unionType.types;
     const schemas: MutableJSONSchema[] = [];
 
-    // Check if we have a UnionTypeNode with member nodes
-    const hasUnionNode = context.typeNode &&
-      ts.isUnionTypeNode(context.typeNode);
-    const unionNode = hasUnionNode
-      ? context.typeNode as ts.UnionTypeNode
-      : undefined;
-
-    // Process each union member
-    for (let i = 0; i < members.length; i++) {
-      const memberType = members[i]!;
-      const memberNode = unionNode?.types[i];
-
+    // Process each union member, in source order and at its written node
+    for (
+      const { member: memberType, node: memberNode }
+        of unionMembersInSourceOrder(
+          unionType,
+          context.typeNode,
+          context.typeChecker,
+        )
+    ) {
       // A scope wrapper around a cell formats as the cell alone, dropping the
       // scope before it reaches the schema — so the structural check on the
       // finished schema would have nothing left to reject. Catch it here,

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 
+import { isAliasBinding } from "../src/alias-binding.ts";
 import { lift } from "../src/builder/module.ts";
 import { resolvedSchema } from "./schema-ref-helpers.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
@@ -14,6 +15,7 @@ import {
   isModule,
   isPattern,
   type JSONSchema,
+  type JSONSchemaObj,
   type Module,
   type Pattern,
 } from "../src/builder/types.ts";
@@ -741,6 +743,74 @@ describe("pattern", () => {
       expect(resultSchema).not.toBe(inner.resultSchema);
       expect(isDeepFrozen(argumentSchema)).toBe(true);
       expect(isDeepFrozen(resultSchema)).toBe(true);
+    });
+
+    describe("an argument alias's schema", () => {
+      // Under the content-addressed flag, which is on by default, a binding
+      // carries a reference to its schema's documents. `createRef()` hashes
+      // an object it reaches twice in one cause as `null`, so where the
+      // schema stays inline, every position holds an object of its own.
+
+      const title = lift<{ title: string }, string>((item) => item.title);
+
+      const titlesResultSchema = (): JSONSchema => ({
+        type: "object",
+        properties: { a: { type: "string" }, b: { type: "string" } },
+      });
+
+      /** The schemas of the aliases binding the argument's `item`. */
+      const itemAliasSchemas = (built: Pattern): (JSONSchema | undefined)[] =>
+        built.nodes.flatMap((node) => {
+          const inputs = node.inputs;
+          return isAliasBinding(inputs) && inputs.$alias.cell === "argument" &&
+              inputs.$alias.path.length === 1 &&
+              inputs.$alias.path[0] === "item"
+            ? [inputs.$alias.schema]
+            : [];
+        });
+
+      it("is one reference object at every position that binds the same cell", () => {
+        const built = pattern<
+          { item: { title: string }; count: number },
+          { a: string; b: string }
+        >(
+          ({ item }) => ({ a: title(item), b: title(item) }),
+          itemsArgumentSchema(),
+          titlesResultSchema(),
+        );
+        const schemas = itemAliasSchemas(built);
+        expect(schemas).toHaveLength(2);
+        expect((schemas[0] as JSONSchemaObj).$ref).toMatch(/^cid:/);
+        expect(schemas[1]).toBe(schemas[0]);
+      });
+
+      it("is an object of its own at each position where decomposition refuses", () => {
+        // A `definitions` keyword is one decomposition refuses, so the
+        // schema stays inline.
+        const argumentSchema: JSONSchema = {
+          type: "object",
+          properties: {
+            item: {
+              type: "object",
+              definitions: { Title: { type: "string" } },
+              properties: { title: { type: "string" } },
+            },
+          },
+        };
+        const built = pattern<
+          { item: { title: string } },
+          { a: string; b: string }
+        >(
+          ({ item }) => ({ a: title(item), b: title(item) }),
+          argumentSchema,
+          titlesResultSchema(),
+        );
+        const schemas = itemAliasSchemas(built);
+        expect(schemas).toHaveLength(2);
+        expect(schemas[0]).toEqual(argumentSchema.properties!.item);
+        expect(schemas[1]).toEqual(schemas[0]);
+        expect(schemas[1]).not.toBe(schemas[0]);
+      });
     });
   });
 });

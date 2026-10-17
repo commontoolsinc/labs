@@ -656,6 +656,68 @@ describe("piece source lifecycle", () => {
     });
   });
 
+  describe("a release time the origin confirmed for the running source", () => {
+    // The reconciler orders `system:` releases by the release time it last
+    // confirmed for the source a piece runs. An explicit update that adopts
+    // nothing has learned nothing that moves that time back.
+
+    async function confirm(
+      piece: { getCell(): Cell<unknown> },
+      origin: string,
+    ) {
+      const running = getPatternIdentityRef(piece.getCell())!.identity;
+      const confirmed = { identity: running, releasedAt: Date.UTC(2024, 2, 5) };
+      const written = await runtime.editWithRetry((tx) => {
+        setPieceReconciliation(piece.getCell(), tx, {
+          outcome: "followed",
+          at: Date.now(),
+          origin,
+          confirmed,
+        });
+      });
+      expect(written.error).toBeUndefined();
+      return confirmed;
+    }
+
+    it("stays across an update that could not reach the origin", async () => {
+      const origin = "system:missing-confirmed.tsx";
+      const piece = await pieces.create(versionProgram("v1"), { input: {} });
+      await stampOrigin(piece, origin);
+      const confirmed = await confirm(piece, origin);
+
+      await expect(piece.changeSource({ kind: "adopt" })).rejects.toThrow();
+
+      expect(getPieceReconciliation(piece.getCell())).toMatchObject({
+        outcome: "unreachable",
+        origin,
+        confirmed,
+      });
+    });
+
+    it("stays across an update that found the origin already current", async () => {
+      const origin = "system:current-confirmed.tsx";
+      webSources["/api/patterns/current-confirmed.tsx"] = versionProgram(
+        "origin-v1",
+      );
+      const piece = await pieces.create(versionProgram("v1"), { input: {} });
+      await stampOrigin(piece, origin);
+      expect(await piece.changeSource({ kind: "adopt" })).toEqual({
+        status: "applied",
+      });
+      const confirmed = await confirm(piece, origin);
+
+      expect(await piece.changeSource({ kind: "adopt" })).toEqual({
+        status: "applied",
+      });
+
+      expect(getPieceReconciliation(piece.getCell())).toMatchObject({
+        outcome: "followed",
+        origin,
+        confirmed,
+      });
+    });
+  });
+
   it("drops an outcome about a piece that moved while it was being reached", async () => {
     const origin = "system:moves-underneath.tsx";
     const piece = await pieces.create(versionProgram("v1"), { input: {} });
