@@ -9,7 +9,6 @@ import {
 import {
   collectReports,
   main,
-  markedSets,
   measuredSetFigures,
   parseReportArgs,
   report,
@@ -17,6 +16,7 @@ import {
   repositoryFigures,
   summarize,
 } from "./coverage-report.ts";
+import { markedSets } from "./coverage-gate.ts";
 import {
   coverageMetricForGroup,
   measuredSetCoverageMetric,
@@ -36,7 +36,7 @@ import { loadTopology } from "./test-topology.ts";
 import {
   measuredSetDirectory,
   measuredSets,
-} from "./test-selection/coverage.ts";
+} from "./test-topology/coverage-gates.ts";
 
 /** The repository the measured-set tests read the workspace from. */
 const REPOSITORY = path.dirname(

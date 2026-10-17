@@ -351,68 +351,207 @@ describe("local-session-documents", () => {
     }
   });
 
-  for (const serverExecution of [false, true]) {
-    for (const stale of [false, true]) {
-      it(`validates shared reads used by a session write (${serverExecution}, stale ${stale})`, async () => {
-        const server = newSharedServer();
-        const writerStorage = EmulatedStorageManager.connectTo(server, {
-          as: signer,
-        });
-        const readerStorage = EmulatedStorageManager.connectTo(server, {
-          as: signer,
-        });
-        const writer = new Runtime({
-          apiUrl: new URL(import.meta.url),
-          storageManager: writerStorage,
-        });
-        const reader = new Runtime({
-          apiUrl: new URL(import.meta.url),
-          storageManager: readerStorage,
-          experimental: {
-            localSessionDocuments: true,
-            serverExecution,
-            commitPreconditions: true,
-          },
-        });
-        try {
-          const seed = writer.edit();
-          writer.getCell<number>(space, "shared-read", undefined, seed).set(1);
-          expect((await seed.commit().settled).error).toBeUndefined();
-          const shared = reader.getCell<number>(space, "shared-read");
-          if (!stale) await shared.sync();
-          const tx = reader.edit();
-          expect(shared.withTx(tx).get()).toBe(stale ? undefined : 1);
-          const local = reader.getCell<number>(
-            space,
-            "shared-read-output",
-            undefined,
-            undefined,
-            "session",
-          );
-          local.withTx(tx).set(2);
-          expect((await tx.commit().settled).error?.name).toBe(
-            stale ? "ConflictError" : undefined,
-          );
-          expect(local.get()).toBe(stale ? undefined : 2);
-          if (!stale) {
-            const guarded = reader.edit();
-            guarded.addCommitPrecondition!(space, {
-              kind: "origin-committed",
-              originLocalSeq: getCommitLocalSeq(tx.tx, space)!,
-            });
-            local.withTx(guarded).set(3);
-            expect((await guarded.commit().settled).error).toBeUndefined();
-            expect(local.get()).toBe(3);
-          }
-        } finally {
-          await reader.dispose();
-          await writer.dispose();
-          await readerStorage.close();
-          await writerStorage.close();
-          await server.close();
-        }
+  for (const stale of [false, true]) {
+    it(`validates shared reads used by a session write under server execution (stale ${stale})`, async () => {
+      const server = newSharedServer();
+      const writerStorage = EmulatedStorageManager.connectTo(server, {
+        as: signer,
       });
-    }
+      const readerStorage = EmulatedStorageManager.connectTo(server, {
+        as: signer,
+      });
+      const writer = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: writerStorage,
+      });
+      const reader = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: readerStorage,
+        experimental: {
+          localSessionDocuments: true,
+          serverExecution: true,
+          commitPreconditions: true,
+        },
+      });
+      try {
+        const seed = writer.edit();
+        writer.getCell<number>(space, "shared-read", undefined, seed).set(1);
+        expect((await seed.commit().settled).error).toBeUndefined();
+        const shared = reader.getCell<number>(space, "shared-read");
+        if (!stale) await shared.sync();
+        const tx = reader.edit();
+        expect(shared.withTx(tx).get()).toBe(stale ? undefined : 1);
+        const local = reader.getCell<number>(
+          space,
+          "shared-read-output",
+          undefined,
+          undefined,
+          "session",
+        );
+        local.withTx(tx).set(2);
+        expect((await tx.commit().settled).error?.name).toBe(
+          stale ? "ConflictError" : undefined,
+        );
+        expect(local.get()).toBe(stale ? undefined : 2);
+        if (!stale) {
+          const guarded = reader.edit();
+          guarded.addCommitPrecondition!(space, {
+            kind: "origin-committed",
+            originLocalSeq: getCommitLocalSeq(tx.tx, space)!,
+          });
+          local.withTx(guarded).set(3);
+          expect((await guarded.commit().settled).error).toBeUndefined();
+          expect(local.get()).toBe(3);
+        }
+      } finally {
+        await reader.dispose();
+        await writer.dispose();
+        await readerStorage.close();
+        await writerStorage.close();
+        await server.close();
+      }
+    });
+  }
+
+  for (const stale of [false, true]) {
+    it(`confirms shared reads used by a session write under client execution (stale ${stale})`, async () => {
+      // The session write stays on the replica, and the commit carrying its
+      // shared reads travels with no operations. A verdict refusing a read
+      // rolls the session write back, whether a handler or a derivation made
+      // it.
+
+      const server = newSharedServer();
+      const commits: ClientCommit[] = [];
+      const transact = server.transact.bind(server);
+      server.transact = (...args: Parameters<typeof transact>) => {
+        commits.push(args[0].commit);
+        return transact(...args);
+      };
+      const writerStorage = EmulatedStorageManager.connectTo(server, {
+        as: signer,
+      });
+      const readerStorage = EmulatedStorageManager.connectTo(server, {
+        as: signer,
+      });
+      const writer = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: writerStorage,
+      });
+      const reader = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: readerStorage,
+        experimental: {
+          localSessionDocuments: true,
+          serverExecution: false,
+          commitPreconditions: true,
+        },
+      });
+      try {
+        const seed = writer.edit();
+        writer.getCell<number>(space, "shared-read", undefined, seed).set(1);
+        expect((await seed.commit().settled).error).toBeUndefined();
+        const sent = commits.length;
+        const shared = reader.getCell<number>(space, "shared-read");
+        if (!stale) await shared.sync();
+        const tx = reader.edit();
+        expect(shared.withTx(tx).get()).toBe(stale ? undefined : 1);
+        const local = reader.getCell<number>(
+          space,
+          "shared-read-output",
+          undefined,
+          undefined,
+          "session",
+        );
+        local.withTx(tx).set(2);
+        expect((await tx.commit().settled).error?.name).toBe(
+          stale ? "ConflictError" : undefined,
+        );
+        expect(local.get()).toBe(stale ? undefined : 2);
+        expect(commits).toHaveLength(sent + 1);
+        expect(commits[sent].operations).toEqual([]);
+        const scopes = new Set(
+          [...commits[sent].reads.confirmed, ...commits[sent].reads.pending]
+            .map((read) => read.scope ?? "space"),
+        );
+        expect([...scopes]).toEqual(["space"]);
+      } finally {
+        await reader.dispose();
+        await writer.dispose();
+        await readerStorage.close();
+        await writerStorage.close();
+        await server.close();
+      }
+    });
+  }
+
+  for (const rejected of [false, true]) {
+    it(`settles a session write over a shared pending layer with that layer's commit (${rejected ? "rejects" : "succeeds"})`, async () => {
+      // The session write read the shared document through the optimistic
+      // layer of a commit still awaiting its verdict. It travels with no
+      // operations, and settles as that commit's verdict decides.
+
+      const server = newSharedServer();
+      const commits: ClientCommit[] = [];
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const transact = server.transact.bind(server);
+      server.transact = async (...args: Parameters<typeof transact>) => {
+        commits.push(args[0].commit);
+        entered.resolve();
+        await release.promise;
+        return await transact(...args);
+      };
+      const storage = EmulatedStorageManager.connectTo(server, { as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: storage,
+        experimental: {
+          localSessionDocuments: true,
+          serverExecution: false,
+          commitPreconditions: true,
+        },
+      });
+      try {
+        const session = runtime.getCell<number>(
+          space,
+          "layered-count",
+          undefined,
+          undefined,
+          "session",
+        );
+        const shared = runtime.getCell<number>(space, "layered-count");
+        const origin = runtime.edit();
+        shared.withTx(origin).set(3);
+        if (rejected) {
+          origin.addCommitPrecondition!(space, {
+            kind: "origin-committed",
+            originLocalSeq: 999999,
+          });
+        }
+        const originCommit = origin.commit();
+        await entered.promise;
+        const dependent = runtime.edit();
+        session.withTx(dependent).set(shared.withTx(dependent).get() + 10);
+        const dependentCommit = dependent.commit();
+        expect(session.get()).toBe(13);
+        release.resolve();
+        expect((await originCommit.settled).error?.name).toBe(
+          rejected ? "PreconditionFailedError" : undefined,
+        );
+        expect((await dependentCommit.settled).error?.name).toBe(
+          rejected ? "ConflictError" : undefined,
+        );
+        expect(shared.get()).toBe(rejected ? undefined : 3);
+        expect(session.get()).toBe(rejected ? undefined : 13);
+        expect(commits).toHaveLength(2);
+        expect(commits[1].operations).toEqual([]);
+      } finally {
+        release.resolve();
+        await runtime.dispose();
+        await storage.close();
+        await server.close();
+      }
+    });
   }
 
   it("rejects a waiting blind session write when its route is replaced", async () => {

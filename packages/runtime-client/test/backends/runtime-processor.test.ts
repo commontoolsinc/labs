@@ -7248,15 +7248,41 @@ describe("runtime-processor", () => {
   describe("RuntimeProcessor.getLoggerCounts()", () => {
     // The handler reads process-global logger state, so each case raises its own
     // flag and clears it again rather than leaving one for the next. It also
-    // reads the runtime's CFC counters, which travel in the same response so a
-    // client comparing them against the timings has both from one moment —
-    // hence the stand-in below, the only runtime member this handler touches.
+    // reads the runtime's CFC counters, the pattern manager's compile-cache
+    // counters and the runtime's structure sizes, which travel in the same
+    // response so a client comparing them against the timings has all of it
+    // from one moment — hence the stand-in below, which fakes the runtime
+    // members this handler touches.
 
     const cfcStats = { cfcRelevantTx: 7 };
+    const compileCacheStats = { hits: 2, misses: 1, byIdentityHits: 3 };
+    const runtimeSizes = {
+      scheduler: { nodes: 3 },
+      storage: { documents: 5 },
+      cfcRejectionsByReason: { "writePolicyAnyOf failed": 2 },
+    };
 
     function processorWithStats() {
-      return buildProcessor({ runtime: { getCfcStats: () => cfcStats } });
+      return buildProcessor({
+        runtime: {
+          getCfcStats: () => cfcStats,
+          patternManager: { getCompileCacheStats: () => compileCacheStats },
+          getSizes: () => runtimeSizes,
+          getCellFromLink: () => ({ sink: () => () => {} }),
+        },
+      });
     }
+
+    // The home space's pieces controller is the one space a processor holds
+    // before any client asks for another.
+    const workerSizesAtRest = {
+      cellSubscriptions: 0,
+      operationSubscriptions: 0,
+      operationSessions: 0,
+      presenceMemberships: 0,
+      vdomMounts: 0,
+      spaces: 1,
+    };
 
     function withFlag(
       metadata: Record<string, unknown>,
@@ -7281,16 +7307,53 @@ describe("runtime-processor", () => {
 
         expect(Object.keys(response).sort()).toEqual([
           "cfc",
+          "compileCache",
           "counts",
           "flags",
           "metadata",
+          "sizes",
           "timing",
         ]);
         expect(response.flags["getLoggerCounts-test"].probe["id:1"]).toEqual({
           a: 1,
         });
         expect(response.cfc).toEqual(cfcStats);
+        expect(response.compileCache).toEqual(compileCacheStats);
       });
+    });
+
+    it("carries the runtime's sizes beside the worker's own tables", () => {
+      const processor = processorWithStats();
+
+      const response = processor.getLoggerCounts({
+        type: RequestType.GetLoggerCounts,
+      });
+
+      expect(response.sizes).toEqual({
+        ...runtimeSizes,
+        worker: workerSizesAtRest,
+      });
+    });
+
+    it("counts a cell subscription while it stands and not after its unsubscribe", () => {
+      const processor = processorWithStats();
+      const cell = {
+        space: cfcSigner.did(),
+        id: `of:${fid("sized-subscription")}`,
+        path: [],
+      } as unknown as CellRef;
+      const sizes = () =>
+        processor.getLoggerCounts({ type: RequestType.GetLoggerCounts })
+          .sizes.worker.cellSubscriptions;
+
+      processor.handleCellSubscribe({ type: RequestType.CellSubscribe, cell });
+      expect(sizes()).toBe(1);
+
+      processor.handleCellUnsubscribe({
+        type: RequestType.CellUnsubscribe,
+        cell,
+      });
+      expect(sizes()).toBe(0);
     });
 
     it("refuses to answer at all when a flag holds unsendable metadata", () => {

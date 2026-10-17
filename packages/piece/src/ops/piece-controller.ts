@@ -22,6 +22,7 @@ import {
   getPatternIdentityRef,
   getPatternRepository,
   getPatternSource,
+  getPieceReconciliation,
   getPieceSourceRevisions,
   getPieceSourceSnapshot,
   getValueAtPath,
@@ -32,6 +33,7 @@ import {
   isStream,
   type JSONSchema,
   KeepAsCell,
+  keepLaterConfirmation,
   materializeStoredValueForValidation,
   type MemorySpace,
   mergeSchemaDefaults,
@@ -4278,11 +4280,18 @@ export class PieceController<T = unknown> {
         current.origin !== expected.origin ||
         current.revisionId !== expected.revisionId
       ) return false;
-      setPieceReconciliation(this.#cell, tx, {
-        ...reconciliation,
-        origin,
-        at: Date.now(),
-      });
+      // A release time confirmed for the source the piece runs stays: an
+      // attempt that failed or found nothing to adopt has learned nothing
+      // that moves it back.
+      setPieceReconciliation(
+        this.#cell,
+        tx,
+        keepLaterConfirmation(
+          getPieceReconciliation(candidate),
+          { ...reconciliation, origin, at: Date.now() },
+          current.pattern.identity,
+        ),
+      );
       return true;
     });
   }

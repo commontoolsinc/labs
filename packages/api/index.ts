@@ -4259,11 +4259,15 @@ export type UIRenderable = {
 /**
  * JSX element type - the result of a JSX expression.
  * Can be a VNode, or a cell containing something with a [UI] property.
+ *
+ * A generated schema lists the members in the order they are written here,
+ * and nearly every pattern's schema holds one, so reordering them changes
+ * every such schema.
  */
 export type JSXElement =
   | VNode
-  | AnyBrandedCell<UIRenderable>
-  | Reactive<UIRenderable>;
+  | Reactive<UIRenderable>
+  | AnyBrandedCell<UIRenderable>;
 
 /** A "virtual view node", e.g. a virtual DOM element */
 export type VNode = {

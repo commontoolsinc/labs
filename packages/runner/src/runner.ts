@@ -139,6 +139,7 @@ import {
 import {
   nodeBindingInputsWeight,
   NodeBindingMemo,
+  type NodeBindingSubjectMember,
 } from "./node-binding-memo.ts";
 import { hasInlineCellScheme } from "./immutable-cell.ts";
 import { runtimeOwnedStoreOwnerKey } from "./cfc/runtime-owned-stores.ts";
@@ -311,12 +312,13 @@ const triggerFlowLogger = getLogger("runner.trigger-flow", {
 const RESULT_SHORTCUT_LIMIT = 4096;
 
 /**
- * How many node bindings of each kind one runner holds for instantiation.
- * A resume pre-sync plans every node of a piece's tree before any of them
- * is instantiated, and its bindings are held until each node's
- * instantiation takes its own; the bound is sized for a tree of several
- * hundred nested instances. Past it the least recently used binding is
- * dropped, and computed again by whichever plan asks for it next.
+ * How many node bindings of each kind one runner holds. A resume pre-sync
+ * plans every node of a piece's tree before any of them is instantiated,
+ * and a binding is held from the first plan of its node for every later
+ * plan of it, across a load and past it; the bound is sized for a tree of
+ * several hundred nested instances. Past it the least recently used
+ * binding is dropped, and computed again by whichever plan asks for it
+ * next.
  */
 const NODE_BINDING_LIMIT = 65_536;
 
@@ -324,9 +326,8 @@ const NODE_BINDING_LIMIT = 65_536;
  * The most weight the held node bindings of one kind have between them, in
  * characters: those of each binding's key, and of its inputs document or,
  * for a pattern node, {@link BOUND_CHILD_NODE_WEIGHT} for each node of its
- * bound child. An inputs document carries a schema inline for every link it
- * holds, and runs to tens of thousands of characters, so this bound is the
- * one a large tree reaches first.
+ * bound child. An inputs document carries a link, its schema as a
+ * reference, for every input it holds.
  */
 const NODE_BINDING_WEIGHT_LIMIT = 256 * 1024 * 1024;
 
@@ -1788,6 +1789,14 @@ export interface PieceSourceRevision {
 
   operation: PieceSourceRevisionOperation;
   selectedRevisionId?: string;
+
+  /**
+   * When the deployment that served this revision's source released it, in
+   * milliseconds since the epoch (`pattern-release-time.ts`). Carried only by
+   * a revision adopted from a `system:` origin whose host states one; it is
+   * what keeps that piece from being moved to an earlier release.
+   */
+  releasedAt?: number;
 }
 
 export interface PieceSourceSnapshot {
@@ -1842,6 +1851,17 @@ export interface PieceReconciliation {
 
   /** What the attempt reported, in its own words. */
   detail?: string;
+
+  /**
+   * The source the piece runs, with the latest release time at which its
+   * `system:` origin has offered that source since the piece adopted it, in
+   * milliseconds since the epoch (`pattern-release-time.ts`). A later deploy
+   * of unchanged source moves it forward without adopting anything, which is
+   * what keeps the piece from being moved to a release between the one it
+   * adopted and the one that confirmed it. It never moves backward, and an
+   * accepted transition clears it with the rest of the record.
+   */
+  confirmed?: { identity: string; releasedAt: number };
 }
 
 export type PieceSourceTransitionBaseline =
@@ -1859,6 +1879,9 @@ export interface PieceSourceTransition {
 
   expected: PieceSourceSnapshot;
   selectedRevisionId?: string;
+
+  /** The release time the revision records (`PieceSourceRevision`). */
+  releasedAt?: number;
 }
 
 /**
@@ -1937,9 +1960,9 @@ type BoundNodeIO = {
 /**
  * What binding a javascript, passthrough or raw node produces before
  * anything is read through a transaction. `Runner.#nodeIOBindings` holds the
- * one a pre-sync computes for a node, result cell and argument link until
- * the node's instantiation takes it, and every plan made meanwhile takes its
- * members from that one, so no holder changes them.
+ * one the first plan of a node, result cell and argument link computes, and
+ * every later plan takes its members from that one, so no holder changes
+ * them.
  */
 type NodeIOBinding = {
   inputs: FabricExecValue;
@@ -2765,9 +2788,8 @@ export class Runner {
     | undefined;
 
   /**
-   * The bindings of the javascript, passthrough and raw nodes a resume
-   * pre-sync of this runner has planned and no instantiation has taken yet,
-   * weighed by their inputs documents.
+   * The bindings of the javascript, passthrough and raw nodes this runner
+   * has planned, weighed by their inputs documents.
    */
   readonly #nodeIOBindings = new NodeBindingMemo<NodeIOBinding>({
     capacity: NODE_BINDING_LIMIT,
@@ -2777,9 +2799,8 @@ export class Runner {
   });
 
   /**
-   * The bindings of the pattern nodes a resume pre-sync of this runner has
-   * planned and no instantiation has taken yet, weighed by the node count of
-   * their bound children.
+   * The bindings of the pattern nodes this runner has planned, weighed by
+   * the node count of their bound children.
    */
   readonly #patternNodeBindings = new NodeBindingMemo<PatternNodeBindingCore>({
     capacity: NODE_BINDING_LIMIT,
@@ -11120,7 +11141,7 @@ export class Runner {
     pattern: Pattern,
     schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
   ) {
-    const plan = this.#nodePlan(tx, node, resultCell, pattern, undefined, true);
+    const plan = this.#nodePlan(tx, node, resultCell, pattern);
     if (plan === undefined) return;
     switch (plan.kind) {
       case "javascript":
@@ -11181,11 +11202,10 @@ export class Runner {
    * machinery-read boundary).
    *
    * A plan has two parts. The bindings read nothing through a transaction,
-   * and the runner holds the ones a pre-sync computes until the node's
-   * instantiation plans it: a plan made with `forInstantiation` takes the
-   * bindings held and leaves none behind, since the node it starts keeps
-   * its own (`#nodeIOBinding()`, `#bindPatternNode()`). What the bound
-   * outputs redirect to is read through `tx` on every call, so each
+   * and the runner holds the ones the first plan of a node computes for
+   * every later plan of it — a pre-sync's, a name-sync's, the node's
+   * instantiation's (`#nodeIOBinding()`, `#bindPatternNode()`). What the
+   * bound outputs redirect to is read through `tx` on every call, so each
    * caller's transaction records the reads its plan rests on, and a plan
    * follows a redirect written since the last one.
    */
@@ -11195,7 +11215,6 @@ export class Runner {
     resultCell: Cell<any>,
     pattern: Pattern,
     argumentLink?: NormalizedFullLink,
-    forInstantiation = false,
   ): NodePlan | undefined {
     const nodeModule = node.module;
     if (!isModule(nodeModule)) {
@@ -11232,7 +11251,6 @@ export class Runner {
             resolved.type,
             moduleRefName,
             argumentLink ?? getMetaLink(resultCell, "argument")!,
-            forInstantiation,
           );
           return {
             kind: resolved.type as "javascript" | "passthrough",
@@ -11258,7 +11276,6 @@ export class Runner {
             pattern,
             moduleRefName,
             argumentLink,
-            forInstantiation,
           ),
         }));
       case "pattern":
@@ -11272,7 +11289,6 @@ export class Runner {
             resultCell,
             pattern,
             argumentLink,
-            forInstantiation,
           ),
         }));
       default:
@@ -11285,8 +11301,7 @@ export class Runner {
    * raw node of `pattern`, on `resultCell` against `argumentCellLink`, or
    * returns the binding held for them. `moduleType` is the type of the
    * module the node resolved to and `moduleRefName` the registry name it
-   * resolved from, when it resolved from one. With `take`, a binding held
-   * is given up to the caller and a binding computed is not held.
+   * resolved from, when it resolved from one.
    *
    * The binding reads nothing through a transaction: it is a function of
    * the node, the pattern's manifest and argument schema, and the two
@@ -11305,7 +11320,6 @@ export class Runner {
     moduleType: Module["type"],
     moduleRefName: string | undefined,
     argumentCellLink: NormalizedFullLink | undefined,
-    take = false,
   ): NodeIOBinding {
     const bind = (): NodeIOBinding => {
       this.#nodeBindingRecorder?.(
@@ -11372,16 +11386,43 @@ export class Runner {
       return { inputs, outputs, inputsCell };
     };
     if (isStandInArgument(argumentCellLink)) return bind();
-    const subject = {
-      node,
-      pattern,
+    return this.#nodeIOBindings.bindingFor({
+      ...this.#bindingSubjectMembers(node, pattern),
       resultLink: resultCell.getAsNormalizedFullLink(),
       argumentLink: argumentCellLink,
       variant: bindingVariant(moduleType, moduleRefName),
-    };
-    return take
-      ? this.#nodeIOBindings.takeBindingFor(subject, bind)
-      : this.#nodeIOBindings.bindingFor(subject, bind);
+    }, bind);
+  }
+
+  /**
+   * How a binding's subject names `node` and `pattern`
+   * (`NodeBindingSubjectMember`): the pattern by its content identity when
+   * it has one, and the node by its position among the pattern's nodes,
+   * since every pattern object of one identity — the one embedded in a
+   * parent's graph, the one loaded by identity for the instance's own start
+   * — holds the same nodes at the same positions; both by object identity
+   * otherwise.
+   */
+  #bindingSubjectMembers(
+    node: Node,
+    pattern: Pattern,
+  ): { node: NodeBindingSubjectMember; pattern: NodeBindingSubjectMember } {
+    const identity = this.#patternSubjectMember(pattern);
+    const position = typeof identity === "string"
+      ? pattern.nodes.indexOf(node)
+      : -1;
+    return position === -1
+      ? { node, pattern }
+      : { node: position, pattern: identity };
+  }
+
+  /**
+   * How a binding's subject names `pattern`: by its content identity when
+   * it has one, and by the object otherwise.
+   */
+  #patternSubjectMember(pattern: Pattern): NodeBindingSubjectMember {
+    const ref = this.#runtime.patternManager.getArtifactEntryRef(pattern);
+    return ref === undefined ? pattern : patternIdentityKey(ref);
   }
 
   #collectStaticRedirectWriteTargets(
@@ -13755,7 +13796,6 @@ export class Runner {
       resultCell,
       "argument",
     )!,
-    take = false,
   ): RawNodeInputs {
     const {
       inputs: mappedInputBindings,
@@ -13768,7 +13808,6 @@ export class Runner {
       "raw",
       moduleRefName,
       argumentCellLink,
-      take,
     );
 
     // outputCells tracks the static write surface for dependency ordering and
@@ -14131,7 +14170,6 @@ export class Runner {
     resultCell: Cell<any>,
     pattern: Pattern,
     argumentLink?: NormalizedFullLink,
-    take = false,
   ): PatternNodeBinding {
     // May be undefined: the owned-cell walk plans before setup writes the
     // meta on a fresh first run, and a child result cell is not synced yet
@@ -14252,26 +14290,21 @@ export class Runner {
       };
     };
     // The child bound here is the pattern object the child's own nodes are
-    // held under, so a plan that takes this binding hands its instantiation
-    // the child the pre-sync planned, and the child's nodes find theirs.
-    let binding: PatternNodeBindingCore;
-    if (isStandInArgument(argumentCellLink)) {
-      binding = bind();
-    } else {
-      const subject = {
-        node,
-        pattern,
+    // held under, so a plan that finds this binding hands its instantiation
+    // the child the first plan bound, and the child's nodes find theirs.
+    const binding = isStandInArgument(argumentCellLink)
+      ? bind()
+      : this.#patternNodeBindings.bindingFor({
+        ...this.#bindingSubjectMembers(node, pattern),
         // A node whose module is a registry reference keeps its identity
-        // when the registry puts another pattern under the name.
-        implementation,
+        // when the registry puts another pattern under the name. The
+        // pattern it holds is named by content identity when it has one,
+        // like the pattern holding the node.
+        implementation: this.#patternSubjectMember(implementation),
         resultLink: resultCell.getAsNormalizedFullLink(),
         argumentLink: argumentCellLink,
         variant: bindingVariant("pattern", undefined),
-      };
-      binding = take
-        ? this.#patternNodeBindings.takeBindingFor(subject, bind)
-        : this.#patternNodeBindings.bindingFor(subject, bind);
-    }
+      }, bind);
     const { child, inputs, outputs, instanceName } = binding;
     const io = {
       child,
@@ -14879,7 +14912,10 @@ export function getPieceSourceRevisions(
           typeof value.origin !== "string") ||
       value.selectedRevisionId !== undefined &&
         (typeof value.selectedRevisionId !== "string" ||
-          value.selectedRevisionId.length === 0)
+          value.selectedRevisionId.length === 0) ||
+      value.releasedAt !== undefined &&
+        (typeof value.releasedAt !== "number" ||
+          !Number.isFinite(value.releasedAt) || value.releasedAt < 0)
     ) {
       throw new Error("piece source history is invalid");
     }
@@ -14896,6 +14932,9 @@ export function getPieceSourceRevisions(
     }
     if (typeof value.selectedRevisionId === "string") {
       revision.selectedRevisionId = value.selectedRevisionId;
+    }
+    if (typeof value.releasedAt === "number") {
+      revision.releasedAt = value.releasedAt;
     }
     revisionIds.add(revision.revisionId);
     revisions.push(revision);
@@ -14917,7 +14956,7 @@ export function getPieceReconciliation(
     meta: ignoreReadForScheduling,
   });
   if (!isObjectOrArray(raw)) return undefined;
-  const { outcome, at, origin, offered, reason, detail } = raw;
+  const { outcome, at, origin, offered, reason, detail, confirmed } = raw;
   if (
     !isPieceReconciliationOutcome(outcome) ||
     typeof at !== "number" || !Number.isFinite(at) || at < 0 ||
@@ -14933,6 +14972,18 @@ export function getPieceReconciliation(
     ...(offeredRef === undefined ? {} : { offered: offeredRef }),
     ...(isPieceReconciliationReason(reason) ? { reason } : {}),
     ...(typeof detail === "string" && detail.length > 0 ? { detail } : {}),
+    ...(isObjectNotArray(confirmed) &&
+        typeof confirmed.identity === "string" &&
+        confirmed.identity.length > 0 &&
+        typeof confirmed.releasedAt === "number" &&
+        Number.isFinite(confirmed.releasedAt) && confirmed.releasedAt >= 0
+      ? {
+        confirmed: {
+          identity: confirmed.identity,
+          releasedAt: confirmed.releasedAt,
+        },
+      }
+      : {}),
   };
 }
 
@@ -14952,6 +15003,29 @@ export function setPieceReconciliation(
   );
 }
 
+/**
+ * `recorded`, keeping the confirmation `stored` carries where that confirms
+ * the source the piece runs (`running`) at a later release time than
+ * `recorded` does, or where `recorded` confirms nothing. Another runtime can
+ * confirm the running source at a later release while an attempt is under
+ * way, and an attempt that failed, or found nothing to adopt, has learned
+ * nothing that moves that time back. An accepted transition clears the record
+ * it supersedes, so nothing is carried past one.
+ */
+export function keepLaterConfirmation(
+  stored: PieceReconciliation | undefined,
+  recorded: PieceReconciliation,
+  running: string | undefined,
+): PieceReconciliation {
+  const kept = stored?.confirmed;
+  if (kept === undefined || kept.identity !== running) return recorded;
+  const own = recorded.confirmed;
+  return own === undefined ||
+      (own.identity === kept.identity && own.releasedAt < kept.releasedAt)
+    ? { ...recorded, confirmed: kept }
+    : recorded;
+}
+
 /** Whether two recorded outcomes say the same thing, ignoring when. */
 export function samePieceReconciliation(
   left: PieceReconciliation | undefined,
@@ -14960,6 +15034,8 @@ export function samePieceReconciliation(
   if (left === undefined || right === undefined) return left === right;
   return left.outcome === right.outcome && left.origin === right.origin &&
     left.reason === right.reason && left.detail === right.detail &&
+    left.confirmed?.identity === right.confirmed?.identity &&
+    left.confirmed?.releasedAt === right.confirmed?.releasedAt &&
     (left.offered === undefined || right.offered === undefined
       ? left.offered === right.offered
       : patternIdentityKey(left.offered) === patternIdentityKey(right.offered));
@@ -15297,6 +15373,9 @@ export function applyPieceSourceTransition(
     ...(transition.selectedRevisionId === undefined
       ? {}
       : { selectedRevisionId: transition.selectedRevisionId }),
+    ...(transition.releasedAt === undefined
+      ? {}
+      : { releasedAt: transition.releasedAt }),
   });
   candidate.setMetaRaw(
     "patternSource",

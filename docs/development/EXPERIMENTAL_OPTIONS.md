@@ -772,16 +772,19 @@ holds the measurements and the conditions for revisiting.
   operations and read dependencies. Explicitly named foreign session instances
   use server reads and admission; they are not treated as locally absent.
   Transactions whose reads, writes, and preconditions are entirely local settle
-  without opening a connection.
-  Shared reads still require server validation, even when all writes are local.
-  Mixed commits roll back session writes on rejection. Runtimes sharing a
-  storage manager must agree on the effective session-storage policy.
+  without opening a connection. A commit whose writes are all local but that
+  read a shared document travels as a validation-only commit, because its
+  session writes are only as good as those reads: a rejected verdict rolls
+  them back, and it is what runs a handler again against fresh state, since
+  no later frame does. Mixed commits roll back session writes on rejection.
+  Runtimes sharing a storage manager must agree on the effective
+  session-storage policy.
 - **Toolshed:** publishes the deployment's flag for clients but keeps its own
   webhook runtime's session documents synchronized, so their values remain in
   the server store across runtime recreation.
 - **Rollout:** deploy memory-server support for validation-only commits before
-  enabling the flag. Older servers reject session writes that require shared-read
-  validation. Leave the flag off until that support is deployed.
+  enabling the flag. Older servers reject session writes that require
+  shared-read validation. Leave the flag off until that support is deployed.
 - **Removal path:** validate rollback, route replacement, scoped reactivity,
   and the performance benefit with the flag enabled; then graduate local
   session storage for client execution and remove the flag. Server execution
@@ -790,7 +793,17 @@ holds the measurements and the conditions for revisiting.
   covers omitted, false, and true values in both execution modes. Cross-runtime
   session fixtures run with the flag off and are explicitly skipped when it is
   on; their user-scope counterparts run in both settings.
-- **Status (2026-10-15):** implemented, off by default; performance unmeasured.
+- **Status (2026-10-16):** implemented, off by default. On the FabriChat
+  room cold load it removes the session writes from a load's commits and
+  spares the three commits a load makes that read nothing shared, while 167
+  of the 168 it empties still carry shared reads and travel for validation;
+  the load's other counts and its wall time stay where they were
+  (`docs/history/development/performance/2026-10-16-fabrichat-room-cold-load-local-session-documents.md`).
+  Settling those commits on the client without the round trip cuts the
+  server's commits to one a load and leaves the client's counts and wall time
+  unchanged, so the round trip is not on the load's critical path; the
+  validation stays for rollback. The remaining cost of the flag is the server
+  recording a commit for each validation-only round trip.
 
 ### `sharedMemoryConnection`
 

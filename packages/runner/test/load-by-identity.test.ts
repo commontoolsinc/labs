@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
 import type { Source } from "@commonfabric/js-compiler";
+import { getLogger } from "@commonfabric/utils/logger";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   injectCfHelpers,
@@ -986,6 +987,48 @@ ${withData ? '  note: dataFile("./note.txt"),' : ""}
     expect(await runPattern(rt3, warm, 6, "T2 warm run")).toEqual({
       result: 12,
     });
+  });
+
+  it("names each by-identity load's outcome in the timing table", async () => {
+    const rt1 = newRuntime();
+    const legacy = await buildLegacyClosure(rt1.harness as Engine, PROGRAM);
+    await persist(rt1, legacy);
+    const name = `${legacy.entryIdentity}#default`;
+    // The rows keep a key's five slowest loads across the whole process, so
+    // they start empty here: the loads below are the only ones they hold.
+    const timings = getLogger("pattern-manager");
+    timings.resetTimeStats();
+    const rows = (key: string) =>
+      timings.getTimeStats("compile-cache", key)
+        ?.slowest.filter((entry) => entry.detail === name) ?? [];
+
+    // No compiled set yet: the storage read misses on an absent entry and
+    // the cold load compiles.
+    const rt2 = newRuntime();
+    expect(
+      typeof await rt2.patternManager.loadPatternByIdentity(
+        legacy.entryIdentity,
+        "default",
+        space,
+      ),
+    ).toBe("function");
+    expect(rows("load-by-identity/entry-absent")).toHaveLength(1);
+    expect(rows("cold-load/compiled")).toHaveLength(1);
+    expect(rows("load-by-identity/hit")).toHaveLength(0);
+    await rt2.patternManager.flushCompileCacheWrites();
+    await rt2.storageManager.synced();
+
+    // The write-back makes the next runtime's load a hit, named the same way.
+    const rt3 = newRuntime();
+    expect(
+      typeof await rt3.patternManager.loadPatternByIdentity(
+        legacy.entryIdentity,
+        "default",
+        space,
+      ),
+    ).toBe("function");
+    expect(rows("load-by-identity/hit")).toHaveLength(1);
+    expect(rows("load-by-identity/entry-absent")).toHaveLength(1);
   });
 
   it("T3: authoring guard intact — fresh source with __cfHelpers still throws", async () => {

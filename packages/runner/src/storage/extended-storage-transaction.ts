@@ -339,6 +339,14 @@ export type CfcInstrumentationHooks = {
     terminal: boolean;
   }): void;
 
+  /**
+   * The commit boundary refused this transaction before it reached storage.
+   * `reasons` are the plain reason texts that refused it; a refusal the
+   * boundary decides on its own — a relevant transaction that never
+   * prepared, a prepared digest that changed — names that one cause.
+   */
+  onCommitRejected?(reasons: readonly string[]): void;
+
   onDigestInvalidation?(reason: string): void;
   onOutboxFlush?(effect: PostCommitSideEffect): void;
   onSinkDedupHit?(key: string): void;
@@ -4171,6 +4179,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         this.#cfcState.prepare.status !== "prepared"
       ) {
         if (this.#commitPreparationCrash !== undefined) {
+          this.#cfcInstrumentation.onCommitRejected?.([
+            `CFC commit preparation crashed: ${this.#commitPreparationCrash}`,
+          ]);
           return this.#rejectCommitBeforeStorage({
             error: {
               name: "CommitPreparationError",
@@ -4223,6 +4234,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             }),
           );
         }
+        this.#cfcInstrumentation.onCommitRejected?.(
+          plainReasons.length > 0
+            ? plainReasons
+            : ["relevant transaction was not prepared"],
+        );
         const message =
           `${CFC_ENFORCEMENT_REJECTION_PREFIX}: relevant transaction was not prepared${detail}`;
         // WATCH(cfc-verdict): a refusal is terminal only when EVERY reason is
@@ -4265,6 +4281,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
                 dials: this.#cfcDials(),
               }),
             );
+            this.#cfcInstrumentation.onCommitRejected?.([
+              "prepared digest changed",
+            ]);
             return this.#rejectCommitBeforeStorage({
               error: {
                 name: "StorageTransactionAborted",
