@@ -95,6 +95,31 @@ export const TranscriptionDataSchema = {
   required: ["id", "text", "duration", "timestamp"],
 } as const satisfies JSONSchema;
 
+/**
+ * Read schema shared by cf-chart's `marks` and its server view traversal. It
+ * reads each mark's `data`, and each point in it, inline, as
+ * `extractDataPoints()` takes them: two marks plotting one series each get
+ * the series, rather than the second getting a handle on it.
+ */
+export const ChartMarksSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      data: {
+        type: "array",
+        items: {
+          anyOf: [
+            { type: "number" },
+            { type: "object", additionalProperties: true },
+          ],
+        },
+      },
+    },
+    additionalProperties: true,
+  },
+} as const satisfies JSONSchema;
+
 /** Read schema shared by cf-autocomplete and its server view traversal. */
 export const AutocompleteItemArraySchema = {
   type: "array",
@@ -388,7 +413,7 @@ export const componentReadContracts: Readonly<
   "cf-modal": { open: { schema: true } },
   "cf-file-download": { data: { schema: true }, filename: { schema: true } },
   "cf-prompt-input": { model: { schema: true } },
-  "cf-chart": { marks: { schema: true } },
+  "cf-chart": { marks: { schema: ChartMarksSchema } },
 };
 
 /** Schema choice shared with cf-autocomplete's single/multiple value binding. */
