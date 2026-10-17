@@ -44,7 +44,6 @@ import {
   inSpaceRootCause,
   isCell,
   isLink,
-  isPieceRoot,
   isStoredArgumentSchemaRefusal,
   isStream,
   type JSONSchema,
@@ -1055,15 +1054,7 @@ export class PiecesController<T = unknown> {
     // operate on the real piece rather than the wrapper. The sync above already
     // made the canonical cell local, so this resolves over local links with no
     // further sync. Idempotent for a normal top-level piece.
-    //
-    // The root of a document carrying a pattern pointer is the piece, whatever
-    // its value links to. A pattern returning a sub-pattern's result as its
-    // whole result stores a redirect to the child's result at its root, and
-    // following it would start the child alone and leave stale everything the
-    // root derives for the child.
-    let piece = isPieceRoot(this.runtime, addressed)
-      ? addressed
-      : addressed.resolveAsCell();
+    let piece = addressed.resolveAsCell();
 
     if (reconcile && !viewScoped) {
       const outcome = await timePiecePhase(

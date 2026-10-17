@@ -22,9 +22,6 @@ describe("PiecesController.getPieceCell", () => {
       // (value-link slot -> result cell) before syncing + starting.
       resolveAsCell: () => piece,
       asSchema: () => piece,
-      // It carries no pattern pointer of its own, so get() resolves it.
-      getAsNormalizedFullLink: () => ({ path: [] }),
-      getMetaRaw: () => undefined,
     };
     const runtime = {
       userIdentityDID: "did:key:home",
@@ -37,10 +34,7 @@ describe("PiecesController.getPieceCell", () => {
       sourceReconciler: { reconcile: () => Promise.resolve("detached") },
       // An open waits for the pattern watcher of a piece that is already
       // running; this one is not.
-      runner: {
-        isRunning: () => false,
-        sessionPatternPointerFor: () => undefined,
-      },
+      runner: { isRunning: () => false },
       start: () => {
         startSawSyncedPiece = pieceSynced;
         return Promise.resolve(true);

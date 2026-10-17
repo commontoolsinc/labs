@@ -76,7 +76,6 @@ import {
   isCell,
   isCellResult,
   isLoopbackHostname,
-  isPieceRoot,
   markDurableReadTx,
   type NormalizedFullLink,
   normalizeSpaceHost,
@@ -3196,8 +3195,7 @@ export class RuntimeProcessor {
    * the schema it is read under — so what this loads is what deciding the
    * address takes: the requested document, and behind a redirect the document
    * the redirect lands in, whose metadata says whether it is a piece and what
-   * result schema a cell inside it takes. A requested document carrying a
-   * pattern pointer is the piece itself, and its redirect is not followed. Serving a slug document, the server
+   * result schema a cell inside it takes. Serving a slug document, the server
    * resolves the redirect through the links on its path, which is the floor
    * for an address a redirect answers. Nothing here reads the target's value,
    * so whatever that value reaches stays cold until a caller subscribes to
@@ -3233,15 +3231,10 @@ export class RuntimeProcessor {
     // arrives, plus what the server resolves at the address itself when the
     // value stored there is a link.
     await requestedCell.sync();
-    // A piece's root is the piece, even when its value is a redirect, as it is
-    // for a pattern that returns a sub-pattern's result whole. Only a
-    // document that is no piece names one.
-    const redirect = isPieceRoot(this.#runtime, requestedCell)
-      ? undefined
-      : parseLink(
-        requestedCell.getRaw(),
-        requestedCell.getAsNormalizedFullLink(),
-      );
+    const redirect = parseLink(
+      requestedCell.getRaw(),
+      requestedCell.getAsNormalizedFullLink(),
+    );
     if (redirect?.overwrite === "redirect") {
       const target = this.#runtime.getCellFromLink({
         ...redirect,
