@@ -64,7 +64,11 @@ import type {
   URI,
   WaveWithdrawalCause,
 } from "../storage/interface.ts";
-import { parsePointer, pathsOverlap } from "../../../memory/v2/path.ts";
+import {
+  isPrefixPath,
+  parsePointer,
+  pathsOverlap,
+} from "../../../memory/v2/path.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { applyAccessListChanges, validateStoredAcl } from "../acl-manager.ts";
@@ -678,6 +682,21 @@ export interface WaveCommitSink {
     holder: string | undefined,
   ): Promise<boolean>;
 
+  /**
+   * The value paths that the authored commits of `session` overwrote in a
+   * doc-instance after `sinceSeq` — §3d's supersession of an event
+   * consequence by a later write of the session that fired the event.
+   * Writes that merge into existing content (appends, splices, increments)
+   * overwrite nothing and are not reported. A sink that cannot answer omits
+   * it, and no consequence is superseded.
+   */
+  sessionOverwritePathsSince?(
+    space: MemorySpace,
+    doc: { id: string; scope?: CellScope; scopeKey: string },
+    sinceSeq: number,
+    session: { principal: string; sessionId: string },
+  ): Promise<ReadonlyArray<readonly string[]>>;
+
   commitWave(
     batch: WaveSpaceCommit,
   ): Promise<Result<{ seq: number }, WaveCommitRejection>>;
@@ -782,12 +801,14 @@ interface SealedSpaceContribution {
 /** How the wave commit step disposed of one contribution. */
 export type ContributionDisposition =
   | { kind: "committed" }
-  /** Some pure-derivation ops dropped (superseded); survivors rode the
+  /** Some ops dropped as superseded — a pure derivation's, or an event
+   * consequence's that the firing session overwrote; survivors rode the
    * wave commit. The sealed commit's local overlay rolls back whole and
    * reconverges from the wave commit arriving as confirmed state. */
   | { kind: "partially-dropped"; droppedOps: number }
-  /** All ops withdrawn: a fully superseded derivation, or a derivation
-   * that read a withdrawn contribution's sealed writes. */
+  /** All ops withdrawn: a fully superseded derivation or event
+   * consequence, or a derivation that read a withdrawn contribution's
+   * sealed writes. */
   | { kind: "dropped" }
   /** A raced non-re-derivable consequence: rolled back to unconsequenced,
    * to be retried in a later wave — never lost, never doubled (§3d; NOT
@@ -2192,6 +2213,74 @@ export class WaveAccumulator
       return observed ? head : undefined;
     };
 
+    /** Whether every write an event-handler contribution holds on `doc` is
+     * SUPERSEDED: the session that fired the event committed an authored
+     * write to the doc after the event's durable entry, overwriting each path
+     * the handler wrote there (§3d). That session fired the event, rendered
+     * its speculative echo, and wrote over the echo, so its write is the
+     * later one in causal order however late the consequence lands — the
+     * handler ran after it (a requeue, a deferred drain), or the write landed
+     * mid-wave. Dropping the doc's writes from the consequence leaves the
+     * store as applying them at the event's position and the session's write
+     * on top would, and nothing could have read the dropped values in
+     * between, since they commit after the write that overwrites them.
+     *
+     * Only the firing session's writes supersede: another session's write is
+     * concurrent with the event, not after it, and keeps commit order. A
+     * handler write the session's writes cover only in part keeps its rebase
+     * or requeue, as does an in-process copy, which has no durable entry to
+     * order against. */
+    const supersededByFiringSession = async (
+      contribution: WaveContribution,
+      doc: { id: string; scope?: CellScope; scopeKey: string },
+    ): Promise<boolean> => {
+      const { context } = contribution;
+      const session = context.acting?.session;
+      if (
+        context.kind !== "event-handler" ||
+        context.streamEntry === undefined || context.acting === undefined ||
+        session === undefined || session === "server" ||
+        sink.sessionOverwritePathsSince === undefined
+      ) {
+        return false;
+      }
+      const home = this.#homeSealed(contribution);
+      if (home === undefined) return false;
+      const overwritten = await sink.sessionOverwritePathsSince(
+        this.#space,
+        doc,
+        context.streamEntry.seq,
+        { principal: context.acting.user, sessionId: session },
+      );
+      if (overwritten.length === 0) return false;
+      const covered = (path: readonly string[]): boolean =>
+        overwritten.some((prefix) => isPrefixPath(prefix, path));
+      let wrote = false;
+      for (const operation of home.sealed.commit.operations) {
+        if (operation.op === "sqlite") continue;
+        if (
+          operation.id !== doc.id ||
+          this.#scopeKeyFor(operation.scope, context) !== doc.scopeKey
+        ) {
+          continue;
+        }
+        wrote = true;
+        if (operation.op === "set" || operation.op === "delete") {
+          if (!covered([])) return false;
+        } else if (operation.op === "patch") {
+          for (const patch of operation.patches) {
+            if (!covered(parsePointer(patch.path))) return false;
+            if (patch.op === "move" && !covered(parsePointer(patch.from))) {
+              return false;
+            }
+          }
+        } else {
+          return false;
+        }
+      }
+      return wrote;
+    };
+
     const resolveConflicts = async (): Promise<void> => {
       for (const contribution of this.#contributions) {
         if (
@@ -2204,11 +2293,18 @@ export class WaveAccumulator
         for (const [key, doc] of docs) {
           if (
             droppedDocs[contribution.index].has(key) ||
-            rebasedDocs[contribution.index].has(key) ||
-            !await conflictsFor(contribution, key, doc)
+            rebasedDocs[contribution.index].has(key)
           ) {
             continue;
           }
+          if (await supersededByFiringSession(contribution, doc)) {
+            // The firing session wrote over this consequence after the
+            // event: drop it, and let the withdrawal closure below fold in
+            // whatever read it.
+            droppedDocs[contribution.index].add(key);
+            continue;
+          }
+          if (!await conflictsFor(contribution, key, doc)) continue;
           const observed = observedOwnCommit(key, contribution);
           if (observed !== undefined) {
             // The doc moved by a direct commit this contribution read at
@@ -3687,20 +3783,31 @@ export class WaveAccumulator
         outcome.dispositions[idx] = allDropped
           ? { kind: "dropped" }
           : { kind: "partially-dropped", droppedOps };
-        // No #warnDropped here: a superseded pure derivation is the
-        // EXPECTED recovery path — the superseding authored commit is the
-        // fresh state its readers reconverge from — not the one-shot loss
-        // class the warn exists for.
+        // No #warnDropped here: a superseded write is the EXPECTED path —
+        // the superseding authored commit is the fresh state its readers
+        // reconverge from — not the one-shot loss class the warn exists for.
         // Any surviving ops rode the wave commit; the sealed commit's own
         // overlay rolls back whole and reconverges from the wave commit
         // (or, all-dropped, from the superseding authored commit) arriving
         // as confirmed state.
+        const handler = context.kind === "event-handler";
         this.#withdraw(
           contribution,
-          "superseded pure derivation writes dropped from the wave commit " +
-            "(serving-loop.md §3d)",
+          (handler
+            ? "event consequence writes the firing session overwrote"
+            : "superseded pure derivation writes") +
+            " dropped from the wave commit (serving-loop.md §3d)",
           allDropped ? "contribution-dropped" : undefined,
         );
+        // A handler's superseded writes still consequence its event: the
+        // wave commit carries the event in `consequenceOf`, as it does for
+        // every surviving contribution.
+        if (
+          handler && context.eventId !== undefined &&
+          !outcome.committedEventIds.includes(context.eventId)
+        ) {
+          outcome.committedEventIds.push(context.eventId);
+        }
         continue;
       }
       outcome.dispositions[idx] = { kind: "committed" };
