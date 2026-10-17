@@ -762,6 +762,22 @@ const resolveKeepingBodyClaims = (
     : resolved;
 };
 
+/**
+ * `side`, a reference, with the `ifc` beside it read as it resolves: the
+ * referenced body's claims beneath it. A side carrying no `ifc` is returned
+ * as it is.
+ */
+const withBodyClaimsBeneathSibling = (
+  side: JSONSchemaObj,
+  definitions: SchemaDefinitions,
+): JSONSchemaObj => {
+  if (!isObjectNotArray(side.ifc)) return side;
+  const resolved = resolveKeepingBodyClaims(side, { $defs: definitions });
+  return isObjectNotArray(resolved) && isObjectNotArray(resolved.ifc)
+    ? { ...side, ifc: resolved.ifc }
+    : side;
+};
+
 const resolveReferenceSide = (
   side: JSONSchemaObj,
   definitions: SchemaDefinitions,
@@ -962,6 +978,14 @@ const mergeSchemaNode = (
     (hasReachableIfc(left, policyRoot) || hasReachableIfc(right, policyRoot));
   const toMergedDefinition = claims && bothReferences &&
     left.$ref !== right.$ref;
+  if (toMergedDefinition) {
+    // An `ifc` beside a reference takes the place of the body's on
+    // resolution, so each side's is read with the body's claims beneath it
+    // before the two merge, and what the merged site carries beside its
+    // reference is the merge of those (`resolveKeepingBodyClaims()`).
+    left = withBodyClaimsBeneathSibling(left, references!.definitions);
+    right = withBodyClaimsBeneathSibling(right, references!.definitions);
+  }
   let childReferences = references;
   if (
     references !== undefined && claims && !toMergedDefinition &&
@@ -1569,7 +1593,14 @@ export const withoutUndefinedMembers = <T>(value: T): T => {
   return result as T;
 };
 
-export const mergeCfcSchemaEnvelopes = (
+/**
+ * The merged envelope of `existing` and `candidate` as
+ * {@link mergeCfcSchemaEnvelopes} builds it, before that canonicalizes it:
+ * both documents' definitions under the names the hoist gave them, every
+ * definition the merge minted, and the maps resolved bodies carry. It is what
+ * canonicalization is held to meaning the same as, and is persisted nowhere.
+ */
+export const mergeCfcSchemaEnvelopesBeforeCanonicalization = (
   existing: JSONSchema,
   candidate: JSONSchema,
   options: MergeCfcSchemaEnvelopeOptions = {},
@@ -1611,18 +1642,33 @@ export const mergeCfcSchemaEnvelopes = (
       ? { definitions, active: new Set(), merged: new Map() }
       : undefined,
   );
+  return Object.keys(definitions).length > 0 && isObjectOrArray(merged)
+    ? { ...merged, $defs: definitions }
+    : merged;
+};
+
+/**
+ * The merged envelope of `existing` and `candidate`, in canonical form.
+ * Throws where the two cannot merge.
+ */
+export const mergeCfcSchemaEnvelopes = (
+  existing: JSONSchema,
+  candidate: JSONSchema,
+  options: MergeCfcSchemaEnvelopeOptions = {},
+): JSONSchema =>
   // The merged document is persisted and hashed as it is returned, so it
   // leaves here in canonical form: one root map, every authored definition,
   // one minted definition per meaning those do not carry, nothing minted
   // that the document does not reach.
-  return internSchema(
+  internSchema(
     canonicalizeCfcSchemaDocument(
-      Object.keys(definitions).length > 0 && isObjectOrArray(merged)
-        ? { ...merged, $defs: definitions }
-        : merged,
+      mergeCfcSchemaEnvelopesBeforeCanonicalization(
+        existing,
+        candidate,
+        options,
+      ),
     ),
   );
-};
 
 /** Why a stored envelope and a candidate envelope cannot be merged. */
 export interface CfcSchemaMergeIssue {

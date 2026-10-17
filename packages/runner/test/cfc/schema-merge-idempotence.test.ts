@@ -2,10 +2,12 @@
  * Merges a stored envelope with a candidate envelope again and again, as a
  * piece whose policies differ from each release's does on every release, and
  * holds the stored result to staying the same size and meaning the same
- * thing. The envelopes are a chat room's result envelopes as one release
- * stored and the next one presented them; the uncompacted merges are what
- * the merge stored for that pair when it copied the definition map onto
- * every schema it inlined, merged once, twice and three times.
+ * thing as the document the merge canonicalizes. The envelopes are a chat
+ * room's result envelopes as one release stored and the next one presented
+ * them; the uncompacted merges are envelopes an earlier merge stored for that
+ * pair, merged once, twice and three times, each copying the definition map
+ * onto every schema it inlined and writing the recursion in them one level
+ * further out, which is the form deployed documents written then still hold.
  */
 
 import { describe, it } from "@std/testing/bdd";
@@ -19,6 +21,7 @@ import { cfcSchemaEntries } from "../../src/cfc/schema-label-view.ts";
 import {
   cfcSchemaPoliciesEqual,
   mergeCfcSchemaEnvelopes,
+  mergeCfcSchemaEnvelopesBeforeCanonicalization,
 } from "../../src/cfc/schema-merge.ts";
 import { localDefinitionName } from "../../src/cfc/schema-refs.ts";
 import { gunzip } from "../traverse-replay/gzip.ts";
@@ -151,6 +154,15 @@ const labelEntries = (schema: JSONSchema): string[] =>
     JSON.stringify([entry.path, entry.label, entry.conditional ?? false])
   ).sort();
 
+/**
+ * The document the merge of `stored` with the candidate canonicalizes, which
+ * `merge()` returns in canonical form.
+ */
+const beforeCanonicalization = (stored: JSONSchema): JSONSchema =>
+  mergeCfcSchemaEnvelopesBeforeCanonicalization(stored, candidate, {
+    generatedOutputPaths: [[]],
+  });
+
 /** The candidate merged into the existing envelope, once, twice and thrice. */
 const mergedRounds = (() => {
   let rounds: JSONSchema[] | undefined;
@@ -193,34 +205,40 @@ describe("schema-merge-idempotence", () => {
   });
 
   describe("meaning", () => {
-    // `schemaUnfoldingDifferences()` compares what two documents unfold to,
-    // so a definition's name, a map below the root, an unreferenced
-    // definition, and how many levels of a recursion are written out inline
-    // all drop out, and every claim, constraint and annotation stays in. The
-    // label entries are compared as well, as a consumer that ends a walk at
-    // the first repeated schema object reads them; an uncompacted merge
-    // writes a recursion one level deeper on each merge, so its walk reaches
-    // further.
+    // Each round is compared with the document the merge canonicalized to
+    // reach it. `schemaUnfoldingDifferences()` compares what two documents
+    // unfold to, so a definition's name, a map below the root, an
+    // unreferenced definition, and how many levels of a recursion are
+    // written out inline all drop out, and every claim, constraint and
+    // annotation stays in. The label entries are compared as well, as a
+    // consumer that ends a walk at the first repeated schema object reads
+    // them.
+
+    /** The document round `round` canonicalized. */
+    const canonicalized = (round: number): JSONSchema =>
+      beforeCanonicalization(
+        round === 1 ? existing : mergedRounds()[round - 2],
+      );
 
     for (const round of [1, 2, 3]) {
-      it(`unfolds merge ${round} alike to the uncompacted merge ${round}`, () => {
+      it(`unfolds merge ${round} alike to the document it canonicalized`, () => {
         expect(
           schemaUnfoldingDifferences(
-            uncompacted[round - 1],
+            canonicalized(round),
             mergedRounds()[round - 1],
           ),
         ).toStrictEqual([]);
       });
     }
 
-    it("returns the label entries the uncompacted first merge holds", () => {
+    it("returns the label entries the document the first merge canonicalized holds", () => {
       expect(labelEntries(mergedRounds()[0])).toStrictEqual(
-        labelEntries(uncompacted[0]),
+        labelEntries(canonicalized(1)),
       );
     });
 
-    it("declares the policies the uncompacted first merge declares", () => {
-      expect(cfcSchemaPoliciesEqual(mergedRounds()[0], uncompacted[0])).toBe(
+    it("declares the policies the document the first merge canonicalized declares", () => {
+      expect(cfcSchemaPoliciesEqual(mergedRounds()[0], canonicalized(1))).toBe(
         true,
       );
     });

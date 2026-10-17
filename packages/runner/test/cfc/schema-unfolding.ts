@@ -27,6 +27,7 @@
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import { hashStringOf } from "@commonfabric/data-model";
 import { forEachSubschema } from "@commonfabric/data-model-schema/schema-walk";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import { localDefinitionName } from "../../src/cfc/schema-refs.ts";
@@ -115,15 +116,19 @@ class DocumentUnfolding {
   // runtime's resolution lays siblings over the body, the merge keeps the
   // body's own claims beneath a sibling `ifc`, and JSON Schema conjoins the
   // two. They agree when the siblings are annotations, which constrain
-  // nothing, and an `ifc` over a target that declares none, which no
-  // validation reads.
+  // nothing; a sibling under a keyword the target does not use, an `ifc`
+  // over a target that declares none above all, which is added whether
+  // laid over or conjoined; and a sibling that repeats what the target says
+  // under the same keyword, which changes nothing either way.
   #readsAsOverlay(siblings: JSONSchemaObj, target: JSONSchema): boolean {
     const keys = Object.keys(siblings);
     if (keys.length === 0) return true;
     if (!isObjectNotArray(target)) return false;
+    const said = target as Record<string, unknown>;
+    const laid = siblings as Record<string, unknown>;
     return keys.every((key) =>
-      ANNOTATION_KEYWORDS.has(key) ||
-      (key === "ifc" && (target as JSONSchemaObj).ifc === undefined)
+      ANNOTATION_KEYWORDS.has(key) || said[key] === undefined ||
+      deepEqual(laid[key], said[key])
     );
   }
 
