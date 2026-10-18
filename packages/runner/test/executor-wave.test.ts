@@ -103,6 +103,10 @@ import { txToReactivityLog } from "../src/scheduler/reactivity.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 import { flushMicrotasks } from "./speculation-intent-test-utils.ts";
 import { createTransactionCommitReceipt } from "../src/storage/commit-receipt.ts";
+import {
+  isStaleReadConflict,
+  isStorageTransactionInconsistent,
+} from "../src/storage/rejection.ts";
 
 const signer = await Identity.fromPassphrase("executor wave test");
 const space = signer.did() as MemorySpace;
@@ -4764,27 +4768,49 @@ describe("stage D seal-into-wave", () => {
     expect(witness.lastRunInstantiation()).toBe(3);
   });
 
-  it("keeps a stale-read instantiation refusal terminal off the flag", async () => {
-    const offManager = EmulatedStorageManager.connectTo(server, {
-      as: signer,
-    });
-    const offRuntime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: offManager,
-      experimental: { serverExecution: false },
-    });
-    try {
-      const witness = await stoppedWitnessPiece(
-        "off-piece-instantiate-stale-read",
-        { on: offRuntime },
-      );
+  describe("off the flag", () => {
+    // Off the flag the refusal reaches the instantiation commit directly, not
+    // through a seal destination, which an OFF runtime refuses. The
+    // instantiate transaction names itself through `stampServerRun`, which an
+    // OFF runtime still calls even though it records nothing, and that is the
+    // handle used here: a start mints several transactions, so intercepting
+    // merely the first would not say which one was refused.
 
-      // The instantiate transaction names ITSELF through `stampServerRun`,
-      // which an OFF runtime still calls even though it records nothing.
-      // That is the handle this test needs: an OFF runtime rejects the seal
-      // destination the flag-ON tests refuse through, and a start mints
-      // several transactions, so refusing merely the first would not say
-      // which one was refused.
+    type CommitReceipt = ReturnType<IExtendedStorageTransaction["commit"]>;
+
+    // Runs `body` against a runtime with the flag off, connected to the
+    // test's server, and disposes of the runtime afterwards.
+    const withOffRuntime = async (
+      body: (offRuntime: Runtime) => Promise<void>,
+    ): Promise<void> => {
+      const offManager = EmulatedStorageManager.connectTo(server, {
+        as: signer,
+      });
+      const offRuntime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: offManager,
+        experimental: { serverExecution: false },
+      });
+      try {
+        await body(offRuntime);
+      } finally {
+        await offRuntime.dispose();
+        await offManager.close();
+      }
+    };
+
+    // Hands each piece-instantiate commit `offRuntime` makes to `commit`,
+    // with the attempt number, counting from 1, the transaction, and the
+    // commit it replaces. Returns what a test reads afterwards: the attempts,
+    // the readiness waits the recovery made, and the start failures reported.
+    const interceptInstantiateCommits = (
+      offRuntime: Runtime,
+      commit: (
+        attempt: number,
+        tx: IExtendedStorageTransaction,
+        original: () => CommitReceipt,
+      ) => CommitReceipt,
+    ) => {
       const instantiateTxs = new WeakSet<object>();
       const originalStamp = offRuntime.stampServerRun.bind(offRuntime);
       (offRuntime as { stampServerRun: typeof offRuntime.stampServerRun })
@@ -4798,33 +4824,17 @@ describe("stage D seal-into-wave", () => {
           return originalStamp(tx, info);
         }) as typeof offRuntime.stampServerRun;
 
-      // The refused read is at a seq above `0`: a revision another writer
-      // moved past, which off the flag means another client raced. A read
-      // claiming the document absent recovers in either posture.
-      const conflicted = witness.cell.getAsNormalizedFullLink().id;
-      const conflict = { space, the: "application/json", of: conflicted };
-      const staleRead = {
-        name: "ConflictError" as const,
-        message: `stale confirmed read: ${conflicted} at seq 1 ` +
-          "conflicted with seq 2",
-        conflict: { ...conflict, seq: 1 },
-        conflicts: [{ ...conflict, seq: 1 }],
-        readyToRetry: () => Promise.resolve(),
-      };
-      let refusals = 0;
+      let attempts = 0;
       const originalEdit = offRuntime.edit.bind(offRuntime);
       (offRuntime as { edit: typeof offRuntime.edit }).edit = ((
         ...args: Parameters<typeof offRuntime.edit>
       ) => {
         const tx = originalEdit(...args);
-        const commit = tx.commit.bind(tx);
+        const original = tx.commit.bind(tx);
         (tx as { commit: typeof tx.commit }).commit = (() => {
-          if (!instantiateTxs.has(tx)) return commit();
-          refusals += 1;
-          tx.abort(staleRead.message);
-          return createTransactionCommitReceipt(
-            Promise.resolve({ error: staleRead as never }),
-          );
+          if (!instantiateTxs.has(tx)) return original();
+          attempts += 1;
+          return commit(attempts, tx, original);
         }) as typeof tx.commit;
         return tx;
       }) as typeof offRuntime.edit;
@@ -4840,86 +4850,275 @@ describe("stage D seal-into-wave", () => {
         return originalReadiness(...args);
       }) as typeof offRuntime.awaitCommitRetryReadiness;
 
-      const started = await offRuntime.start(witness.cell);
-      await offRuntime.idle();
-      await offRuntime.runner.idlePieceInstantiationSettlements();
+      const failures: unknown[] = [];
+      offRuntime.pieceStartCommitFailureObserver = ({ error }) => {
+        failures.push(error);
+      };
 
-      // The refusal reached the instantiate commit itself, and off the flag
-      // it stays terminal: no catch-up is awaited and no second attempt is
-      // made. The repaired view a retry would read is the serving side's to
-      // supply, and an OFF runtime has none, so the start reports the piece
-      // as not running rather than recovering it. The same refusal under
-      // the flag leaves `start` true and instantiates a third time.
-      expect(refusals).toBe(1);
-      expect(started).toBe(false);
-      expect(readinessCalls).toBe(0);
-      expect(witness.instantiations()).toBe(2);
-    } finally {
-      await offRuntime.dispose();
-      await offManager.close();
-    }
-  });
+      return {
+        attempts: () => attempts,
+        readinessCalls: () => readinessCalls,
+        failures,
+      };
+    };
 
-  it("tears down after a second stale-read refusal instead of spinning", async () => {
-    const witness = await stoppedWitnessPiece(
-      "wave-piece-instantiate-stale-read-twice",
-    );
-    let pieceInstantiationSeals = 0;
-    let readinessCalls = 0;
-    const failures: unknown[] = [];
-    runtime.pieceStartCommitFailureObserver = ({ error }) => {
-      failures.push(error);
+    // A stale-read refusal of `id`, in the shape `toRejectedError` hands the
+    // runner. The read is at a seq above `0`: a revision another writer moved
+    // past, which off the flag means another client raced. A read claiming
+    // the document absent is the absence refusal instead.
+    const staleReadOf = (id: string) => {
+      const conflict = { space, the: "application/json", of: id };
+      return {
+        name: "ConflictError" as const,
+        message: `stale confirmed read: ${id} at seq 1 conflicted with seq 2`,
+        conflict: { ...conflict, seq: 1 },
+        conflicts: [{ ...conflict, seq: 1 }],
+        readyToRetry: () => Promise.resolve(),
+      };
     };
-    const conflicted = witness.cell.getAsNormalizedFullLink().id;
-    const staleRead = {
-      name: "ConflictError" as const,
-      message: `stale confirmed read: ${conflicted} at seq 0 ` +
-        "conflicted with seq 1",
-      conflict: { space, the: "application/json", of: conflicted },
-      readyToRetry: () => {
-        readinessCalls += 1;
-        return Promise.resolve();
-      },
+
+    // Refuses `tx`'s commit with `error`, as storage would.
+    const refuseCommit = (
+      tx: IExtendedStorageTransaction,
+      error: { message: string },
+    ): CommitReceipt => {
+      tx.abort(error.message);
+      return createTransactionCommitReceipt(
+        Promise.resolve({ error: error as never }),
+      );
     };
-    runtime.installSealDestination({
-      seal: (tx) => {
-        if (
-          !waveRunContextOf(tx)?.actionId.startsWith("piece-instantiate/")
-        ) {
-          return tx.tx.commit().settled;
-        }
-        pieceInstantiationSeals += 1;
-        if (pieceInstantiationSeals <= 2) {
-          return Promise.resolve({ error: staleRead as never });
-        }
-        return tx.tx.commit().settled;
-      },
-    }, {
-      runStamper: (tx, info) =>
-        stampWaveRunContext(tx, {
-          actionId: info.actionId,
-          kind: info.kind,
-        }),
+
+    it("reinstantiates a piece once after the server refuses its instantiation for a read another client's write made stale", async () => {
+      // The refusal here is the engine's own. Another session commits to the
+      // piece's document after the instantiation read it, directly to the
+      // engine, so this runtime's replica has not seen the write when the
+      // instantiation commits, and the server judges the read stale.
+
+      await withOffRuntime(async (offRuntime) => {
+        const witness = await stoppedWitnessPiece(
+          "off-piece-instantiate-server-conflict",
+          { on: offRuntime },
+        );
+        const id = witness.cell.getAsNormalizedFullLink().id;
+        const firstVerdicts: unknown[] = [];
+        const counts = interceptInstantiateCommits(
+          offRuntime,
+          (attempt, _tx, original) => {
+            if (attempt > 1) return original();
+            Engine.applyCommit(engine, {
+              sessionId: "rival-session",
+              principal: signer.did(),
+              commit: {
+                localSeq: 1,
+                reads: { confirmed: [], pending: [] },
+                operations: [{
+                  op: "patch",
+                  id,
+                  patches: [{
+                    op: "replace",
+                    path: "/value/witness",
+                    value: 100,
+                  }],
+                }],
+              },
+            });
+            return createTransactionCommitReceipt(
+              original().settled.then((settled) => {
+                firstVerdicts.push(settled.error);
+                return settled;
+              }),
+            );
+          },
+        );
+
+        const started = await offRuntime.start(witness.cell);
+        await offRuntime.idle();
+        await offRuntime.runner.idlePieceInstantiationSettlements();
+
+        expect(firstVerdicts).toHaveLength(1);
+        expect(
+          isStaleReadConflict(
+            firstVerdicts[0] as { name?: string; message?: string },
+          ),
+          "the first instantiation commit must be refused as a stale read",
+        ).toBe(true);
+        expect(started).toBe(true);
+        expect(counts.attempts()).toBe(2);
+        expect(counts.readinessCalls()).toBe(1);
+        expect(counts.failures).toEqual([]);
+        expect(witness.instantiations()).toBe(3);
+        expect(witness.lastRunInstantiation()).toBe(3);
+        expect(
+          (Engine.readState(engine, { id })?.document as {
+            value?: { witness?: number };
+          })?.value?.witness,
+          "the retry's setup write is the one stored",
+        ).toBe(3);
+      });
     });
 
-    expect(await runtime.start(witness.cell)).toBe(true);
-    await runtime.idle();
-    await runtime.runner.idlePieceInstantiationSettlements();
+    it("reinstantiates a piece once after another client's write reaches its replica between its instantiation's read and commit", async () => {
+      // The refusal here is the replica's own: another client's write lands
+      // in this runtime's replica after the instantiation read the document,
+      // so the commit's consistency check fails before anything is sent.
 
-    // Exactly one retry. A basis the serving side does not repair is a
-    // permanent refusal, so the second one retires the registration rather
-    // than spinning on it.
-    expect(pieceInstantiationSeals).toBe(2);
-    expect(readinessCalls).toBe(1);
-    expect(failures).toContain(staleRead);
-    expect(witness.instantiations()).toBe(3);
+      await withOffRuntime(async (offRuntime) => {
+        const id = "off-piece-instantiate-replica-conflict";
+        const witness = await stoppedWitnessPiece(id, { on: offRuntime });
+        const rivalManager = EmulatedStorageManager.connectTo(server, {
+          as: signer,
+        });
+        const rival = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager: rivalManager,
+          experimental: { serverExecution: false },
+        });
+        try {
+          const rivalCell = rival.getCell<{ witness?: number }>(
+            space,
+            id,
+            undefined,
+          );
+          await rivalCell.sync();
+          const firstVerdicts: unknown[] = [];
+          const counts = interceptInstantiateCommits(
+            offRuntime,
+            (attempt, _tx, original) => {
+              if (attempt > 1) return original();
+              return createTransactionCommitReceipt((async () => {
+                const rivalTx = rival.edit();
+                rivalCell.withTx(rivalTx).key("witness").set(100);
+                expect((await rivalTx.commit().settled).error)
+                  .toBeUndefined();
+                const settled = await original().settled;
+                firstVerdicts.push(settled.error);
+                return settled;
+              })());
+            },
+          );
 
-    // Retired, not wedged: a later owner starts the piece afresh.
-    runtime.clearSealDestination();
-    expect(await runtime.start(witness.cell)).toBe(true);
-    await runtime.idle();
-    await runtime.runner.idlePieceInstantiationSettlements();
-    expect(witness.instantiations()).toBe(4);
+          const started = await offRuntime.start(witness.cell);
+          await offRuntime.idle();
+          await offRuntime.runner.idlePieceInstantiationSettlements();
+
+          expect(firstVerdicts).toHaveLength(1);
+          expect(
+            isStorageTransactionInconsistent(
+              firstVerdicts[0] as { name?: string },
+            ),
+            "the first instantiation commit must fail its consistency check",
+          ).toBe(true);
+          expect(started).toBe(true);
+          expect(counts.attempts()).toBe(2);
+          expect(counts.failures).toEqual([]);
+          expect(witness.instantiations()).toBe(3);
+          expect(witness.lastRunInstantiation()).toBe(3);
+          expect(
+            (Engine.readState(engine, {
+              id: witness.cell.getAsNormalizedFullLink().id,
+            })?.document as { value?: { witness?: number } })?.value
+              ?.witness,
+            "the retry's setup write is the one stored",
+          ).toBe(3);
+        } finally {
+          await rival.dispose();
+          await rivalManager.close();
+        }
+      });
+    });
+
+    it("reinstantiates a piece once after an immediate stale-read refusal", async () => {
+      await withOffRuntime(async (offRuntime) => {
+        const witness = await stoppedWitnessPiece(
+          "off-piece-instantiate-stale-read",
+          { on: offRuntime },
+        );
+        const staleRead = staleReadOf(
+          witness.cell.getAsNormalizedFullLink().id,
+        );
+        const counts = interceptInstantiateCommits(
+          offRuntime,
+          (attempt, tx, original) =>
+            attempt === 1 ? refuseCommit(tx, staleRead) : original(),
+        );
+
+        const started = await offRuntime.start(witness.cell);
+        await offRuntime.idle();
+        await offRuntime.runner.idlePieceInstantiationSettlements();
+
+        expect(started).toBe(true);
+        expect(counts.attempts()).toBe(2);
+        expect(counts.readinessCalls()).toBe(1);
+        expect(counts.failures).toEqual([]);
+        expect(witness.instantiations()).toBe(3);
+        expect(witness.lastRunInstantiation()).toBe(3);
+      });
+    });
+
+    it("reinstantiates a piece after successive stale-read refusals while rounds remain", async () => {
+      await withOffRuntime(async (offRuntime) => {
+        const witness = await stoppedWitnessPiece(
+          "off-piece-instantiate-stale-read-twice",
+          { on: offRuntime },
+        );
+        const staleRead = staleReadOf(
+          witness.cell.getAsNormalizedFullLink().id,
+        );
+        const counts = interceptInstantiateCommits(
+          offRuntime,
+          (attempt, tx, original) =>
+            attempt <= 2 ? refuseCommit(tx, staleRead) : original(),
+        );
+
+        expect(await offRuntime.start(witness.cell)).toBe(true);
+        await offRuntime.idle();
+        await offRuntime.runner.idlePieceInstantiationSettlements();
+
+        expect(counts.attempts()).toBe(3);
+        expect(counts.readinessCalls()).toBe(2);
+        expect(counts.failures).toEqual([]);
+        expect(witness.instantiations()).toBe(4);
+        expect(witness.lastRunInstantiation()).toBe(4);
+      });
+    });
+
+    it("tears down once its rounds over stale reads are spent", async () => {
+      await withOffRuntime(async (offRuntime) => {
+        const witness = await stoppedWitnessPiece(
+          "off-piece-instantiate-stale-read-unbounded",
+          { on: offRuntime },
+        );
+        const staleRead = staleReadOf(
+          witness.cell.getAsNormalizedFullLink().id,
+        );
+        let refusing = true;
+        const counts = interceptInstantiateCommits(
+          offRuntime,
+          (_attempt, tx, original) =>
+            refusing ? refuseCommit(tx, staleRead) : original(),
+        );
+
+        // The start resolves before its commit settles.
+        expect(await offRuntime.start(witness.cell)).toBe(true);
+        await offRuntime.idle();
+        await offRuntime.runner.idlePieceInstantiationSettlements();
+
+        // The first attempt and five rounds, the bound a retrying writer
+        // takes, and the last refusal retires the registration and reports
+        // the loss.
+        expect(counts.attempts()).toBe(6);
+        expect(counts.readinessCalls()).toBe(5);
+        expect(counts.failures).toEqual([staleRead]);
+        expect(witness.instantiations()).toBe(7);
+
+        // Retired, not wedged: a later start sets the piece up afresh.
+        refusing = false;
+        expect(await offRuntime.start(witness.cell)).toBe(true);
+        await offRuntime.idle();
+        await offRuntime.runner.idlePieceInstantiationSettlements();
+        expect(witness.instantiations()).toBe(8);
+      });
+    });
   });
 
   // A refusal claiming `id` in `inSpace` absent: a confirmed read of it at
@@ -4970,6 +5169,72 @@ describe("stage D seal-into-wave", () => {
     await runtime.runner.idlePieceInstantiationSettlements();
     return { attempts, failures };
   };
+
+  // A stale-read refusal of the witness piece's own document, counting the
+  // catch-ups the recovery waits for.
+  const staleReadOfWitness = (
+    witness: Awaited<ReturnType<typeof stoppedWitnessPiece>>,
+  ) => {
+    const conflicted = witness.cell.getAsNormalizedFullLink().id;
+    let readinessCalls = 0;
+    const refusal = {
+      name: "ConflictError" as const,
+      message: `stale confirmed read: ${conflicted} at seq 1 ` +
+        "conflicted with seq 2",
+      conflict: { space, the: "application/json", of: conflicted, seq: 1 },
+      readyToRetry: () => {
+        readinessCalls += 1;
+        return Promise.resolve();
+      },
+    };
+    return { refusal, readinessCalls: () => readinessCalls };
+  };
+
+  it("reinstantiates a piece after successive stale-read refusals while rounds remain", async () => {
+    // Each concurrent write that lands while a retry is in flight costs one
+    // round, and the retry after the last of them commits.
+
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-stale-read-twice",
+    );
+    const staleRead = staleReadOfWitness(witness);
+
+    const { attempts, failures } = await startRefusingInstantiations(
+      witness,
+      (attempt) => attempt <= 2 ? staleRead.refusal : undefined,
+    );
+
+    expect(attempts).toBe(3);
+    expect(staleRead.readinessCalls()).toBe(2);
+    expect(failures).toEqual([]);
+    expect(witness.instantiations()).toBe(4);
+    expect(witness.lastRunInstantiation()).toBe(4);
+  });
+
+  it("tears down once its rounds over stale reads are spent", async () => {
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-stale-read-unbounded",
+    );
+    const staleRead = staleReadOfWitness(witness);
+
+    const { attempts, failures } = await startRefusingInstantiations(
+      witness,
+      () => staleRead.refusal,
+    );
+
+    // The first attempt and five rounds, the bound a retrying writer takes.
+    expect(attempts).toBe(6);
+    expect(staleRead.readinessCalls()).toBe(5);
+    expect(failures).toEqual([staleRead.refusal]);
+    expect(witness.instantiations()).toBe(7);
+
+    // Retired, not wedged: a later owner starts the piece afresh.
+    runtime.clearSealDestination();
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await runtime.idle();
+    await runtime.runner.idlePieceInstantiationSettlements();
+    expect(witness.instantiations()).toBe(8);
+  });
 
   it("reinstantiates a piece once per layer of documents its refusals claim absent", async () => {
     // A retry can read documents that only the previous round's catch-up
