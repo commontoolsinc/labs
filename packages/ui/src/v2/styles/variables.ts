@@ -3,22 +3,24 @@
  * This file exports the CSS variables for use in shadow DOM
  */
 
-/**
- * Every variable derived from a `--cf-theme-*` token: the pill radius and the
- * shared surface recipes. A custom property's `var()` resolves where it is
- * declared, so every host that declares these fixes them to the theme around
- * it. A `cf-theme` declares them again, so a tint it makes reaches what is
- * beneath it: a card under a tinted `cf-theme` inside another component would
- * otherwise draw the component's surface, not the tint's. A theme-derived
- * variable belongs here, not in `variablesCSS`.
- */
-export const themeDerivedCSS = `
-  /* Shared pill geometry: see the pill sizes in variablesCSS. */
+// The variables below derive from `--cf-theme-*` tokens, so each is declared
+// by the components that consume it, not by every component's base styles. A
+// custom property's `var()` resolves where it is declared: declared on every
+// host, a recipe is fixed by each component to the theme around it, and a tint
+// inside that component (a nested `cf-theme`, or `--cf-theme-*` set by any
+// element) never reaches a card or a pill beneath. Declared on the consumer's
+// own host, it derives from the theme the consumer itself is in.
+
+/** The pill radius, for badges, chips and tags. */
+export const pillGeometryCSS = `
   --cf-pill-border-radius: var(
     --cf-theme-border-radius-full,
     var(--cf-border-radius-full, 9999px)
   );
+`;
 
+/** The surface recipes, for cards, modals and toasts. */
+export const surfaceRecipesCSS = `
   /*
    * Shared surface recipes
    * Components like cards, modals, and toasts should consume these shared
@@ -418,7 +420,6 @@ export const variablesCSS = `
   --cf-surface-translucent-strong: rgba(255, 255, 255, 0.88);
   --cf-overlay-dim: rgba(0, 0, 0, 0.4);
 
-${themeDerivedCSS}
   /* Z-index — Semantic Layers */
   --cf-z-layer-sticky: 10;
   --cf-z-layer-fixed: 500;

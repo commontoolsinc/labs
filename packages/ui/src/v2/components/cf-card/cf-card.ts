@@ -1,5 +1,6 @@
-import { css, html } from "lit";
+import { css, html, unsafeCSS } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
+import { surfaceRecipesCSS } from "../../styles/variables.ts";
 
 /**
  * CFCard - Content container with support for header, content, and footer sections
@@ -26,6 +27,7 @@ import { BaseElement } from "../../core/base-element.ts";
 export class CFCard extends BaseElement {
   static override styles = css`
     :host {
+      ${unsafeCSS(surfaceRecipesCSS)};
       --cf-card-border-radius: var(
         --cf-surface-plain-border-radius,
         var(--cf-theme-border-radius, 0.5rem)
