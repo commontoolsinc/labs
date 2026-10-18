@@ -2,12 +2,12 @@
  * A FabriChat room's acts on a message, and its replies, take only a message
  * of the room's own space. Handed a message that lives elsewhere, an edit and
  * an obliteration are refused, so a room's rules, its kind and its policy,
- * never reach a message another room's rules govern. Refused means the act's
- * run throws, with its reason, and writes nothing; the three refusals here are
- * the runtime errors the test requires, and the count is exact, so a refusal
- * that went back to a silent return fails it. A reply to that message is
- * refused too, so the room links no document of another space. The same acts
- * on the room's own messages land. Alice and Bob run here as this lane's one principal, which
+ * never reach a message another room's rules govern, and so is a reply to it,
+ * so the room links no document of another space. Refused means the act's run
+ * throws, with its reason, and writes nothing; the test requires exactly these
+ * three refusals, each by its reason, so a refusal that went back to a silent
+ * return, or gave another reason, fails it. The same acts on the room's own
+ * messages land. Alice and Bob run here as this lane's one principal, which
  * holds OWNER in every space it creates, so what tells them apart is their
  * profiles alone.
  */
@@ -173,6 +173,11 @@ export default pattern(() => {
       },
       { assertion: assert(() => bodies(messages) === "<obliterated>") },
     ],
-    expectRuntimeErrors: 3,
+    // The edit, the obliteration and the reply handed the message elsewhere.
+    expectRuntimeErrors: [
+      "That message isn't in this chat.",
+      "That message isn't in this chat.",
+      "That message isn't in this chat.",
+    ],
   };
 });

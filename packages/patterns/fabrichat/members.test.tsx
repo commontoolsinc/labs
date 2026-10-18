@@ -5,8 +5,8 @@
  * delete or obliterate someone else's; a reader with READ is offered no way to
  * write; and someone the list leaves out sees a placement of the room as not
  * theirs. Who is in the space is the space's business, not the room's. Each
- * act the room refuses fails its run with a reason, which a participant
- * tolerates; `refusals.test.tsx` requires each reason, and counts them.
+ * act the room refuses fails its run with a reason, and each participant
+ * requires exactly its own refusals, each by its reason.
  *
  * The test lane doesn't enforce the list, so what this checks is what the room
  * decides from the level `spaceAccess()` reports, not what the memory server
@@ -186,7 +186,7 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
       { label: "alice-done" },
     ],
     // Her refused deletion of someone else's message.
-    allowRuntimeErrors: true,
+    expectRuntimeErrors: ["Only its author can delete a message."],
   };
 });
 
@@ -204,6 +204,9 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
     myProfile: profile,
     inThread: false,
     kind: "group" as const,
+    // The group room's policy, as the room binds its rows to it, so that what
+    // refuses his obliteration is his access rather than a missing policy.
+    ownersMayObliterate: true,
     composer: Writable.of({}),
     // Stand-ins for what the room derives; a row's streams read none of it.
     places: {},
@@ -278,8 +281,13 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       // Alice obliterated it, so the editor no longer offers him an edit.
       { assertion: assert(() => editorDisplay(onHis[UI]) === "none") },
     ],
-    // His refused deletions and obliteration.
-    allowRuntimeErrors: true,
+    // His refused deletion and obliteration of Alice's message on its row,
+    // and his refused deletion of it through the room.
+    expectRuntimeErrors: [
+      "Only its author can delete a message.",
+      "Only an owner of this chat can remove a message.",
+      "Only its author can delete a message.",
+    ],
   };
 });
 
