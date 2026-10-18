@@ -8,6 +8,7 @@ import { hashOf } from "@commonfabric/data-model";
 import { openSpace, type SpaceDb } from "../db.ts";
 import {
   contentFingerprint,
+  fingerprintReader,
   generatedInternalCellIds,
 } from "../fingerprint.ts";
 import { listEntityModels } from "../model.ts";
@@ -98,6 +99,153 @@ function piece(generated: string[], named: string[] = []): string {
 }
 
 describe("fingerprint-scan", () => {
+  it("names the configured branch in primary observations", () => {
+    withStore([
+      { id: "of:a", data: '{"value":1}' },
+      { id: "of:a", branch: "child", data: '{"value":2}' },
+    ], (space) => {
+      const seen: { branch: string | undefined; value: unknown }[] = [];
+      contentFingerprint(space, {
+        branch: "child",
+        onEntity: (at, outcome) =>
+          seen.push({
+            branch: at.branch,
+            value: outcome.status === "present"
+              ? outcome.document.value
+              : undefined,
+          }),
+      });
+      expect(seen).toEqual([{ branch: "child", value: 2 }]);
+    });
+  });
+
+  it("captures head evidence when an address also carries a historical cut", () => {
+    withStore([
+      { id: "of:a", data: '{"value":1}' },
+      { id: "of:a", branch: "child", data: '{"value":2}' },
+    ], (space) => {
+      const reader = fingerprintReader(space, { branch: "child" });
+      const at = { id: "of:a", scope: "space", branch: "", atSeq: 1 };
+      expect(reader.read(at)).toEqual({
+        status: "present",
+        document: { value: 2 },
+      });
+      expect(reader.finish())
+        .toEqual(contentFingerprint(space, { branch: "child" }));
+    });
+  });
+
+  it("classifies equal primary documents against each reader's own schemas", () => {
+    const rows = (stream: boolean): Revision[] => [
+      {
+        id: "of:owner",
+        data: JSON.stringify({
+          patternIdentity: {},
+          internal: [{
+            partialCause: "event",
+            link: link("of:event", { $ref: "cid:declaration" }),
+          }],
+        }),
+      },
+      { id: "of:event", data: JSON.stringify({ result: link("of:owner") }) },
+      {
+        id: "cid:declaration",
+        data: JSON.stringify({ value: stream ? { asCell: ["stream"] } : {} }),
+      },
+    ];
+    withStore(rows(true), (left) => {
+      withStore(rows(false), (right) => {
+        const a = fingerprintReader(left);
+        const b = fingerprintReader(right);
+        const at = { id: "of:event", scope: "space" };
+        expect(a.read(at)).toEqual(b.read(at));
+        expect(a.finish().perEntity).toContainEqual({
+          ...at,
+          kind: "stream",
+          hash: null,
+        });
+        expect(b.finish().perEntity).toContainEqual({
+          ...at,
+          kind: "owned-cell",
+          hash: null,
+        });
+      });
+    });
+  });
+
+  it("completes captured evidence with independently enumerated addresses", () => {
+    withStore([
+      { id: "of:g", data: "malformed" },
+      { id: "of:orphan", data: '{"value":7}' },
+      { id: "of:owner", scope: "user:z", data: piece(["of:g"]) },
+      { id: "of:deleted", data: null, op: "delete" },
+    ], (space) => {
+      const expected = contentFingerprint(space);
+      const reader = fingerprintReader(space);
+      expect(reader.read({ id: "of:g", scope: "space" }).status)
+        .toBe("undecodable");
+      expect(reader.read({ id: "of:missing", scope: "space" }).status)
+        .toBe("absent");
+      expect(reader.read({ id: "of:owner", scope: "user:z" }).status)
+        .toBe("present");
+      expect(reader.finish()).toEqual(expected);
+      expect(expected.perEntity.map((entry) => entry.id)).toEqual([
+        "of:deleted",
+        "of:orphan",
+        "of:owner",
+      ]);
+    });
+  });
+
+  it("reuses captured evidence while enforcing enumeration caps", () => {
+    withStore([
+      { id: "of:a", data: '{"value":1}' },
+      { id: "of:b", data: '{"value":2}' },
+    ], (space) => {
+      const expected = contentFingerprint(space);
+      const get = space.get.bind(space);
+      let primaryReads = 0;
+      space.get = (sql, ...params) => {
+        if (sql.includes("ORDER BY seq DESC, op_index DESC LIMIT 1")) {
+          primaryReads++;
+        }
+        return get(sql, ...params);
+      };
+      const reader = fingerprintReader(space);
+      reader.read({ id: "of:b", scope: "space" });
+      expect(reader.finish()).toEqual(expected);
+      expect(primaryReads).toBe(2);
+      const capped = fingerprintReader(space, { enumerationCap: 1 });
+      capped.read({ id: "of:a", scope: "space" });
+      capped.read({ id: "of:b", scope: "space" });
+      expect(() => capped.finish()).toThrow("refusing to fingerprint");
+    });
+  });
+
+  it("defers captured decode errors to listing order", () => {
+    withStore([
+      { id: "of:a", data: "[" },
+      { id: "of:z", data: "{" },
+      { id: "of:z", data: "{" },
+    ], (space) => {
+      const reader = fingerprintReader(space);
+      const first = reader.read({ id: "of:a", scope: "space" });
+      const expected = reader.read({ id: "of:z", scope: "space" });
+      expect(first.status).toBe("undecodable");
+      expect(expected.status).toBe("undecodable");
+      if (expected.status !== "undecodable") {
+        throw new Error("Expected corruption");
+      }
+      let failure: unknown;
+      try {
+        reader.finish();
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBe(expected.error);
+    });
+  });
+
   it("applies later scopes' generated causes to every matching address", () => {
     withStore([
       { id: "of:g", data: '{"value":1}' },
