@@ -2,7 +2,9 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   collectDataFileNames,
+  collectImportSpecifiers,
   resolveProgram,
+  scanModuleDeclarations,
 } from "../typescript/resolver.ts";
 import { TARGET } from "../typescript/options.ts";
 import { InMemoryProgram } from "../program.ts";
@@ -395,6 +397,65 @@ describe("typescript/resolver.ts", () => {
 
     it("finds nothing in a module that never imports it", () => {
       expect(names("export const x = 1;\n")).toEqual([]);
+    });
+  });
+
+  describe("scanModuleDeclarations", () => {
+    const READER = [
+      'import * as cf from "commonfabric";',
+      'import { dataFile } from "commonfabric";',
+      'import type { Shape } from "./shape.ts";',
+      'export { helper } from "./helper.ts";',
+      'type Inline = import("./inline.ts").Inline;',
+      "export default () => [",
+      '  dataFile("./a.json"),',
+      '  dataFile("../b.txt"),',
+      '  cf.dataFile("c.txt"),',
+      "];",
+    ].join("\n");
+
+    it("returns the imports `collectImportSpecifiers()` returns", () => {
+      const source = { name: "/dir/main.tsx", contents: READER };
+
+      expect(scanModuleDeclarations(source, TARGET).imports).toEqual(
+        collectImportSpecifiers(source, TARGET),
+      );
+      expect(scanModuleDeclarations(source, TARGET).imports).toContain(
+        "./inline.ts",
+      );
+    });
+
+    it("returns each data-file path as the source writes it", () => {
+      const source = { name: "/dir/main.tsx", contents: READER };
+
+      expect(scanModuleDeclarations(source, TARGET).dataFiles).toEqual([
+        "./a.json",
+        "../b.txt",
+        "c.txt",
+      ]);
+      expect(collectDataFileNames(source, TARGET)).toEqual([
+        "/dir/a.json",
+        "/b.txt",
+        "/dir/c.txt",
+      ]);
+    });
+
+    it("returns a path that climbs above the root without throwing", () => {
+      expect(
+        scanModuleDeclarations({ name: "/main.tsx", contents: READER }, TARGET)
+          .dataFiles,
+      ).toContain("../b.txt");
+    });
+
+    it("returns the same result under any name with the same base name", () => {
+      expect(
+        scanModuleDeclarations({ name: "/main.tsx", contents: READER }, TARGET),
+      ).toEqual(
+        scanModuleDeclarations(
+          { name: "/~cf/some-identity/nested/main.tsx", contents: READER },
+          TARGET,
+        ),
+      );
     });
   });
 });

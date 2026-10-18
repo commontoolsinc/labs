@@ -1,4 +1,9 @@
-import type { ProgramResolver, Source } from "@commonfabric/js-compiler";
+import type {
+  ModuleDeclarations,
+  ProgramResolver,
+  Source,
+} from "@commonfabric/js-compiler";
+import { resolveDeclaredDataFile } from "@commonfabric/js-compiler/specifier";
 
 import type { SourcePackageIdentity } from "../sandbox/module-record-compiler.ts";
 import { compilerStack } from "./deferred-compiler-stack.ts";
@@ -23,8 +28,9 @@ import type { RuntimeProgram } from "./types.ts";
  * a web address, or from anywhere else reaches its data the way it reaches its
  * source. Reading is all this asks of the resolver.
  *
- * Parsing is the compiler stack's work, so the caller must have awaited
- * `ensureCompilerStack()`.
+ * A module with an entry in `declarations`, keyed by file name, is read from
+ * that scan; any other is parsed here, which is the compiler stack's work, so
+ * the caller must have awaited `ensureCompilerStack()`.
  *
  * A declared name the resolver cannot produce is an error. The program cannot
  * be assembled as its source describes it, and saying so here names both the
@@ -34,8 +40,8 @@ import type { RuntimeProgram } from "./types.ts";
 export async function attachDeclaredDataFiles(
   program: RuntimeProgram,
   resolver: Pick<ProgramResolver, "resolveSource" | "resolveDataFile">,
+  declarations: ReadonlyMap<string, ModuleDeclarations> = new Map(),
 ): Promise<RuntimeProgram> {
-  const { collectDataFileNames, TARGET } = compilerStack();
   // A data file is not code and is never parsed as code. One already attached
   // is in `files` like any other entry, and its bytes may happen to read as a
   // `dataFile()` call.
@@ -43,7 +49,7 @@ export async function attachDeclaredDataFiles(
   const declaredBy = new Map<string, string>();
   for (const file of program.files) {
     if (alreadyAttached.has(file.name)) continue;
-    for (const name of collectDataFileNames(file, TARGET)) {
+    for (const name of declaredDataFiles(file, declarations.get(file.name))) {
       if (!declaredBy.has(name)) declaredBy.set(name, file.name);
     }
   }
@@ -90,13 +96,14 @@ export async function attachDeclaredDataFiles(
  *
  * `modules` are the code modules whose identities are being computed, and only
  * those can own an edge, so a reader the program's roots never reach leaves
- * its file to the entry. Each is scanned under `storedNameFor(name)`, the name
- * the runtime resolves its reads against; the result names modules and files
- * the way `program` does. A module that owns nothing has no entry in the
- * result.
+ * its file to the entry. Each one's reads resolve against
+ * `storedNameFor(name)`, the name the runtime resolves them against; the
+ * result names modules and files the way `program` does. A module that owns
+ * nothing has no entry in the result.
  *
- * Parsing is the compiler stack's work, so the caller must have awaited
- * `ensureCompilerStack()`.
+ * A module with an entry in `program.declarations`, keyed by module name, is
+ * read from that scan; any other is parsed here, which is the compiler stack's
+ * work, so the caller must have awaited `ensureCompilerStack()`.
  */
 export function sourcePackageOwners(
   program: {
@@ -104,6 +111,7 @@ export function sourcePackageOwners(
     sourceRoots: readonly string[];
     dataPaths: readonly string[];
     modules: readonly Source[];
+    declarations?: ReadonlyMap<string, ModuleDeclarations>;
   },
   storedNameFor: (name: string) => string = (name) => name,
 ): SourcePackageIdentity[] {
@@ -113,13 +121,14 @@ export function sourcePackageOwners(
   const dataByOwner = new Map<string, Set<string>>();
   const claimed = new Set<string>();
   if (dataByStoredName.size > 0) {
-    const { collectDataFileNames, TARGET } = compilerStack();
     for (const module of program.modules) {
+      // A scan holds under the stored name, which keeps the base name.
       const read = {
         name: storedNameFor(module.name),
         contents: module.contents,
       };
-      for (const name of collectDataFileNames(read, TARGET)) {
+      const declared = program.declarations?.get(module.name);
+      for (const name of declaredDataFiles(read, declared)) {
         const path = dataByStoredName.get(name);
         if (path === undefined) continue;
         claimed.add(path);
@@ -147,4 +156,22 @@ export function sourcePackageOwners(
     owners.push({ ownerPath, rootPaths: [], dataPaths: [...owned].sort() });
   }
   return owners;
+}
+
+/**
+ * Helper for the two functions above, which returns the data-file names
+ * `module` declares, resolved against its name. `declared` is the module's
+ * scan, when the caller holds one; without it the module is parsed here.
+ */
+function declaredDataFiles(
+  module: Source,
+  declared: ModuleDeclarations | undefined,
+): string[] {
+  if (declared === undefined) {
+    const { collectDataFileNames, TARGET } = compilerStack();
+    return collectDataFileNames(module, TARGET);
+  }
+  return declared.dataFiles.map((path) =>
+    resolveDeclaredDataFile(path, module)
+  );
 }

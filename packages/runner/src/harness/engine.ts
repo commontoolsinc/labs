@@ -1,6 +1,7 @@
 import { hashOf } from "@commonfabric/data-model";
 import type {
   AuthoredSourceLookup,
+  ModuleDeclarations,
   Program,
   ProgramResolver,
   Source,
@@ -84,6 +85,7 @@ import { FabricAwareResolver } from "./fabric-resolver.ts";
 import {
   type ModuleImportEdges,
   resolveModuleImports,
+  scanModules,
 } from "./module-identity.ts";
 import {
   pretransformProgramForModules,
@@ -540,7 +542,16 @@ export class Engine extends EventTarget {
         mappedProgram,
         `/${id}`,
       );
-      assertFabricImportsHaveSpace(codeFiles, options);
+      // Each authored module is parsed once, in its authored bytes, and the
+      // fabric-import check here and the identity steps below all read that
+      // scan. The injection adds no fabric import, so the check's verdict is
+      // the one the injected bytes would give.
+      const authoredDataFiles = new Set(program.dataFiles ?? []);
+      const authoredCode = program.files.filter((file) =>
+        !authoredDataFiles.has(file.name)
+      );
+      const authoredScans = scanModules(authoredCode);
+      assertFabricImportsHaveSpace(authoredScans, options);
       const engineResolver = new EngineProgramResolver(
         { ...mappedProgram, files: codeFiles },
         this.#ctRuntime.staticCache,
@@ -582,9 +593,8 @@ export class Engine extends EventTarget {
       const authoredByStoredName = new Map(
         program.files.map((f) => [f.name, f.contents]),
       );
-      const authoredDataFiles = new Set(program.dataFiles ?? []);
       const authoredCompileSources = [
-        ...program.files.filter((file) => !authoredDataFiles.has(file.name)),
+        ...authoredCode,
         ...resolvedFiles.filter((file) =>
           file.name.startsWith(FABRIC_MOUNT_ROOT)
         ),
@@ -610,11 +620,18 @@ export class Engine extends EventTarget {
         storedNameFor,
       );
       const pristineSourceFiles = [...pristineModules, ...dataSources];
+      const declarations = pristineModuleScans(
+        pristineModules,
+        authoredByStoredName,
+        authoredScans,
+        storedNameFor,
+      );
       const sourcePackages = sourcePackageOwners({
         main: mappedProgram.main,
         sourceRoots,
         dataPaths,
         modules: authoredModules(pristineModules),
+        declarations,
       }, storedNameFor);
 
       // Prefix-free content identity per resolved module path. Computed here
@@ -623,7 +640,7 @@ export class Engine extends EventTarget {
       const identityByPath = computeFabricModuleIdentities(
         pristineSourceFiles,
         mounts,
-        { idPrefix: `/${id}`, sourcePackages },
+        { idPrefix: `/${id}`, sourcePackages, declarations },
       );
       const entryIdentity = identityByPath.get(mappedProgram.main)!;
 
@@ -874,7 +891,7 @@ export class Engine extends EventTarget {
       const importEdges = resolveModuleImports({
         main: "",
         files: pristineSourceFiles,
-      }, { dataFiles: dataFileSet });
+      }, { dataFiles: dataFileSet, declarations });
       const packageByOwner = new Map(
         sourcePackages.map((owner) => [owner.ownerPath, owner]),
       );
@@ -1174,7 +1191,10 @@ export class Engine extends EventTarget {
       files: resolvedFiles,
       dataFiles: attachedData,
     });
-    assertFabricImportsHaveSpace(codeFiles, options);
+    // Each stored module is parsed once, and the fabric-import check here and
+    // the identity steps below all read that scan.
+    const authoredScans = scanModules(codeFiles);
+    assertFabricImportsHaveSpace(authoredScans, options);
     // The stored source set holds prefix-free AUTHORED TS (the helper import is
     // NOT baked in — identity is over authored source, module-loading.md).
     // Inject the helper BEFORE resolve so the resolver pulls the `commonfabric`
@@ -1241,12 +1261,20 @@ export class Engine extends EventTarget {
     const authoredByStoredName = new Map(
       codeFiles.map((f) => [f.name, f.contents]),
     );
+    const storedNameFor = (name: string) =>
+      storedFilenameFor(name, undefined, mounts);
     const pristineModules = pristineModuleSources(
       persistableSourceFiles(resolvedProgramFiles),
       authoredByStoredName,
-      (name) => storedFilenameFor(name, undefined, mounts),
+      storedNameFor,
     );
     const pristineSourceFiles = [...pristineModules, ...dataSources];
+    const declarations = pristineModuleScans(
+      pristineModules,
+      authoredByStoredName,
+      authoredScans,
+      storedNameFor,
+    );
     // Stored attachments keep the owners they were stored under, which is what
     // lets a stored closure recompile to the identities it is keyed by. A
     // program given only its roots and data files assigns owners as a fresh
@@ -1256,11 +1284,12 @@ export class Engine extends EventTarget {
       sourceRoots: declaredRoots,
       dataPaths,
       modules: authoredModules(pristineModules),
+      declarations,
     });
     const identityByPath = computeFabricModuleIdentities(
       pristineSourceFiles,
       mounts,
-      { sourcePackages },
+      { sourcePackages, declarations },
     );
 
     // Instrumenting does not disturb the identity check below: identity hashes
@@ -1332,7 +1361,7 @@ export class Engine extends EventTarget {
     const importEdges = resolveModuleImports({
       main: "",
       files: pristineSourceFiles,
-    }, { dataFiles: dataFileSet });
+    }, { dataFiles: dataFileSet, declarations });
     const packageByOwner = new Map(
       sourcePackages.map((owner) => [owner.ownerPath, owner]),
     );
@@ -2017,25 +2046,15 @@ function assertNoReservedFabricPaths(files: readonly Source[]): void {
 }
 
 function assertFabricImportsHaveSpace(
-  files: readonly Source[],
+  scans: ReadonlyMap<string, ModuleDeclarations>,
   options: { fabricImports?: { space: MemorySpace } },
 ): void {
   if (options.fabricImports !== undefined) return;
-  // Deferred compiler stack (parses): only called from compileToRecordGraph,
-  // which awaits ensureCompilerStack() first.
-  const { collectImportSpecifiers, ts } = compilerStack();
-  for (const file of files) {
-    for (
-      const specifier of collectImportSpecifiers(
-        file,
-        ts.ScriptTarget.ES2023,
-      )
-    ) {
-      if (isFabricImportSpecifier(specifier)) {
-        throw new Error(
-          "fabric imports require a space context (options.fabricImports)",
-        );
-      }
+  for (const { imports } of scans.values()) {
+    if (imports.some(isFabricImportSpecifier)) {
+      throw new Error(
+        "fabric imports require a space context (options.fabricImports)",
+      );
     }
   }
 }
@@ -2061,6 +2080,27 @@ function pristineModuleSources(
     return authored === undefined
       ? file
       : { name: file.name, contents: authored };
+  });
+}
+
+/**
+ * Helper for the two compile paths, which returns the scan of each pristine
+ * module by name. A module still holding the bytes of the authored file it was
+ * recovered from takes that file's scan from `authoredScans`, which is keyed by
+ * stored name as `authoredByStoredName` is; any other, a fabric mount among
+ * them, is parsed here.
+ */
+function pristineModuleScans(
+  pristineModules: readonly Source[],
+  authoredByStoredName: ReadonlyMap<string, string>,
+  authoredScans: ReadonlyMap<string, ModuleDeclarations>,
+  storedNameOf: (name: string) => string,
+): Map<string, ModuleDeclarations> {
+  return scanModules(pristineModules, (file) => {
+    const storedName = storedNameOf(file.name);
+    return authoredByStoredName.get(storedName) === file.contents
+      ? authoredScans.get(storedName)
+      : undefined;
   });
 }
 

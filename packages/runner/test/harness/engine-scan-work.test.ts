@@ -1,0 +1,99 @@
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { spy } from "@std/testing/mock";
+import { Identity } from "@commonfabric/identity";
+
+import * as compiler from "../../src/harness/compiler-stack.ts";
+import { ensureCompilerStack } from "../../src/harness/deferred-compiler-stack.ts";
+import type { Engine } from "../../src/harness/engine.ts";
+import type { RuntimeProgram } from "../../src/harness/types.ts";
+import { Runtime } from "../../src/runtime.ts";
+import { StorageManager } from "../../src/storage/cache.deno.ts";
+
+// This file's isolated runtime installs the counting loader; the engine's
+// identity tests use the real compiler stack in their own files. All three
+// scans the stack offers are counted, so a step that parses a module through
+// any of them shows up here.
+const scans = spy(compiler.scanModuleDeclarations);
+const importScans = spy(compiler.collectImportSpecifiers);
+const dataFileScans = spy(compiler.collectDataFileNames);
+await ensureCompilerStack(() =>
+  Promise.resolve({
+    ...compiler,
+    scanModuleDeclarations: scans,
+    collectImportSpecifiers: importScans,
+    collectDataFileNames: dataFileScans,
+  })
+);
+
+const signer = await Identity.fromPassphrase("engine scan work");
+
+const MAIN = [
+  'import { dataFile } from "commonfabric";',
+  'import { words } from "./words.ts";',
+  'export default () => words(dataFile("./words.txt"));',
+].join("\n");
+const WORDS = "export const words = (text: string) => text.split(`\\n`);\n";
+const DATA = 'import "./not-a-module.ts";\nalpha\nbeta\n';
+
+const PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [
+    { name: "/main.tsx", contents: MAIN },
+    { name: "/words.ts", contents: WORDS },
+    { name: "/words.txt", contents: DATA },
+  ],
+  dataFiles: ["/words.txt"],
+};
+
+/** Runs `work` and returns the source text of every module it scanned. */
+async function scannedDuring(work: () => Promise<unknown>): Promise<string[]> {
+  const starts = [scans, importScans, dataFileScans].map((s) => s.calls.length);
+  await work();
+  return [scans, importScans, dataFileScans].flatMap((s, i) =>
+    s.calls.slice(starts[i]).map((call) => call.args[0].contents)
+  );
+}
+
+describe("engine", () => {
+  let runtime: Runtime;
+  let engine: Engine;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    engine = runtime.harness as Engine;
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("parses each authored module once on a cold compile and on a cache hit", async () => {
+    let first: Awaited<ReturnType<Engine["compileToRecordGraph"]>>;
+    const cold = await scannedDuring(async () => {
+      first = await engine.compileToRecordGraph(PROGRAM);
+    });
+    const cached = new Map(
+      first!.modules.map((module) => [module.identity, { js: module.js }]),
+    );
+    let entryIdentity = "";
+    const hit = await scannedDuring(async () => {
+      ({ entryIdentity } = await engine.compileToRecordGraph(PROGRAM, {
+        precompiledModulesFor: () => Promise.resolve(cached),
+      }));
+    });
+
+    expect(entryIdentity).toBe(first!.entryIdentity);
+    for (const scanned of [cold, hit]) {
+      expect(scanned.filter((text) => text === MAIN)).toHaveLength(1);
+      expect(scanned.filter((text) => text === WORDS)).toHaveLength(1);
+      expect(scanned).not.toContain(DATA);
+    }
+  });
+});
