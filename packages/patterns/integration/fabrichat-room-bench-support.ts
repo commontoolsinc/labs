@@ -64,10 +64,10 @@ export interface FabrichatBenchmarkRooms<Room> {
 }
 
 /**
- * Seeds the fixed-size benchmark's rooms together, so that a run waits for the
- * slowest seed rather than for all three in turn, and resolves only once every
- * one has finished, so that no seed is still running while a segment measures.
- * Rejects as soon as one seed does.
+ * Seeds the fixed-size benchmark's rooms together, so that a run waits only as
+ * long as the slowest seed, and resolves only once every one has finished, so
+ * that no seed is still running while a segment measures. Rejects as soon as
+ * one seed does.
  */
 export async function seedFabrichatBenchmarkRooms<Room>(
   seed: (label: keyof FabrichatBenchmarkRooms<Room>) => Promise<Room>,
