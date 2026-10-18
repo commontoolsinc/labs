@@ -16,8 +16,8 @@ import { refuseAtCommitBoundary } from "./refused-commit.ts";
 const signer = await Identity.fromPassphrase("piece-start-recovery");
 const space = signer.did();
 
-/** A piece whose `slots` are its `input` times `factor`. */
-function scaling(factor: number) {
+/** A piece whose `count` `slots` are each its `input` times `factor`. */
+function scaling(factor: number, count = 1) {
   return {
     main: "/main.tsx",
     files: [{
@@ -26,7 +26,9 @@ function scaling(factor: number) {
         import { computed, pattern, Writable } from "commonfabric";
         export default pattern<{ input: Writable<number> }, { slots: number[] }>(
           ({ input }) => ({
-            slots: [0].map(() => computed(() => input.get() * ${factor})),
+            slots: [${new Array(count).fill(0).join(", ")}].map(() =>
+              computed(() => input.get() * ${factor})
+            ),
           }),
         );
       `,
@@ -69,20 +71,26 @@ describe("piece-start-recovery", () => {
     await runtime.idle();
   };
 
-  it("instantiates the running pattern again when the pointer moves during the catch-up and the incoming pattern's setup is refused", async () => {
-    // A refused instantiation retires its graph and waits for a catch-up
-    // before it instantiates again. A pointer that moves during that wait has
-    // a swap of its own on the way, and when that swap's setup is refused the
-    // swap keeps the running pattern, so the retry is what gives the piece a
-    // graph to keep.
-
-    const v1 = await runtime.patternManager.compilePattern(scaling(2), {
-      space,
-    });
-    const v2 = await runtime.patternManager.compilePattern(scaling(3), {
-      space,
-    });
-    const v2Ref = runtime.patternManager.getArtifactEntryRef(v2)!;
+  /**
+   * Starts a piece whose first instantiation commit is refused, and moves its
+   * pointer from the pattern it runs to another while the recovery waits for
+   * its catch-up. The watcher's setup for the incoming pattern settles once
+   * the recovery's catch-up has ended, landing or refused as `swapLands`
+   * says. With `repairOwed`, the piece's pointer names a pattern its stored
+   * setup was not made by, so its start stages a setup repair.
+   */
+  const recoverAcrossPointerMove = async (
+    { repairOwed, swapLands }: { repairOwed: boolean; swapLands: boolean },
+  ) => {
+    const compile = (factor: number, count?: number) =>
+      runtime.patternManager.compilePattern(scaling(factor, count), { space });
+    const v1 = await compile(2);
+    const v2Ref = runtime.patternManager.getArtifactEntryRef(await compile(3))!;
+    // A pattern with more internal cells than `v1` set up, so that the stored
+    // setup covers none of the extra ones.
+    const v4Ref = runtime.patternManager.getArtifactEntryRef(
+      await compile(4, 2),
+    )!;
     const input = runtime.getCell<number>(space, "recovery-input");
     const piece = runtime.getCell<{ slots: number[] }>(
       space,
@@ -93,14 +101,29 @@ describe("piece-start-recovery", () => {
     input.withTx(seed).set(1);
     await runtime.setup(seed, v1, { input }, piece);
     expect((await seed.commit().settled).error).toBeUndefined();
+    const movePointer = async (ref: typeof v2Ref) => {
+      const move = runtime.edit();
+      piece.withTx(move).setMetaRaw(
+        "patternIdentity",
+        ref,
+        rawMetaWriteAuthorization,
+      );
+      expect((await move.commit().settled).error).toBeUndefined();
+    };
+    if (repairOwed) await movePointer(v4Ref);
 
     // The first instantiation commit is refused with a claim that the piece's
     // own document is absent, which recovers in every posture.
-    const instantiations = new WeakSet<object>();
+    const starts = new WeakSet<object>();
+    const actionIds: string[] = [];
     const stamp = runtime.stampServerRun.bind(runtime);
     runtime.stampServerRun = ((tx, info) => {
-      if (info.actionId.startsWith("piece-instantiate/")) {
-        instantiations.add(tx);
+      if (
+        info.actionId.startsWith("piece-instantiate/") ||
+        info.actionId.startsWith("piece-start-repair/")
+      ) {
+        starts.add(tx);
+        actionIds.push(info.actionId.split("/")[0]);
       }
       return stamp(tx, info);
     }) as typeof runtime.stampServerRun;
@@ -114,13 +137,17 @@ describe("piece-start-recovery", () => {
       readyToRetry: () => Promise.resolve(),
     };
     let refusals = 0;
+    const failures: unknown[] = [];
+    runtime.pieceStartCommitFailureObserver = ({ error }) => {
+      failures.push(error);
+    };
 
-    // The watcher's setup for the incoming pattern is refused, and its
-    // settlement held until `setupSettles` resolves.
+    // The watcher's setup for the incoming pattern settles only once
+    // `setupSettles` resolves.
     const setupStaged = Promise.withResolvers<void>();
     const setupSettles = Promise.withResolvers<void>();
     runtime.prepareTxForCommit = (tx: IExtendedStorageTransaction) => {
-      if (instantiations.has(tx) && refusals === 0) {
+      if (starts.has(tx) && refusals === 0) {
         refusals += 1;
         tx.commit = () => {
           tx.abort(absence.message);
@@ -130,13 +157,14 @@ describe("piece-start-recovery", () => {
         };
         return;
       }
-      const stagesSetup = [...tx.getWriteDetails?.(space) ?? []].some((
-        { address },
-      ) =>
-        address.id === pieceId && address.path[0] === "patternSetupIdentity"
-      );
+      const stagesSetup = !starts.has(tx) &&
+        [...tx.getWriteDetails?.(space) ?? []].some(({ address }) =>
+          address.id === pieceId && address.path[0] === "patternSetupIdentity"
+        );
       if (stagesSetup) {
-        refuseAtCommitBoundary(tx, space, "refuse the watcher's setup");
+        if (!swapLands) {
+          refuseAtCommitBoundary(tx, space, "refuse the watcher's setup");
+        }
         const commit = tx.commit.bind(tx);
         tx.commit = (...args) => {
           const receipt = commit(...args);
@@ -154,38 +182,91 @@ describe("piece-start-recovery", () => {
     // The catch-up holds until `caughtUp` resolves.
     const catchingUp = Promise.withResolvers<void>();
     const caughtUp = Promise.withResolvers<void>();
+    const catchUpEnded = Promise.withResolvers<void>();
     runtime.awaitCommitRetryReadiness = async (...args) => {
       catchingUp.resolve();
       await caughtUp.promise;
-      return await readiness.apply(runtime, args);
+      const unloaded = await readiness.apply(runtime, args);
+      catchUpEnded.resolve();
+      return unloaded;
     };
 
     expect(await runtime.start(piece)).toBe(true);
     const cancel = piece.sink(() => {});
     await catchingUp.promise;
-
-    const move = runtime.edit();
-    piece.withTx(move).setMetaRaw(
-      "patternIdentity",
-      v2Ref,
-      rawMetaWriteAuthorization,
-    );
-    expect((await move.commit().settled).error).toBeUndefined();
+    await movePointer(v2Ref);
     await setupStaged.promise;
-
     caughtUp.resolve();
-    await runtime.runner.idlePieceInstantiationSettlements();
+    await catchUpEnded.promise;
+    await runtime.idle();
     setupSettles.resolve();
     await settled();
     runtime.prepareTxForCommit = prepare;
 
     expect(refusals).toBe(1);
-    expect(runtime.runner.pieceGraphIsInstalled(piece)).toBe(true);
+    expect(actionIds[0]).toBe(
+      repairOwed ? "piece-start-repair" : "piece-instantiate",
+    );
+    return { piece, input, failures, cancel };
+  };
+
+  /** Sets the piece's input to `value`, and returns the piece once settled. */
+  const recomputeWith = async (
+    piece: Awaited<ReturnType<typeof recoverAcrossPointerMove>>,
+    value: number,
+  ) => {
     expect(
-      (await runtime.editWithRetry((tx) => input.withTx(tx).set(4))).error,
+      (await runtime.editWithRetry((tx) => piece.input.withTx(tx).set(value)))
+        .error,
     ).toBeUndefined();
     await settled();
-    expect(piece.get()).toEqual({ slots: [8] });
-    cancel();
+    return piece.piece.get();
+  };
+
+  describe("a pointer move during the catch-up", () => {
+    // A refused instantiation retires its graph and waits for a catch-up
+    // before it instantiates again. A pointer that moves during that wait has
+    // a swap of its own on the way, which either lands and runs the incoming
+    // pattern, or keeps the running pattern.
+
+    it("instantiates the running pattern again when the incoming pattern's setup is refused", async () => {
+      const recovered = await recoverAcrossPointerMove({
+        repairOwed: false,
+        swapLands: false,
+      });
+
+      expect(runtime.runner.pieceGraphIsInstalled(recovered.piece)).toBe(true);
+      expect(recovered.failures).toEqual([]);
+      expect(await recomputeWith(recovered, 4)).toEqual({ slots: [8] });
+      recovered.cancel();
+    });
+
+    it("runs the incoming pattern when its setup lands, for a start owed a setup repair", async () => {
+      const recovered = await recoverAcrossPointerMove({
+        repairOwed: true,
+        swapLands: true,
+      });
+
+      expect(runtime.runner.pieceGraphIsInstalled(recovered.piece)).toBe(true);
+      expect(recovered.failures).toEqual([]);
+      expect(await recomputeWith(recovered, 4)).toEqual({ slots: [12] });
+      recovered.cancel();
+    });
+
+    it("reports the start as failed when the incoming pattern's setup is refused, for a start owed a setup repair", async () => {
+      const recovered = await recoverAcrossPointerMove({
+        repairOwed: true,
+        swapLands: false,
+      });
+
+      expect(recovered.failures.map((error) => (error as Error).message))
+        .toEqual([
+          expect.stringContaining(
+            "moved to another pattern while its setup was being repaired",
+          ),
+        ]);
+      expect(runtime.runner.isRunning(recovered.piece)).toBe(false);
+      recovered.cancel();
+    });
   });
 });
