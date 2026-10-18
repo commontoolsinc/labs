@@ -139,7 +139,41 @@ describe("runtime-sizes", () => {
       expect(sizes.storage?.documents).toBe(0);
       expect(sizes.patterns.compiledPrograms).toBe(0);
       expect(sizes.runtime.retryingEdits).toBe(0);
+      expect(sizes.runtime.moduleDelegations).toEqual({
+        spaces: 0,
+        identities: 0,
+        predecessors: 0,
+        snapshotBuilds: 0,
+      });
       expect(sizes.cfcRejectionsByReason).toEqual({});
+    });
+
+    it("counts the module delegations registered and the snapshots built for them, not the transactions handed one", () => {
+      const runtime = createRuntime();
+      runtime.registerModuleDelegations(
+        space,
+        new Map([
+          ["successor", new Set(["predecessor", "other"])],
+          ["predecessor", new Set(["ancestor"])],
+        ]),
+      );
+      runtime.registerModuleDelegations(
+        space,
+        new Map([["successor", new Set(["predecessor"])]]),
+      );
+      runtime.registerModuleDelegations(
+        "did:key:z6MkRuntimeSizesOtherSpace",
+        new Map([["other", new Set(["elder"])]]),
+      );
+      runtime.edit().abort("sized");
+      runtime.edit().abort("sized");
+
+      expect(runtime.getSizes().runtime.moduleDelegations).toEqual({
+        spaces: 2,
+        identities: 3,
+        predecessors: 4,
+        snapshotBuilds: 2,
+      });
     });
 
     it("counts a committed document and the space it opened", async () => {

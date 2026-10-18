@@ -123,6 +123,7 @@ import {
   rawMetaWriteAuthorized,
   storedMetaFields,
 } from "../meta-seam.ts";
+import type { ModuleDelegationSnapshot } from "../module-delegations.ts";
 import {
   isReservedSibling,
   RESERVED_SIBLINGS,
@@ -1434,32 +1435,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   /**
-   * Sets the module-update delegations, which are runtime-learned trust state.
-   * Snapshotted and pinned once at transaction creation: later module loads
-   * affect future transactions, never an authorization decision already in
-   * flight.
+   * Sets the module-update delegations, which are runtime-learned trust
+   * state, and pins them: the first call, the `Runtime`'s in `edit()`, is
+   * the one that counts, so later module loads affect future transactions,
+   * never an authorization decision already in flight. The snapshot is held
+   * by reference. The `Runtime` publishes a new one for every change and
+   * never mutates a published one, and `getCfcState()` hands it out
+   * read-only, so the reference pins it as a copy would.
    */
-  setCfcModuleDelegations(
-    delegations: ReadonlyMap<
-      MemorySpace,
-      ReadonlyMap<string, readonly string[]>
-    >,
-  ): void {
+  setCfcModuleDelegations(delegations: ModuleDelegationSnapshot): void {
     if (this.#cfcModuleDelegationsPinned) return;
     this.#noteCfcActivity();
     this.#cfcModuleDelegationsPinned = true;
-    const snapshot = new Map<
-      MemorySpace,
-      ReadonlyMap<string, readonly string[]>
-    >();
-    for (const [space, spaceDelegations] of delegations) {
-      const spaceSnapshot = new Map<string, readonly string[]>();
-      for (const [identity, predecessors] of spaceDelegations) {
-        spaceSnapshot.set(identity, [...predecessors]);
-      }
-      if (spaceSnapshot.size > 0) snapshot.set(space, spaceSnapshot);
-    }
-    this.#cfcState.moduleDelegations = snapshot;
+    this.#cfcState.moduleDelegations = delegations;
   }
 
   markCfcRelevant(reason?: string): void {

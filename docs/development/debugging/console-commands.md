@@ -368,6 +368,7 @@ await commonfabric.rt.getLoggerCounts()
 // Counts of the worker's live structures right now: scheduler nodes and
 // queues, storage documents and subscriptions (`storage` is `null`, not zeros,
 // for a storage manager that reports no sizes), compiled-code caches, the
+// module-delegation registry and how often its snapshot was built, the
 // worker's own subscription and mount tables, and cumulative CFC commit
 // refusals by reason. Take two readings apart to see which tracked collection
 // is growing; growth in what the entries hold, or in a structure not counted
