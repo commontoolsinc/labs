@@ -996,6 +996,15 @@ all stayed open would cost one recompute per member per message. A second member
 stays open throughout, to add a reaction to every third message while it is the
 newest, and to write the thread's replies alongside the last writer.
 
+Each act is followed by a wait for its effect in the acting member's copy of
+the room. A room handler refuses an act by throwing, which writes nothing, so a
+refused act's effect never arrives. The member's runtime reports the handler's
+error, and that report ends the pending wait instead: the seed fails with an
+error naming the member, the act, and the handler's message, and the child
+exits non-zero. The child writes to the benchmark's own stderr as it runs, so
+its progress and the reason for a failure reach the workflow log as they
+happen, not only once the child has exited.
+
 Every body is derived from its index, so two rooms of one size carry the same
 text. Each benchmark process derives its members from a passphrase new to that
 process, so each starter's Home lists only that process's room, and a toolshed
@@ -1024,11 +1033,11 @@ and neither changes what another segment measures. Each `send` adds one message
 to its room, so the room holds thirty messages before the first send and
 thirty-six before the last; each `react` adds one reaction, to a different
 message each time, and leaves the messages as they were. The three rooms seed
-in turn, since each seed child can use up to 8 GB of heap. All three finish
-before the first segment starts, leaving at most one seed child alive and no
-setup work in a measured interval. One read-accounted sample each of `messages`
-and `send`, taken in a browser of its own, goes to stderr with the same counters
-the rendered lunch-poll benchmark records.
+together, each in a child of its own, and all three finish before the first
+segment starts, so no seed child is alive and no setup work runs in a measured
+interval. One read-accounted sample each of `messages` and `send`, taken in a
+browser of its own, goes to stderr with the same counters the rendered
+lunch-poll benchmark records.
 
 `react` adds to an existing reaction's tally rather than picking one from the
 row's reaction picker. At the shell's 1024-pixel viewport, the picker the row

@@ -8,62 +8,75 @@ import {
 
 describe("fabrichat-room-bench-support", () => {
   describe("seedFabrichatBenchmarkRooms()", () => {
-    it("seeds one room at a time and returns after every seed", async () => {
+    // Each seed is held open until the test releases it, so a case can see
+    // which seeds are running at once and whether the call has returned.
+    const heldSeeds = () => {
       type Label = keyof FabrichatBenchmarkRooms<string>;
       const gates = {
         read: Promise.withResolvers<void>(),
         send: Promise.withResolvers<void>(),
         react: Promise.withResolvers<void>(),
       };
-      const started = {
-        read: Promise.withResolvers<void>(),
-        send: Promise.withResolvers<void>(),
-        react: Promise.withResolvers<void>(),
-      };
-      const order: Label[] = [];
-      let active = 0;
-      let maximumActive = 0;
-      let returned = false;
-
-      const roomsPromise = seedFabrichatBenchmarkRooms(async (label) => {
-        order.push(label);
-        active++;
-        maximumActive = Math.max(maximumActive, active);
-        started[label].resolve();
+      const running = new Set<Label>();
+      let maximumRunning = 0;
+      const seed = async (label: Label) => {
+        running.add(label);
+        maximumRunning = Math.max(maximumRunning, running.size);
         try {
           await gates[label].promise;
           return `${label} room`;
         } finally {
-          active--;
+          running.delete(label);
         }
-      });
-      void roomsPromise.then(() => returned = true);
+      };
+      return { gates, running, seed, maximumRunning: () => maximumRunning };
+    };
 
-      await started.read.promise;
-      expect(order).toEqual(["read"]);
-      expect(active).toBe(1);
+    it("runs all three seeds at once", async () => {
+      const held = heldSeeds();
+
+      const rooms = seedFabrichatBenchmarkRooms(held.seed);
+
+      expect([...held.running].sort()).toEqual(["react", "read", "send"]);
+      held.gates.read.resolve();
+      held.gates.send.resolve();
+      held.gates.react.resolve();
+      await rooms;
+      expect(held.maximumRunning()).toBe(3);
+    });
+
+    it("returns each room only once every seed has finished", async () => {
+      const held = heldSeeds();
+      let returned = false;
+
+      const rooms = seedFabrichatBenchmarkRooms(held.seed);
+      void rooms.then(() => returned = true);
+      held.gates.react.resolve();
+      held.gates.read.resolve();
+      await held.gates.read.promise;
+      await Promise.resolve();
       expect(returned).toBe(false);
+      expect([...held.running]).toEqual(["send"]);
 
-      gates.read.resolve();
-      await started.send.promise;
-      expect(order).toEqual(["read", "send"]);
-      expect(active).toBe(1);
-      expect(returned).toBe(false);
-
-      gates.send.resolve();
-      await started.react.promise;
-      expect(order).toEqual(["read", "send", "react"]);
-      expect(active).toBe(1);
-      expect(returned).toBe(false);
-
-      gates.react.resolve();
-      expect(await roomsPromise).toEqual({
+      held.gates.send.resolve();
+      expect(await rooms).toEqual({
         read: "read room",
         send: "send room",
         react: "react room",
       });
-      expect(maximumActive).toBe(1);
       expect(returned).toBe(true);
+    });
+
+    it("rejects with the error of a seed that fails", async () => {
+      const failure = new Error("Member 2's reaction did not happen");
+
+      const rooms = seedFabrichatBenchmarkRooms((label) =>
+        label === "send"
+          ? Promise.reject(failure)
+          : Promise.resolve(`${label} room`)
+      );
+
+      await expect(rooms).rejects.toBe(failure);
     });
   });
 });
