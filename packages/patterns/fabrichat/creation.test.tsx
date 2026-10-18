@@ -354,13 +354,13 @@ export default pattern(() => {
             entries[0]?.revision === direct.rooms[0]?.revision;
         }),
       },
-      // The notice offers the room's link, for its creator to send on, and
-      // the room's entry in the list is a link to it, labeled with whom it is
+      // The room's entry in the list is a link to it, labeled with whom it is
       // with, which opens it as a page of its own: the manager renders no
-      // room itself.
+      // room itself. Nor does it show the room's notice, or link the room
+      // for its creator to send on.
       {
         assertion: assert(() =>
-          equals(cellLinked(direct[UI], undefined), directHeld.key("room")) &&
+          cellLinked(direct[UI], undefined) === undefined &&
           equals(
             cellLinked(direct[UI], `With ${BOB}`),
             directHeld.key("room"),
