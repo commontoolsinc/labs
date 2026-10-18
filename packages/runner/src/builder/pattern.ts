@@ -76,7 +76,7 @@ import {
   patternToEncodableForm,
   withAliasBindings,
 } from "./to-encodable-form.ts";
-import { traverseValue } from "./traverse-utils.ts";
+import { traverseValue, visitValue } from "./traverse-utils.ts";
 import {
   type CellScope,
   type DerivedInternalCellDescriptor,
@@ -992,7 +992,7 @@ function assignComputedCellKinds(
 ): void {
   const collectCellRoots = (value: unknown): Set<OpaqueCell<any>> => {
     const roots = new Set<OpaqueCell<any>>();
-    traverseValue(value as FactoryInput<unknown>, (item) => {
+    visitValue(value as FactoryInput<unknown>, (item) => {
       if (isCellResultForDereferencing(item)) item = getCellOrThrow(item);
       if (isCell(item)) roots.add(exportCell(item).cell);
       return item;
