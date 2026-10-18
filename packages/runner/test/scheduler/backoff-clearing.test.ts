@@ -117,6 +117,19 @@ describe("Scheduler", () => {
         expect(bystanderReads.map((reads) => reads())).toEqual([0, 0, 0]);
       });
 
+      it("keeps a never-ran node whose initial-run hold was released out of the walk", () => {
+        const released = registerNode("holdReleased", "never-ran");
+        holdBackoff(released);
+        runtime.scheduler.accessForTestingOnly.gates.releaseInitialRunHold(
+          released.action,
+        );
+        const reads = countStatusReads(released);
+
+        runtime.scheduler.accessForTestingOnly.clearBackoffForCleanNodes();
+
+        expect(reads()).toBe(0);
+      });
+
       it("keeps a node whose backoff it cleared out of the next walk", () => {
         const cleared = registerNode("clearedBefore", "clean");
         holdBackoff(cleared);

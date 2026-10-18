@@ -64,7 +64,10 @@ export class SchedulerGates {
   releaseInitialRunHold(action: Action): void {
     const record = this.#state.nodes.get(action);
     if (!record?.gate?.backoffUntil) return;
-    record.gate.backoffUntil = 0;
+    delete record.gate.backoffUntil;
+    if (!holdsBackoffState(record.gate)) {
+      this.#state.nodes.forgetBackoff(record);
+    }
     this.recomputeWakeAfterClear();
   }
 
