@@ -200,6 +200,7 @@ describe("piece-start-recovery", () => {
     await catchUpEnded.promise;
     await runtime.idle();
     setupSettles.resolve();
+    await runtime.runner.patternPointerFollowed(piece);
     await settled();
     runtime.prepareTxForCommit = prepare;
 
