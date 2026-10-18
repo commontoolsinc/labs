@@ -588,11 +588,12 @@ the backup (the current size), the result (the compacted size), and WAL
 headroom for the run; `df -h /data` before starting, and the staging copy
 document's note that `/tmp` has no room applies here too.
 
-### Verification, in order
+### Verification obligations
 
-Checks are reported in this order. Head comparison and fingerprinting share
-primary reconstructions within each file; each fingerprint independently
-enumerates revision addresses and resolves related documents in its own file.
+The checks below define the verification obligations. Head comparison and
+fingerprinting share primary reconstructions within each file; each fingerprint
+independently enumerates revision addresses and resolves related documents in
+its own file.
 
 1. `PRAGMA integrity_check` and `PRAGMA foreign_key_check` on the result.
 2. **Heads unchanged, one excepted.** `SELECT branch, id, scope_key, seq,
