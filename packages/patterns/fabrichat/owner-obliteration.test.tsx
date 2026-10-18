@@ -4,8 +4,9 @@
  * does. An OWNER obliterates someone else's message only where the setting
  * holds, and deletes no one else's message either way. Alice and Bob run here
  * as this lane's one principal, which holds OWNER in the room's space, so what
- * tells them apart is their profiles alone. `members.test.tsx` and
- * `direct.test.tsx` cover each kind's default.
+ * tells them apart is their profiles alone. Each act the room refuses fails
+ * its run with a reason, and the test requires exactly those. `members.test.tsx`
+ * and `direct.test.tsx` cover each kind's default.
  */
 import {
   type AddIntegrity,
@@ -232,5 +233,6 @@ export default pattern(() => {
         ),
       },
     ],
+    expectRuntimeErrors: 5,
   };
 });

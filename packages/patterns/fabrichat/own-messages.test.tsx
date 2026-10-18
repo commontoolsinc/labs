@@ -1,13 +1,13 @@
 /**
  * A FabriChat room's acts on a message, and its replies, take only a message
  * of the room's own space. Handed a message that lives elsewhere, an edit and
- * an obliteration are dropped, so a room's rules, its kind and its policy,
- * never reach a message another room's rules govern. Dropped means untouched
- * and without an error: an act that went on to write the message would have
- * its transaction refused by the runtime's write isolation, and this test
- * tolerates no runtime error. A reply to that message is dropped too, so the
- * room links no document of another space. The same acts on the room's own
- * messages land. Alice and Bob run here as this lane's one principal, which
+ * an obliteration are refused, so a room's rules, its kind and its policy,
+ * never reach a message another room's rules govern. Refused means the act's
+ * run throws, with its reason, and writes nothing; the three refusals here are
+ * the runtime errors the test requires, and the count is exact, so a refusal
+ * that went back to a silent return fails it. A reply to that message is
+ * refused too, so the room links no document of another space. The same acts
+ * on the room's own messages land. Alice and Bob run here as this lane's one principal, which
  * holds OWNER in every space it creates, so what tells them apart is their
  * profiles alone.
  */
@@ -125,7 +125,7 @@ export default pattern(() => {
       },
 
       // Handed the message elsewhere, Alice's edit and Bob's obliteration,
-      // which this room's policy would let him make, are dropped.
+      // which this room's policy would let him make, are refused.
       {
         action: alice.editMessage,
         event: {
@@ -145,7 +145,7 @@ export default pattern(() => {
         ),
       },
 
-      // A reply to the message elsewhere is dropped.
+      // A reply to the message elsewhere is refused.
       {
         action: alice.sendMessage,
         event: {
@@ -173,5 +173,6 @@ export default pattern(() => {
       },
       { assertion: assert(() => bodies(messages) === "<obliterated>") },
     ],
+    expectRuntimeErrors: 3,
   };
 });

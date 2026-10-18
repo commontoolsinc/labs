@@ -146,9 +146,11 @@ handler makes that the runtime refuses, such as one whose UI contract the event
 does not satisfy, resolves `sendStrict()` all the same.
 `sendStrict(event, { awaitHandling: true })` waits for the handler's run as
 well, and rejects with the reason when that run's commit is refused, when it
-throws, and when the event is dropped or refused admission. Under server
-execution the run it waits for is the served one, whose outcome reaches the
-worker as the consequence the serving loop recorded for the event.
+throws, and when the event is dropped or refused admission. A run that writes
+nothing resolves it all the same: resolving says the run finished, not that it
+wrote, so a handler that turns an event down throws. Under server execution the
+run it waits for is the served one, whose outcome reaches the worker as the
+consequence the serving loop recorded for the event.
 
 `CellHandle.sendReviewed(event, { surface, action })` sends a reviewed action
 from a control the host draws itself, bound to one trusted surface and one

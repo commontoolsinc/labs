@@ -2,7 +2,8 @@
  * Reactions in a FabriChat room: what a reaction stores, that adding or
  * removing one is idempotent rather than a toggle, which reactions are
  * refused, how a message tallies its own, and that deleting a message takes
- * its reactions with it.
+ * its reactions with it. A refused reaction's run fails with its reason, and
+ * the test requires exactly those.
  */
 import {
   action,
@@ -230,5 +231,6 @@ export default pattern(() => {
         ),
       },
     ],
+    expectRuntimeErrors: 3,
   };
 });

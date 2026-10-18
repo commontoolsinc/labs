@@ -836,6 +836,48 @@ const emojiOf = (event: RoomStreamEvent, bound: string | undefined): unknown =>
 const isInRoomOf = (room: Cell<unknown>, target: Cell<unknown>): boolean =>
   spaceOf(target) === spaceOf(room);
 
+/** Why an act from a sender whose profile hasn't resolved is refused. */
+const NO_PROFILE = "Your profile hasn't loaded yet.";
+
+/** Why an act on, or a reply to, a message the room doesn't hold is refused. */
+const NOT_IN_ROOM = "That message isn't in this chat.";
+
+/** Why an act on a deleted message, other than its obliteration, is refused. */
+const DELETED = "That message was deleted.";
+
+/**
+ * The message `link` names, as the target of an act: one of the room's
+ * messages, by `isInRoomOf()`.
+ *
+ * @throws If `link` names no message, or one outside the room's space.
+ */
+const messageInRoom = (
+  room: Cell<unknown>,
+  link: MessageCell | undefined,
+): MessageCell => {
+  const target = link?.resolveAsCell();
+  if (target === undefined || !isInRoomOf(room, target)) {
+    throw new Error(NOT_IN_ROOM);
+  }
+  return target;
+};
+
+/**
+ * Why `messageRightsOf()` refuses an obliteration, for a person to read: the
+ * room's `kind` and whether its OWNERs may obliterate decide who may.
+ */
+const obliterationRefusal = (
+  kind: ChatRoomKind,
+  ownersMayObliterate: boolean,
+): string =>
+  kind === "direct"
+    ? ownersMayObliterate
+      ? "Only an owner of this chat can remove someone else's message."
+      : "Only its author can remove a message in this chat."
+    : ownersMayObliterate
+    ? "Only an owner of this chat can remove a message."
+    : "Messages in this chat can't be removed.";
+
 /**
  * Leaves a tombstone of the message at `target`: its time and what it replies
  * to stay, its body becomes the deleted marker, its reactions go, and so does
@@ -860,15 +902,19 @@ const leaveTombstone = (target: MessageCell, keepsAuthor: boolean): void => {
 /**
  * Pushes a send onto `messages`: the text `event` carries, from `myProfile`,
  * as a reply to `reply` where that names a message, shown `shownIn`, with a
- * reaction list of its own; then `joined` is told. A send with no text,
- * before the profile resolves, or replying to a message outside the room's
- * space, pushes nothing. Returns whether it pushed.
+ * reaction list of its own; then `joined` is told.
  *
  * Every handler here takes the event a rendered control of the room sends,
  * and the controls offer only acts the viewer may take, so a handler checks
  * what the element's write policy does not — whose message it is, and that
- * a message acted on or replied to is one of the room's — and drops anything
- * else without a word.
+ * a message acted on or replied to is one of the room's — and refuses
+ * anything else by throwing, with a reason a person can read, before it
+ * writes: the run fails and writes nothing, and a send that awaits its
+ * handling is rejected with the reason. An act that would change nothing,
+ * such as a reaction added twice, writes nothing and succeeds.
+ *
+ * @throws If the profile hasn't resolved, the send has no text, or `reply`
+ *   names a message outside the room's space.
  */
 const sendInto = (
   event: RoomStreamEvent,
@@ -877,12 +923,15 @@ const sendInto = (
   reply: Cell<RepliedMessage> | undefined,
   shownIn: ShownIn,
   joined: Stream<JoinedEvent> | undefined,
-): boolean => {
+): void => {
   const profile = resolvedProfile(myProfile);
+  if (profile === undefined) throw new Error(NO_PROFILE);
   const body = textOf(event);
-  if (profile === undefined || body === "") return false;
+  if (body === "") throw new Error("This send has no text in `body`.");
   const target = reply?.resolveAsCell();
-  if (target !== undefined && !isInRoomOf(messages, target)) return false;
+  if (target !== undefined && !isInRoomOf(messages, target)) {
+    throw new Error(NOT_IN_ROOM);
+  }
   // A message may link only a list that exists, so the list is made before
   // the message links it.
   const reactions = new Writable<ReactionsValue>([] as ReactionsValue);
@@ -894,7 +943,6 @@ const sendInto = (
     reactions,
   } as SentMessage);
   joined?.send({ messageAct: true });
-  return true;
 };
 
 /**
@@ -924,12 +972,8 @@ export const commitComposerSend = handler<RoomStreamEvent, ComposerSendState>(
     // A cleared link still reads back as a cell, holding nothing.
     const link = composer.get()?.replyTo;
     const reply = link?.get() === undefined ? undefined : link;
-    if (
-      sendInto(event, myProfile, messages, reply, "main", joined) &&
-      reply !== undefined
-    ) {
-      composer.key("replyTo").set(undefined);
-    }
+    sendInto(event, myProfile, messages, reply, "main", joined);
+    if (reply !== undefined) composer.key("replyTo").set(undefined);
   },
 );
 
@@ -962,16 +1006,14 @@ export const commitReply = handler<RoomStreamEvent, ReplyState>(
  */
 export const commitEdit = handler<RoomStreamEvent, EditState>(
   (event, { myProfile, room, message, composer }) => {
-    const target = (event?.message ?? message)?.resolveAsCell();
-    if (target === undefined || !isInRoomOf(room, target)) return;
+    const target = messageInRoom(room, event?.message ?? message);
     const current = target.get();
-    const body = textOf(event);
-    if (
-      isDeleted(current) || !isAuthorOf(current, resolvedProfile(myProfile)) ||
-      body === ""
-    ) {
-      return;
+    if (isDeleted(current)) throw new Error(DELETED);
+    if (!isAuthorOf(current, resolvedProfile(myProfile))) {
+      throw new Error("Only its author can edit a message.");
     }
+    const body = textOf(event);
+    if (body === "") throw new Error("This edit has no text in `body`.");
     target.key("body").set(body);
     target.key("editedAt").set(now());
     const editing = composer.get()?.editing;
@@ -988,13 +1030,12 @@ export const commitEdit = handler<RoomStreamEvent, EditState>(
  */
 export const commitDelete = handler<RoomStreamEvent, MessageActState>(
   (event, { myProfile, room, message }) => {
-    const target = (event?.message ?? message)?.resolveAsCell();
-    if (target === undefined || !isInRoomOf(room, target)) return;
+    const target = messageInRoom(room, event?.message ?? message);
     const current = target.get();
-    if (
-      isDeleted(current) || !isAuthorOf(current, resolvedProfile(myProfile))
-    ) {
-      return;
+    // Deleted already: there is nothing to delete.
+    if (isDeleted(current)) return;
+    if (!isAuthorOf(current, resolvedProfile(myProfile))) {
+      throw new Error("Only its author can delete a message.");
     }
     leaveTombstone(target, !FABRICHAT_POLICY.deletionIsObliteration);
   },
@@ -1007,16 +1048,22 @@ export const commitDelete = handler<RoomStreamEvent, MessageActState>(
  */
 export const commitObliterate = handler<RoomStreamEvent, ObliterateState>(
   (event, { myProfile, room, message, kind, ownersMayObliterate }) => {
-    const target = (event?.message ?? message)?.resolveAsCell();
-    if (target === undefined || !isInRoomOf(room, target)) return;
+    const target = messageInRoom(room, event?.message ?? message);
+    const current = target.get();
+    // Obliterated already, its author gone: there is nothing to remove.
+    if (isDeleted(current) && current?.authorProfile === undefined) return;
     const rights = messageRightsOf(
-      target.get(),
+      current,
       resolvedProfile(myProfile),
       kind,
       isOwnerOf(target),
       ownersMayObliterate === true,
     );
-    if (!rights.canObliterate) return;
+    if (!rights.canObliterate) {
+      throw new Error(
+        obliterationRefusal(kind, ownersMayObliterate === true),
+      );
+    }
     leaveTombstone(target, false);
   },
 );
@@ -1052,16 +1099,15 @@ export const commitSendReaction = handler<RoomStreamEvent, AddReactionState>(
     },
   ) => {
     const profile = resolvedProfile(myProfile);
+    if (profile === undefined) throw new Error(NO_PROFILE);
     const emoji = emojiOf(event, bound);
-    const target = (event?.message ?? message)?.resolveAsCell();
-    if (target === undefined || !isInRoomOf(room, target)) return;
-    const current = target.get();
+    if (!isSingleEmoji(emoji)) throw new Error("A reaction is a single emoji.");
+    const target = messageInRoom(room, event?.message ?? message);
     const list = reactionsOf(target);
-    if (
-      profile === undefined || !isSingleEmoji(emoji) || isDeleted(current) ||
-      list === undefined
-    ) {
-      return;
+    // A send gives every message its reaction list, and a deletion takes it
+    // away, so a message without one is a deleted one.
+    if (isDeleted(target.get()) || list === undefined) {
+      throw new Error(DELETED);
     }
     if (closesPicker === true) pickerOpen?.set(false);
     const reactions = (list.get() ?? []) as ChatReaction[];
@@ -1089,16 +1135,21 @@ export const commitDeleteReaction = handler<
 >(
   (event, { myProfile, room, message, reaction }) => {
     const profile = resolvedProfile(myProfile);
-    const target = (event?.message ?? message)?.resolveAsCell();
-    if (target === undefined || !isInRoomOf(room, target)) return;
+    if (profile === undefined) throw new Error(NO_PROFILE);
+    const target = messageInRoom(room, event?.message ?? message);
     const list = reactionsOf(target);
+    // A send gives every message its reaction list, and a deletion takes it
+    // away, so a message without one is a deleted one.
+    if (isDeleted(target.get()) || list === undefined) {
+      throw new Error(DELETED);
+    }
     const removed = (event?.reaction ?? reaction)?.resolveAsCell();
-    const record = removed?.get();
-    if (
-      profile === undefined || list === undefined || removed === undefined ||
-      record === undefined || !equals(record.reactorProfile, profile)
-    ) {
-      return;
+    if (removed === undefined) throw new Error("This names no reaction.");
+    const record = removed.get();
+    // One no longer there, which reads as none, removes nothing.
+    if (record === undefined) return;
+    if (!equals(record.reactorProfile, profile)) {
+      throw new Error("Only the person who reacted can remove a reaction.");
     }
     list.removeByValue(removed);
   },
