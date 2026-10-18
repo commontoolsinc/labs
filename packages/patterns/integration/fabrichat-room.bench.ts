@@ -36,7 +36,7 @@
  * one reaction to a message that had none of the viewer's, which leaves the
  * room's messages as they were.
  *
- * The three rooms are seeded in turn on first use, each by members whose
+ * The three rooms are seeded together on first use, each by members whose
  * identities are new to this run, so each starter's Home lists that one room.
  * Each is then loaded once, untimed, through the same steps a segment takes: a
  * seeded room's first load builds and commits the derived state of every row,
@@ -136,9 +136,9 @@ type Rooms = FabrichatBenchmarkRooms<FabrichatRoomFixture>;
 let seeding: Promise<Rooms> | undefined;
 
 /**
- * Seeds every room in turn on first use. A seed child can use up to 8 GB of
- * heap, so only one seed process is alive at a time, and all setup finishes
- * before any segment starts.
+ * Seeds every room on first use, each in a child of its own and all three
+ * together, and resolves once all of them have finished, so that no setup
+ * work runs while a segment measures.
  */
 function rooms(): Promise<Rooms> {
   const seed = (label: string) =>

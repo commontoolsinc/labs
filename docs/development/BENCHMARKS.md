@@ -1033,9 +1033,9 @@ and neither changes what another segment measures. Each `send` adds one message
 to its room, so the room holds thirty messages before the first send and
 thirty-six before the last; each `react` adds one reaction, to a different
 message each time, and leaves the messages as they were. The three rooms seed
-in turn, since each seed child can use up to 8 GB of heap. All three finish
-before the first segment starts, leaving at most one seed child alive and no
-setup work in a measured interval. One read-accounted sample each of `messages`
+together, each in a child of its own, and all three finish before the first
+segment starts, so no seed child is alive and no setup work runs in a measured
+interval. One read-accounted sample each of `messages`
 and `send`, taken in a browser of its own, goes to stderr with the same counters
 the rendered lunch-poll benchmark records.
 

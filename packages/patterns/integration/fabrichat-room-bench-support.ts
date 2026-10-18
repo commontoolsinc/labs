@@ -64,17 +64,20 @@ export interface FabrichatBenchmarkRooms<Room> {
 }
 
 /**
- * Seeds the fixed-size benchmark's rooms in turn. A seed child can use up to
- * 8 GB of heap, so only one seed operation may be active at a time.
+ * Seeds the fixed-size benchmark's rooms together, so that a run waits for the
+ * slowest seed rather than for all three in turn, and resolves only once every
+ * one has finished, so that no seed is still running while a segment measures.
+ * Rejects as soon as one seed does.
  */
 export async function seedFabrichatBenchmarkRooms<Room>(
   seed: (label: keyof FabrichatBenchmarkRooms<Room>) => Promise<Room>,
 ): Promise<FabrichatBenchmarkRooms<Room>> {
-  return {
-    read: await seed("read"),
-    send: await seed("send"),
-    react: await seed("react"),
-  };
+  const [read, send, react] = await Promise.all([
+    seed("read"),
+    seed("send"),
+    seed("react"),
+  ]);
+  return { read, send, react };
 }
 
 /**
