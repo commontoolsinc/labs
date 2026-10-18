@@ -5502,6 +5502,11 @@ export class Runner {
       pattern: Pattern;
       stage: (tx: IExtendedStorageTransaction) => void;
     } | undefined;
+    // The work the pattern watcher has in flight following a move of the
+    // piece's pointer, from seeing the move until it runs the incoming pattern
+    // or keeps the running one. A recovering instantiation waits it out: only
+    // once it settles is it known whether the move installed a graph.
+    const pointerFollows = new Set<Promise<unknown>>();
 
     // Helper to instantiate nodes for a pattern. Returns the settlement of the
     // transaction it commits itself, and nothing when it stages into `useTx`
@@ -5782,18 +5787,53 @@ export class Runner {
               retryReadinessTeardown.signal,
             );
 
-            // A stop aborts the readiness/pull work above; a runtime cycle,
-            // pointer change, or newer instantiation during the wait owns the
-            // key now. Otherwise retry, handing the retry what it may still
-            // recover, so that a failure it may not tears the registration
-            // down instead of spinning.
-            if (
-              retryReadinessTeardown.signal.aborted || !active ||
-              startLifecycleEpoch !== this.#lifecycleEpoch ||
-              registrations.get(key) !== cancel ||
-              currentPatternKey !== patternKeyAtInstantiation ||
-              cancelNodes !== undefined
-            ) {
+            // A pointer that moved during the wait has a follow in flight,
+            // which either runs the incoming pattern or keeps the running
+            // one. The retry waits for it: a retry staged first would
+            // re-stage the running pattern's setup repair over a pointer
+            // that names another pattern, which the repair refuses, and its
+            // failure would tear down the piece the follow is about to run.
+            if (pointerFollows.size > 0) {
+              const tornDown = new Promise<void>((resolve) =>
+                retryReadinessTeardown.signal.addEventListener(
+                  "abort",
+                  () => resolve(),
+                  { once: true },
+                )
+              );
+              while (
+                pointerFollows.size > 0 &&
+                !retryReadinessTeardown.signal.aborted
+              ) {
+                await Promise.race([
+                  Promise.allSettled([...pointerFollows]),
+                  tornDown,
+                ]);
+              }
+            }
+
+            // A stop aborts the waits above; a runtime cycle, a newer
+            // registration, or a newer instantiation, the incoming pattern's
+            // among them, owns the key now. A follow that kept the running
+            // pattern installed no graph for it, so the retry below is what
+            // gives that pattern a graph to keep. Otherwise retry, handing
+            // the retry what it may still recover, so that a failure it may
+            // not tears the registration down instead of spinning.
+            const supersededBy = retryReadinessTeardown.signal.aborted ||
+                !active
+              ? "a stop"
+              : startLifecycleEpoch !== this.#lifecycleEpoch
+              ? "a runtime cycle"
+              : registrations.get(key) !== cancel
+              ? "a newer registration"
+              : cancelNodes !== undefined
+              ? "a newer instantiation"
+              : undefined;
+            if (supersededBy !== undefined) {
+              logger.warn("piece-start-commit-superseded", () => [
+                `piece-start commit ${instantiateActionId} was not retried: ` +
+                `${supersededBy} took the piece over during its catch-up`,
+              ]);
               return;
             }
             // A retry reads the documents the catch-up loaded. One that could
@@ -5838,6 +5878,15 @@ export class Runner {
               return failure;
             }
           };
+          // The settlement of a commit whose setup writes landed. A retry
+          // says so at the level `piece-start-commit-recovering` is logged
+          // at, so that each recovery's log says how it ended.
+          const reportRecovered = (): undefined => {
+            if (retry === undefined) return;
+            logger.warn("piece-start-commit-recovered", () => [
+              `piece-start commit ${instantiateActionId} landed on its retry`,
+            ]);
+          };
           const commitWork = actualTx.commit().settled.then(
             async ({ error }): PieceInstantiationSettlement => {
               if (error !== undefined) {
@@ -5873,9 +5922,9 @@ export class Runner {
                 return failure;
               }
               const settlement = waveSettlementOf(actualTx);
-              if (settlement === undefined) return;
+              if (settlement === undefined) return reportRecovered();
               const settled = await settlement;
-              if (settled.error === undefined) return;
+              if (settled.error === undefined) return reportRecovered();
 
               const waveWithdrawalCause = settled.error.waveWithdrawalCause;
               if (waveWithdrawalCause === "wave-abandoned") {
@@ -5936,6 +5985,12 @@ export class Runner {
         follows.isCancelled = true;
         markCancelled();
       });
+      /** Records `work` among the follows a recovering instantiation waits out. */
+      const followingPointer = (work: Promise<unknown>): void => {
+        pointerFollows.add(work);
+        const settle = () => pointerFollows.delete(work);
+        work.then(settle, settle);
+      };
       // A hot-swap targets a DIFFERENT program over this piece's existing doc:
       // the incoming pattern's internal cells and its argument-schema
       // defaults have never been materialized here. A fresh start() does
@@ -6076,6 +6131,7 @@ export class Runner {
         // the cycle that sealed into it ends, so a caller in that cycle could
         // not wait for it (`patternPointerFollowed()`), and an event held on it
         // would hold the wave (`pendingPatternChangeFor()`).
+        followingPointer(setupWork);
         if (this.#runtime.sealDestinationInstalled) {
           this.#pendingWatcherPatternLoads.add(setupWork);
           setupWork.finally(() =>
@@ -6165,6 +6221,7 @@ export class Runner {
                 err,
               );
             });
+          followingPointer(named);
           this.#trackWatcherPatternLoad(pieceKey, follows, named);
           return;
         }
@@ -6410,6 +6467,7 @@ export class Runner {
               err,
             );
           });
+        followingPointer(watcherLoad);
         this.#trackWatcherPatternLoad(pieceKey, follows, watcherLoad);
       };
       addCancel(
@@ -6440,6 +6498,7 @@ export class Runner {
             }
             followPointer(newRef, newKey);
           });
+          followingPointer(followed);
           this.#trackWatcherPatternLoad(pieceKey, follows, followed);
         }),
       );

@@ -7316,10 +7316,22 @@ supply; OW29/OW32/OW34 closed):
     waits for retry readiness, and instantiates the still-current
     pattern once into the next wave. A stop/stopAll/dispose aborts that
     readiness and any named-document pull through the outer registration's
-    cancellation signal; a runtime cycle, pointer change, or newer node
-    group wins through exact guards. A second drop tears the exact
-    registration down rather than spinning. In every posture, an immediate
-    stale read follows the same catch-up and reinstantiation path, whether
+    cancellation signal; a runtime cycle, a newer registration, or a newer
+    node group wins through exact guards. A pointer that moved during the
+    wait has a follow in flight, and the retry waits for it to settle
+    first: a retry staged sooner would re-stage a setup repair the start
+    owes over a pointer naming another pattern, which the repair refuses.
+    A follow that runs the incoming pattern wins as a newer node group. One
+    that keeps the running pattern installs no graph for it, so the retry
+    instantiates it. Every way a recovery ends is logged after its
+    `piece-start-commit-recovering`: `piece-start-commit-recovered` when
+    the retry's setup lands, `piece-start-commit-superseded` when something
+    else took the piece over, `piece-start-commit-abandoned`,
+    `piece-start-commit-failed`, or a further
+    `piece-start-commit-recovering` for another round. A recovery still
+    waiting for its catch-up has logged nothing further. A second drop tears
+    the exact registration down rather than spinning. In every posture, an
+    immediate stale read follows the same catch-up and reinstantiation path, whether
     the server refuses it or the replica's own consistency check does because
     another writer's change arrived between the read and the commit: it is
     the commit-time form of losing a race to a concurrent write — under server
