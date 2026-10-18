@@ -123,6 +123,28 @@ describe("label-view transactions", () => {
     });
   });
 
+  it("reports a failed read, and throws nothing, when the transaction cannot be opened", async () => {
+    await withRuntime(async (runtime) => {
+      const leaf = await linkedRow(runtime);
+      const edit = runtime.edit.bind(runtime);
+      runtime.edit = (() => {
+        throw new Error("no transaction for this read");
+      }) as typeof runtime.edit;
+      try {
+        expect(cfcLabelViewForResolvedCellWithStatus(leaf)).toEqual({
+          view: undefined,
+          readFailed: true,
+        });
+        expect(cfcLabelViewForCellWithStatus(leaf)).toEqual({
+          view: undefined,
+          readFailed: true,
+        });
+      } finally {
+        runtime.edit = edit;
+      }
+    });
+  });
+
   it("opens no transaction for a cell bound to a live one", async () => {
     await withRuntime(async (runtime) => {
       const leaf = await linkedRow(runtime);

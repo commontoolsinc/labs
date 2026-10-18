@@ -52,10 +52,14 @@ worker's receipt) and the handler's own time (`handle`). From the live root:
 | `delivery/cell:subscribe`          | 1,313 | 2.0 s  | 6.5 s  | 11.6 s | 3,304 s |
 | `runtime-client.cfc-label/total`   | 1,393 | 3 ms   | 12 ms  | 814 ms | 7.2 s   |
 
-A label read is handled in 3 ms. The 65 s is the time the request sat in the
-inbox while the worker's event loop was held by something else. The loop's
-own lag counter (`runner.loop/workerLag`, 1,078 samples) recorded single
-stalls of 76.3 s, 67.5 s and 49.0 s, 267 s in all.
+A label read is handled in 3 ms. What a label read waits for is the inbox:
+the delivery row's total is 450 times the handler's. The 65 s median was
+read from an older generation of the root during a load burst, through the
+Weaver's round-trip rows; the generation read here is younger and its longest
+inbox wait is 29.3 s, with the loop's own lag counter
+(`runner.loop/workerLag`, 1,078 samples) recording single stalls of 76.3 s,
+67.5 s and 49.0 s, 267 s in all. A request posted at the start of such a
+stall waits the whole of it.
 
 ## What holds the loop
 
@@ -130,11 +134,13 @@ transactions a label read opens hold theirs only until the read returns.
 ## What this changed
 
 A label read of a cell bound to no transaction (every IPC label read, every
-outbound cell ref's view, the display-fit reads) opened three transactions
-for one read: one for the cell's own stored labels, one for the labels along
-the links the path follows, one for the labels of the document the path
-resolves to, each with its own delegation copy and an empty resolution memo,
-so the link was resolved twice. `label-view.ts` now resolves the transaction
+outbound cell ref's view, the display-fit reads) opened a transaction for
+each read it joins: one for the cell's own stored labels and one for the
+labels along the links the path follows, two for the plain read
+(`cfcLabelViewForCell`), and a third for the labels of the document the path
+resolves to in the resolved read (`cfcLabelViewForResolvedCell`), each with
+its own delegation copy and an empty resolution memo, so the resolved read
+resolved the link twice. `label-view.ts` now resolves the transaction
 once per read and the three reads share it; a cell bound to a live
 transaction already read through that one and still opens none
 (`cfc-label-view-transactions.test.ts`).

@@ -50,8 +50,7 @@ type LabelQueryableCell = {
  * transaction the read runs on, and the link the cell names. A cell bound to
  * a live transaction reads through it; one bound to none reads through one
  * transaction opened for the whole read, so the reads the view joins share
- * one snapshot memo and one read cache. Absent for a value that is not a
- * cell, or whose link cannot be read, which carries at most a view.
+ * one snapshot memo and one read cache.
  */
 type LabelReadScope = {
   runtime: Runtime;
@@ -59,22 +58,40 @@ type LabelReadScope = {
   link: NormalizedFullLink;
 };
 
-const labelReadScope = (cell: unknown): LabelReadScope | undefined => {
+/**
+ * The scope a label read of `cell` runs in, or none for a value that is not
+ * a cell or whose link cannot be read, which carries at most a view. A cell
+ * whose transaction cannot be opened is a failed read: nothing stored can be
+ * read for it, which is not the same as nothing being stored.
+ */
+type LabelReadScopeResult = {
+  scope: LabelReadScope | undefined;
+  readFailed: boolean;
+};
+
+const labelReadScope = (cell: unknown): LabelReadScopeResult => {
   if (
     !isObjectOrArray(cell) ||
     typeof cell.getAsNormalizedFullLink !== "function" ||
     !isCell(cell)
   ) {
-    return undefined;
+    return { scope: undefined, readFailed: false };
   }
   let link: NormalizedFullLink;
   try {
     link = (cell as LabelQueryableCell).getAsNormalizedFullLink();
   } catch {
-    return undefined;
+    return { scope: undefined, readFailed: false };
   }
-  const runtime = cellRuntime(cell);
-  return { runtime, tx: runtime.readTx(cellTx(cell)), link };
+  try {
+    const runtime = cellRuntime(cell);
+    return {
+      scope: { runtime, tx: runtime.readTx(cellTx(cell)), link },
+      readFailed: false,
+    };
+  } catch {
+    return { scope: undefined, readFailed: true };
+  }
 };
 
 // `metadata` is what a reader of a document instance answers to
@@ -221,13 +238,13 @@ export const cfcLabelViewForCellWithStatus = (
 /** {@link cfcLabelViewSourceForCell}, read through `scope`. */
 const labelViewSourceForCell = (
   cell: unknown,
-  scope: LabelReadScope | undefined,
+  { scope, readFailed }: LabelReadScopeResult,
 ): CfcLabelViewSource => {
   if (scope === undefined) {
     const view = getCarriedCfcLabelView(cell);
     return {
       view,
-      readFailed: false,
+      readFailed,
       spaces: cfcLabelViewOriginSpaces(view),
     };
   }
@@ -329,10 +346,12 @@ const resolvedMetadataForCell = (
  * undefined when `cell` names no document.
  */
 const resolvedTargetLabelView = (
-  scope: LabelReadScope | undefined,
+  { scope, readFailed }: LabelReadScopeResult,
   options: ResolvedLabelReadOptions,
 ): CfcLabelViewStatus | undefined => {
-  if (scope === undefined) return undefined;
+  if (scope === undefined) {
+    return readFailed ? { view: undefined, readFailed } : undefined;
+  }
   const resolved = resolvedMetadataForCell(scope, options);
   return {
     view: cfcLabelViewFromMetadata(resolved.metadata, resolved.path),
