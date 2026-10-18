@@ -1304,7 +1304,10 @@ where a requeued or late-drained handler finds it, or mid-wave, where the
 overlap would otherwise requeue the event and the requeued run would
 write over it again. The event still completes: its other writes, its
 consequence mark and its watermark advance ride the wave commit, and
-`consequenceOf` names it. The patches it keeps on a doc go through this
+`consequenceOf` names it, so a wave whose consequence lost every domain
+write still commits that entry's consequence, and an entry held behind
+it (events.md §5) re-drains at that wave as it would behind any other
+consequence. The patches it keeps on a doc go through this
 class's CAS without the dropped ones. The store ends where applying the
 dropped writes at the event's position and the session's writes on top
 would have left it, and nothing can have read a dropped value in
