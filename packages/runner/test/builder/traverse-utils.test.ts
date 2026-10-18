@@ -33,6 +33,22 @@ describe("traverse-utils", () => {
   });
 
   describe("traverseValue()", () => {
+    it("rebuilds a record's own `__proto__` member as an own member", () => {
+      const record: Record<string, unknown> = {};
+      Object.defineProperty(record, "__proto__", {
+        value: { marker: true },
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+      const copy = traverseValue({ record }, () => undefined) as {
+        record: Record<string, unknown>;
+      };
+      expect(Object.hasOwn(copy.record, "__proto__")).toBe(true);
+      expect(copy.record["__proto__"]).toEqual({ marker: true });
+      expect(Object.getPrototypeOf(copy.record)).toBe(Object.prototype);
+    });
+
     it("keeps the holes of a sparse array in the rebuilt copy", () => {
       const sparse: unknown[] = [];
       sparse[1] = "x";

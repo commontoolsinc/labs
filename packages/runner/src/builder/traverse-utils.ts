@@ -39,6 +39,29 @@ export function visitValue(
 }
 
 /**
+ * Helper for the rebuild, which gives `copy` the own property `key` holding
+ * `value`. An assignment would do for every name but `__proto__`, which an
+ * engine that keeps the `Object.prototype` accessor routes to the prototype
+ * setter; that one is defined instead.
+ */
+function defineOwn(
+  copy: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): void {
+  if (key === "__proto__") {
+    Object.defineProperty(copy, key, {
+      value,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  } else {
+    copy[key] = value;
+  }
+}
+
+/**
  * Helper for `traverseValue()` and `visitValue()`, which walks one value and
  * rebuilds its containers only when `rebuild` is set.
  */
@@ -117,7 +140,7 @@ function walkValue(
       const copy: Record<string, unknown> = {};
       for (const key in record) {
         if (Object.hasOwn(record, key)) {
-          copy[key] = walkValue(record[key], fn, seen, true);
+          defineOwn(copy, key, walkValue(record[key], fn, seen, true));
         }
       }
       // A pattern copied here must keep its link back to the original
