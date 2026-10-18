@@ -51,6 +51,32 @@ export interface SeedLoadedRoomOptions {
   report: (message: string) => void;
 }
 
+/** The fixtures used by the fixed-size room benchmark. */
+export interface FabrichatBenchmarkRooms<Room> {
+  /** The room every segment but `send` and `react` visits. */
+  read: Room;
+
+  /** The room `send` writes to. */
+  send: Room;
+
+  /** The room `react` writes to. */
+  react: Room;
+}
+
+/**
+ * Seeds the fixed-size benchmark's rooms in turn. A seed child can use up to
+ * 8 GB of heap, so only one seed operation may be active at a time.
+ */
+export async function seedFabrichatBenchmarkRooms<Room>(
+  seed: (label: keyof FabrichatBenchmarkRooms<Room>) => Promise<Room>,
+): Promise<FabrichatBenchmarkRooms<Room>> {
+  return {
+    read: await seed("read"),
+    send: await seed("send"),
+    react: await seed("react"),
+  };
+}
+
 /**
  * Seeds a room, then loads it once as its starter, untimed, and returns it.
  *
