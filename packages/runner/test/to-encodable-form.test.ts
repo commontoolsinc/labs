@@ -56,6 +56,21 @@ describe("to-encodable-form", () => {
   });
 
   describe("withAliasBindings", () => {
+    it("keeps the holes of a sparse array, at the array's length", () => {
+      // The data model tells a hole from a stored `undefined`, so a bound
+      // array has exactly the holes its input has.
+      const sparse: unknown[] = [];
+      sparse[0] = 1;
+      sparse[2] = { nested: [3] };
+      const result = withAliasBindings({ list: sparse }) as {
+        list: unknown[];
+      };
+      expect(result.list.length).toBe(3);
+      expect(1 in result.list).toBe(false);
+      expect(result.list[0]).toBe(1);
+      expect(result.list[2]).toEqual({ nested: [3] });
+    });
+
     it("should serialize shared object references correctly", () => {
       // Regression test: shared style objects used across siblings in .map()
       // should all serialize with full data, not {} for the 3rd+ occurrence.

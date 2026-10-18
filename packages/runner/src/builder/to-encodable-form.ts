@@ -370,17 +370,19 @@ function bindNodeMember(
 
 /**
  * Helper for the binding walks, which binds each element of an inert array
- * through `bindElement`, at its index on the walk's path.
+ * through `bindElement`, at its index on the walk's path. A hole stays a
+ * hole: the data model tells one from a stored `undefined`.
  */
 function bindElements<Element>(
   elements: readonly unknown[],
   walk: BindingWalk,
   bindElement: (element: unknown, walk: BindingWalk) => Element,
 ): Element[] {
-  const result: Element[] = [];
+  const result: Element[] = new Array(elements.length);
   for (let index = 0; index < elements.length; index++) {
+    if (!(index in elements)) continue;
     walk.path.push(index);
-    result.push(bindElement(elements[index], walk));
+    result[index] = bindElement(elements[index], walk);
     walk.path.pop();
   }
   return result;
