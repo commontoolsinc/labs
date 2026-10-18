@@ -96,7 +96,11 @@ function walkValue(
     if (Array.isArray(value)) {
       const elements = value as unknown[];
       if (!rebuild) {
-        for (const element of elements) walkValue(element, fn, seen, false);
+        // By index, skipping holes, as the rebuild's `map()` does: a hole is
+        // no value for `fn` to see.
+        for (let index = 0; index < elements.length; index++) {
+          if (index in elements) walkValue(elements[index], fn, seen, false);
+        }
         return value;
       }
       return elements.map((v) => walkValue(v, fn, seen, true));
