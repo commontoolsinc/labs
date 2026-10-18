@@ -125,6 +125,12 @@ Most packages with benches define a `bench` task for running them locally
 (see `packages/runner/deno.jsonc`); otherwise invoke `deno bench` on a
 single file.
 
+`packages/state-inspector/test/reconstruct-range.bench.ts` is a local replay
+benchmark. It holds the replay suffix fixed while growing the preceding history
+from 100 to 10,000 revisions, covering snapshot-backed reads and exact-row reads
+within a multi-operation commit. Fixture construction and output assertions are
+outside the timed interval. Run it with `deno bench -A` and the file path.
+
 `packages/runner/test/view-replication.bench.ts` measures view selection through
 chains of 100, 300, and 1,000 computations, each mixed with an equally large
 unrelated chain. Fixture construction stays outside timing; index construction
@@ -1017,16 +1023,19 @@ benchmark's do.
 and neither changes what another segment measures. Each `send` adds one message
 to its room, so the room holds thirty messages before the first send and
 thirty-six before the last; each `react` adds one reaction, to a different
-message each time, and leaves the messages as they were. One read-accounted sample each of
-`messages` and `send`, taken in a browser of its own, goes to stderr with the
-same counters the rendered lunch-poll benchmark records.
+message each time, and leaves the messages as they were. The three rooms seed
+in turn, since each seed child can use up to 8 GB of heap. All three finish
+before the first segment starts, leaving at most one seed child alive and no
+setup work in a measured interval. One read-accounted sample each of `messages`
+and `send`, taken in a browser of its own, goes to stderr with the same counters
+the rendered lunch-poll benchmark records.
 
 `react` adds to an existing reaction's tally rather than picking one from the
 row's reaction picker. At the shell's 1024-pixel viewport, the picker the row
 opens lays its quick reactions out under the row's author avatar, which takes
 the click.
 
-`CF_FABRICHAT_MEMBERS` and `CF_FABRICHAT_MESSAGES` resize both rooms for a
+`CF_FABRICHAT_MEMBERS` and `CF_FABRICHAT_MESSAGES` resize all three rooms for a
 local run. The `react` segment needs one seeded reaction per invocation, which
 a room of fewer than nineteen messages does not carry, and the file says so
 before it seeds anything.

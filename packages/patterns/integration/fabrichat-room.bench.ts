@@ -36,11 +36,11 @@
  * one reaction to a message that had none of the viewer's, which leaves the
  * room's messages as they were.
  *
- * The three rooms are seeded together on first use, each by members whose
- * identities are new to this run, so each starter's Home lists that one room. Each is then loaded
- * once, untimed, through the same steps a segment takes: a seeded room's first
- * load builds and commits the derived state of every row, which no later load
- * repeats, and that load is not what any segment measures.
+ * The three rooms are seeded in turn on first use, each by members whose
+ * identities are new to this run, so each starter's Home lists that one room.
+ * Each is then loaded once, untimed, through the same steps a segment takes: a
+ * seeded room's first load builds and commits the derived state of every row,
+ * which no later load repeats, and that load is not what any segment measures.
  *
  * Requirements are those of `topic-board-navigation.bench.ts`: a toolshed at
  * `API_URL`, a shell at `FRONTEND_URL`, a Chrome for Astral, and nothing but
@@ -49,9 +49,9 @@
  *     API_URL=http://localhost:8000/ FRONTEND_URL=http://localhost:5173/ \
  *       deno bench -A packages/patterns/integration/fabrichat-room.bench.ts
  *
- * `CF_FABRICHAT_MEMBERS` and `CF_FABRICHAT_MESSAGES` resize both rooms for a
- * local run; CI leaves them unset so its series all describe the same room.
- * The size in force goes to stderr at startup.
+ * `CF_FABRICHAT_MEMBERS` and `CF_FABRICHAT_MESSAGES` resize all three rooms
+ * for a local run; CI leaves them unset, so its series all describe the same
+ * room. The size in force goes to stderr at startup.
  */
 
 import { debugStr } from "@commonfabric/data-model";
@@ -60,8 +60,10 @@ import { describeThrown } from "../../integration/describe-thrown.ts";
 import { collectBrowserLoadSummary } from "./cfc-browser-helpers.ts";
 import {
   benchPosture,
+  type FabrichatBenchmarkRooms,
   reporter,
   runPassphrase,
+  seedFabrichatBenchmarkRooms,
   seedLoadedRoom,
   sizeFromEnv,
 } from "./fabrichat-room-bench-support.ts";
@@ -129,24 +131,16 @@ report(
 );
 
 /** The rooms the segments visit, by what they do there. */
-interface Rooms {
-  /** The room every segment but `send` and `react` visits. */
-  read: Promise<FabrichatRoomFixture>;
+type Rooms = FabrichatBenchmarkRooms<FabrichatRoomFixture>;
 
-  /** The room `send` writes to. */
-  send: Promise<FabrichatRoomFixture>;
-
-  /** The room `react` writes to. */
-  react: Promise<FabrichatRoomFixture>;
-}
-
-let seeding: Rooms | undefined;
+let seeding: Promise<Rooms> | undefined;
 
 /**
- * Seeds every room together on first use, each in a child of its own, so a run
- * pays for the slowest of the seeds rather than for all of them in turn.
+ * Seeds every room in turn on first use. A seed child can use up to 8 GB of
+ * heap, so only one seed process is alive at a time, and all setup finishes
+ * before any segment starts.
  */
-function rooms(): Rooms {
+function rooms(): Promise<Rooms> {
   const seed = (label: string) =>
     seedLoadedRoom({
       passphrase: `${PASSPHRASE} ${label}`,
@@ -154,8 +148,13 @@ function rooms(): Rooms {
       messageCount: MESSAGES,
       report,
     });
-  seeding ??= { read: seed("read"), send: seed("send"), react: seed("react") };
+  seeding ??= seedFabrichatBenchmarkRooms(seed);
   return seeding;
+}
+
+/** Returns one of the rooms once all three have finished seeding. */
+function room(label: keyof Rooms): () => Promise<FabrichatRoomFixture> {
+  return async () => (await rooms())[label];
 }
 
 /** Invocations of each case so far, by name. */
@@ -277,21 +276,21 @@ async function draftNext(session: RoomSession): Promise<() => Promise<void>> {
 
 segment(
   "load",
-  () => rooms().read,
+  room("read"),
   () => Promise.resolve(),
   (session) => session.load(),
 );
 
 segment(
   "sign in",
-  () => rooms().read,
+  room("read"),
   (session) => session.load(),
   (session) => session.signIn(),
 );
 
 segment(
   "messages",
-  () => rooms().read,
+  room("read"),
   signedIn,
   (session) => session.showMessages(),
   async (session) => {
@@ -302,7 +301,7 @@ segment(
 
 segment(
   "send",
-  () => rooms().send,
+  room("send"),
   draftNext,
   (_session, send) => send(),
   draftNext,
@@ -310,7 +309,7 @@ segment(
 
 segment(
   "react",
-  () => rooms().react,
+  room("react"),
   async (session) => {
     await inRoom(session);
     const index = REACTABLE[reacted++];
@@ -324,14 +323,14 @@ segment(
 
 segment(
   "thread",
-  () => rooms().read,
+  room("read"),
   inRoom,
   (session) => session.openThread(THREAD),
 );
 
 segment(
   "journey",
-  () => rooms().read,
+  room("read"),
   () => Promise.resolve(),
   inRoom,
 );

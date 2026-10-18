@@ -1809,9 +1809,11 @@ export interface PieceSourceRevision {
 
   /**
    * When the deployment that served this revision's source released it, in
-   * milliseconds since the epoch (`pattern-release-time.ts`). Carried only by
-   * a revision adopted from a `system:` origin whose host states one; it is
-   * what keeps that piece from being moved to an earlier release.
+   * milliseconds since the epoch (`pattern-release-time.ts`). Carried by a
+   * revision adopted from a `system:` origin whose host states one, and by a
+   * later revision that leaves that same source in place, which carries the
+   * latest time known for it ({@link knownPieceReleasedAt}). It is what keeps
+   * the piece from being moved to an earlier release.
    */
   releasedAt?: number;
 }
@@ -1899,6 +1901,14 @@ export interface PieceSourceTransition {
 
   /** The release time the revision records (`PieceSourceRevision`). */
   releasedAt?: number;
+
+  /**
+   * Refuse the transition with {@link PIECE_RELEASE_OVERTAKEN} unless
+   * `releasedAt` is later than the latest release time known, when it
+   * commits, for the source the piece runs. Set by a step whose review relied
+   * on the candidate being the later release.
+   */
+  requireLaterRelease?: boolean;
 }
 
 /**
@@ -15315,6 +15325,47 @@ export const PIECE_SOURCE_MOVED =
   "piece source changed while the source transition was being prepared";
 
 /**
+ * The reason a transition marked `requireLaterRelease` is refused: by the time
+ * it commits, the source the piece runs is known to have been released at or
+ * after the candidate, so the candidate is no longer the later release its
+ * review took it for.
+ *
+ * Exported so that the caller that set the requirement can tell this refusal
+ * from any other and review the candidate again.
+ */
+export const PIECE_RELEASE_OVERTAKEN =
+  "the piece's source was confirmed at a later release while the update was " +
+  "being prepared";
+
+/**
+ * The latest release time known for the source `resultCell` runs, `running`:
+ * the latest one recorded by the revisions naming it since the piece last
+ * moved to it from another source, or a later one the piece's reconciliation
+ * record confirms for it. `undefined` when none says.
+ */
+export function knownPieceReleasedAt(
+  resultCell: Cell<unknown>,
+  running: { identity: string; symbol: string },
+): number | undefined {
+  const history = getPieceSourceRevisions(resultCell);
+  let latest: number | undefined;
+  for (let index = history.length - 1; index >= 0; index--) {
+    const revision = history[index];
+    if (patternIdentityKey(revision.pattern) !== patternIdentityKey(running)) {
+      break;
+    }
+    if (revision.releasedAt !== undefined) {
+      latest = Math.max(latest ?? revision.releasedAt, revision.releasedAt);
+    }
+  }
+  const confirmed = getPieceReconciliation(resultCell)?.confirmed;
+  if (confirmed?.identity === running.identity) {
+    latest = Math.max(latest ?? confirmed.releasedAt, confirmed.releasedAt);
+  }
+  return latest;
+}
+
+/**
  * The session-side pattern the prepare/apply moved-guards below check a KEYLESS
  * piece's source state against. A keyless expected pattern is session-side by
  * construction — the durable pointer legitimately holds nothing and a
@@ -15405,6 +15456,16 @@ export function applyPieceSourceTransition(
   ) {
     throw new Error(PIECE_SOURCE_MOVED);
   }
+  // Read before anything below writes: the reconciliation record this
+  // transition clears may be the only place the latest time is kept.
+  const knownReleasedAt = knownPieceReleasedAt(candidate, current.pattern);
+  if (
+    transition.requireLaterRelease &&
+    (transition.releasedAt === undefined || knownReleasedAt === undefined ||
+      knownReleasedAt >= transition.releasedAt)
+  ) {
+    throw new Error(PIECE_RELEASE_OVERTAKEN);
+  }
   const history = getPieceSourceRevisions(candidate);
   if (
     history.some((revision) => revision.revisionId === transition.revisionId)
@@ -15454,6 +15515,14 @@ export function applyPieceSourceTransition(
     }, rawMetaWriteAuthorization);
   }
 
+  // A transition that leaves the source in place keeps the latest release
+  // time known for it, so a confirmation the cleared reconciliation record
+  // held still orders the piece's later updates.
+  const keepsSource =
+    patternIdentityKey(current.pattern) === patternIdentityKey(nextPattern);
+  const releasedAt = !keepsSource || knownReleasedAt === undefined
+    ? transition.releasedAt
+    : Math.max(transition.releasedAt ?? knownReleasedAt, knownReleasedAt);
   const recordedCurrent = history.at(-1);
   const currentOrigin = normalizePieceSourceOrigin(
     runtime,
@@ -15500,9 +15569,7 @@ export function applyPieceSourceTransition(
     ...(transition.selectedRevisionId === undefined
       ? {}
       : { selectedRevisionId: transition.selectedRevisionId }),
-    ...(transition.releasedAt === undefined
-      ? {}
-      : { releasedAt: transition.releasedAt }),
+    ...(releasedAt === undefined ? {} : { releasedAt }),
   });
   candidate.setMetaRaw(
     "patternSource",

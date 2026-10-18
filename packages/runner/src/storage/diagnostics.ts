@@ -40,6 +40,13 @@ export type SpaceStorageDiagnostic = {
   repairCount: number;
   parkedAcceptLocalSeqs: number[];
   parkedAcceptCount: number;
+
+  /**
+   * This space's share of the manager's sizes, which add every open space
+   * together. Its commit and read counts are the ones above, under the names
+   * the sizes give them.
+   */
+  sizes: SpaceStorageSizes;
 };
 
 /** Bounded current work, without cell values, credentials, or retained history. */
