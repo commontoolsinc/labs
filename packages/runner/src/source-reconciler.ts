@@ -218,7 +218,7 @@ function reconciliationFor(
  * another host has placed on a stated one. An offer stating the same time as
  * the running release is not earlier.
  */
-function isEarlierRelease(
+export function isEarlierRelease(
   offered: number | undefined,
   running: number | undefined,
 ): boolean {
@@ -235,7 +235,7 @@ function isEarlierRelease(
  * (`knownPieceReleasedAt`). A record says only when it confirms that same
  * source.
  */
-function runningReleasedAt(
+export function runningReleasedAt(
   resultCell: Cell<unknown>,
   running: { identity: string; symbol: string },
 ): number | undefined {

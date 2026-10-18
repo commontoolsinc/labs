@@ -1272,6 +1272,26 @@ describe("piece source reconciliation", () => {
           expect(originUpdates(piece)).toHaveLength(1);
         });
 
+        describe("when no offer states a release time", () => {
+          // Without release times nothing orders the offer against what the
+          // piece runs. A host a deploy has not restarted yet and a deliberate
+          // rollback across a runtime too old to load the later source offer
+          // the same thing, the source the history records moving from, and
+          // only the rollback leaves no runtime that can start the later one.
+
+          it("adopts the source its history records moving from, as a rollback", async () => {
+            const { piece, identities, offer } = await followingPiece();
+            await offer({ marker: "v2" });
+            using _unloadable = cannotLoad(identities.v2);
+
+            expect(await offer({ marker: "v1" })).toEqual({
+              outcome: "updated",
+              running: "v1",
+            });
+            expect(originUpdates(piece)).toHaveLength(2);
+          });
+        });
+
         describe("when the move to it displaced the earlier release without a baseline", () => {
           // A transition whose predecessor's source is not retained records no
           // baseline revision for it. It names the predecessor in
