@@ -383,7 +383,8 @@ design, as below.
   Nothing delivers a notice yet (see
   [first contact](FabriChatManager.md#first-contact)), so the manager's
   rendering shows each queued notice with a link to its room, for the room's
-  creator to send on. Whoever opens the room's link, and whoever forgot the
+  creator to send on, until it is reported delivered or the room's roster
+  lists its recipient. Whoever opens the room's link, and whoever forgot the
   room, joins it by writing in it: the room sends the writer's manager
   `joinRoom`, which lists the room, or lists a forgotten one again.
 - **The index discovers rooms and keeps individual choices.** The manager

@@ -11,7 +11,8 @@
  * notice for her a client reported delivered, though she hasn't joined its
  * room. Carol has joined her room before Bob names her profile, so she is
  * offered nothing, and Dave's profile points at no inbox, so he is offered
- * nothing either; both keep their notices. Each person writes their own
+ * nothing either; both keep their notices, though the manager lists only
+ * Dave's, since Carol is on her room's roster. Each person writes their own
  * profile here, so its label names them, as a Fabric profile's does.
  */
 import {
@@ -535,6 +536,17 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
           noticeIdsFor(notices, setup.daveDid).join() ===
             JSON.stringify([setup.daveDid.get(), "d-dave"])
         ),
+      },
+      // Carol is on her room's roster, so the manager lists no notice for
+      // her, though it still holds one. Dave isn't on his, and his is listed.
+      {
+        assertion: assert(() => {
+          const listed = manager.outgoingNotices.map((notice) =>
+            notice.recipient
+          );
+          return !listed.includes(setup.carolDid.get()) &&
+            listed.includes(setup.daveDid.get());
+        }),
       },
       // She has no notice waiting now, and is on the room's roster, so
       // naming her profile again offers her nothing more.
