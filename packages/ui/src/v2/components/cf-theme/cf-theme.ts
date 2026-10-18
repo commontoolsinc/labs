@@ -1,11 +1,12 @@
 import type { IframePresentation } from "@commonfabric/iframe-sandbox";
 import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
 import { ContextConsumer, provide } from "@lit/context";
-import { css, html } from "lit";
+import { css, html, unsafeCSS } from "lit";
 import { property } from "lit/decorators.js";
 
 import { BaseElement } from "../../core/base-element.ts";
 import { valueForDisplay } from "../../core/value-for-display.ts";
+import { surfaceRecipesCSS } from "../../styles/variables.ts";
 import { iframePresentationContext } from "../cf-iframe/cf-iframe.ts";
 import {
   applyThemeToElement,
@@ -125,9 +126,12 @@ export function subscribeToThemeCellValues(
  * @element cf-theme
  */
 export class CFThemeProvider extends BaseElement {
+  // The surface recipes again, derived from this theme rather than inherited
+  // as a component above it fixed them (see `surfaceRecipesCSS`).
   static override styles = css`
     :host {
       display: contents; /* do not add extra layout */
+      ${unsafeCSS(surfaceRecipesCSS)};
     }
   `;
 

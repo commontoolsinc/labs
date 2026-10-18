@@ -6,7 +6,9 @@
 
 import { expect } from "@std/expect";
 
+import { CFCard } from "../cf-card/index.ts";
 import { CFCodeEditor } from "../cf-code-editor/index.ts";
+import { CFHoverReveal } from "../cf-hover-reveal/index.ts";
 import { CFThemeProvider } from "./index.ts";
 
 const OUTER_FONT = "Georgia";
@@ -175,5 +177,41 @@ Deno.test("a theme with nothing in effect above it writes the whole theme", asyn
       .toBe(ACCENT);
   } finally {
     provider.remove();
+  }
+});
+
+/** The background a card draws: its inner container's, in its shadow root. */
+function cardBackground(card: CFCard): string {
+  const inner = card.shadowRoot?.querySelector(".card");
+  if (!inner) throw new Error("cf-card rendered no .card container");
+  return getComputedStyle(inner).backgroundColor;
+}
+
+Deno.test("a card under a tint inside another component draws the tint's surface, not the component's", async () => {
+  // As a chat thread draws a message: the reveal around it is a component
+  // that declares the shared surface recipes, and the bubble is a card in a
+  // cf-theme naming only its surface.
+  const page = new CFThemeProvider();
+  page.theme = { colors: { surface: HOST_SURFACE } };
+  const reveal = new CFHoverReveal();
+  const tint = new CFThemeProvider();
+  tint.theme = { colors: { surface: ACCENT } };
+  const tinted = new CFCard();
+  const plain = new CFCard();
+  tint.append(tinted);
+  reveal.append(tint, plain);
+  page.append(reveal);
+  document.body.append(page);
+  try {
+    await page.updateComplete;
+    await reveal.updateComplete;
+    await tint.updateComplete;
+    await tinted.updateComplete;
+    await plain.updateComplete;
+
+    expect(cardBackground(tinted)).toBe(ACCENT);
+    expect(cardBackground(plain)).toBe(HOST_SURFACE);
+  } finally {
+    page.remove();
   }
 });

@@ -3,6 +3,64 @@
  * This file exports the CSS variables for use in shadow DOM
  */
 
+/**
+ * The shared surface recipes, derived from the `--cf-theme-*` tokens. A
+ * custom property's `var()` resolves where it is declared, so every host that
+ * declares these fixes them to the theme around it. A `cf-theme` declares them
+ * again, so a tint it makes reaches the surfaces beneath it: a card under a
+ * tinted `cf-theme` inside another component would otherwise draw the
+ * component's surface, not the tint's.
+ */
+export const surfaceRecipesCSS = `
+  /*
+   * Shared surface recipes
+   * Components like cards, modals, and toasts should consume these shared
+   * tier tokens instead of defining independent radius, padding, border,
+   * or elevation values inline.
+   */
+  --cf-surface-plain-border-radius: var(
+    --cf-theme-border-radius,
+    var(--cf-border-radius-lg, 0.5rem)
+  );
+  --cf-surface-plain-background: var(--cf-theme-color-surface, #ffffff);
+  --cf-surface-plain-border: 1px solid var(
+    --cf-theme-color-border,
+    #e5e7eb
+  );
+  --cf-surface-plain-padding: var(--cf-spacing-4);
+  --cf-surface-plain-box-shadow: var(--cf-shadow-none);
+
+  --cf-surface-elevated-border-radius: var(--cf-surface-plain-border-radius);
+  --cf-surface-elevated-background: var(--cf-surface-plain-background);
+  --cf-surface-elevated-border: var(--cf-surface-plain-border);
+  --cf-surface-elevated-padding: var(--cf-surface-plain-padding);
+  --cf-surface-elevated-box-shadow: var(
+    --cf-shadow-md,
+    0 4px 6px -1px rgba(0, 0, 0, 0.1),
+    0 2px 4px -1px rgba(0, 0, 0, 0.06)
+  );
+
+  --cf-surface-overlay-border-radius: var(--cf-surface-plain-border-radius);
+  --cf-surface-overlay-background: var(--cf-theme-color-background, #ffffff);
+  --cf-surface-overlay-border: var(--cf-surface-plain-border);
+  --cf-surface-overlay-padding: var(--cf-spacing-4) var(--cf-spacing-5);
+  --cf-surface-overlay-box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  --cf-surface-overlay-sheet-box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.15);
+
+  --cf-surface-transient-border-radius: var(--cf-surface-plain-border-radius);
+  --cf-surface-transient-background: color-mix(
+    in srgb,
+    var(--cf-theme-color-surface, #f8fafc) 85%,
+    transparent
+  );
+  --cf-surface-transient-border: 1px solid var(
+    --cf-theme-color-border,
+    #e2e8f0
+  );
+  --cf-surface-transient-padding: 0.625rem 0.875rem;
+  --cf-surface-transient-box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+`;
+
 export const variablesCSS = `
   /*
    * Canonical token namespaces:
@@ -357,54 +415,7 @@ export const variablesCSS = `
   --cf-surface-translucent-strong: rgba(255, 255, 255, 0.88);
   --cf-overlay-dim: rgba(0, 0, 0, 0.4);
 
-  /*
-   * Shared surface recipes
-   * Components like cards, modals, and toasts should consume these shared
-   * tier tokens instead of defining independent radius, padding, border,
-   * or elevation values inline.
-   */
-  --cf-surface-plain-border-radius: var(
-    --cf-theme-border-radius,
-    var(--cf-border-radius-lg, 0.5rem)
-  );
-  --cf-surface-plain-background: var(--cf-theme-color-surface, #ffffff);
-  --cf-surface-plain-border: 1px solid var(
-    --cf-theme-color-border,
-    #e5e7eb
-  );
-  --cf-surface-plain-padding: var(--cf-spacing-4);
-  --cf-surface-plain-box-shadow: var(--cf-shadow-none);
-
-  --cf-surface-elevated-border-radius: var(--cf-surface-plain-border-radius);
-  --cf-surface-elevated-background: var(--cf-surface-plain-background);
-  --cf-surface-elevated-border: var(--cf-surface-plain-border);
-  --cf-surface-elevated-padding: var(--cf-surface-plain-padding);
-  --cf-surface-elevated-box-shadow: var(
-    --cf-shadow-md,
-    0 4px 6px -1px rgba(0, 0, 0, 0.1),
-    0 2px 4px -1px rgba(0, 0, 0, 0.06)
-  );
-
-  --cf-surface-overlay-border-radius: var(--cf-surface-plain-border-radius);
-  --cf-surface-overlay-background: var(--cf-theme-color-background, #ffffff);
-  --cf-surface-overlay-border: var(--cf-surface-plain-border);
-  --cf-surface-overlay-padding: var(--cf-spacing-4) var(--cf-spacing-5);
-  --cf-surface-overlay-box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-  --cf-surface-overlay-sheet-box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.15);
-
-  --cf-surface-transient-border-radius: var(--cf-surface-plain-border-radius);
-  --cf-surface-transient-background: color-mix(
-    in srgb,
-    var(--cf-theme-color-surface, #f8fafc) 85%,
-    transparent
-  );
-  --cf-surface-transient-border: 1px solid var(
-    --cf-theme-color-border,
-    #e2e8f0
-  );
-  --cf-surface-transient-padding: 0.625rem 0.875rem;
-  --cf-surface-transient-box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-
+${surfaceRecipesCSS}
   /* Z-index — Semantic Layers */
   --cf-z-layer-sticky: 10;
   --cf-z-layer-fixed: 500;
