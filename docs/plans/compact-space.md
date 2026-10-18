@@ -4,7 +4,9 @@
 the dry run, the write path with its verification, the documentation and
 inspector); stage 6, the rehearsal, ran on 2026-10-12 and passed its
 verification, and its last acceptance check, the served edit, closed on
-2026-10-13 with the server-side instrument; stages 7–8 open. Design
+2026-10-13 with the server-side instrument; stage 7 is complete on Estuary
+([production record](../history/topics-board-compaction-2026-10-18.md));
+stage 8 remains open. Design
 written 2026-10-08 against
 the shared Topics space after
 [the October write storm](../history/development/performance/2026-10-07-topics-space-write-storm.md):
@@ -1028,7 +1030,8 @@ operator took.
 ## Stages
 
 Each stage is a pull request. Stages 1 through 5 have landed, stage 6 has
-run and closed its acceptance checks, and stage 7 onward is open. Two engine changes came first, and both have landed: the
+run and closed its acceptance checks, and stage 7 is complete on Estuary.
+Stage 8 remains open. Two engine changes came first, and both have landed: the
 base search, because it preserves history, helps the uncompacted store from
 the deploy that carries it, and is the measurement the compaction decision
 was made against; and the basis guard, because no store may be compacted
@@ -1109,8 +1112,11 @@ until the engine can tell compacted history from absence.
    board page costs the server, which the `cf` instrument understates five
    times over; that is recorded in the runbook and taken up outside this
    plan.
-7. **The production run**, by the operator, from the rehearsed flag set, with
-   the owner's agreement. Stage 1's measurement left disk as the reason:
+7. **The production run** — complete on Estuary with the owner's agreement,
+   `--documents computed: --keep-payloads 7d`, and full verification before
+   installation; see the
+   [production record](../history/topics-board-compaction-2026-10-18.md).
+   Stage 1's measurement left disk as the reason:
    22.7 GB, of which 13.6 GB is commit payloads that I6 reaches outside the
    window, and 1.2 GB revision rows that truncation removes.
 8. **Faithful replay of hollowed commits and explicit refusal of reads
