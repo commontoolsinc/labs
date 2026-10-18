@@ -7318,10 +7318,12 @@ supply; OW29/OW32/OW34 closed):
     readiness and any named-document pull through the outer registration's
     cancellation signal; a runtime cycle, a newer registration, or a newer
     node group wins through exact guards. A pointer that moved during the
-    wait does not win: its swap installs a graph only once its setup lands,
-    and a swap whose setup does not land keeps the running pattern, so the
-    retry instantiates the running pattern and a swap that lands replaces
-    it. Every way a recovery ends is logged after its
+    wait has a follow in flight, and the retry waits for it to settle
+    first: a retry staged sooner would re-stage a setup repair the start
+    owes over a pointer naming another pattern, which the repair refuses.
+    A follow that runs the incoming pattern wins as a newer node group. One
+    that keeps the running pattern installs no graph for it, so the retry
+    instantiates it. Every way a recovery ends is logged after its
     `piece-start-commit-recovering`: `piece-start-commit-recovered` when
     the retry's setup lands, `piece-start-commit-superseded` when something
     else took the piece over, `piece-start-commit-abandoned`,
