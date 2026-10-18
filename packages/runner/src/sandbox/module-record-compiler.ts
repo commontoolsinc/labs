@@ -1,4 +1,8 @@
-import type { Source, SourceMap } from "@commonfabric/js-compiler";
+import type {
+  ModuleDeclarations,
+  Source,
+  SourceMap,
+} from "@commonfabric/js-compiler";
 import {
   resolveDataFilePath,
   resolveImportSpecifier,
@@ -560,6 +564,24 @@ export interface SourcePackageIdentity {
   dataPaths?: readonly string[];
 }
 
+/** How {@link computeModuleIdentities} names and hashes a set of sources. */
+export interface ModuleIdentitiesOptions {
+  /** Whole-program path prefix (`/<id>`) left out of every identity. */
+  idPrefix?: string;
+
+  /** Identity of the runtime surface, as `computeModuleHashes()` takes it. */
+  runtimeFingerprint?: string;
+
+  /** The source-package edges each owning module carries. */
+  sourcePackages?: readonly SourcePackageIdentity[];
+
+  /**
+   * Modules already scanned, keyed by source name, from `scanModules()`. A
+   * source with an entry is resolved from that scan rather than parsed again.
+   */
+  declarations?: ReadonlyMap<string, ModuleDeclarations>;
+}
+
 /**
  * Per-module content-addressed identity (`cf:module/<hash>` minus the `cf:module/`
  * scheme) for every source path, computed prefix-free so identities dedupe
@@ -569,11 +591,7 @@ export interface SourcePackageIdentity {
  */
 export function computeModuleIdentities(
   sources: Source[],
-  options: {
-    idPrefix?: string;
-    runtimeFingerprint?: string;
-    sourcePackages?: readonly SourcePackageIdentity[];
-  } = {},
+  options: ModuleIdentitiesOptions = {},
 ): Map<string, string> {
   const stripPath = (path: string) =>
     stripIdentityPrefix(path, options.idPrefix);
@@ -607,6 +625,14 @@ export function computeModuleIdentities(
       additionalInternalDeps.set(ownerPath, ownerDeps);
     }
   }
+  // Stripping a prefix keeps a module's base name, so its scan still holds.
+  const declarations = new Map<string, ModuleDeclarations>();
+  for (const source of sources) {
+    const declared = options.declarations?.get(source.name);
+    if (declared !== undefined) {
+      declarations.set(stripPath(source.name), declared);
+    }
+  }
   const hashes = computeModuleHashes(
     {
       main: "",
@@ -621,6 +647,7 @@ export function computeModuleIdentities(
         : {}),
       ...(additionalInternalDeps.size === 0 ? {} : { additionalInternalDeps }),
       ...(dataFiles.size === 0 ? {} : { dataFiles }),
+      ...(declarations.size === 0 ? {} : { declarations }),
     },
   );
   const identityByPath = new Map<string, string>();
@@ -654,11 +681,7 @@ export interface FabricMount {
 export function computeFabricModuleIdentities(
   sources: Source[],
   mounts: readonly FabricMount[],
-  options: {
-    idPrefix?: string;
-    runtimeFingerprint?: string;
-    sourcePackages?: readonly SourcePackageIdentity[];
-  } = {},
+  options: ModuleIdentitiesOptions = {},
 ): Map<string, string> {
   const authored: Source[] = [];
   const mountFiles = new Map<FabricMount, Source[]>();
@@ -687,6 +710,9 @@ export function computeFabricModuleIdentities(
       idPrefix: `${FABRIC_MOUNT_ROOT}${mount.entryIdentity}`,
       ...(options.runtimeFingerprint !== undefined
         ? { runtimeFingerprint: options.runtimeFingerprint }
+        : {}),
+      ...(options.declarations !== undefined
+        ? { declarations: options.declarations }
         : {}),
     });
     const actual = identities.get(mount.entryPath);

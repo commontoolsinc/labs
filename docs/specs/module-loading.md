@@ -270,7 +270,7 @@ order, which is exactly the bottom-up order the Merkle hash needs.
 
 **Import-edge completeness.** Every `import`, `import type`, `export … from`, and
 inline `import("./mod").Type` edge is collected
-([`collectImportSpecifiers`][c5]); there is no value/type filtering and no
+([`scanModuleDeclarations`][c5]); there is no value/type filtering and no
 dependence on emit elision. `export * from` barrel edges are counted as ordinary
 edges, so a barrel does not collapse distinct modules into one hash. Missing a
 type edge would silently treat a behavior-changing type edit as a no-op, which is
@@ -428,7 +428,7 @@ or inline `import("cf:…").Type` reference cannot remain mutable in deployed
 source. If it could, a later type change could alter generated schemas and
 executable behavior without changing the importing pattern's stored source. The
 current `rewriteFabricPins` visitor already rewrites import declarations, export
-declarations, and inline import-type nodes. [`collectImportSpecifiers`][c5]
+declarations, and inline import-type nodes. [`scanModuleDeclarations`][c5]
 already includes these edges in module identity. Automatic piece deployment still
 uses an ordinary local resolver before invoking the rewriter. It therefore
 rejects every fabric import or export declaration at that stage, including an
@@ -974,8 +974,11 @@ index's restart-stable `action` column,
   [`computeFabricModuleIdentities`][c7]. [`sourcePackageOwners`][c17] assigns
   each source-package edge to the module that owns it.
 - Emit configuration: [`getCompilerOptions`][c4] / [`MODULE_KIND`][c4].
-- Import-graph discovery, including `export * from` and inline import types:
-  [`collectImportSpecifiers`][c5].
+- Import-graph discovery, including `export * from` and inline import types,
+  and the `dataFile()` reads that decide which module owns a data file's edge:
+  [`scanModuleDeclarations`][c5], one parse per module, shared across a
+  compile through [`scanModules`][c3]. [`collectImportSpecifiers`][c5] and
+  [`collectDataFileNames`][c5] each return one half of that scan.
 - Record assembly and the warm-load rebuild: [`compileSourcesToRecords`][c7],
   [`deriveModuleRecordFields`][c7], [`buildRecordsFromCompiled`][c7].
 - Loading: [`loadModuleGraph`][c6] / [`importModuleGraphNow`][c6] over
