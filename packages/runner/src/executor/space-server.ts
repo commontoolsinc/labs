@@ -3493,14 +3493,20 @@ export class SpaceServer implements TransactionSealDestination {
     );
   }
 
-  /** Whether the store holds `address`'s entry without its consequence. */
-  #streamEntryPending(address: StreamEntryAddress): boolean {
-    const stored = this.#storedStreamEntry(
-      address.sidecarId,
-      address.eventId,
-      address.seq,
-    );
-    return stored !== undefined && stored.consequenced !== true;
+  /**
+   * Whether the store holds any of the first `count` of `addresses`' entries
+   * without its consequence.
+   */
+  #anyStreamEntryPending(
+    addresses: readonly StreamEntryAddress[],
+    count: number,
+  ): boolean {
+    for (let i = 0; i < count; i++) {
+      const { sidecarId, eventId, seq } = addresses[i];
+      const stored = this.#storedStreamEntry(sidecarId, eventId, seq);
+      if (stored !== undefined && stored.consequenced !== true) return true;
+    }
+    return false;
   }
 
   #stageDeliveryCheckpoint(
@@ -4056,6 +4062,8 @@ export class SpaceServer implements TransactionSealDestination {
     let visibilityFlushed = false;
     // The entries this pass has queued or found in flight, in arrival order:
     // what a later entry's deferral is held behind while any is still pending.
+    // Only ever appended to, so the prefix ahead of an entry is fixed by its
+    // length when the entry is queued.
     const ahead: StreamEntryAddress[] = [];
     for (const { doc, entry } of ordered) {
       let sidecar = sidecars.get(doc.id);
@@ -4409,7 +4417,7 @@ export class SpaceServer implements TransactionSealDestination {
           this.#drainInFlight.set(entry.eventId, "queued");
           const eventId = entry.eventId;
           const tenure = runtime;
-          const aheadOfThis = [...ahead];
+          const aheadCount = ahead.length;
           runtime.scheduler.queueEvent(
             link,
             entry.payload,
@@ -4528,8 +4536,9 @@ export class SpaceServer implements TransactionSealDestination {
                     // what creates its piece. While any is still pending,
                     // this deferral is the run racing it and spends none of
                     // the budget; the earliest pending entry always does.
-                    const arrivalHeld = aheadOfThis.some((earlier) =>
-                      this.#streamEntryPending(earlier)
+                    const arrivalHeld = this.#anyStreamEntryPending(
+                      ahead,
+                      aheadCount,
                     );
                     if (arrivalHeld) {
                       this.#options.stats.events.arrivalHeldDeferrals += 1;
