@@ -144,7 +144,10 @@ import {
   isOrClause,
   normalizeClause,
 } from "./clause.ts";
-import { ConsumedLabelIndex } from "./consumed-label-index.ts";
+import {
+  ConsumedLabelIndex,
+  type ConsumedLabelSelection,
+} from "./consumed-label-index.ts";
 import { collectDeclaredMonotonicityViolations } from "./declared-monotonicity.ts";
 import {
   CfcEnvelopeStabilityError,
@@ -4132,6 +4135,29 @@ const probedSlotPath = (path: readonly string[]): readonly string[] => {
     : path;
 };
 
+/**
+ * The entries a read of `shape` consumes, as the selection an index shares
+ * across transactions: one predicate per shape, under the shape's name.
+ */
+const consumedByShape = (
+  shape: ReadObservationShape,
+): ConsumedLabelSelection => {
+  let selection = consumedByShapeSelections.get(shape);
+  if (selection === undefined) {
+    selection = {
+      key: shape,
+      keeps: (entry) => readConsumesEntry(shape, entry),
+    };
+    consumedByShapeSelections.set(shape, selection);
+  }
+  return selection;
+};
+
+const consumedByShapeSelections = new Map<
+  ReadObservationShape,
+  ConsumedLabelSelection
+>();
+
 const forEachFlowObservation = (
   tx: IExtendedStorageTransaction,
   consume: (
@@ -4789,19 +4815,13 @@ const deriveFlowJoinImpl = (
       ): ConsumedLabelIndex | undefined => {
         let index = document.indexes.get(shape);
         if (index === undefined && document.metadata !== undefined) {
-          index = new ConsumedLabelIndex(
-            document.metadata.labelMap.entries.filter((entry) =>
-              readConsumesEntry(shape, entry)
-            ),
-            {
-              onQuery: (wildcard) =>
-                tx.noteCfcPreparationWork?.(
-                  wildcard
-                    ? "overlapWildcardQueries"
-                    : "overlapConcreteQueries",
-                ),
-            },
-          );
+          index = new ConsumedLabelIndex(document.metadata.labelMap.entries, {
+            onQuery: (wildcard) =>
+              tx.noteCfcPreparationWork?.(
+                wildcard ? "overlapWildcardQueries" : "overlapConcreteQueries",
+              ),
+            select: consumedByShape(shape),
+          });
           document.indexes.set(shape, index);
         }
         return index;
