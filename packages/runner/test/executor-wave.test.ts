@@ -4801,9 +4801,8 @@ describe("stage D seal-into-wave", () => {
 
     // Hands each piece-instantiate commit `offRuntime` makes to `commit`,
     // with the attempt number, counting from 1, the transaction, and the
-    // commit it replaces.
-    // Returns the counts a test reads afterwards: the readiness waits the
-    // recovery made, and the start failures reported.
+    // commit it replaces. Returns what a test reads afterwards: the attempts,
+    // the readiness waits the recovery made, and the start failures reported.
     const interceptInstantiateCommits = (
       offRuntime: Runtime,
       commit: (
