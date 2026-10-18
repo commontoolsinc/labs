@@ -140,7 +140,7 @@ gesture on the reviewed surface its policy names:
 Which of editing, deleting, and obliterating the room takes on each message,
 from the reader, is in the room's `messageRights`, decided by the same rules the
 room admits those acts by. A client reads it there rather than deciding for
-itself, since the room refuses any other silently.
+itself, since the room refuses any other.
 
 A client that draws natively sends `addMember` through
 [the sanctioned issuing path](#the-sanctioned-issuing-path) on
@@ -173,8 +173,9 @@ direct one, but not a space's own chat, which is shown by its space's name.
 A client sends to the room's own streams, never through a placement or an
 adapter.
 
-A room drops a message act outside its stream's rules without a word, so a
-client MUST check each event against those rules before sending it: a
+A room refuses a message act outside its stream's rules, and a send that
+awaits its handling is rejected with the room's reason. A client MUST still
+check each event against those rules before sending it: a
 non-empty body, a reply whose target is in the room, not deleted, and allowed
 for its `shownIn`, a single emoji (see
 [`ChatRoomOutput`](ChatRoomOutput.md#streams)), and it offers an act only
@@ -186,7 +187,8 @@ refused, and getting an event to the room is its runtime's job: a runtime
 re-submits an event it can't tell was appended, with its trusted mark and the
 same event id, which the room's runtime deduplicates, and runs an appended
 event once. A client sees a send take effect when the message appears in the
-room's `messages`; nothing else is owed, and a client offers no retry of its
+room's `messages`, and sees it refused when the send is rejected, the room's
+reason with it. Nothing else is owed, and a client offers no retry of its
 own, since a person who sends again sends another message.
 
 A client that resumes an interrupted `createGroup` MUST resend it with its

@@ -374,6 +374,12 @@ await commonfabric.rt.getLoggerCounts()
 // here, does not show.
 (await commonfabric.rt.getLoggerCounts()).sizes
 
+// The storage counts above add every open space together. Each open space's
+// own share is the `sizes` of its entry here, beside its session state (at
+// most 64 spaces; `spacesOmitted` counts the rest; `null` for a storage
+// manager without diagnostics).
+(await commonfabric.rt.getStorageDiagnostics())?.spaces
+
 // Control worker loggers
 await commonfabric.rt.setLoggerLevel("debug")         // all loggers
 await commonfabric.rt.setLoggerLevel("debug", "runner") // specific logger
@@ -708,6 +714,7 @@ await commonfabric.watchWrites([])
 | `commonfabric.rt.setLoggerLevel(lvl, name?)` | Set worker logger level |
 | `commonfabric.rt.setLoggerEnabled(on, name?)` | Enable/disable worker logger |
 | `commonfabric.rt.getLoggerCounts()` | Get worker logger counts/timing/flags/CFC counters/structure sizes |
+| `commonfabric.rt.getStorageDiagnostics()` | Get worker storage work in flight and each open space's session state and sizes |
 | `commonfabric.rt.setSettleStatsEnabled(on)` | Enable/disable worker settle stats |
 | `commonfabric.rt.getSettleStats()` | Get the last worker settle stats payload |
 | `commonfabric.rt.getSettleStatsHistory()` | Get recent worker settle stats history |

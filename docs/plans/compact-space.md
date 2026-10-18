@@ -588,9 +588,12 @@ the backup (the current size), the result (the compacted size), and WAL
 headroom for the run; `df -h /data` before starting, and the staging copy
 document's note that `/tmp` has no room applies here too.
 
-### Verification, in order
+### Verification obligations
 
-Each check fails differently and the order goes from cheap to expensive:
+The checks below define the verification obligations. Head comparison and
+fingerprinting share primary reconstructions within each file; each fingerprint
+independently enumerates revision addresses and resolves related documents in
+its own file.
 
 1. `PRAGMA integrity_check` and `PRAGMA foreign_key_check` on the result.
 2. **Heads unchanged, one excepted.** `SELECT branch, id, scope_key, seq,
@@ -604,17 +607,16 @@ Each check fails differently and the order goes from cheap to expensive:
    boundary is byte-identical to the backup's, op and `commit_seq` included.
    Every head must still join to a revision row.
 3. **Every document reads back identical, one excepted.** Reconstruct every
-   selected instance at its head on both files with the state inspector's
+   non-ACL instance with a default-branch head on both files with the inspector's
    replay (`packages/state-inspector/reconstruct.ts`), which is a second
    implementation of the engine's rule, and compare canonical encodings. All
-   of them, not a sample: it is offline and runs in minutes, and "every head
-   identical" is the claim the operator wants to make. For the ACL document
+   of them, not a sample: "every head identical" is the claim the operator wants
+   to make. For the ACL document
    the comparison is: `value` byte-identical, and the only root member that
    differs is `compaction`, holding what the dry run said it would.
    `--verify-sample <n>` exists for a quick pass during rehearsal.
 4. `cf space fingerprint` on both files must agree. The fingerprint excludes
-   generated cells, so it is necessary rather than sufficient, and it is
-   cheap.
+   generated cells, so it is necessary rather than sufficient.
 5. **The compaction commit is recorded**: one `system` row at the seq the dry
    run named; the rows pointing at it are exactly every boundary this run
    re-attributed — materialized or already a `set` or `delete` — plus the

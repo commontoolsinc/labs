@@ -152,8 +152,14 @@ alongside the binary it starts. A host restarts its instances one after another,
 so for a while some serve the release being replaced and some the one replacing
 it; the time is what tells a piece which of the two to keep. A value kept with
 the release the instances run from gives that pairing by construction. A
-toolshed whose environment does not set the time advertises identities alone,
-and a piece it serves then follows whichever identity it was offered last.
+toolshed whose environment does not set the time advertises identities alone.
+A piece it serves then follows whichever identity it was offered last, unless
+the source the piece runs carries a time from another release, adopted or
+confirmed: an offer with no time is earlier than that one, and the piece keeps
+its source unless it has nothing it can start. Without times, a host partway through a deploy and a deliberate
+rollback offer a piece the same earlier identity, so a piece cannot be kept
+from moving back and forth between the two releases until every instance runs
+one of them.
 
 The time has to be the deploy's own. A time from the future would stamp every
 release a piece adopts from that deploy, and every correct release after it

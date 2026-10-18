@@ -5027,6 +5027,7 @@ export class SpaceReplica
       repairCount: this.#rejectedPendingLayers.size,
       parkedAcceptLocalSeqs: diagnosticPrefix(this.#parkedAccepts.keys()),
       parkedAcceptCount: this.#parkedAccepts.size,
+      sizes: this.getSizes(),
     };
   }
 
