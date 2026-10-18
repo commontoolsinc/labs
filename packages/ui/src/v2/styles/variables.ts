@@ -4,14 +4,21 @@
  */
 
 /**
- * The shared surface recipes, derived from the `--cf-theme-*` tokens. A
- * custom property's `var()` resolves where it is declared, so every host that
- * declares these fixes them to the theme around it. A `cf-theme` declares them
- * again, so a tint it makes reaches the surfaces beneath it: a card under a
- * tinted `cf-theme` inside another component would otherwise draw the
- * component's surface, not the tint's.
+ * Every variable derived from a `--cf-theme-*` token: the pill radius and the
+ * shared surface recipes. A custom property's `var()` resolves where it is
+ * declared, so every host that declares these fixes them to the theme around
+ * it. A `cf-theme` declares them again, so a tint it makes reaches what is
+ * beneath it: a card under a tinted `cf-theme` inside another component would
+ * otherwise draw the component's surface, not the tint's. A theme-derived
+ * variable belongs here, not in `variablesCSS`.
  */
-export const surfaceRecipesCSS = `
+export const themeDerivedCSS = `
+  /* Shared pill geometry: see the pill sizes in variablesCSS. */
+  --cf-pill-border-radius: var(
+    --cf-theme-border-radius-full,
+    var(--cf-border-radius-full, 9999px)
+  );
+
   /*
    * Shared surface recipes
    * Components like cards, modals, and toasts should consume these shared
@@ -318,10 +325,6 @@ export const variablesCSS = `
    * Badge, chip, and button[variant="pill"] keep separate semantics and
    * colors, but they should share the same compact rounded size contract.
    */
-  --cf-pill-border-radius: var(
-    --cf-theme-border-radius-full,
-    var(--cf-border-radius-full, 9999px)
-  );
   --cf-pill-xs-min-height: var(--cf-size-xs-height);
   --cf-pill-xs-padding-h: 6px;
   --cf-pill-xs-padding-v: 1px;
@@ -415,7 +418,7 @@ export const variablesCSS = `
   --cf-surface-translucent-strong: rgba(255, 255, 255, 0.88);
   --cf-overlay-dim: rgba(0, 0, 0, 0.4);
 
-${surfaceRecipesCSS}
+${themeDerivedCSS}
   /* Z-index — Semantic Layers */
   --cf-z-layer-sticky: 10;
   --cf-z-layer-fixed: 500;

@@ -197,15 +197,20 @@ Deno.test("a card under a tint inside another component draws the tint's surface
   const tint = new CFThemeProvider();
   tint.theme = { colors: { surface: ACCENT } };
   const tinted = new CFCard();
-  const plain = new CFCard();
   tint.append(tinted);
-  reveal.append(tint, plain);
+  // A tint that names no surface leaves the page's surface in effect.
+  const textOnly = new CFThemeProvider();
+  textOnly.theme = { colors: { text: HOST_TEXT } };
+  const plain = new CFCard();
+  textOnly.append(plain);
+  reveal.append(tint, textOnly);
   page.append(reveal);
   document.body.append(page);
   try {
     await page.updateComplete;
     await reveal.updateComplete;
     await tint.updateComplete;
+    await textOnly.updateComplete;
     await tinted.updateComplete;
     await plain.updateComplete;
 

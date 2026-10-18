@@ -5,6 +5,7 @@ import {
   pushRefusal,
   pushUpdate,
 } from "../../test-utils/mock-cell-handle.ts";
+import { themeDerivedCSS, variablesCSS } from "../../styles/variables.ts";
 import { defaultTheme, mergeWithDefaultTheme } from "../theme-context.ts";
 import { subscribeToThemeCellValues, unwrapThemeCellValues } from "./index.ts";
 
@@ -72,5 +73,16 @@ describe("cf-theme reactive theme values", () => {
     off();
     pushUpdate(primary, "#475569");
     expect(changeCount).toBe(1);
+  });
+});
+
+describe("theme-derived variables", () => {
+  it("are all in themeDerivedCSS, which cf-theme declares again", () => {
+    // A theme-derived variable left in the rest of variablesCSS is fixed by
+    // every component that declares it, and no tint beneath reaches it.
+    const rest = variablesCSS.replace(themeDerivedCSS, "")
+      .replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(rest).not.toContain("--cf-theme-");
+    expect(themeDerivedCSS).toContain("var(--cf-theme-color-surface");
   });
 });

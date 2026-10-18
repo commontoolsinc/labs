@@ -6,7 +6,7 @@ import { property } from "lit/decorators.js";
 
 import { BaseElement } from "../../core/base-element.ts";
 import { valueForDisplay } from "../../core/value-for-display.ts";
-import { surfaceRecipesCSS } from "../../styles/variables.ts";
+import { themeDerivedCSS } from "../../styles/variables.ts";
 import { iframePresentationContext } from "../cf-iframe/cf-iframe.ts";
 import {
   applyThemeToElement,
@@ -126,12 +126,12 @@ export function subscribeToThemeCellValues(
  * @element cf-theme
  */
 export class CFThemeProvider extends BaseElement {
-  // The surface recipes again, derived from this theme rather than inherited
-  // as a component above it fixed them (see `surfaceRecipesCSS`).
+  // The theme-derived variables again, derived from this theme rather than
+  // inherited as a component above it fixed them (see `themeDerivedCSS`).
   static override styles = css`
     :host {
       display: contents; /* do not add extra layout */
-      ${unsafeCSS(surfaceRecipesCSS)};
+      ${unsafeCSS(themeDerivedCSS)};
     }
   `;
 
