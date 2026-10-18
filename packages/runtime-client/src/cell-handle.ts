@@ -141,8 +141,8 @@ export type CellSendOptions = {
    * the served run recorded. The send then rejects, with the reason, when
    * that run's commit is refused, as it is for a write whose UI contract the
    * event does not satisfy, and when the run throws or the event is dropped
-   * or refused admission. A run that writes nothing resolves it: resolving
-   * says the run finished, not that it wrote.
+   * or refused admission. A run that finishes without an error resolves it,
+   * whether or not it wrote anything.
    */
   awaitHandling?: boolean;
 };
@@ -819,9 +819,9 @@ export class CellHandle<T = unknown> {
    * rejects with the reason when the runtime refuses the event, when that
    * run's commit is refused, as it is for a write whose UI contract the event
    * does not satisfy, and when the run throws or the event is dropped or
-   * refused admission. A run that writes nothing resolves it: resolving says
-   * the run finished, not that it wrote, so a handler that turns an event
-   * down throws. The surface and action are read once, here.
+   * refused admission. A run that finishes without an error resolves it,
+   * whether or not it wrote anything; a handler that turns an event down
+   * throws, which fails its run and rejects the send. The surface and action are read once, here.
    *
    * This mints trusted events. The host calls it only from the control's
    * real user-input path, with exactly the values the control displayed and

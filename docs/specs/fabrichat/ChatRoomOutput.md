@@ -313,8 +313,10 @@ These rules hold for every stream:
   [`clients.md`](clients.md#writing-the-reviewed-gesture-requirement)), and the
   record it writes is labeled `authored-by` the principal who sent it.
 - `sendMessage`, `editMessage`, and `sendReaction` record the sender's profile,
-  and refuse an event that arrives before it resolves. The
-  other streams don't depend on a profile.
+  and `deleteMessage` and `deleteReaction` read it to tell the sender's own
+  message or reaction. Each refuses an event that arrives before it resolves.
+  `obliterateMessage` reads it only to tell whether a message is the sender's
+  own.
 - Writing in a room is joining it. When `sendMessage` appends a message,
   `sendReaction` adds a reaction, or `setTitle` sets the title, in a room in a
   space of its own, the room

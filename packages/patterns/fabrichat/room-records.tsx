@@ -1006,10 +1006,12 @@ export const commitReply = handler<RoomStreamEvent, ReplyState>(
  */
 export const commitEdit = handler<RoomStreamEvent, EditState>(
   (event, { myProfile, room, message, composer }) => {
+    const profile = resolvedProfile(myProfile);
+    if (profile === undefined) throw new Error(NO_PROFILE);
     const target = messageInRoom(room, event?.message ?? message);
     const current = target.get();
     if (isDeleted(current)) throw new Error(DELETED);
-    if (!isAuthorOf(current, resolvedProfile(myProfile))) {
+    if (!isAuthorOf(current, profile)) {
       throw new Error("Only its author can edit a message.");
     }
     const body = textOf(event);
@@ -1030,11 +1032,13 @@ export const commitEdit = handler<RoomStreamEvent, EditState>(
  */
 export const commitDelete = handler<RoomStreamEvent, MessageActState>(
   (event, { myProfile, room, message }) => {
+    const profile = resolvedProfile(myProfile);
+    if (profile === undefined) throw new Error(NO_PROFILE);
     const target = messageInRoom(room, event?.message ?? message);
     const current = target.get();
     // Deleted already: there is nothing to delete.
     if (isDeleted(current)) return;
-    if (!isAuthorOf(current, resolvedProfile(myProfile))) {
+    if (!isAuthorOf(current, profile)) {
       throw new Error("Only its author can delete a message.");
     }
     leaveTombstone(target, !FABRICHAT_POLICY.deletionIsObliteration);

@@ -159,9 +159,21 @@ export default pattern(() => {
         event: { message: first, target: { value: "   " } },
         trustedUi: editGesture,
       },
-      // A deletion of someone else's message.
+      // A deletion of someone else's message. Then an edit and a deletion
+      // from a profile that hasn't resolved, which can't tell whose message
+      // it is.
       {
         action: bob.deleteMessage,
+        event: { message: first },
+        trustedUi: deleteGesture,
+      },
+      {
+        action: carol.editMessage,
+        event: { message: first, target: { value: "Carol's words" } },
+        trustedUi: editGesture,
+      },
+      {
+        action: carol.deleteMessage,
         event: { message: first },
         trustedUi: deleteGesture,
       },
@@ -295,6 +307,6 @@ export default pattern(() => {
       },
       { assertion: assert(() => bodies(directMessages) === "Just us") },
     ],
-    expectRuntimeErrors: 16,
+    expectRuntimeErrors: 18,
   };
 });
