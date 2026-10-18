@@ -3868,7 +3868,59 @@ export type LoggerCountsResponse = {
    * a collection's own count, so a collection that keeps growing shows up
    * here, while growth in what its entries hold does not.
    */
-  sizes: RuntimeSizes & { worker: WorkerSizes };
+  sizes: RuntimeSizes & { worker: WorkerSizes; ipc: WorkerIpcSizes | null };
+};
+
+/**
+ * What one of the worker's outbound channels has carried: every message is
+ * counted, and one in `IPC_SAMPLE_STRIDE` of them is measured, so the bytes
+ * are an estimate from a sample rather than a sum.
+ */
+export type IpcChannelSizes = {
+  /** Messages handed to the channel's `postMessage`. */
+  messages: number;
+
+  /** Messages measured, the first of the channel and every stride after. */
+  sampledMessages: number;
+
+  /**
+   * The approximate JSON length of the measured messages' encodings, as
+   * `approximateJsonSize()` measures one: what structured clone copied,
+   * give or take the clone's own per-object overhead.
+   */
+  sampledBytes: number;
+
+  /**
+   * `sampledBytes` scaled from the measured messages to all of them. A
+   * channel whose messages vary widely in size is estimated loosely while
+   * its sample is small; `messages` and `sampledMessages` say how small.
+   */
+  approxBytes: number;
+};
+
+/**
+ * What the worker's ports have carried and how many it holds, for a read
+ * that attributes serialization traffic to the port it crossed.
+ */
+export type WorkerIpcSizes = {
+  /**
+   * The `MessagePort`s of attached clients the worker holds now, and how
+   * many it has closed. The owner speaks over the worker's own global, which
+   * is not a port and is in neither count.
+   */
+  openPorts: { open: number; closed: number };
+
+  /** Each outbound channel's traffic since the worker started. */
+  bytesSerialized: {
+    /** The worker's own global, over which the owner is reached. */
+    owner: IpcChannelSizes;
+
+    /** Each attached client's port, by client id. */
+    clients: Record<string, IpcChannelSizes>;
+
+    /** The ports of clients that have departed, added together. */
+    departedClients: IpcChannelSizes;
+  };
 };
 
 /** Sizes of the tables the worker keeps on its clients' behalf. */

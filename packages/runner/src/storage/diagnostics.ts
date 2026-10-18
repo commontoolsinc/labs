@@ -5,6 +5,7 @@
  */
 
 import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { SpaceDocumentSizes } from "./document-sizes.ts";
 
 /** Provenance read only when a pending-work snapshot is requested. */
 export type PendingCommitContext = {
@@ -111,6 +112,62 @@ export type StorageSizes = SpaceStorageSizes & {
 
   /** Cross-space promises in flight. */
   pendingCrossSpace: number;
+
+  /**
+   * Each open space's documents and their approximate size, largest first,
+   * at most {@link STORAGE_DIAGNOSTICS_LIMIT} of them; `bySpaceOmitted` adds
+   * the rest together. The entries' `documents` and `watched` add up to the
+   * manager's `documents` and `watchedDocuments`.
+   */
+  bySpace: SpaceDocumentSizes[];
+
+  /** The spaces past the cap on `bySpace`, added together. */
+  bySpaceOmitted: Omit<SpaceDocumentSizes, "space"> & { spaces: number };
+
+  /** Documents measured across every space; see `SpaceDocumentSizes`. */
+  measuredDocuments: number;
+
+  /** The approximate size of every space's documents, added together. */
+  approxBytes: number;
+
+  /**
+   * What the memory connections have carried, or `null` for a session
+   * factory that reports none.
+   */
+  wire: MemoryConnectionSizes | null;
+};
+
+/**
+ * What the connections to memory servers have carried since the session
+ * factory was created, closed connections included, and what the open ones
+ * hold queued. A text frame counts its length in UTF-16 code units, which is
+ * its size on the wire for ASCII and below it otherwise; a binary frame
+ * counts its bytes.
+ */
+export type MemoryConnectionSizes = {
+  /** Connections open. */
+  connections: number;
+
+  /** Connections closed since the factory was created. */
+  connectionsClosed: number;
+
+  /** Frames handed to a socket. */
+  messagesSent: number;
+
+  /** The size of every frame handed to a socket. */
+  bytesSent: number;
+
+  /** Frames a socket delivered. */
+  messagesReceived: number;
+
+  /** The size of every frame a socket delivered. */
+  bytesReceived: number;
+
+  /**
+   * Bytes the open sockets hold queued for the network, as each socket's own
+   * `bufferedAmount` reports; a peer that reads slowly shows up here.
+   */
+  bufferedAmount: number;
 };
 
 /** Adds every replica's sizes together, field by field. */

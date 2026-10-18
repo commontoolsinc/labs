@@ -121,6 +121,7 @@ import type { CompiledModuleArtifact } from "./harness/types.ts";
 import {
   immutableCellsFor,
   liveImmutableSnapshotCount,
+  liveImmutableSnapshotsBySpace,
   ownImmutableCells,
 } from "./immutable-cell.ts";
 import type { ConsoleMessage } from "./interface.ts";
@@ -160,7 +161,11 @@ import {
   type RunSyncedWithCommitOptions,
 } from "./runner.ts";
 import { brandRuntime } from "./runtime-brand.ts";
-import { CfcRejectionTally, type RuntimeSizes } from "./runtime-sizes.ts";
+import {
+  boundedCounts,
+  CfcRejectionTally,
+  type RuntimeSizes,
+} from "./runtime-sizes.ts";
 import { Action, Scheduler } from "./scheduler.ts";
 import {
   type CommitBackpressurePolicy,
@@ -3145,11 +3150,13 @@ export class Runtime {
   }
 
   /**
-   * The sizes of the structures this runtime holds live, each read from the
-   * structure's own count, so the read is safe at any moment and walks
-   * nothing. A tracked collection that keeps growing shows up here; growth in
-   * what its entries hold, or in a structure not counted here, does not. The
-   * storage figure is `null` for a storage manager that reports no sizes.
+   * The sizes of the structures this runtime holds live, most read from the
+   * structure's own count and the per-space views from one bounded pass
+   * each, so the read is safe at any moment; `runtime-sizes.ts` says what
+   * each pass costs. A tracked collection that keeps growing shows up here,
+   * and the space whose documents or snapshots grow with it; growth in a
+   * structure not counted here does not. The storage figure is `null` for a
+   * storage manager that reports no sizes.
    */
   getSizes(): RuntimeSizes {
     return {
@@ -3163,6 +3170,9 @@ export class Runtime {
         modules: this.moduleRegistry.size,
         policyManifests: this.#policyManifests.size,
         moduleDelegations: this.#moduleDelegations.getSizes(),
+        immutableSnapshotsBySpace: boundedCounts(
+          liveImmutableSnapshotsBySpace(),
+        ),
       },
       cfcRejectionsByReason: this.#cfcRejections.snapshot(),
     };

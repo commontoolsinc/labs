@@ -28,6 +28,7 @@ import {
 } from "@commonfabric/memory/v2/routed-parser";
 import { getLogger } from "@commonfabric/utils/logger";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
+import type { MemoryConnectionSizes } from "./diagnostics.ts";
 import {
   createMemorySocket,
   type MemorySocket,
@@ -134,6 +135,9 @@ export interface SessionFactory {
 
   /** Closes every connection the factory keeps open between sessions. */
   close?(): Promise<void>;
+
+  /** What the factory's connections have carried, for the sizes read. */
+  getSizes?(): MemoryConnectionSizes;
 }
 
 export const toWebSocketAddress = (address: URL): URL => {
@@ -243,6 +247,35 @@ export const createStorageAddressResolver = (
   };
 };
 
+/** The traffic one transport has carried, counted as `frameSize()` counts. */
+export type TransportSizes = {
+  /** Frames handed to a socket. */
+  messagesSent: number;
+
+  /** The size of every frame handed to a socket. */
+  bytesSent: number;
+
+  /** Frames a socket delivered. */
+  messagesReceived: number;
+
+  /** The size of every frame a socket delivered. */
+  bytesReceived: number;
+};
+
+/**
+ * The size of a frame as the sizes read counts one: a text frame its length
+ * in UTF-16 code units, a binary frame its bytes. Reading either allocates
+ * nothing, which is what lets every frame be counted.
+ */
+function frameSize(frame: unknown): number {
+  if (typeof frame === "string") return frame.length;
+  if (frame instanceof Blob) return frame.size;
+  if (frame instanceof ArrayBuffer || ArrayBuffer.isView(frame)) {
+    return frame.byteLength;
+  }
+  return 0;
+}
+
 export class WebSocketTransport implements MemoryClient.Transport {
   #address: URL;
   #createSocket: MemorySocketFactory;
@@ -264,6 +297,10 @@ export class WebSocketTransport implements MemoryClient.Transport {
   #routedMessages = false;
   #sending: Promise<void> = Promise.resolve();
   #receiving: Promise<void> = Promise.resolve();
+  #messagesSent = 0;
+  #bytesSent = 0;
+  #messagesReceived = 0;
+  #bytesReceived = 0;
 
   /** Constructs a transport for one memory WebSocket route. */
   constructor(
@@ -282,6 +319,21 @@ export class WebSocketTransport implements MemoryClient.Transport {
   get supportsMessageCompression(): boolean {
     return typeof CompressionStream === "function" &&
       typeof DecompressionStream === "function";
+  }
+
+  /** Bytes the current socket holds queued for the network, if it says. */
+  get bufferedAmount(): number {
+    return this.#socket?.bufferedAmount ?? 0;
+  }
+
+  /** What this transport has handed to its sockets and received from them. */
+  getSizes(): TransportSizes {
+    return {
+      messagesSent: this.#messagesSent,
+      bytesSent: this.#bytesSent,
+      messagesReceived: this.#messagesReceived,
+      bytesReceived: this.#bytesReceived,
+    };
   }
 
   setReceiver(receiver: (payload: string) => void): void {
@@ -418,6 +470,8 @@ export class WebSocketTransport implements MemoryClient.Transport {
       }, { once: true });
       socket.addEventListener("message", (event) => {
         const frame = event.data;
+        this.#messagesReceived++;
+        this.#bytesReceived += frameSize(frame);
         const receive = this.#receiving.then(async () => {
           if (this.#socket !== socket) return;
           try {
@@ -600,6 +654,8 @@ export class WebSocketTransport implements MemoryClient.Transport {
     connection: MemorySocketConnection,
     frame: EncodedMemoryMessage,
   ): Promise<void> {
+    this.#messagesSent++;
+    this.#bytesSent += frameSize(frame);
     try {
       await connection.send(frame);
     } catch (cause) {
@@ -806,6 +862,17 @@ export class RemoteSessionFactory implements SessionFactory {
   #transports = new Set<WebSocketTransport>();
   #sharedConnections = false;
 
+  /** Transports closed so far. */
+  #closedTransports = 0;
+
+  /** What the closed transports carried, so the totals stay cumulative. */
+  #closedTransportSizes: TransportSizes = {
+    messagesSent: 0,
+    bytesSent: 0,
+    messagesReceived: 0,
+    bytesReceived: 0,
+  };
+
   /** The shared connection per storage address, while sharing is on. */
   #shared = new Map<string, SharedConnection>();
 
@@ -851,6 +918,24 @@ export class RemoteSessionFactory implements SessionFactory {
   /** @inheritDoc */
   setSharedConnections(enabled: boolean): void {
     this.#sharedConnections = enabled;
+  }
+
+  /** @inheritDoc */
+  getSizes(): MemoryConnectionSizes {
+    const sizes = { ...this.#closedTransportSizes, bufferedAmount: 0 };
+    for (const transport of this.#transports) {
+      const carried = transport.getSizes();
+      sizes.messagesSent += carried.messagesSent;
+      sizes.bytesSent += carried.bytesSent;
+      sizes.messagesReceived += carried.messagesReceived;
+      sizes.bytesReceived += carried.bytesReceived;
+      sizes.bufferedAmount += transport.bufferedAmount;
+    }
+    return {
+      connections: this.#transports.size,
+      connectionsClosed: this.#closedTransports,
+      ...sizes,
+    };
   }
 
   /** Closes the shared connections, and with them the sessions on them. */
@@ -981,7 +1066,7 @@ export class RemoteSessionFactory implements SessionFactory {
     const transport = new WebSocketTransport(
       toWebSocketAddress(address),
       this.#compressionEnabled,
-      () => this.#transports.delete(transport),
+      () => this.#retire(transport),
       this.#createSocket,
     );
     this.#transports.add(transport);
@@ -1029,6 +1114,21 @@ export class RemoteSessionFactory implements SessionFactory {
   }
 
   /**
+   * Forgets a transport that has closed, folding what it carried into the
+   * factory's totals so a closed connection's traffic stays counted.
+   */
+  #retire(transport: WebSocketTransport): void {
+    if (!this.#transports.delete(transport)) return;
+    this.#closedTransports++;
+    const carried = transport.getSizes();
+    const totals = this.#closedTransportSizes;
+    totals.messagesSent += carried.messagesSent;
+    totals.bytesSent += carried.bytesSent;
+    totals.messagesReceived += carried.messagesReceived;
+    totals.bytesReceived += carried.bytesReceived;
+  }
+
+  /**
    * Helper for `#createDedicated()` and `serverFlags()`, which makes the
    * transport of a connection for one space alone, naming the space in its
    * address.
@@ -1037,7 +1137,7 @@ export class RemoteSessionFactory implements SessionFactory {
     const transport = new WebSocketTransport(
       toSpaceWebSocketAddress(this.#resolveAddress(space), space),
       this.#compressionEnabled,
-      () => this.#transports.delete(transport),
+      () => this.#retire(transport),
       this.#createSocket,
     );
     this.#transports.add(transport);

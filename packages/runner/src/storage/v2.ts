@@ -100,10 +100,17 @@ import {
   type PendingCommitContext,
   type SpaceStorageDiagnostic,
   type SpaceStorageSizes,
+  STORAGE_DIAGNOSTICS_LIMIT,
   type StorageDiagnostics,
   type StorageSizes,
   sumSpaceStorageSizes,
 } from "./diagnostics.ts";
+import {
+  DOCUMENT_SIZE_NODE_BUDGET,
+  DocumentSizeEstimate,
+  type MeasureBudget,
+  type SpaceDocumentSizes,
+} from "./document-sizes.ts";
 import type { Cell } from "../cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import {
@@ -2720,8 +2727,41 @@ export class StorageManager implements IStorageManager {
     };
   }
 
-  /** @inheritDoc */
+  /**
+   * @inheritDoc
+   *
+   * The per-space entries are built in one pass over the open spaces, with
+   * the document measurement of `DocumentSizeEstimate` drawing on one
+   * {@link DOCUMENT_SIZE_NODE_BUDGET} shared by all of them, so a read is
+   * bounded however many documents the spaces hold.
+   */
   getSizes(): StorageSizes {
+    const budget: MeasureBudget = { remaining: DOCUMENT_SIZE_NODE_BUDGET };
+    const bySpace = [...this.#providers.values()]
+      .map((provider) => provider.replica.getDocumentSizes(budget))
+      .sort((a, b) =>
+        b.approxBytes - a.approxBytes || b.documents - a.documents
+      );
+    const bySpaceOmitted = {
+      spaces: 0,
+      documents: 0,
+      watched: 0,
+      measuredDocuments: 0,
+      approxBytes: 0,
+    };
+    let measuredDocuments = 0;
+    let approxBytes = 0;
+    for (const [index, entry] of bySpace.entries()) {
+      measuredDocuments += entry.measuredDocuments;
+      approxBytes += entry.approxBytes;
+      if (index < STORAGE_DIAGNOSTICS_LIMIT) continue;
+      bySpaceOmitted.spaces++;
+      bySpaceOmitted.documents += entry.documents;
+      bySpaceOmitted.watched += entry.watched;
+      bySpaceOmitted.measuredDocuments += entry.measuredDocuments;
+      bySpaceOmitted.approxBytes += entry.approxBytes;
+    }
+    bySpace.length = Math.min(bySpace.length, STORAGE_DIAGNOSTICS_LIMIT);
     return {
       ...sumSpaceStorageSizes(
         [...this.#providers.values()].map((provider) =>
@@ -2733,6 +2773,11 @@ export class StorageManager implements IStorageManager {
       pendingLoads: this.#pendingLoads.size,
       pendingCrossingLoads: this.#pendingCrossingLoads.size,
       pendingCrossSpace: this.#crossSpacePromises.size,
+      bySpace,
+      bySpaceOmitted,
+      measuredDocuments,
+      approxBytes,
+      wire: this.#sessionFactory.getSizes?.() ?? null,
     };
   }
 
@@ -4553,6 +4598,10 @@ export class SpaceReplica
   #aclChangedSinceMount = false;
 
   readonly #docs = new Map<string, DocumentRecord>();
+
+  /** The sizes read's running measurement of `#docs`; it reads nothing else. */
+  readonly #documentSizes = new DocumentSizeEstimate();
+
   readonly #syncTasks = new Map<string, SyncTask>();
   readonly #commitPromises = new Set<Promise<unknown>>();
 
@@ -5045,6 +5094,23 @@ export class SpaceReplica
       parkedAccepts: this.#parkedAccepts.size,
       syncTasks: this.#syncTasks.size,
       pendingReads: this.#syncPromises.size,
+    };
+  }
+
+  /**
+   * This replica's documents and their approximate size, measured from the
+   * confirmed value of each within `budget`, which the measurement draws
+   * down; `DocumentSizeEstimate` says how the estimate is built across
+   * reads. Reading it starts no I/O and changes no document.
+   */
+  getDocumentSizes(budget: MeasureBudget): SpaceDocumentSizes {
+    const values = function* (docs: Iterable<DocumentRecord>) {
+      for (const record of docs) yield record.confirmed.value;
+    };
+    return {
+      space: this.#space,
+      watched: this.#watchedIds.size,
+      ...this.#documentSizes.measure(values(this.#docs.values()), budget),
     };
   }
 

@@ -6,10 +6,13 @@ import type { JSONSchema } from "../src/builder/types.ts";
 import { immutableCellsFor } from "../src/immutable-cell.ts";
 import { Runtime, type RuntimeOptions } from "../src/runtime.ts";
 import {
+  boundedCounts,
   CFC_REJECTION_REASON_LIMIT,
   CFC_REJECTION_REASON_OTHER,
   cfcRejectionReasonPrefix,
   CfcRejectionTally,
+  SIZES_BY_KEY_LIMIT,
+  SIZES_BY_KEY_OTHER,
 } from "../src/runtime-sizes.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { prepareAndCommit, refuseAtCommitBoundary } from "./refused-commit.ts";
@@ -103,6 +106,29 @@ describe("runtime-sizes", () => {
     });
   });
 
+  describe("boundedCounts()", () => {
+    it("returns a map within the limit whole, largest first", () => {
+      expect(boundedCounts(new Map([["a", 1], ["b", 3], ["c", 2]]))).toEqual({
+        b: 3,
+        c: 2,
+        a: 1,
+      });
+    });
+
+    it("adds the counts past the limit under `(other)`", () => {
+      const counts = new Map<string, number>();
+      for (let i = 0; i < SIZES_BY_KEY_LIMIT + 3; i++) {
+        counts.set(`space-${i}`, SIZES_BY_KEY_LIMIT + 3 - i);
+      }
+
+      const bounded = boundedCounts(counts);
+
+      expect(Object.keys(bounded)).toHaveLength(SIZES_BY_KEY_LIMIT + 1);
+      expect(bounded["space-0"]).toBe(SIZES_BY_KEY_LIMIT + 3);
+      expect(bounded[SIZES_BY_KEY_OTHER]).toBe(3 + 2 + 1);
+    });
+  });
+
   describe("Runtime.getSizes()", () => {
     let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
     let runtime: Runtime | undefined;
@@ -137,6 +163,15 @@ describe("runtime-sizes", () => {
       });
       expect(sizes.storage?.spaces).toBe(0);
       expect(sizes.storage?.documents).toBe(0);
+      expect(sizes.storage?.bySpace).toEqual([]);
+      expect(sizes.storage?.bySpaceOmitted).toEqual({
+        spaces: 0,
+        documents: 0,
+        watched: 0,
+        measuredDocuments: 0,
+        approxBytes: 0,
+      });
+      expect(sizes.storage?.approxBytes).toBe(0);
       expect(sizes.patterns.compiledPrograms).toBe(0);
       expect(sizes.runtime.retryingEdits).toBe(0);
       expect(sizes.runtime.moduleDelegations).toEqual({
@@ -185,6 +220,64 @@ describe("runtime-sizes", () => {
       const sizes = runtime.getSizes();
       expect(sizes.storage?.spaces).toBe(1);
       expect(sizes.storage?.documents).toBe(1);
+    });
+
+    it("reports each open space's documents under `bySpace`, largest first, adding up to the manager's counts", async () => {
+      // The manager's counts add every open space together, so they cannot
+      // say which space holds what; the entries carry each space's share and
+      // the approximate size of its documents, which is what ranks them.
+
+      const runtime = createRuntime();
+      const otherSpace: MemorySpace = "did:key:z6MkRuntimeSizesBySpace";
+      const own = runtime.edit();
+      runtime.getCell<number>(space, "sized-a", { type: "number" }, own).set(1);
+      runtime.getCell<number>(space, "sized-b", { type: "number" }, own).set(2);
+      await own.commit().settled;
+      const other = runtime.edit();
+      runtime.getCell<string>(otherSpace, "sized-c", { type: "string" }, other)
+        .set("x".repeat(10_000));
+      await other.commit().settled;
+      await storageManager!.synced();
+
+      const storage = runtime.getSizes().storage!;
+      expect(storage.bySpace.map((entry) => entry.space)).toEqual([
+        otherSpace,
+        space,
+      ]);
+      expect(storage.bySpace.map((entry) => entry.documents)).toEqual([1, 2]);
+      expect(
+        storage.bySpace.reduce((sum, entry) => sum + entry.documents, 0) +
+          storage.bySpaceOmitted.documents,
+      ).toBe(storage.documents);
+      expect(
+        storage.bySpace.reduce((sum, entry) => sum + entry.watched, 0) +
+          storage.bySpaceOmitted.watched,
+      ).toBe(storage.watchedDocuments);
+      expect(storage.bySpaceOmitted.spaces).toBe(0);
+      expect(storage.measuredDocuments).toBe(storage.documents);
+      expect(storage.bySpace[0].approxBytes).toBeGreaterThan(10_000);
+      expect(storage.approxBytes).toBe(
+        storage.bySpace.reduce((sum, entry) => sum + entry.approxBytes, 0),
+      );
+      // The emulated manager's sessions cross no socket.
+      expect(storage.wire).toBeNull();
+    });
+
+    it("counts the snapshots read out of a space's documents under that space, and the rest under `(none)`", () => {
+      // The table spans every store in the process, so each key is read as
+      // a difference: what this runtime adds to whatever other stores hold.
+
+      const runtime = createRuntime();
+      const before = runtime.getSizes().runtime.immutableSnapshotsBySpace;
+      const base = runtime.getCell(space, "elements-by-space", {
+        type: "object",
+      }).getAsNormalizedFullLink();
+      immutableCellsFor(runtime).createElement({ name: "Ada" }, base);
+      runtime.getImmutableCell(space, { value: 3 }, { type: "object" });
+
+      const after = runtime.getSizes().runtime.immutableSnapshotsBySpace;
+      expect((after[space] ?? 0) - (before[space] ?? 0)).toBe(1);
+      expect((after["(none)"] ?? 0) - (before["(none)"] ?? 0)).toBe(1);
     });
 
     it("counts a sink's node while it is live and not after it is cancelled", async () => {

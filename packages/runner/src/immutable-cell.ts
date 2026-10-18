@@ -443,6 +443,25 @@ export function liveImmutableSnapshotCount(): number {
   return snapshots.size;
 }
 
+/** The key an unattributed snapshot counts under, by space. */
+export const IMMUTABLE_SNAPSHOTS_NO_SPACE = "(none)";
+
+/**
+ * The snapshots {@link liveImmutableSnapshotCount} counts, by the space of
+ * the stored document each was read out of. A snapshot minted from a value
+ * no space has stored, and one whose value has been reclaimed ahead of its
+ * identifier, count under {@link IMMUTABLE_SNAPSHOTS_NO_SPACE}. One pass
+ * over the snapshot table, so the read costs what the table holds.
+ */
+export function liveImmutableSnapshotsBySpace(): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const { value } of snapshots.values()) {
+    const space = value.deref()?.origin?.space ?? IMMUTABLE_SNAPSHOTS_NO_SPACE;
+    counts.set(space, (counts.get(space) ?? 0) + 1);
+  }
+  return counts;
+}
+
 /**
  * Whether `id` names a snapshot minted from a value no space has stored: one
  * read out of no stored document, so with no origin, or an element snapshot
