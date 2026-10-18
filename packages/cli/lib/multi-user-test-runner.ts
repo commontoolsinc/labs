@@ -271,6 +271,7 @@ interface ParticipantState {
   assertionCount: number;
   lastActionName: string | null;
   allowRuntimeErrors: boolean;
+  expectRuntimeErrors: true | number | undefined;
   expectNonIdempotent: boolean;
   allowConsoleErrors: boolean;
   allowConsoleWarnings: boolean;
@@ -425,6 +426,7 @@ export async function runMultiUserTestPattern(
           assertionCount: 0,
           lastActionName: null,
           allowRuntimeErrors: init.allowRuntimeErrors,
+          expectRuntimeErrors: init.expectRuntimeErrors,
           expectNonIdempotent: init.expectNonIdempotent,
           allowConsoleErrors: init.allowConsoleErrors,
           allowConsoleWarnings: init.allowConsoleWarnings,
@@ -575,10 +577,11 @@ export async function runMultiUserTestPattern(
       }
     }
 
-    // Apply allowRuntimeErrors / expectNonIdempotent / allowConsoleErrors /
-    // allowConsoleWarnings PER participant — one participant opting out must
-    // not mask another participant's failures — so the aggregate result reports
-    // only unallowed entries with the flags left off.
+    // Apply allowRuntimeErrors / expectRuntimeErrors / expectNonIdempotent /
+    // allowConsoleErrors / allowConsoleWarnings PER participant — one
+    // participant opting out must not mask another participant's failures —
+    // so the aggregate result reports only unallowed entries with the flags
+    // left off.
     let anyExpectNonIdempotent = false;
     let expectedNonIdempotentDetected = false;
     const consoleErrors: string[] = [];
@@ -590,7 +593,25 @@ export async function runMultiUserTestPattern(
         consoleWarnings: string[];
         nonIdempotent: string[];
       };
-      if (!participant.allowRuntimeErrors) {
+      // An expectation tolerates the errors it counts and REQUIRES them, as
+      // in a single-user test: a count that differs, or none where some are
+      // expected, fails as a result named for the participant.
+      const expected = participant.expectRuntimeErrors;
+      if (expected !== undefined) {
+        const want = expected === true ? undefined : expected;
+        const got = health.runtimeErrors.length;
+        if (got === 0 || (want !== undefined && got !== want)) {
+          results.push({
+            name: `${participant.spec.name}: expectRuntimeErrors`,
+            passed: false,
+            afterAction: null,
+            error: `[${participant.spec.name}] expected ${
+              want ?? "some"
+            } runtime error(s), saw ${got}`,
+            durationMs: 0,
+          });
+        }
+      } else if (!participant.allowRuntimeErrors) {
         for (const error of health.runtimeErrors) {
           runtimeErrors.push(`[${participant.spec.name}] ${error}`);
         }

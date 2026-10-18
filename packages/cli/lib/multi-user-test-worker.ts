@@ -119,6 +119,14 @@ export interface StepMeta {
 export interface ParticipantInitResult {
   steps: StepMeta[];
   allowRuntimeErrors: boolean;
+
+  /**
+   * The runtime errors this participant requires: `true` for at least one, a
+   * number for exactly that many, and `undefined` for no requirement. As in a
+   * single-user test, an expectation tolerates the errors it counts.
+   */
+  expectRuntimeErrors: true | number | undefined;
+
   expectNonIdempotent: boolean;
   allowConsoleErrors: boolean;
   allowConsoleWarnings: boolean;
@@ -324,6 +332,17 @@ function classifyStep(stepCell: Cell<unknown>, index: number): StepMeta {
         Object.keys(stepCell.get() as object ?? {}).join(",") || "none"
       })`,
   );
+}
+
+/**
+ * A participant's `expectRuntimeErrors`, as its descriptor states it: `true`
+ * or a count of zero or more. Anything else states no expectation.
+ */
+function runtimeErrorExpectation(value: unknown): true | number | undefined {
+  if (value === true) return true;
+  return typeof value === "number" && Number.isInteger(value) && value >= 0
+    ? value
+    : undefined;
 }
 
 /**
@@ -598,6 +617,9 @@ const handlers: Record<
       allowRuntimeErrors:
         await (resultCell.key("allowRuntimeErrors") as Cell<unknown>)
           .pull() === true,
+      expectRuntimeErrors: runtimeErrorExpectation(
+        await (resultCell.key("expectRuntimeErrors") as Cell<unknown>).pull(),
+      ),
       expectNonIdempotent:
         await (resultCell.key("expectNonIdempotent") as Cell<unknown>)
           .pull() === true,
