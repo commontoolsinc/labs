@@ -12,32 +12,39 @@
  * The errors an expectation counts are tolerated.
  */
 
+import { debugStr } from "@commonfabric/data-model";
+
 /** A test's `expectRuntimeErrors`, as `runtimeErrorExpectation()` reads it. */
 export type RuntimeErrorExpectation = true | number | readonly string[];
 
 /**
  * The expectation a descriptor's `expectRuntimeErrors` states: `true`, a whole
- * count, or a list of strings. Anything else, `false` included, states none.
+ * count, or a list of strings, and `undefined` where it is absent or `false`.
+ *
+ * @throws If it is anything else, naming the value: an expectation misread as
+ *   none would let a test that requires errors pass without them.
  */
 export function runtimeErrorExpectation(
   value: unknown,
 ): RuntimeErrorExpectation | undefined {
+  if (value === undefined || value === false) return undefined;
   if (value === true) return true;
-  if (typeof value === "number") {
-    return Number.isInteger(value) && value >= 0 ? value : undefined;
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+    return value;
   }
   if (Array.isArray(value) && value.every((item) => typeof item === "string")) {
     return [...value];
   }
-  return undefined;
+  throw new Error(
+    debugStr`\`expectRuntimeErrors\` is \`true\`, a whole count, or a list of strings, not $quote${value}`,
+  );
 }
 
 /**
  * Why the runtime errors `errors` don't meet `expected`, for a person to read,
- * or `undefined` when they do. No error at all meets no expectation. For a
- * list, each expected string claims one error that contains it, the longest
- * strings first, so a short string that also appears in a longer one's error
- * does not take that error from it.
+ * or `undefined` when they do. A list is met when its strings and the errors
+ * pair off one to one, each string with an error containing it; the pairing
+ * is searched for, so it is found whenever one exists.
  */
 export function unmetRuntimeErrorExpectation(
   expected: RuntimeErrorExpectation,
@@ -49,20 +56,34 @@ export function unmetRuntimeErrorExpectation(
       : "expected some runtime error(s), saw 0";
   }
   if (typeof expected === "number") {
-    return errors.length > 0 && errors.length === expected
+    return errors.length === expected
       ? undefined
       : `expected ${expected} runtime error(s), saw ${errors.length}`;
   }
-  const unclaimed = [...errors];
+  // Each error's string, by its index in `expected`: a matching grown one
+  // string at a time, each by a path that may move earlier strings to other
+  // errors of theirs.
+  const holder: (number | undefined)[] = errors.map(() => undefined);
+  const claim = (text: number, visited: Set<number>): boolean => {
+    for (let error = 0; error < errors.length; error++) {
+      if (visited.has(error) || !errors[error].includes(expected[text])) {
+        continue;
+      }
+      visited.add(error);
+      const held = holder[error];
+      if (held === undefined || claim(held, visited)) {
+        holder[error] = text;
+        return true;
+      }
+    }
+    return false;
+  };
   const missing: string[] = [];
-  for (const text of [...expected].sort((a, b) => b.length - a.length)) {
-    const at = unclaimed.findIndex((error) => error.includes(text));
-    if (at === -1) missing.push(text);
-    else unclaimed.splice(at, 1);
+  for (let text = 0; text < expected.length; text++) {
+    if (!claim(text, new Set())) missing.push(expected[text]);
   }
-  if (errors.length > 0 && missing.length === 0 && unclaimed.length === 0) {
-    return undefined;
-  }
+  const unclaimed = errors.filter((_, error) => holder[error] === undefined);
+  if (missing.length === 0 && unclaimed.length === 0) return undefined;
   return [
     `expected ${expected.length} runtime error(s), saw ${errors.length}`,
     ...missing.map((text) => `none contains ${JSON.stringify(text)}`),

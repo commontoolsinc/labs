@@ -254,10 +254,11 @@ In multi-user tests the flags are per participant: one participant opting out
 does not mask another participant's errors. (The same applies to the
 pre-existing `allowRuntimeErrors` flag for scheduler-level errors; use
 `expectRuntimeErrors: true | <count> | ["<message>", …]` when the errors are
-the point — it REQUIRES them, failing the run if none fire, if a `<count>`
-differs from how many fired, or if the fired errors are not one for each listed
-message, each error containing its message, in any order. In a multi-user test
-each participant's expectation counts and tolerates its own errors only.)
+the point — it REQUIRES them: `true` fails the run if none fire, a `<count>` if
+a different number fire, and a list unless the fired errors pair off one for
+each listed message, each error containing its message, in any order. Any other
+value fails the run. In a multi-user test each participant's expectation counts
+and tolerates its own errors only.)
 
 ## Multi-User Tests
 

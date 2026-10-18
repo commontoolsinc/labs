@@ -13,12 +13,18 @@ describe("runtime-error-expectation", () => {
       expect(runtimeErrorExpectation(["a", "b"])).toEqual(["a", "b"]);
     });
 
-    it("returns `undefined` for anything else, `false` and a mixed list included", () => {
-      for (
-        const value of [false, undefined, null, -1, 1.5, "a", ["a", 1], {}]
-      ) {
-        expect(runtimeErrorExpectation(value)).toBeUndefined();
+    it("returns `undefined` for an absent expectation or `false`", () => {
+      expect(runtimeErrorExpectation(undefined)).toBeUndefined();
+      expect(runtimeErrorExpectation(false)).toBeUndefined();
+    });
+
+    it("throws for anything else, naming the value", () => {
+      for (const value of [null, -1, 1.5, "true", ["a", 1], {}]) {
+        expect(() => runtimeErrorExpectation(value)).toThrow(
+          "`expectRuntimeErrors` is `true`, a whole count, or a list of strings, not",
+        );
       }
+      expect(() => runtimeErrorExpectation("true")).toThrow('"true"');
     });
   });
 
@@ -30,14 +36,22 @@ describe("runtime-error-expectation", () => {
       );
     });
 
-    it("returns `undefined` only for exactly the count expected", () => {
+    it("returns `undefined` only for exactly the count expected, zero included", () => {
       expect(unmetRuntimeErrorExpectation(2, ["Error: a", "Error: b"]))
         .toBeUndefined();
       expect(unmetRuntimeErrorExpectation(2, ["Error: a"])).toBe(
         "expected 2 runtime error(s), saw 1",
       );
-      expect(unmetRuntimeErrorExpectation(0, [])).toBe(
-        "expected 0 runtime error(s), saw 0",
+      expect(unmetRuntimeErrorExpectation(0, [])).toBeUndefined();
+      expect(unmetRuntimeErrorExpectation(0, ["Error: a"])).toBe(
+        "expected 0 runtime error(s), saw 1",
+      );
+    });
+
+    it("returns `undefined` for an empty list only when no error fired", () => {
+      expect(unmetRuntimeErrorExpectation([], [])).toBeUndefined();
+      expect(unmetRuntimeErrorExpectation([], ["Error: a"])).toBe(
+        "expected 0 runtime error(s), saw 1; unexpected: Error: a",
       );
     });
 
@@ -70,11 +84,20 @@ describe("runtime-error-expectation", () => {
       ).toBe('expected 2 runtime error(s), saw 1; none contains "refusal"');
     });
 
-    it("claims errors for the longest strings first, so a shorter string takes another", () => {
+    it("returns `undefined` where a shorter string's error also holds a longer one", () => {
       expect(
         unmetRuntimeErrorExpectation(["refused", "message refused"], [
           "Error: message refused",
           "Error: refused",
+        ]),
+      ).toBeUndefined();
+    });
+
+    it("returns `undefined` where meeting the list moves a string to another error", () => {
+      expect(
+        unmetRuntimeErrorExpectation(["abcd", "cde"], [
+          "Error: abcd cde",
+          "Error: abcd one",
         ]),
       ).toBeUndefined();
     });
