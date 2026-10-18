@@ -5692,8 +5692,8 @@ export class Runner {
             active && startLifecycleEpoch === this.#lifecycleEpoch &&
             registrations.get(key) === cancel && cancelNodes === nodeCancel &&
             currentPatternKey === patternKeyAtInstantiation;
-          // `refusal` is how the commit was lost: its basis to the serving
-          // side, a policy manifest install to another participant, an
+          // `refusal` is how the commit was lost: its basis to a concurrent
+          // write, a policy manifest install to another participant, an
           // absence claim over the documents `absent` names that the store
           // holds, or none of these, which is terminal. One retry is enough
           // for a lost install: a manifest never changes once present, so
@@ -5751,8 +5751,8 @@ export class Runner {
                 : refusal === "absence"
                 ? "claimed documents absent that the store holds; loading " +
                   "them, and instantiating once more if they load"
-                : "lost its basis to the serving side; re-instantiating once " +
-                  "from the caught-up view"),
+                : "lost its basis to a concurrent write; re-instantiating " +
+                  "once from the caught-up view"),
               error,
             ]);
 
@@ -5842,11 +5842,13 @@ export class Runner {
                     conflictKeys(error),
                   );
                 }
-                // Any other stale read recovers only where a serving side
-                // supplies the view the retry reads.
+                // So does any other stale read, refused by the server or by
+                // this replica's own consistency check: the retry reads the
+                // replica once the refusal's catch-up has brought the
+                // conflicting documents into it, whichever side wrote them.
                 if (
-                  this.#runtime.experimental.serverExecution === true &&
-                  isStaleReadConflict(error)
+                  isStaleReadConflict(error) ||
+                  isStorageTransactionInconsistent(error)
                 ) {
                   return await recoverInstantiation(error, "basis");
                 }
