@@ -7,6 +7,7 @@ import { MemberWaits } from "../integration/fabrichat-room-fixture.ts";
 class FakeScheduler {
   #handlers: ((error: Error) => void)[] = [];
 
+  /** Adds `handler` to the handlers a failed action is reported to. */
   onError(handler: (error: Error) => void): void {
     this.#handlers.push(handler);
   }
@@ -23,6 +24,7 @@ class FakeCell<T> {
   #cancelled = 0;
   #value: T | undefined;
 
+  /** Constructs an instance which holds `value` until a test sets another. */
   constructor(value?: T) {
     this.#value = value;
   }
@@ -32,6 +34,10 @@ class FakeCell<T> {
     return this.#cancelled;
   }
 
+  /**
+   * Hands `callback` the cell's value now and each value it takes later, and
+   * returns the function that stops it reading.
+   */
   sink(callback: (value: T | undefined) => void): () => void {
     this.#readers.push(callback);
     callback(this.#value);
