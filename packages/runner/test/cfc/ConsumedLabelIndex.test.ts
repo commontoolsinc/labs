@@ -228,6 +228,16 @@ describe("ConsumedLabelIndex", () => {
       expect(unselected.overlapping([]).map((item) => item.entry))
         .toEqual(entries);
     });
+
+    it("keeps a selection keyed by the empty string apart from no selection", () => {
+      const entries = [["a"], ["b"]].map(entry);
+      const none = { key: "", keeps: () => false };
+      const selected = new ConsumedLabelIndex(entries, { select: none });
+      const unselected = new ConsumedLabelIndex(entries);
+      expect(selected.overlapping([])).toEqual([]);
+      expect(unselected.overlapping([]).map((item) => item.entry))
+        .toEqual(entries);
+    });
   });
 
   describe("instance members", () => {

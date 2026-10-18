@@ -69,7 +69,10 @@ export type ConsumedLabelSelection = {
  * immutable from the first index over them, as the index's retention of
  * their paths already requires.
  */
-const builtRoots = new WeakMap<readonly LabelMapEntry[], Map<string, Node>>();
+const builtRoots = new WeakMap<
+  readonly LabelMapEntry[],
+  Map<string | undefined, Node>
+>();
 
 /** Helper for `ConsumedLabelIndex`, which builds the trie over `entries`. */
 const buildRoot = (
@@ -118,7 +121,8 @@ export class ConsumedLabelIndex {
     } = {},
   ) {
     this.#onQuery = options.onQuery;
-    const key = options.select?.key ?? "";
+    // No selection is its own slot, apart from every selection key.
+    const key = options.select?.key;
     let roots = builtRoots.get(entries);
     let root = roots?.get(key);
     if (root === undefined) {
