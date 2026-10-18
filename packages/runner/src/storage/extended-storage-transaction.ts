@@ -480,16 +480,21 @@ const throwCfcReadOnly = (): never => {
 // iteration leaks) are pinned by unit-testing the helper directly.
 export const readOnlyCfcView = <T>(value: T): T => {
   if (!isObjectOrArray(value)) return value;
-  if (Object.isFrozen(value)) return value;
+  // A frozen Map is not immutable: freezing fixes its properties and leaves
+  // its entries writable, so a Map is wrapped whether frozen or not.
+  if (!(value instanceof Map) && Object.isFrozen(value)) return value;
   const cached = readOnlyCfcViews.get(value);
   if (cached !== undefined) return cached as T;
   let view: object;
   if (value instanceof Map) {
     // Map methods work on an internal slot, so they must be called on the
-    // real Map, not the proxy. Read results are re-wrapped, and every API
-    // that would surface the backing map or its values raw is intercepted:
-    // forEach's third callback argument is the view, and get / entries /
-    // values / iteration yield wrapped values (cubic round 3 on #4517).
+    // real Map, not the proxy. The view exposes a Map's read surface and
+    // nothing else: each read is re-implemented over the backing map with
+    // its results re-wrapped (forEach's third callback argument is the view,
+    // and get / entries / values / iteration yield wrapped values), and no
+    // other function reaches a caller, since one bound to the backing map
+    // runs against it — inherited `valueOf` returns its receiver, and
+    // `__defineGetter__` installs a getter whose `this` is the receiver.
     // Keys pass raw on purpose — they are the frozen records whose
     // reference identity callers key on.
     const target = value as Map<unknown, unknown>;
@@ -500,11 +505,19 @@ export const readOnlyCfcView = <T>(value: T): T => {
           case "delete":
           case "clear":
             return throwCfcReadOnly;
-          // Inherited `valueOf` returns its receiver, so bound to the backing
-          // map below it would hand that map out writable. The view is what
-          // it stands for.
+          case "size":
+            return target.size;
+          case "has":
+            return (key: unknown) => target.has(key);
+          case "keys":
+            return () => target.keys();
+          case "constructor":
+            return target.constructor;
           case "valueOf":
             return () => mapView;
+          case "toString":
+          case "toLocaleString":
+            return () => Object.prototype.toString.call(target);
           case "get":
             return (key: unknown) => readOnlyCfcView(target.get(key));
           case "forEach":
@@ -529,13 +542,15 @@ export const readOnlyCfcView = <T>(value: T): T => {
         }
         const member = Reflect.get(target, prop, target);
         return typeof member === "function"
-          ? member.bind(target)
+          ? undefined
           : readOnlyCfcView(member);
       },
       set: throwCfcReadOnly,
       defineProperty: throwCfcReadOnly,
       deleteProperty: throwCfcReadOnly,
       setPrototypeOf: throwCfcReadOnly,
+      // Without this trap `Object.freeze(view)` freezes the backing map.
+      preventExtensions: throwCfcReadOnly,
     });
     view = mapView;
   } else {

@@ -234,16 +234,33 @@ describe("CFC tx state contracts", () => {
     expect(backing.nested.flag).toBe(true);
   });
 
-  it("the read-only view returns itself from `valueOf()`, not the backing map", () => {
-    // `Object.prototype.valueOf` returns its receiver, so a view binding it
-    // to the backing map would hand that map out writable. The view returns
-    // itself, and a write through it is refused.
+  it("the read-only view of a Map exposes its read surface and nothing that reaches the backing map", () => {
+    // `Object.prototype.valueOf` returns its receiver and `__defineGetter__`
+    // installs a getter whose `this` is the receiver, so either one bound to
+    // the backing map hands it out writable. And a Map proxy with no
+    // `preventExtensions` trap lets `Object.freeze(view)` freeze the backing
+    // map, which a frozen-value shortcut then returns raw, its entries still
+    // writable.
     const backing = new Map<string, string[]>([["a", ["b"]]]);
     const view = readOnlyCfcView(backing);
+    expect(view.size).toBe(1);
+    expect(view.has("a")).toBe(true);
+    expect([...view.keys()]).toEqual(["a"]);
+    expect(String(view)).toBe("[object Map]");
+    expect(view).toBeInstanceOf(Map);
     const unwrapped = view.valueOf() as Map<string, string[]>;
     expect(unwrapped).toBe(view);
     expect(() => unwrapped.set("c", ["d"])).toThrow("read-only");
+    expect(
+      (view as unknown as { __defineGetter__?: unknown }).__defineGetter__,
+    ).toBeUndefined();
+    expect(() => Object.freeze(view)).toThrow("read-only");
+    expect(Object.isFrozen(backing)).toBe(false);
+    expect(readOnlyCfcView(backing)).toBe(view);
+    const frozen = Object.freeze(new Map<string, string[]>([["a", ["b"]]]));
+    expect(() => readOnlyCfcView(frozen).set("c", ["d"])).toThrow("read-only");
     expect(backing.size).toBe(1);
+    expect(frozen.size).toBe(1);
   });
 
   it("noteCfcSinkReleaseReject lands in diagnostics", async () => {

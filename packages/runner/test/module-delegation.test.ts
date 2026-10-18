@@ -300,26 +300,65 @@ describe("module identity delegation", () => {
       }
     });
 
-    it("is not writable through a transaction's read-only view, whose `valueOf()` returns the view, so the runtime's grants and the other transactions stay as they were", () => {
-      const first = runtime.edit();
-      const second = runtime.edit();
-      let third: ReturnType<typeof runtime.edit> | undefined;
-      try {
-        const view = first.getCfcState().moduleDelegations;
-        const unwrapped = view.valueOf() as Map<string, Map<string, string[]>>;
-        expect(unwrapped).toBe(view);
-        expect(() => unwrapped.set(space, new Map([["successor", ["forged"]]])))
-          .toThrow("read-only");
-        third = runtime.edit();
-        expect(runtime.grantsModuleDelegation(space, "successor", "forged"))
-          .toBe(false);
-        for (const tx of [first, second, third]) {
-          expect(tx.getCfcState().moduleDelegations.get(space)).toBeUndefined();
-        }
-      } finally {
-        for (const tx of [first, second, third]) {
-          tx?.abort("snapshot view test complete");
-        }
+    describe("is not writable through a transaction's read-only view", () => {
+      // Each probe is a way a holder of one transaction could reach the
+      // shared snapshot's backing map through the view. Every one is
+      // refused, and the runtime's grants and the other transactions stay
+      // as they were.
+
+      type Tx = ReturnType<Runtime["edit"]>;
+      const forged = () => new Map([["successor", ["forged"]]]);
+      const probes: [string, (tx: Tx) => void][] = [
+        ["`valueOf()` returns the view, and a write through it is refused", (
+          tx,
+        ) => {
+          const view = tx.getCfcState().moduleDelegations;
+          const unwrapped = view.valueOf() as Map<
+            string,
+            Map<string, string[]>
+          >;
+          expect(unwrapped).toBe(view);
+          expect(() => unwrapped.set(space, forged())).toThrow("read-only");
+        }],
+        ["freezing the view is refused, and the next read is still the view", (
+          tx,
+        ) => {
+          expect(() => Object.freeze(tx.getCfcState().moduleDelegations))
+            .toThrow("read-only");
+          const next = tx.getCfcState().moduleDelegations as Map<
+            string,
+            Map<string, string[]>
+          >;
+          expect(() => next.set(space, forged())).toThrow("read-only");
+        }],
+        ["an inherited getter-defining method is not reachable", (tx) => {
+          const view = tx.getCfcState().moduleDelegations as unknown as {
+            __defineGetter__?: unknown;
+          };
+          expect(view.__defineGetter__).toBeUndefined();
+        }],
+      ];
+
+      for (const [description, probe] of probes) {
+        it(description, () => {
+          const first = runtime.edit();
+          const second = runtime.edit();
+          let third: Tx | undefined;
+          try {
+            probe(first);
+            third = runtime.edit();
+            expect(runtime.grantsModuleDelegation(space, "successor", "forged"))
+              .toBe(false);
+            for (const tx of [first, second, third]) {
+              expect(tx.getCfcState().moduleDelegations.get(space))
+                .toBeUndefined();
+            }
+          } finally {
+            for (const tx of [first, second, third]) {
+              tx?.abort("snapshot view test complete");
+            }
+          }
+        });
       }
     });
 
