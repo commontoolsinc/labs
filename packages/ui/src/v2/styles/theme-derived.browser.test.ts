@@ -90,3 +90,21 @@ Deno.test("a card under any element setting the theme's surface inside another c
     p.reveal.parentElement?.remove();
   }
 });
+
+Deno.test("a card's own surface wins over the recipe, inside another component or not", async () => {
+  const p = page();
+  const own = "rgb(4, 5, 6)";
+  const inside = new CFCard();
+  inside.style.setProperty("--cf-card-color-surface", own);
+  const outside = new CFCard();
+  outside.style.setProperty("--cf-card-color-surface", own);
+  p.reveal.append(inside);
+  p.reveal.parentElement?.append(outside);
+  try {
+    await rendered(p, inside, outside);
+    expect(cardBackground(inside)).toBe(own);
+    expect(cardBackground(outside)).toBe(own);
+  } finally {
+    p.reveal.parentElement?.remove();
+  }
+});
