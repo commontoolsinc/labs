@@ -7317,16 +7317,20 @@ supply; OW29/OW32/OW34 closed):
     pattern once into the next wave. A stop/stopAll/dispose aborts that
     readiness and any named-document pull through the outer registration's
     cancellation signal; a runtime cycle, pointer change, or newer node
-    group wins through exact guards. In every posture, an immediate stale
-    read follows the same catch-up and one-shot reinstantiation path, whether
+    group wins through exact guards. A second drop tears the exact
+    registration down rather than spinning. In every posture, an immediate
+    stale read follows the same catch-up and reinstantiation path, whether
     the server refuses it or the replica's own consistency check does because
     another writer's change arrived between the read and the commit: it is
     the commit-time form of losing a race to a concurrent write — under server
     execution, the serving side's materialization — not a terminal graph
     failure. The catch-up brings the conflicting documents into the
-    runtime's own replica, which is the view the retry reads. A second
-    recoverable failure tears the exact registration down rather than
-    spinning. A whole-wave abort or abandon is not retried in place.
+    runtime's own replica, which is the view the retry reads. Each write
+    that lands while a retry is in flight costs a round, up to
+    `PIECE_RUN_START_MAX_RETRIES` rounds, a budget the rounds over absent
+    documents below share; once the rounds are spent the start reports the
+    loss and tears the exact registration down rather than spinning. A
+    whole-wave abort or abandon is not retried in place.
     Non-stale refusals and promise rejections remain terminal in every
     posture. A refusal that names only policy manifests takes a path of its
     own in every posture: the
@@ -7353,8 +7357,8 @@ supply; OW29/OW32/OW34 closed):
     start's pre-sync is meant to name everything a start reads; these
     rounds are what keep a document it misses from costing more than a
     round trip per layer. A refusal that names any read at a later seq is
-    a stale read over a revision another writer moved past, and stays
-    terminal with the flag off. With the flag off, a named piece's run
+    a stale read over a revision another writer moved past, and takes the
+    stale-read rounds above. With the flag off, a named piece's run
     start, which runs in a transaction of its own, runs again for either
     exception within its `PIECE_RUN_START_MAX_RETRIES` budget, and fails
     with the load's reason when the catch-up cannot load a document it
