@@ -300,6 +300,29 @@ describe("module identity delegation", () => {
       }
     });
 
+    it("is not writable through a transaction's read-only view, whose `valueOf()` returns the view, so the runtime's grants and the other transactions stay as they were", () => {
+      const first = runtime.edit();
+      const second = runtime.edit();
+      let third: ReturnType<typeof runtime.edit> | undefined;
+      try {
+        const view = first.getCfcState().moduleDelegations;
+        const unwrapped = view.valueOf() as Map<string, Map<string, string[]>>;
+        expect(unwrapped).toBe(view);
+        expect(() => unwrapped.set(space, new Map([["successor", ["forged"]]])))
+          .toThrow("read-only");
+        third = runtime.edit();
+        expect(runtime.grantsModuleDelegation(space, "successor", "forged"))
+          .toBe(false);
+        for (const tx of [first, second, third]) {
+          expect(tx.getCfcState().moduleDelegations.get(space)).toBeUndefined();
+        }
+      } finally {
+        for (const tx of [first, second, third]) {
+          tx?.abort("snapshot view test complete");
+        }
+      }
+    });
+
     it("carries a space's delegations under that space and under no other", () => {
       runtime.registerModuleDelegations(
         space,

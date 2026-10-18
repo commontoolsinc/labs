@@ -500,6 +500,11 @@ export const readOnlyCfcView = <T>(value: T): T => {
           case "delete":
           case "clear":
             return throwCfcReadOnly;
+          // Inherited `valueOf` returns its receiver, so bound to the backing
+          // map below it would hand that map out writable. The view is what
+          // it stands for.
+          case "valueOf":
+            return () => mapView;
           case "get":
             return (key: unknown) => readOnlyCfcView(target.get(key));
           case "forEach":

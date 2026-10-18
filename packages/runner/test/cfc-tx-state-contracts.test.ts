@@ -234,6 +234,18 @@ describe("CFC tx state contracts", () => {
     expect(backing.nested.flag).toBe(true);
   });
 
+  it("the read-only view returns itself from `valueOf()`, not the backing map", () => {
+    // `Object.prototype.valueOf` returns its receiver, so a view binding it
+    // to the backing map would hand that map out writable. The view returns
+    // itself, and a write through it is refused.
+    const backing = new Map<string, string[]>([["a", ["b"]]]);
+    const view = readOnlyCfcView(backing);
+    const unwrapped = view.valueOf() as Map<string, string[]>;
+    expect(unwrapped).toBe(view);
+    expect(() => unwrapped.set("c", ["d"])).toThrow("read-only");
+    expect(backing.size).toBe(1);
+  });
+
   it("noteCfcSinkReleaseReject lands in diagnostics", async () => {
     await withTx(async (_runtime, tx) => {
       tx.noteCfcSinkReleaseReject({
