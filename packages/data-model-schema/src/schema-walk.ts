@@ -482,7 +482,11 @@ export function mapSubschemas(
   return (result ?? schema) as JSONSchemaObj;
 }
 
-/** A subschema node visited during a recursive walk. */
+/**
+ * A subschema node visited during a recursive walk. A visitor reads it by its
+ * members; it is not a plain object to spread or serialize, and `path` is
+ * computed the first time it is read.
+ */
 export interface SchemaNode {
   /** The subschema at this node. */
   readonly schema: JSONSchema;
@@ -490,7 +494,8 @@ export interface SchemaNode {
   /**
    * Structural path from the walk root: keyword-segmented, e.g.
    * `["properties", "user", "items"]` or `["allOf", 0, "properties", "id"]`.
-   * Empty at the root.
+   * Empty at the root. Built on first read, and the same array on every read
+   * after.
    */
   readonly path: ReadonlyArray<string | number>;
 
