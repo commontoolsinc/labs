@@ -2,8 +2,8 @@
 
 /**
  * Each participant's expectation goes unmet: Alice expects two runtime errors
- * and raises one, and Bob expects some and raises none. Each is reported
- * under its own name.
+ * and raises one, Bob expects some and raises none, and Carol names a message
+ * her one error doesn't hold. Each is reported under its own name.
  */
 
 import { action, multiUserTest, pattern, TESTS, Writable } from "commonfabric";
@@ -28,4 +28,14 @@ export const bob = pattern<{ setup: ErrorSetup }>(({ setup }) => {
   return { [TESTS]: [{ action: write }], expectRuntimeErrors: true };
 });
 
-export default multiUserTest({ setup, participants: { alice, bob } });
+export const carol = pattern<{ setup: ErrorSetup }>(() => {
+  const refuse = action(() => {
+    throw new Error("Carol's action is refused");
+  });
+  return {
+    [TESTS]: [{ action: refuse }],
+    expectRuntimeErrors: ["Carol's action is allowed"],
+  };
+});
+
+export default multiUserTest({ setup, participants: { alice, bob, carol } });

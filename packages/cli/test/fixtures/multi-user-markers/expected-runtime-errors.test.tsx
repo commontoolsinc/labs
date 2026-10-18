@@ -2,7 +2,8 @@
 
 /**
  * Each participant requires the runtime errors its own actions raise: Alice
- * exactly two, Bob at least one. Both are met, so the run passes.
+ * exactly two, Bob the one his refusal names. Both are met, so the run
+ * passes.
  */
 
 import { action, multiUserTest, pattern, TESTS, Writable } from "commonfabric";
@@ -29,7 +30,10 @@ export const bob = pattern<{ setup: ErrorSetup }>(() => {
   const refuse = action(() => {
     throw new Error("Bob's action is refused");
   });
-  return { [TESTS]: [{ action: refuse }], expectRuntimeErrors: true };
+  return {
+    [TESTS]: [{ action: refuse }],
+    expectRuntimeErrors: ["Bob's action is refused"],
+  };
 });
 
 export default multiUserTest({ setup, participants: { alice, bob } });

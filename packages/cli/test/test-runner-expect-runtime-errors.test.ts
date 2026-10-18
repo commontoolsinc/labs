@@ -1,8 +1,9 @@
 /**
  * Integration-level guard for expectRuntimeErrors semantics: the flag REQUIRES
- * runtime errors (exact count when numeric) rather than merely tolerating
- * them, so a thrown rejection quietly reverting to a silent return fails the
- * suite that depends on it.
+ * runtime errors (exact count when numeric, and each named message when a
+ * list) rather than merely tolerating them, so a thrown rejection quietly
+ * reverting to a silent return, or giving another error, fails the suite that
+ * depends on it.
  *
  * Mirrors the design of test-runner-console-capture.test.ts.
  */
@@ -47,6 +48,24 @@ describe(
     it("fails on an exact-count mismatch", async () => {
       const { passed, failed } = await runTests(
         fixture("expected-count-mismatch.test.tsx"),
+        { root: FIXTURES },
+      );
+      expect(passed).toBe(1);
+      expect(failed).toBe(1);
+    });
+
+    it("passes when each listed message is one fired error's, in any order", async () => {
+      const { passed, failed } = await runTests(
+        fixture("expected-messages.test.tsx"),
+        { root: FIXTURES },
+      );
+      expect(passed).toBe(1);
+      expect(failed).toBe(0);
+    });
+
+    it("fails when a fired error is not the one a listed message names", async () => {
+      const { passed, failed } = await runTests(
+        fixture("expected-messages-mismatch.test.tsx"),
         { root: FIXTURES },
       );
       expect(passed).toBe(1);

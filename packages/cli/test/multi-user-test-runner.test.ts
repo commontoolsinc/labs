@@ -17,8 +17,8 @@
  * it fails seven assertions across `topics`, `lobby`, and `cfc-group-chat-demo`.
  *
  * Also here: a participant's `expectRuntimeErrors` requires its own runtime
- * errors, exactly where it names a count, and tolerates only those, so one
- * participant's expectation never covers another's errors.
+ * errors, exactly where it names a count or their messages, and tolerates only
+ * those, so one participant's expectation never covers another's errors.
  *
  * And: the CFC enforcement mode a run names reaches every participant.
  * Each participant builds its own runtime in its own worker, so a mode the
@@ -460,10 +460,13 @@ describe(
           fixture("unmet-runtime-errors.test.tsx"),
           { root: FIXTURES },
         );
-        expect(failed).toBe(2);
+        expect(failed).toBe(3);
         expect(results[0].results.map((result) => result.error)).toEqual([
           "[alice] expected 2 runtime error(s), saw 1",
           "[bob] expected some runtime error(s), saw 0",
+          "[carol] expected 1 runtime error(s), saw 1; " +
+          `none contains "Carol's action is allowed"; ` +
+          "unexpected: Error: Carol's action is refused",
         ]);
         expect(results[0].runtimeErrors).toEqual([]);
       });

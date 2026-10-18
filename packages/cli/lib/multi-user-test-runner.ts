@@ -82,6 +82,10 @@ import type {
   WorkerResponse,
 } from "./multi-user-test-worker.ts";
 import { patternTestExperimentalOptions } from "./pattern-test-experimental-options.ts";
+import {
+  type RuntimeErrorExpectation,
+  unmetRuntimeErrorExpectation,
+} from "./runtime-error-expectation.ts";
 
 export interface MultiUserParticipantSpec {
   name: string;
@@ -271,7 +275,7 @@ interface ParticipantState {
   assertionCount: number;
   lastActionName: string | null;
   allowRuntimeErrors: boolean;
-  expectRuntimeErrors: true | number | undefined;
+  expectRuntimeErrors: RuntimeErrorExpectation | undefined;
   expectNonIdempotent: boolean;
   allowConsoleErrors: boolean;
   allowConsoleWarnings: boolean;
@@ -594,20 +598,20 @@ export async function runMultiUserTestPattern(
         nonIdempotent: string[];
       };
       // An expectation tolerates the errors it counts and REQUIRES them, as
-      // in a single-user test: a count that differs, or none where some are
-      // expected, fails as a result named for the participant.
+      // in a single-user test (`unmetRuntimeErrorExpectation()`); one unmet
+      // fails as a result named for the participant.
       const expected = participant.expectRuntimeErrors;
       if (expected !== undefined) {
-        const want = expected === true ? undefined : expected;
-        const got = health.runtimeErrors.length;
-        if (got === 0 || (want !== undefined && got !== want)) {
+        const unmet = unmetRuntimeErrorExpectation(
+          expected,
+          health.runtimeErrors,
+        );
+        if (unmet !== undefined) {
           results.push({
             name: `${participant.spec.name}: expectRuntimeErrors`,
             passed: false,
             afterAction: null,
-            error: `[${participant.spec.name}] expected ${
-              want ?? "some"
-            } runtime error(s), saw ${got}`,
+            error: `[${participant.spec.name}] ${unmet}`,
             durationMs: 0,
           });
         }

@@ -78,6 +78,10 @@ import {
   type EventError,
   servedRuntimeErrors,
 } from "./served-errors.ts";
+import {
+  type RuntimeErrorExpectation,
+  runtimeErrorExpectation,
+} from "./runtime-error-expectation.ts";
 import { servedConsequences, settleServed } from "./served-settle.ts";
 import { buildActionEvent } from "./trusted-action-event.ts";
 
@@ -121,11 +125,11 @@ export interface ParticipantInitResult {
   allowRuntimeErrors: boolean;
 
   /**
-   * The runtime errors this participant requires: `true` for at least one, a
-   * number for exactly that many, and `undefined` for no requirement. As in a
+   * The runtime errors this participant requires, as
+   * `runtimeErrorExpectation()` reads them, or `undefined` for none. As in a
    * single-user test, an expectation tolerates the errors it counts.
    */
-  expectRuntimeErrors: true | number | undefined;
+  expectRuntimeErrors: RuntimeErrorExpectation | undefined;
 
   expectNonIdempotent: boolean;
   allowConsoleErrors: boolean;
@@ -332,17 +336,6 @@ function classifyStep(stepCell: Cell<unknown>, index: number): StepMeta {
         Object.keys(stepCell.get() as object ?? {}).join(",") || "none"
       })`,
   );
-}
-
-/**
- * A participant's `expectRuntimeErrors`, as its descriptor states it: `true`
- * or a count of zero or more. Anything else states no expectation.
- */
-function runtimeErrorExpectation(value: unknown): true | number | undefined {
-  if (value === true) return true;
-  return typeof value === "number" && Number.isInteger(value) && value >= 0
-    ? value
-    : undefined;
 }
 
 /**
