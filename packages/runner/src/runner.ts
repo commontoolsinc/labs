@@ -15339,9 +15339,9 @@ export const PIECE_RELEASE_OVERTAKEN =
 
 /**
  * The latest release time known for the source `resultCell` runs, `running`:
- * the latest one the revisions naming it since it was last adopted record, or
- * a later one the piece's reconciliation record confirms for it. `undefined`
- * when none says.
+ * the latest one recorded by the revisions naming it since the piece last
+ * moved to it from another source, or a later one the piece's reconciliation
+ * record confirms for it. `undefined` when none says.
  */
 export function knownPieceReleasedAt(
   resultCell: Cell<unknown>,

@@ -23,6 +23,7 @@ import {
   getPieceReconciliation,
   getPieceSourceRevisions,
   getPieceSourceSnapshot,
+  type IExtendedStorageTransaction,
   preparePieceSourceTransitionBaseline,
   resolveEntryIdentity,
   Runtime,
@@ -902,6 +903,35 @@ describe("piece source reconciliation", () => {
         );
       }
 
+      /**
+       * Applies to `piece` a transition that leaves the source it runs in
+       * place, as a repoint onto that same source does. `alongside` runs in
+       * the same transaction, after it.
+       */
+      async function keepInPlace(
+        piece: Cell<unknown>,
+        alongside?: (tx: IExtendedStorageTransaction) => void,
+      ) {
+        const expected = getPieceSourceSnapshot(piece)!;
+        const baseline = await preparePieceSourceTransitionBaseline(
+          runtime,
+          piece,
+          expected,
+        );
+        const kept = await runtime.editWithRetry((tx) => {
+          applyPieceSourceTransition(runtime, piece, tx, expected.pattern, {
+            revisionId: crypto.randomUUID(),
+            baseline,
+            timestamp: Date.now(),
+            operation: "repoint",
+            origin: expected.origin,
+            expected,
+          });
+          alongside?.(tx);
+        });
+        expect(kept.error).toBeUndefined();
+      }
+
       it("records the release time on the revision that adopts a release", async () => {
         const { piece, offer } = await followingPiece();
 
@@ -928,6 +958,47 @@ describe("piece source reconciliation", () => {
         expect(getPieceReconciliation(piece)).toMatchObject({
           outcome: "followed",
           offered: { identity: identities.v2, symbol: SYMBOL },
+        });
+      });
+
+      it("keeps a later release when the revision that last kept it in place records no release time", async () => {
+        // A runtime that does not carry the running source's release time onto
+        // a revision leaving that source in place writes the revision without
+        // one, and the transition clears the record that confirmed it. The
+        // revision that adopted the source still records its time.
+
+        const { piece, identities, offer } = await followingPiece();
+        await offer({ marker: "v2", releasedAt: LATER });
+        await keepInPlace(piece, (tx) => {
+          const history = piece.withTx(tx).getMetaRaw(
+            "pieceSourceHistory",
+          ) as Record<string, unknown>[];
+          const { releasedAt: _carried, ...untimed } = history.at(-1)!;
+          piece.withTx(tx).setMetaRaw(
+            "pieceSourceHistory",
+            [...history.slice(0, -1), untimed] as FabricValue,
+            rawMetaWriteAuthorization,
+          );
+        });
+        expect(
+          getPieceSourceRevisions(piece).map(({ pattern, releasedAt }) => ({
+            identity: pattern.identity,
+            releasedAt,
+          })).slice(-2),
+        ).toEqual([
+          { identity: identities.v2, releasedAt: Date.parse(LATER) },
+          { identity: identities.v2, releasedAt: undefined },
+        ]);
+        expect(getPieceReconciliation(piece)).toBeUndefined();
+
+        expect(await offer({ marker: "v1", releasedAt: EARLIER })).toEqual({
+          outcome: "ahead",
+          running: "v2",
+        });
+        expect(originUpdates(piece)).toHaveLength(1);
+        expect(getPieceReconciliation(piece)?.confirmed).toEqual({
+          identity: identities.v2,
+          releasedAt: Date.parse(LATER),
         });
       });
 
@@ -1057,6 +1128,30 @@ describe("piece source reconciliation", () => {
           });
           expect(getPieceReconciliation(piece)?.confirmed).toEqual({
             identity: identities.v2,
+            releasedAt: Date.parse(LATER),
+          });
+          expect(await offer({ marker: "v1", releasedAt: EARLIER })).toEqual({
+            outcome: "ahead",
+            running: "v2",
+          });
+        });
+
+        it("carries the time that confirms a source adopted with no release time onto a revision that leaves it in place", async () => {
+          // The record is the only place that time is kept, and the
+          // transition clears the record.
+
+          const { piece, identities, offer } = await followingPiece();
+          await offer({ marker: "v2" });
+          await offer({ marker: "v2", releasedAt: LATER });
+          expect(
+            getPieceSourceRevisions(piece).map(({ releasedAt }) => releasedAt),
+          ).not.toContain(Date.parse(LATER));
+
+          await keepInPlace(piece);
+
+          expect(getPieceReconciliation(piece)).toBeUndefined();
+          expect(getPieceSourceRevisions(piece).at(-1)).toMatchObject({
+            pattern: { identity: identities.v2 },
             releasedAt: Date.parse(LATER),
           });
           expect(await offer({ marker: "v1", releasedAt: EARLIER })).toEqual({
