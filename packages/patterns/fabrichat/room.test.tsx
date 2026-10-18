@@ -1,7 +1,8 @@
 /**
  * A FabriChat group room of its own, as several viewers sharing it: what a
  * send stores, how edits, deletions, and obliterations change a message, and
- * how replies divide into the conversation and its threads.
+ * how replies divide into the conversation and its threads. An act the room
+ * refuses fails its run with a reason, and the test requires exactly those.
  */
 import {
   type AddIntegrity,
@@ -330,5 +331,6 @@ export default pattern(() => {
         ),
       },
     ],
+    expectRuntimeErrors: 4,
   };
 });

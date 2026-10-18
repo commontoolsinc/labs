@@ -4,7 +4,9 @@
  * lets OWNERs, but deletes no one else's; a member with WRITE sends but can't
  * delete or obliterate someone else's; a reader with READ is offered no way to
  * write; and someone the list leaves out sees a placement of the room as not
- * theirs. Who is in the space is the space's business, not the room's.
+ * theirs. Who is in the space is the space's business, not the room's. Each
+ * act the room refuses fails its run with a reason, which a participant
+ * tolerates; `refusals.test.tsx` requires each reason, and counts them.
  *
  * The test lane doesn't enforce the list, so what this checks is what the room
  * decides from the level `spaceAccess()` reports, not what the memory server
@@ -183,6 +185,8 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
       { assertion: assert(() => room.canSend === true) },
       { label: "alice-done" },
     ],
+    // Her refused deletion of someone else's message.
+    allowRuntimeErrors: true,
   };
 });
 
@@ -274,6 +278,8 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       // Alice obliterated it, so the editor no longer offers him an edit.
       { assertion: assert(() => editorDisplay(onHis[UI]) === "none") },
     ],
+    // His refused deletions and obliteration.
+    allowRuntimeErrors: true,
   };
 });
 

@@ -4,7 +4,9 @@
  * people, each an OWNER of its space, may delete and obliterate their own
  * messages and neither of the other's. Someone the space admits with WRITE
  * alone, as a direct room whose space has grown may, likewise obliterates
- * their own messages, and nobody else's. `owner-obliteration.test.tsx` covers
+ * their own messages, and nobody else's. Each act the room refuses fails its
+ * run with a reason, which a participant tolerates; `refusals.test.tsx`
+ * requires each reason, and counts them. `owner-obliteration.test.tsx` covers
  * a direct room configured to let its OWNERs obliterate.
  *
  * The test lane doesn't enforce the access list, so what this checks is what
@@ -195,6 +197,8 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       { label: "bob-done" },
       { await: "alice-done" },
     ],
+    // His refused deletion and obliteration of Alice's message.
+    allowRuntimeErrors: true,
   };
 });
 
@@ -252,6 +256,8 @@ export const carol = pattern<{ setup: Setup }>(({ setup }) => {
       { label: "carol-done" },
       { await: "alice-done" },
     ],
+    // Her refused deletion and obliteration of Alice's message.
+    allowRuntimeErrors: true,
   };
 });
 
