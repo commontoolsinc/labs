@@ -2634,9 +2634,12 @@ export class PatternManager {
     })).filter((sourcePackage) =>
       sourcePackage.rootPaths.length > 0 || sourcePackage.dataPaths.length > 0
     );
-    const dataFiles = sourcePackages.flatMap((sourcePackage) =>
-      sourcePackage.dataPaths
-    );
+    // Two modules reading one file each own an edge to it.
+    const dataFiles = [
+      ...new Set(
+        sourcePackages.flatMap((sourcePackage) => sourcePackage.dataPaths),
+      ),
+    ];
 
     const sourceFiles: Source[] = [...sourceDocs.values()].map((doc) => ({
       name: doc.filename,
