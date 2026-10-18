@@ -996,6 +996,15 @@ all stayed open would cost one recompute per member per message. A second member
 stays open throughout, to add a reaction to every third message while it is the
 newest, and to write the thread's replies alongside the last writer.
 
+Each act is followed by a wait for its effect in the acting member's copy of
+the room. A room handler refuses an act by throwing, which writes nothing, so a
+refused act's effect never arrives. The member's runtime reports the handler's
+error, and that report ends the pending wait instead: the seed fails with an
+error naming the member, the act, and the handler's message, and the child
+exits non-zero. The child writes to the benchmark's own stderr as it runs, so
+its progress and the reason for a failure reach the workflow log as they
+happen, not only once the child has exited.
+
 Every body is derived from its index, so two rooms of one size carry the same
 text. Each benchmark process derives its members from a passphrase new to that
 process, so each starter's Home lists only that process's room, and a toolshed

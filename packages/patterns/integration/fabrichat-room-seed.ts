@@ -14,7 +14,8 @@
  *
  * The members' identities derive from `--passphrase`, and the fixture names
  * the passphrase, so the starter can sign in with it. Progress goes to stderr;
- * the fixture goes to `--out` as JSON.
+ * the fixture goes to `--out` as JSON. An act the room refuses fails the seed
+ * with the refusal's reason, and the process exits non-zero.
  */
 
 import { parseArgs } from "@std/cli/parse-args";
