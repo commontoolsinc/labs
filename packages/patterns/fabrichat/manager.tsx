@@ -1998,8 +1998,10 @@ export const FabriChatManagerCore = pattern<
       shownPeople.length === 0 ? "none" : "block"
     );
     // A notice whose room's roster lists a profile attesting its recipient
-    // has nothing left to tell them: they are in the room.
-    const noticeList = computed(() =>
+    // has nothing left to tell them: they are in the room. Per session, as
+    // `newestFirst` is: the roster is read under the reader's access, and a
+    // profile attests no one to a reader its space refuses.
+    const noticeList = computed((): PerSession<ChatManagerNotice[]> =>
       ((outgoingNotices.get() ?? []) as ChatManagerNotice[]).filter((notice) =>
         !(notice.room.key("roster").get() ?? []).some((member) =>
           principalOf(member, "represents-principal") === notice.recipient
