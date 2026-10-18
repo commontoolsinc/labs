@@ -221,6 +221,15 @@ export default pattern(() => {
         event: { message: first, reaction: firstReaction },
         trustedUi: unreactGesture,
       },
+      // One named by a place in the list that holds none removes nothing.
+      {
+        action: bob.deleteReaction,
+        event: {
+          message: first,
+          reaction: messages.key(0).key("reactions").key(5),
+        },
+        trustedUi: unreactGesture,
+      },
       { assertion: assert(() => reactionCount(messages) === 0) },
 
       // An obliteration in a room whose OWNERs may not obliterate.
