@@ -5056,7 +5056,7 @@ describe("stage D seal-into-wave", () => {
       });
     });
 
-    it("tears down after a second stale-read refusal instead of spinning", async () => {
+    it("reinstantiates a piece after successive stale-read refusals while rounds remain", async () => {
       await withOffRuntime(async (offRuntime) => {
         const witness = await stoppedWitnessPiece(
           "off-piece-instantiate-stale-read-twice",
@@ -5071,88 +5071,55 @@ describe("stage D seal-into-wave", () => {
             attempt <= 2 ? refuseCommit(tx, staleRead) : original(),
         );
 
-        const started = await offRuntime.start(witness.cell);
-        await offRuntime.idle();
-        await offRuntime.runner.idlePieceInstantiationSettlements();
-
-        // The start resolves before its commit settles. Exactly one retry
-        // follows, and the second refusal retires the registration and
-        // reports the loss.
-        expect(started).toBe(true);
-        expect(counts.attempts()).toBe(2);
-        expect(counts.readinessCalls()).toBe(1);
-        expect(counts.failures).toEqual([staleRead]);
-        expect(witness.instantiations()).toBe(3);
-
-        // Retired, not wedged: a later start sets the piece up afresh.
         expect(await offRuntime.start(witness.cell)).toBe(true);
         await offRuntime.idle();
         await offRuntime.runner.idlePieceInstantiationSettlements();
+
+        expect(counts.attempts()).toBe(3);
+        expect(counts.readinessCalls()).toBe(2);
+        expect(counts.failures).toEqual([]);
         expect(witness.instantiations()).toBe(4);
+        expect(witness.lastRunInstantiation()).toBe(4);
       });
     });
-  });
 
-  it("tears down after a second stale-read refusal instead of spinning", async () => {
-    const witness = await stoppedWitnessPiece(
-      "wave-piece-instantiate-stale-read-twice",
-    );
-    let pieceInstantiationSeals = 0;
-    let readinessCalls = 0;
-    const failures: unknown[] = [];
-    runtime.pieceStartCommitFailureObserver = ({ error }) => {
-      failures.push(error);
-    };
-    const conflicted = witness.cell.getAsNormalizedFullLink().id;
-    const staleRead = {
-      name: "ConflictError" as const,
-      message: `stale confirmed read: ${conflicted} at seq 0 ` +
-        "conflicted with seq 1",
-      conflict: { space, the: "application/json", of: conflicted },
-      readyToRetry: () => {
-        readinessCalls += 1;
-        return Promise.resolve();
-      },
-    };
-    runtime.installSealDestination({
-      seal: (tx) => {
-        if (
-          !waveRunContextOf(tx)?.actionId.startsWith("piece-instantiate/")
-        ) {
-          return tx.tx.commit().settled;
-        }
-        pieceInstantiationSeals += 1;
-        if (pieceInstantiationSeals <= 2) {
-          return Promise.resolve({ error: staleRead as never });
-        }
-        return tx.tx.commit().settled;
-      },
-    }, {
-      runStamper: (tx, info) =>
-        stampWaveRunContext(tx, {
-          actionId: info.actionId,
-          kind: info.kind,
-        }),
+    it("tears down once its rounds over stale reads are spent", async () => {
+      await withOffRuntime(async (offRuntime) => {
+        const witness = await stoppedWitnessPiece(
+          "off-piece-instantiate-stale-read-unbounded",
+          { on: offRuntime },
+        );
+        const staleRead = staleReadOf(
+          witness.cell.getAsNormalizedFullLink().id,
+        );
+        let refusing = true;
+        const counts = interceptInstantiateCommits(
+          offRuntime,
+          (_attempt, tx, original) =>
+            refusing ? refuseCommit(tx, staleRead) : original(),
+        );
+
+        // The start resolves before its commit settles.
+        expect(await offRuntime.start(witness.cell)).toBe(true);
+        await offRuntime.idle();
+        await offRuntime.runner.idlePieceInstantiationSettlements();
+
+        // The first attempt and five rounds, the bound a retrying writer
+        // takes, and the last refusal retires the registration and reports
+        // the loss.
+        expect(counts.attempts()).toBe(6);
+        expect(counts.readinessCalls()).toBe(5);
+        expect(counts.failures).toEqual([staleRead]);
+        expect(witness.instantiations()).toBe(7);
+
+        // Retired, not wedged: a later start sets the piece up afresh.
+        refusing = false;
+        expect(await offRuntime.start(witness.cell)).toBe(true);
+        await offRuntime.idle();
+        await offRuntime.runner.idlePieceInstantiationSettlements();
+        expect(witness.instantiations()).toBe(8);
+      });
     });
-
-    expect(await runtime.start(witness.cell)).toBe(true);
-    await runtime.idle();
-    await runtime.runner.idlePieceInstantiationSettlements();
-
-    // Exactly one retry. A basis the serving side does not repair is a
-    // permanent refusal, so the second one retires the registration rather
-    // than spinning on it.
-    expect(pieceInstantiationSeals).toBe(2);
-    expect(readinessCalls).toBe(1);
-    expect(failures).toContain(staleRead);
-    expect(witness.instantiations()).toBe(3);
-
-    // Retired, not wedged: a later owner starts the piece afresh.
-    runtime.clearSealDestination();
-    expect(await runtime.start(witness.cell)).toBe(true);
-    await runtime.idle();
-    await runtime.runner.idlePieceInstantiationSettlements();
-    expect(witness.instantiations()).toBe(4);
   });
 
   // A refusal claiming `id` in `inSpace` absent: a confirmed read of it at
@@ -5203,6 +5170,72 @@ describe("stage D seal-into-wave", () => {
     await runtime.runner.idlePieceInstantiationSettlements();
     return { attempts, failures };
   };
+
+  // A stale-read refusal of the witness piece's own document, counting the
+  // catch-ups the recovery waits for.
+  const staleReadOfWitness = (
+    witness: Awaited<ReturnType<typeof stoppedWitnessPiece>>,
+  ) => {
+    const conflicted = witness.cell.getAsNormalizedFullLink().id;
+    let readinessCalls = 0;
+    const refusal = {
+      name: "ConflictError" as const,
+      message: `stale confirmed read: ${conflicted} at seq 1 ` +
+        "conflicted with seq 2",
+      conflict: { space, the: "application/json", of: conflicted, seq: 1 },
+      readyToRetry: () => {
+        readinessCalls += 1;
+        return Promise.resolve();
+      },
+    };
+    return { refusal, readinessCalls: () => readinessCalls };
+  };
+
+  it("reinstantiates a piece after successive stale-read refusals while rounds remain", async () => {
+    // Each concurrent write that lands while a retry is in flight costs one
+    // round, and the retry after the last of them commits.
+
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-stale-read-twice",
+    );
+    const staleRead = staleReadOfWitness(witness);
+
+    const { attempts, failures } = await startRefusingInstantiations(
+      witness,
+      (attempt) => attempt <= 2 ? staleRead.refusal : undefined,
+    );
+
+    expect(attempts).toBe(3);
+    expect(staleRead.readinessCalls()).toBe(2);
+    expect(failures).toEqual([]);
+    expect(witness.instantiations()).toBe(4);
+    expect(witness.lastRunInstantiation()).toBe(4);
+  });
+
+  it("tears down once its rounds over stale reads are spent", async () => {
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-stale-read-unbounded",
+    );
+    const staleRead = staleReadOfWitness(witness);
+
+    const { attempts, failures } = await startRefusingInstantiations(
+      witness,
+      () => staleRead.refusal,
+    );
+
+    // The first attempt and five rounds, the bound a retrying writer takes.
+    expect(attempts).toBe(6);
+    expect(staleRead.readinessCalls()).toBe(5);
+    expect(failures).toEqual([staleRead.refusal]);
+    expect(witness.instantiations()).toBe(7);
+
+    // Retired, not wedged: a later owner starts the piece afresh.
+    runtime.clearSealDestination();
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await runtime.idle();
+    await runtime.runner.idlePieceInstantiationSettlements();
+    expect(witness.instantiations()).toBe(8);
+  });
 
   it("reinstantiates a piece once per layer of documents its refusals claim absent", async () => {
     // A retry can read documents that only the previous round's catch-up

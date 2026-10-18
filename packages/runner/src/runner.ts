@@ -379,10 +379,10 @@ const PRESENCE_PROBE_READ = {
  * How many times a named piece's run starts again after its start transaction
  * is refused retryably, matching the bound `Runtime.editWithRetry()` puts on
  * any other retrying writer, and how many times a piece's instantiation runs
- * again over successive layers of documents its commit claimed absent. Each
- * attempt waits for the refusal's catch-up first, so the bound caps a basis
- * that keeps moving, or a chain of links each reaching a document not yet
- * loaded, rather than a spin.
+ * again after its commit loses its basis to concurrent writes or claims absent
+ * successive layers of documents. Each attempt waits for the refusal's
+ * catch-up first, so the bound caps a basis that keeps moving, or a chain of
+ * links each reaching a document not yet loaded, rather than a spin.
  */
 const PIECE_RUN_START_MAX_RETRIES = 5;
 
@@ -484,14 +484,14 @@ const catchUpLoadFailure = (
 
 /**
  * What a piece's instantiation may still recover once an earlier attempt's
- * refused commit was recovered: another refusal claiming documents absent
- * ({@link refusalClaimsOnlyAbsence}), while rounds remain and only when it
- * names a document no earlier round's catch-up loaded. Any other refusal is
- * terminal.
+ * refused commit was recovered, while rounds remain: another stale read, or
+ * another refusal claiming documents absent ({@link refusalClaimsOnlyAbsence})
+ * when it names a document no earlier round's catch-up loaded. Any other
+ * refusal is terminal.
  */
 type InstantiationRetry = {
-  /** Rounds over documents claimed absent that the retry may still take. */
-  readonly absenceRoundsLeft: number;
+  /** Rounds the retry may still take, over stale reads and absences alike. */
+  readonly roundsLeft: number;
 
   /** The documents earlier rounds loaded, as {@link conflictKeys} names. */
   readonly loaded: ReadonlySet<string>;
@@ -2596,10 +2596,11 @@ export class Runner {
    * In-flight settlements of self-minted piece instantiations, which commit
    * asynchronously. Their local graph is speculative until the commit and any
    * serving-wave settlement succeed, so a stale-read refusal or contribution
-   * drop tears down that exact node group and re-instantiates it once against
-   * the repaired view. This set is a deterministic test seam: disposal relies
-   * on the registration and lifecycle guards rather than waiting for a
-   * readiness gate or a wave that a closing serving loop may abandon.
+   * drop tears down that exact node group and re-instantiates it against the
+   * repaired view, for a bounded number of rounds. This set is a deterministic
+   * test seam: disposal relies on the registration and lifecycle guards rather
+   * than waiting for a readiness gate or a wave that a closing serving loop may
+   * abandon.
    */
   #pendingPieceInstantiationSettlements = new Set<Promise<unknown>>();
 
@@ -5693,20 +5694,27 @@ export class Runner {
             registrations.get(key) === cancel && cancelNodes === nodeCancel &&
             currentPatternKey === patternKeyAtInstantiation;
           // `refusal` is how the commit was lost: its basis to a concurrent
-          // write, a policy manifest install to another participant, an
-          // absence claim over the documents `absent` names that the store
-          // holds, or none of these, which is terminal. One retry is enough
+          // write, its whole contribution to the serving wave, a policy
+          // manifest install to another participant, an absence claim over
+          // the documents `absent` names that the store holds, or none of
+          // these, which is terminal. A dropped contribution takes one retry
+          // against the view the drop rolled back to. One retry is enough
           // for a lost install: a manifest never changes once present, so
           // once the catch-up has loaded it the install reads it as present
-          // and writes nothing, and the same refusal cannot recur. An absence
-          // claim can take a round per layer of documents instead: the retry
-          // reads each named document at the revision the catch-up loaded,
-          // and may follow a link in one to a document not yet loaded. The
-          // rounds are bounded by `PIECE_RUN_START_MAX_RETRIES`, and each has
-          // to name a document no earlier round loaded.
+          // and writes nothing, and the same refusal cannot recur. A lost
+          // basis can take a round per concurrent write that lands while the
+          // retry is in flight, since each round reads only what its own
+          // catch-up brought in. An absence claim can take a round per layer
+          // of documents: the retry reads each named document at the
+          // revision the catch-up loaded, and may follow a link in one to a
+          // document not yet loaded, so each such round has to name a
+          // document no earlier round loaded. The rounds of both kinds come
+          // from one budget, `PIECE_RUN_START_MAX_RETRIES`, the bound
+          // `Runtime.editWithRetry()` and a named piece's run start also put
+          // on a basis that keeps moving.
           const recoverInstantiation = async (
             error: unknown,
-            refusal: "absence" | "basis" | "manifest" | "terminal",
+            refusal: "absence" | "basis" | "dropped" | "manifest" | "terminal",
             absent: readonly string[] = [],
           ): PieceInstantiationSettlement => {
             if (!exactNodesAreCurrent()) {
@@ -5722,14 +5730,16 @@ export class Runner {
             }
             const recoverable = refusal !== "terminal" &&
               (retry === undefined ||
-                (refusal === "absence" && retry.absenceRoundsLeft > 0 &&
+                (refusal === "basis" && retry.roundsLeft > 0) ||
+                (refusal === "absence" && retry.roundsLeft > 0 &&
                   absent.some((key) => !retry.loaded.has(key))));
             if (!recoverable) {
               // Either this failure was never the recoverable class, or an
-              // earlier recovery leaves it none: the one retry lost the same
-              // way, or a round over documents claimed absent reached none
-              // not yet loaded, or the rounds are spent. The graph's setup
-              // does not become durable and the load has genuinely failed.
+              // earlier recovery leaves it none: the one retry of a manifest
+              // or of a dropped contribution lost the same way, or a round
+              // over documents claimed absent reached none not yet loaded, or
+              // the rounds are spent. The graph's setup does not become
+              // durable and the load has genuinely failed.
               const failure = this.#reportPieceStartCommitFailure(
                 instantiateActionId,
                 error,
@@ -5751,8 +5761,11 @@ export class Runner {
                 : refusal === "absence"
                 ? "claimed documents absent that the store holds; loading " +
                   "them, and instantiating once more if they load"
+                : refusal === "dropped"
+                ? "had its contribution dropped from the serving wave; " +
+                  "re-instantiating once from the rolled-back view"
                 : "lost its basis to a concurrent write; re-instantiating " +
-                  "once from the caught-up view"),
+                  "from the caught-up view"),
               error,
             ]);
 
@@ -5808,13 +5821,13 @@ export class Runner {
               return await instantiatePattern(
                 pattern,
                 undefined,
-                refusal === "absence"
-                  ? {
-                    absenceRoundsLeft: (retry?.absenceRoundsLeft ??
+                refusal === "manifest" || refusal === "dropped"
+                  ? { roundsLeft: 0, loaded: new Set() }
+                  : {
+                    roundsLeft: (retry?.roundsLeft ??
                       PIECE_RUN_START_MAX_RETRIES) - 1,
                     loaded: new Set([...(retry?.loaded ?? []), ...absent]),
-                  }
-                  : { absenceRoundsLeft: 0, loaded: new Set() },
+                  },
               );
             } catch (retryError) {
               const failure = this.#reportPieceStartCommitFailure(
@@ -5886,7 +5899,7 @@ export class Runner {
               return await recoverInstantiation(
                 settled.error,
                 waveWithdrawalCause === "contribution-dropped"
-                  ? "basis"
+                  ? "dropped"
                   : "terminal",
               );
             },
