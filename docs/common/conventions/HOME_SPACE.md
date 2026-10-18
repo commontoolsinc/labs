@@ -109,8 +109,9 @@ Each profile lives in its own space, created with the anonymous
 a random DID owned by the creating user and writable by anyone, since its ACL
 grants the wildcard `"*"` WRITE: a runtime showing a profile writes into the
 profile's space, so a visitor needs more than READ. CFC owner-protects the
-profile's data fields, and its view state is per session; nothing else in the
-space is protected from a visitor (a *named* `inSpace(name)` would put every
+profile's data fields that store an owner policy (all but `picture`, as below),
+and its view state is per session; nothing else in the space is protected from
+a visitor (a *named* `inSpace(name)` would put every
 profile created under one name in one space) —
 running `/api/patterns/system/profile-home.tsx`; the link
 is appended to `profiles`. The home Profile tab renders the **profile picker**
@@ -127,8 +128,9 @@ cell's own label is minted by the write that stored the value. Only the second
 says whose word the value is, so a reader that relies on who a field
 represents, such as a host showing a member's picture as their face, reads the
 value cell's label and takes the field as the owner's only when that label
-names the owner alone. A pattern reads it with
-`principalOf(profile.key(field), "represents-principal")`, and a host with
+names the owner alone. A pattern reads it in a handler or a reactive
+computation, since the call throws in a pattern body, with
+`principalOf(profile.key(field), "represents-principal")`; a host reads it with
 `cfcLabelViewForResolvedTarget()`. Like every claim, it binds honest runtimes
 only: the memory server does not check a claim against the session that
 committed it ([`principal-of.md`](../../features/principal-of.md)).
