@@ -125,6 +125,12 @@ Most packages with benches define a `bench` task for running them locally
 (see `packages/runner/deno.jsonc`); otherwise invoke `deno bench` on a
 single file.
 
+`packages/state-inspector/test/reconstruct-range.bench.ts` is a local replay
+benchmark. It holds the replay suffix fixed while growing the preceding history
+from 100 to 10,000 revisions, covering snapshot-backed reads and exact-row reads
+within a multi-operation commit. Fixture construction and output assertions are
+outside the timed interval. Run it with `deno bench -A` and the file path.
+
 `packages/runner/test/view-replication.bench.ts` measures view selection through
 chains of 100, 300, and 1,000 computations, each mixed with an equally large
 unrelated chain. Fixture construction stays outside timing; index construction
