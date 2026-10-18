@@ -97,14 +97,17 @@ export interface RuntimeClientsOptions {
 }
 
 /**
- * One connected client, its channel, what the channel has carried, and
- * whether its attach is settled.
+ * One connected client, its channel, the tally its posts count into, and
+ * whether its attach is settled. The tally is held through a holder the
+ * client's `post` reads at each call, so that a post made after the client
+ * is dropped counts into the departed clients' tally rather than into one
+ * nothing reports any more.
  */
 type RegisteredClient = {
   client: WorkerClient;
   duplex: MessagePortLike;
   listener: (event: MessageEvent) => void;
-  tally: IpcChannelTally;
+  channel: { tally: IpcChannelTally };
   attached: boolean;
 };
 
@@ -117,7 +120,10 @@ export class RuntimeClients {
   /** Ports dropped so far. */
   #closedPorts = 0;
 
-  /** What the clients on dropped ports had been sent, added together. */
+  /**
+   * What the clients on dropped ports have been sent, added together, a
+   * post made after the drop included.
+   */
   readonly #departedClients = new IpcChannelTally();
 
   readonly #owner: WorkerClient;
@@ -148,11 +154,15 @@ export class RuntimeClients {
    */
   attach(duplex: MessagePortLike): WorkerClient {
     const id = this.#nextClientId++;
-    const tally = new IpcChannelTally();
+    const channel = { tally: new IpcChannelTally() };
     const client: WorkerClient = {
       id,
       post: (message) =>
-        postThrough((encoded) => duplex.postMessage(encoded), message, tally),
+        postThrough(
+          (encoded) => duplex.postMessage(encoded),
+          message,
+          channel.tally,
+        ),
     };
     const listener = (event: MessageEvent) => {
       void this.handleMessage(client, event);
@@ -161,7 +171,7 @@ export class RuntimeClients {
       client,
       duplex,
       listener,
-      tally,
+      channel,
       attached: false,
     });
     duplex.addEventListener("message", listener);
@@ -181,8 +191,8 @@ export class RuntimeClients {
    */
   getIpcSizes(): WorkerIpcSizes {
     const clients: Record<string, IpcChannelSizes> = {};
-    for (const [id, { tally }] of this.#attachedClients) {
-      clients[id] = tally.snapshot();
+    for (const [id, { channel }] of this.#attachedClients) {
+      clients[id] = channel.tally.snapshot();
     }
     return {
       openPorts: {
@@ -211,7 +221,8 @@ export class RuntimeClients {
     if (!registered) return;
     this.#attachedClients.delete(id);
     this.#closedPorts++;
-    this.#departedClients.add(registered.tally.snapshot());
+    this.#departedClients.add(registered.channel.tally.snapshot());
+    registered.channel.tally = this.#departedClients;
     registered.duplex.removeEventListener?.("message", registered.listener);
     registered.duplex.close?.();
   }

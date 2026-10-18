@@ -449,15 +449,25 @@ export const IMMUTABLE_SNAPSHOTS_NO_SPACE = "(none)";
 /**
  * The snapshots {@link liveImmutableSnapshotCount} counts, by the space of
  * the stored document each was read out of. A snapshot minted from a value
- * no space has stored, and one whose value has been reclaimed ahead of its
- * identifier, count under {@link IMMUTABLE_SNAPSHOTS_NO_SPACE}. One pass
- * over the snapshot table, so the read costs what the table holds.
+ * no space has stored, an element snapshot whose chain of origins ends at
+ * one (what {@link mintedFromUnstoredValue} decides), and one whose value
+ * has been reclaimed ahead of its identifier count under
+ * {@link IMMUTABLE_SNAPSHOTS_NO_SPACE}. One pass over the snapshot table,
+ * following each entry's origins, so the read costs what the table holds.
  */
 export function liveImmutableSnapshotsBySpace(): Map<string, number> {
   const counts = new Map<string, number>();
-  for (const { value } of snapshots.values()) {
-    const space = value.deref()?.origin?.space ?? IMMUTABLE_SNAPSHOTS_NO_SPACE;
-    counts.set(space, (counts.get(space) ?? 0) + 1);
+  for (const [id, { value }] of snapshots) {
+    const space = value.deref()?.origin?.space;
+    let key = IMMUTABLE_SNAPSHOTS_NO_SPACE;
+    if (space !== undefined) {
+      try {
+        if (!mintedFromUnstoredValue(id)) key = space;
+      } catch {
+        // An origin along the chain has expired, so the chain says nothing.
+      }
+    }
+    counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   return counts;
 }

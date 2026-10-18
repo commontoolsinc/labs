@@ -109,6 +109,7 @@ import {
   DOCUMENT_SIZE_NODE_BUDGET,
   DocumentSizeEstimate,
   type MeasureBudget,
+  measureDocumentSizes,
   type SpaceDocumentSizes,
 } from "./document-sizes.ts";
 import type { Cell } from "../cell.ts";
@@ -2731,34 +2732,38 @@ export class StorageManager implements IStorageManager {
    * @inheritDoc
    *
    * The per-space entries are built in one pass over the open spaces, with
-   * the document measurement of `DocumentSizeEstimate` drawing on one
-   * {@link DOCUMENT_SIZE_NODE_BUDGET} shared by all of them, so a read is
+   * the document measurement of `measureDocumentSizes()` sharing one
+   * {@link DOCUMENT_SIZE_NODE_BUDGET} among all of them, so a read is
    * bounded however many documents the spaces hold.
    */
   getSizes(): StorageSizes {
-    const budget: MeasureBudget = { remaining: DOCUMENT_SIZE_NODE_BUDGET };
-    const bySpace = [...this.#providers.values()]
-      .map((provider) => provider.replica.getDocumentSizes(budget))
-      .sort((a, b) =>
-        b.approxBytes - a.approxBytes || b.documents - a.documents
-      );
+    const bySpace = measureDocumentSizes(
+      [...this.#providers.values()].map((provider) => provider.replica),
+      DOCUMENT_SIZE_NODE_BUDGET,
+    ).sort((a, b) =>
+      b.approxBytes - a.approxBytes || b.documents - a.documents
+    );
     const bySpaceOmitted = {
       spaces: 0,
       documents: 0,
       watched: 0,
       measuredDocuments: 0,
+      truncatedDocuments: 0,
       approxBytes: 0,
     };
     let measuredDocuments = 0;
+    let truncatedDocuments = 0;
     let approxBytes = 0;
     for (const [index, entry] of bySpace.entries()) {
       measuredDocuments += entry.measuredDocuments;
+      truncatedDocuments += entry.truncatedDocuments;
       approxBytes += entry.approxBytes;
       if (index < STORAGE_DIAGNOSTICS_LIMIT) continue;
       bySpaceOmitted.spaces++;
       bySpaceOmitted.documents += entry.documents;
       bySpaceOmitted.watched += entry.watched;
       bySpaceOmitted.measuredDocuments += entry.measuredDocuments;
+      bySpaceOmitted.truncatedDocuments += entry.truncatedDocuments;
       bySpaceOmitted.approxBytes += entry.approxBytes;
     }
     bySpace.length = Math.min(bySpace.length, STORAGE_DIAGNOSTICS_LIMIT);
@@ -2776,6 +2781,7 @@ export class StorageManager implements IStorageManager {
       bySpace,
       bySpaceOmitted,
       measuredDocuments,
+      truncatedDocuments,
       approxBytes,
       wire: this.#sessionFactory.getSizes?.() ?? null,
     };

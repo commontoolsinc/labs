@@ -1,5 +1,6 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -169,6 +170,7 @@ describe("runtime-sizes", () => {
         documents: 0,
         watched: 0,
         measuredDocuments: 0,
+        truncatedDocuments: 0,
         approxBytes: 0,
       });
       expect(sizes.storage?.approxBytes).toBe(0);
@@ -263,6 +265,20 @@ describe("runtime-sizes", () => {
       expect(storage.wire).toBeNull();
     });
 
+    it("counts a stored byte payload's bytes in its space's approximate size", async () => {
+      const runtime = createRuntime();
+      const tx = runtime.edit();
+      runtime.getCell(space, "sized-bytes", { type: "object" }, tx).set({
+        payload: new FabricBytes(new Uint8Array(1_000_000)),
+      });
+      await tx.commit().settled;
+      await storageManager!.synced();
+
+      const storage = runtime.getSizes().storage!;
+      expect(storage.measuredDocuments).toBe(storage.documents);
+      expect(storage.approxBytes).toBeGreaterThanOrEqual(1_000_000);
+    });
+
     it("counts the snapshots read out of a space's documents under that space, and the rest under `(none)`", () => {
       // The table spans every store in the process, so each key is read as
       // a difference: what this runtime adds to whatever other stores hold.
@@ -278,6 +294,22 @@ describe("runtime-sizes", () => {
       const after = runtime.getSizes().runtime.immutableSnapshotsBySpace;
       expect((after[space] ?? 0) - (before[space] ?? 0)).toBe(1);
       expect((after["(none)"] ?? 0) - (before["(none)"] ?? 0)).toBe(1);
+    });
+
+    it("counts an element read out of an unstored snapshot under `(none)`, not the space its link names", () => {
+      const runtime = createRuntime();
+      const before = runtime.getSizes().runtime.immutableSnapshotsBySpace;
+      const unstored = runtime.getImmutableCell(space, { items: [{ n: 4 }] }, {
+        type: "object",
+      }).getAsNormalizedFullLink();
+      immutableCellsFor(runtime).createElement({ n: 4 }, {
+        ...unstored,
+        path: ["items", "0"],
+      });
+
+      const after = runtime.getSizes().runtime.immutableSnapshotsBySpace;
+      expect((after[space] ?? 0) - (before[space] ?? 0)).toBe(0);
+      expect((after["(none)"] ?? 0) - (before["(none)"] ?? 0)).toBe(2);
     });
 
     it("counts a sink's node while it is live and not after it is cancelled", async () => {

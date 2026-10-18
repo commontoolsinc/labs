@@ -28,7 +28,7 @@ describe("IpcChannelTally", () => {
     });
 
     describe("add()", () => {
-      it("adds another channel's counts to this one's", () => {
+      it("adds another channel's counts and its own estimate to this one's", () => {
         const tally = new IpcChannelTally();
         tally.note("one");
         tally.add({
@@ -42,8 +42,33 @@ describe("IpcChannelTally", () => {
           messages: 11,
           sampledMessages: 2,
           sampledBytes: 100,
-          approxBytes: 550,
+          approxBytes: 955,
         });
+      });
+
+      it("keeps each added channel's estimate whatever fraction of its traffic it sampled", () => {
+        // A long-lived channel sampled one message in sixteen; a short-lived
+        // one sampled its only message. Pooling the two samples would weigh
+        // the small message as heavily as the large ones.
+        const large = new IpcChannelTally();
+        const message = "x".repeat(1_000_000);
+        for (let sent = 0; sent < IPC_SAMPLE_STRIDE; sent++) {
+          large.note(message);
+        }
+        const small = new IpcChannelTally();
+        small.note("y");
+        const departed = new IpcChannelTally();
+
+        departed.add(large.snapshot());
+        const withLarge = departed.snapshot().approxBytes;
+        departed.add(small.snapshot());
+
+        expect(withLarge).toBe(
+          approximateJsonSize(message).bytes * IPC_SAMPLE_STRIDE,
+        );
+        expect(departed.snapshot().approxBytes).toBe(
+          withLarge + approximateJsonSize("y").bytes,
+        );
       });
     });
 

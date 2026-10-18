@@ -730,6 +730,30 @@ describe("RuntimeClients", () => {
         }
       });
 
+      it("counts a post made to a client after its drop under the departed clients", async () => {
+        // In-flight work can still post to a client whose port is gone; the
+        // message is still handed to `postMessage`, so it is still counted.
+        const h = harness();
+        await h.initialize(1);
+        const { client } = attachDirect(h);
+        await h.deliver(client, {
+          msgId: 1,
+          data: { type: RequestType.Attach, data: runningContext },
+        });
+        await h.deliver(client, {
+          msgId: 2,
+          data: { type: RequestType.Dispose },
+        });
+        const departed = () =>
+          h.clients.getIpcSizes().bytesSerialized.departedClients.messages;
+        const before = departed();
+
+        client.post({ type: NotificationType.ErrorReport, message: "late" });
+
+        expect(h.clients.getIpcSizes().bytesSerialized.clients).toEqual({});
+        expect(departed() - before).toBe(1);
+      });
+
       it("counts a refused client's port as closed", async () => {
         const h = harness();
         await h.initialize(1);

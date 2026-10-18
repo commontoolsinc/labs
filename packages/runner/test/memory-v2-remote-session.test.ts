@@ -938,20 +938,20 @@ describe("WebSocketTransport failure signaling", () => {
     });
   });
 
-  it("counts the frames it hands to the socket and the frames the socket delivers, by size", async () => {
+  it("counts the frames it hands to the socket and the frames the socket delivers, by their UTF-8 size", async () => {
     await withTransport(async (transport, socket) => {
       transport.setReceiver(() => {});
-      const send = transport.send("abcd");
+      const send = transport.send("abcé");
       socket().openConnection();
       await send;
       socket().receive("xyz");
-      socket().receive("hello");
+      socket().receive("😀");
 
       expect(transport.getSizes()).toEqual({
         messagesSent: 1,
-        bytesSent: 4,
+        bytesSent: 5,
         messagesReceived: 2,
-        bytesReceived: 8,
+        bytesReceived: 7,
       });
     });
   });
@@ -983,8 +983,9 @@ describe("WebSocketTransport failure signaling", () => {
       activeSocket.openConnection();
       await activeSocket.whenSent(1);
       expect(factory.getSizes()).toMatchObject({
-        connections: 1,
-        connectionsClosed: 0,
+        transports: 1,
+        transportsClosed: 0,
+        socketsOpen: 1,
         messagesSent: 1,
         bytesSent: requireTextFrame(activeSocket.sent[0]).length,
       });
@@ -998,8 +999,9 @@ describe("WebSocketTransport failure signaling", () => {
       await flags;
 
       expect(factory.getSizes()).toEqual({
-        connections: 0,
-        connectionsClosed: 1,
+        transports: 0,
+        transportsClosed: 1,
+        socketsOpen: 0,
         messagesSent: 1,
         bytesSent: requireTextFrame(activeSocket.sent[0]).length,
         messagesReceived: 1,

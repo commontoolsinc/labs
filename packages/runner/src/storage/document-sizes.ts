@@ -6,9 +6,12 @@
  * remembers each measurement for as long as the measured value lives, and
  * reports how far it has got. A read on a quiet replica soon costs nothing
  * but cache lookups, and a document a frame replaces is measured again at
- * the next read with budget to spare.
+ * the next read with budget to spare. The budget bounds every read: a
+ * document the budget runs out inside is reported as a lower bound and
+ * measured again when a read has more to spend on it.
  */
 
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { EntityDocument } from "@commonfabric/memory/v2";
 import { approximateJsonSize } from "@commonfabric/utils/approximate-json-size";
@@ -24,19 +27,29 @@ export type SpaceDocumentSizes = {
   watched: number;
 
   /**
-   * Documents whose confirmed value has been measured, or that have none.
-   * Equal to `documents` once the estimate has caught up with the replica.
+   * Documents whose confirmed value has been measured whole, or that have
+   * none. Equal to `documents` once the estimate has caught up with the
+   * replica.
    */
   measuredDocuments: number;
 
   /**
+   * Documents the budget ran out inside, whose size the estimate holds as
+   * a lower bound until a read has more budget to spend on them than the
+   * last attempt did. One that stays here across reads is larger than the
+   * whole budget.
+   */
+  truncatedDocuments: number;
+
+  /**
    * The approximate JSON length of the space's confirmed documents, as
-   * `approximateJsonSize()` measures one, extrapolated from the measured
-   * documents to all of them while some are still unmeasured. The pending
-   * layers over a document, the materialized views cached beside it and the
-   * cells built over it are not in the number, and neither is the heap's
-   * own per-object overhead; what it ranks is the stored content each space
-   * keeps decoded in this process.
+   * `approximateJsonSize()` measures one: the measured documents' sizes,
+   * the truncated documents' lower bounds, and the measured documents' mean
+   * for each document not yet reached. The pending layers over a document,
+   * the materialized views cached beside it and the cells built over it are
+   * not in the number, and neither is the heap's own per-object overhead;
+   * what it ranks is the stored content each space keeps decoded in this
+   * process.
    */
   approxBytes: number;
 };
@@ -52,6 +65,52 @@ export const DOCUMENT_SIZE_NODE_BUDGET = 1_000_000;
 /** The nodes one sizes read may still spend on measuring documents. */
 export type MeasureBudget = { remaining: number };
 
+/** A replica as the measurement sees one: its documents and their sizes. */
+export type MeasurableSpace = {
+  getDocumentSizes(budget: MeasureBudget): SpaceDocumentSizes;
+};
+
+/**
+ * The size of a Fabric primitive that keeps its payload where a walk cannot
+ * see it: a `FabricBytes` counts its bytes. Every other instance is walked
+ * through its own enumerable properties, which for the remaining primitives
+ * is nothing, and their payloads are a few dozen bytes at most.
+ */
+function fabricInstanceSize(instance: object): number | undefined {
+  return instance instanceof FabricBytes ? instance.length : undefined;
+}
+
+/**
+ * Measures every space's documents within `budget` nodes, shared so that no
+ * space goes unmeasured in a read: each space is first given an equal share,
+ * which admits at least one document, and what the shares leave unspent
+ * then goes, in order, to the spaces still holding unmeasured documents. So
+ * every space's `approxBytes` rests on a sample of its own from the first
+ * read, and the estimate converges across reads as `DocumentSizeEstimate`
+ * says.
+ */
+export function measureDocumentSizes(
+  spaces: readonly MeasurableSpace[],
+  budget: number,
+): SpaceDocumentSizes[] {
+  if (spaces.length === 0) return [];
+  const share = Math.ceil(budget / spaces.length);
+  let unspent = 0;
+  const measured = spaces.map((space) => {
+    const own: MeasureBudget = { remaining: share };
+    const sizes = space.getDocumentSizes(own);
+    unspent += Math.max(0, own.remaining);
+    return sizes;
+  });
+  const pooled: MeasureBudget = { remaining: unspent };
+  return measured.map((sizes, index) =>
+    pooled.remaining > 0 &&
+      sizes.measuredDocuments + sizes.truncatedDocuments < sizes.documents
+      ? spaces[index].getDocumentSizes(pooled)
+      : sizes
+  );
+}
+
 /**
  * Remembers the measured size of each document value it has seen, and sums a
  * replica's documents from those measurements within a budget. A value is
@@ -60,45 +119,75 @@ export type MeasureBudget = { remaining: number };
  * measured afresh.
  */
 export class DocumentSizeEstimate {
-  readonly #measured = new WeakMap<object, number>();
+  /**
+   * What each value's last walk found: its size, or a lower bound and the
+   * nodes the walk had visited when the budget ran out.
+   */
+  readonly #measured = new WeakMap<
+    object,
+    { bytes: number; nodes: number; complete: boolean }
+  >();
 
   /**
    * Sums the confirmed `values` of one replica's documents. A value already
-   * measured costs a lookup; one not yet measured is walked while `budget`
-   * has nodes left, and left for a later read otherwise. An absent document,
-   * whose value is `undefined`, counts as measured at no bytes.
+   * measured whole costs a lookup; one not yet measured is walked within
+   * what `budget` has left, which the walk draws down as it goes, and one
+   * the budget ran out inside keeps its lower bound until a read has more
+   * budget left than that walk spent. An absent document, whose value is
+   * `undefined`, counts as measured at no bytes.
    */
   measure(
     values: Iterable<EntityDocument | undefined>,
     budget: MeasureBudget,
-  ): { documents: number; measuredDocuments: number; approxBytes: number } {
+  ): {
+    documents: number;
+    measuredDocuments: number;
+    truncatedDocuments: number;
+    approxBytes: number;
+  } {
     let documents = 0;
     let measuredDocuments = 0;
     let measuredBytes = 0;
+    let truncatedDocuments = 0;
+    let truncatedBytes = 0;
     for (const value of values) {
       documents++;
       if (value === undefined) {
         measuredDocuments++;
         continue;
       }
-      let bytes = this.#measured.get(value);
-      if (bytes === undefined) {
-        if (budget.remaining <= 0) continue;
-        const size = approximateJsonSize(value);
-        budget.remaining -= size.nodes;
-        bytes = size.bytes;
-        // A document is an object, and only an object can key the cache; a
-        // value that is not one is measured again each read, which costs
-        // what one leaf costs.
-        if (typeof value === "object") this.#measured.set(value, bytes);
+      let size = this.#measured.get(value);
+      if (
+        size === undefined ||
+        (!size.complete && budget.remaining > size.nodes)
+      ) {
+        if (budget.remaining <= 0) {
+          if (size === undefined) continue;
+        } else {
+          size = approximateJsonSize(value, {
+            instanceSize: fabricInstanceSize,
+            nodeLimit: budget.remaining,
+          });
+          budget.remaining -= size.nodes;
+          // A document is an object, and only an object can key the cache;
+          // a value that is not one is measured again each read, which
+          // costs what one leaf costs.
+          if (typeof value === "object") this.#measured.set(value, size);
+        }
       }
-      measuredDocuments++;
-      measuredBytes += bytes;
+      if (size.complete) {
+        measuredDocuments++;
+        measuredBytes += size.bytes;
+      } else {
+        truncatedDocuments++;
+        truncatedBytes += size.bytes;
+      }
     }
-    const approxBytes =
-      measuredDocuments === documents || measuredDocuments === 0
-        ? measuredBytes
-        : Math.round(measuredBytes / measuredDocuments * documents);
-    return { documents, measuredDocuments, approxBytes };
+    const unreached = documents - measuredDocuments - truncatedDocuments;
+    const approxBytes = measuredBytes + truncatedBytes +
+      (measuredDocuments === 0
+        ? 0
+        : Math.round(measuredBytes / measuredDocuments * unreached));
+    return { documents, measuredDocuments, truncatedDocuments, approxBytes };
   }
 }

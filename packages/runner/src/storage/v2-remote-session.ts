@@ -27,6 +27,7 @@ import {
   encodeRoutedFrame,
 } from "@commonfabric/memory/v2/routed-parser";
 import { getLogger } from "@commonfabric/utils/logger";
+import { utf8ByteLength } from "@commonfabric/utils/utf8";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
 import type { MemoryConnectionSizes } from "./diagnostics.ts";
 import {
@@ -263,12 +264,12 @@ export type TransportSizes = {
 };
 
 /**
- * The size of a frame as the sizes read counts one: a text frame its length
- * in UTF-16 code units, a binary frame its bytes. Reading either allocates
- * nothing, which is what lets every frame be counted.
+ * The size of a frame on the wire: a text frame its UTF-8 size, counted
+ * from its code units without encoding it, a binary frame its bytes.
+ * Neither allocates, which is what lets every frame be counted.
  */
 function frameSize(frame: unknown): number {
-  if (typeof frame === "string") return frame.length;
+  if (typeof frame === "string") return utf8ByteLength(frame);
   if (frame instanceof Blob) return frame.size;
   if (frame instanceof ArrayBuffer || ArrayBuffer.isView(frame)) {
     return frame.byteLength;
@@ -324,6 +325,11 @@ export class WebSocketTransport implements MemoryClient.Transport {
   /** Bytes the current socket holds queued for the network, if it says. */
   get bufferedAmount(): number {
     return this.#socket?.bufferedAmount ?? 0;
+  }
+
+  /** Whether this transport holds a socket that is open right now. */
+  get socketOpen(): boolean {
+    return this.#socket?.readyState === WebSocket.OPEN;
   }
 
   /** What this transport has handed to its sockets and received from them. */
@@ -922,18 +928,23 @@ export class RemoteSessionFactory implements SessionFactory {
 
   /** @inheritDoc */
   getSizes(): MemoryConnectionSizes {
-    const sizes = { ...this.#closedTransportSizes, bufferedAmount: 0 };
+    const sizes = {
+      ...this.#closedTransportSizes,
+      socketsOpen: 0,
+      bufferedAmount: 0,
+    };
     for (const transport of this.#transports) {
       const carried = transport.getSizes();
       sizes.messagesSent += carried.messagesSent;
       sizes.bytesSent += carried.bytesSent;
       sizes.messagesReceived += carried.messagesReceived;
       sizes.bytesReceived += carried.bytesReceived;
+      if (transport.socketOpen) sizes.socketsOpen++;
       sizes.bufferedAmount += transport.bufferedAmount;
     }
     return {
-      connections: this.#transports.size,
-      connectionsClosed: this.#closedTransports,
+      transports: this.#transports.size,
+      transportsClosed: this.#closedTransports,
       ...sizes,
     };
   }

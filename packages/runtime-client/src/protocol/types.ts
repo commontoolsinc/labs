@@ -3862,11 +3862,13 @@ export type LoggerCountsResponse = {
   compileCache: Record<string, number>;
 
   /**
-   * How large the runtime's live structures are at this moment: the
-   * scheduler's tables, storage's documents and subscriptions, the compiled
-   * code caches, and the worker's own subscription and mount tables. Each is
-   * a collection's own count, so a collection that keeps growing shows up
-   * here, while growth in what its entries hold does not.
+   * How large the runtime's live structures are at this moment, and what its
+   * channels have carried: the scheduler's tables, storage's documents and
+   * subscriptions with each space's share and the approximate size of its
+   * documents, the compiled code caches, the worker's own subscription and
+   * mount tables, and the traffic of the memory connections and the worker's
+   * ports. The counts are each a collection's own; the sizes are estimates
+   * that say so where they are declared.
    */
   sizes: RuntimeSizes & { worker: WorkerSizes; ipc: WorkerIpcSizes | null };
 };
@@ -3884,9 +3886,10 @@ export type IpcChannelSizes = {
   sampledMessages: number;
 
   /**
-   * The approximate JSON length of the measured messages' encodings, as
-   * `approximateJsonSize()` measures one: what structured clone copied,
-   * give or take the clone's own per-object overhead.
+   * The approximate JSON length of the measured messages' encodings, in
+   * UTF-16 code units, as `approximateJsonSize()` measures one: a stand-in
+   * for what structured clone copied, which the clone's own per-object
+   * overhead puts above it and text outside ASCII puts below its UTF-8 size.
    */
   sampledBytes: number;
 

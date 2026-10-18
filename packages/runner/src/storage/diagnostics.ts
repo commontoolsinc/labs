@@ -124,8 +124,11 @@ export type StorageSizes = SpaceStorageSizes & {
   /** The spaces past the cap on `bySpace`, added together. */
   bySpaceOmitted: Omit<SpaceDocumentSizes, "space"> & { spaces: number };
 
-  /** Documents measured across every space; see `SpaceDocumentSizes`. */
+  /** Documents measured whole across every space; see `SpaceDocumentSizes`. */
   measuredDocuments: number;
+
+  /** Documents held as a lower bound across every space. */
+  truncatedDocuments: number;
 
   /** The approximate size of every space's documents, added together. */
   approxBytes: number;
@@ -139,17 +142,20 @@ export type StorageSizes = SpaceStorageSizes & {
 
 /**
  * What the connections to memory servers have carried since the session
- * factory was created, closed connections included, and what the open ones
- * hold queued. A text frame counts its length in UTF-16 code units, which is
- * its size on the wire for ASCII and below it otherwise; a binary frame
- * counts its bytes.
+ * factory was created, closed ones included, and what the open ones hold
+ * queued. A transport is one logical connection, which keeps its place and
+ * its counts across the sockets it dials; the bytes are the frames' sizes
+ * on the wire, a text frame's UTF-8 size among them.
  */
 export type MemoryConnectionSizes = {
-  /** Connections open. */
-  connections: number;
+  /** Transports the factory holds, a reconnecting one included. */
+  transports: number;
 
-  /** Connections closed since the factory was created. */
-  connectionsClosed: number;
+  /** Transports closed since the factory was created. */
+  transportsClosed: number;
+
+  /** Transports whose socket is open right now. */
+  socketsOpen: number;
 
   /** Frames handed to a socket. */
   messagesSent: number;

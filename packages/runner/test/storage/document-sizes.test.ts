@@ -1,10 +1,88 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { approximateJsonSize } from "@commonfabric/utils/approximate-json-size";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { EntityDocument } from "@commonfabric/memory/v2";
-import { DocumentSizeEstimate } from "../../src/storage/document-sizes.ts";
+import { approximateJsonSize } from "@commonfabric/utils/approximate-json-size";
+import {
+  DocumentSizeEstimate,
+  type MeasurableSpace,
+  type MeasureBudget,
+  measureDocumentSizes,
+  type SpaceDocumentSizes,
+} from "../../src/storage/document-sizes.ts";
 
 const document = (text: string): EntityDocument => ({ value: { text } });
+
+/**
+ * A space of `documents` documents, each of `nodesEach` nodes, measured the
+ * way a replica measures its own: whole documents while the budget lasts,
+ * and the budgets it was handed recorded.
+ */
+function spaceOf(
+  space: string,
+  documents: number,
+  nodesEach: number,
+): MeasurableSpace & { budgets: number[] } {
+  const budgets: number[] = [];
+  let measured = 0;
+  return {
+    budgets,
+    getDocumentSizes(budget: MeasureBudget): SpaceDocumentSizes {
+      budgets.push(budget.remaining);
+      while (measured < documents && budget.remaining > 0) {
+        budget.remaining -= nodesEach;
+        measured++;
+      }
+      return {
+        space: space as SpaceDocumentSizes["space"],
+        documents,
+        watched: 0,
+        measuredDocuments: measured,
+        truncatedDocuments: 0,
+        approxBytes: measured * nodesEach * 10,
+      };
+    },
+  };
+}
+
+describe("document-sizes", () => {
+  describe("measureDocumentSizes()", () => {
+    it("gives every space a share first, so each reports a sample of its own", () => {
+      const first = spaceOf("first", 100, 10);
+      const second = spaceOf("second", 100, 10);
+
+      const sizes = measureDocumentSizes([first, second], 100);
+
+      expect(first.budgets[0]).toBe(50);
+      expect(second.budgets[0]).toBe(50);
+      expect(sizes.map((entry) => entry.measuredDocuments)).toEqual([5, 5]);
+    });
+
+    it("hands what the shares leave unspent to the spaces still unmeasured, in order", () => {
+      const small = spaceOf("small", 1, 10);
+      const large = spaceOf("large", 100, 10);
+
+      const sizes = measureDocumentSizes([small, large], 100);
+
+      // The small space spent 10 of its 50; the large one got its own 50
+      // and then the 40 left over.
+      expect(large.budgets).toEqual([50, 40]);
+      expect(sizes.map((entry) => entry.measuredDocuments)).toEqual([1, 9]);
+    });
+
+    it("leaves a space alone once every document is measured or held as a bound", () => {
+      const done = spaceOf("done", 2, 10);
+
+      measureDocumentSizes([done], 100);
+
+      expect(done.budgets).toEqual([100]);
+    });
+
+    it("returns nothing for no spaces", () => {
+      expect(measureDocumentSizes([], 100)).toEqual([]);
+    });
+  });
+});
 
 describe("DocumentSizeEstimate", () => {
   describe("instance members", () => {
@@ -17,8 +95,61 @@ describe("DocumentSizeEstimate", () => {
         expect(estimate.measure(values, budget)).toEqual({
           documents: 3,
           measuredDocuments: 3,
+          truncatedDocuments: 0,
           approxBytes: approximateJsonSize(values[0]).bytes +
             approximateJsonSize(values[1]).bytes,
+        });
+      });
+
+      it("counts a stored byte payload by its bytes", () => {
+        const estimate = new DocumentSizeEstimate();
+        const value: EntityDocument = {
+          value: { payload: new FabricBytes(new Uint8Array(1_000_000)) },
+        };
+
+        const measured = estimate.measure([value], { remaining: 1_000 });
+
+        expect(measured.measuredDocuments).toBe(1);
+        expect(measured.approxBytes).toBeGreaterThanOrEqual(1_000_000);
+      });
+
+      it("stops inside a document the budget runs out in, holding its size as a lower bound", () => {
+        const estimate = new DocumentSizeEstimate();
+        const giant: EntityDocument = {
+          value: Array.from({ length: 5_000 }, () => 0),
+        };
+        const budget = { remaining: 1_000 };
+
+        const measured = estimate.measure([giant], budget);
+
+        expect(budget.remaining).toBe(0);
+        expect(measured).toMatchObject({
+          documents: 1,
+          measuredDocuments: 0,
+          truncatedDocuments: 1,
+        });
+        expect(measured.approxBytes).toBeGreaterThan(0);
+        expect(measured.approxBytes).toBeLessThan(
+          approximateJsonSize(giant).bytes,
+        );
+      });
+
+      it("measures a truncated document again once a read has more budget than the last walk spent", () => {
+        const estimate = new DocumentSizeEstimate();
+        const giant: EntityDocument = {
+          value: Array.from({ length: 5_000 }, () => 0),
+        };
+        estimate.measure([giant], { remaining: 1_000 });
+
+        const stillShort = estimate.measure([giant], { remaining: 1_000 });
+        const enough = estimate.measure([giant], { remaining: 10_000 });
+
+        expect(stillShort.truncatedDocuments).toBe(1);
+        expect(enough).toEqual({
+          documents: 1,
+          measuredDocuments: 1,
+          truncatedDocuments: 0,
+          approxBytes: approximateJsonSize(giant).bytes,
         });
       });
 
@@ -42,6 +173,7 @@ describe("DocumentSizeEstimate", () => {
         expect(measured).toEqual({
           documents: 3,
           measuredDocuments: 1,
+          truncatedDocuments: 0,
           approxBytes: each.bytes * 3,
         });
       });
@@ -75,6 +207,7 @@ describe("DocumentSizeEstimate", () => {
         expect(estimate.measure([document("a")], { remaining: 0 })).toEqual({
           documents: 1,
           measuredDocuments: 0,
+          truncatedDocuments: 0,
           approxBytes: 0,
         });
       });

@@ -379,11 +379,12 @@ await commonfabric.rt.getLoggerCounts()
 // how far the measurement has got; the rest of the spaces past the first 64
 // add up under `bySpaceOmitted`). `storage.wire` counts the frames the memory
 // connections have sent and received and the bytes the open sockets still
-// hold queued. `runtime.immutableSnapshotsBySpace` counts the snapshots by
-// the space each was read out of. `ipc` counts the `MessagePort`s the worker
-// holds and has closed, and what each outbound channel has carried: every
-// message counted, one in sixteen measured, `approxBytes` scaled from the
-// sample.
+// hold queued (`null` for a session factory that reports none, as the
+// emulated one is). `runtime.immutableSnapshotsBySpace` counts the snapshots
+// by the space each was read out of. `ipc` counts the `MessagePort`s the
+// worker holds and has closed, and what each outbound channel has carried:
+// every message counted, one in sixteen measured, `approxBytes` scaled from
+// the sample (`null` for a processor with no client registry behind it).
 (await commonfabric.rt.getLoggerCounts()).sizes
 
 // The storage counts above add every open space together. Each open space's
