@@ -5769,18 +5769,30 @@ export class Runner {
               retryReadinessTeardown.signal,
             );
 
-            // A stop aborts the readiness/pull work above; a runtime cycle,
-            // pointer change, or newer instantiation during the wait owns the
-            // key now. Otherwise retry, handing the retry what it may still
-            // recover, so that a failure it may not tears the registration
-            // down instead of spinning.
-            if (
-              retryReadinessTeardown.signal.aborted || !active ||
-              startLifecycleEpoch !== this.#lifecycleEpoch ||
-              registrations.get(key) !== cancel ||
-              currentPatternKey !== patternKeyAtInstantiation ||
-              cancelNodes !== undefined
-            ) {
+            // A stop aborts the readiness/pull work above; a runtime cycle, a
+            // newer registration, or a newer instantiation during the wait
+            // owns the key now. A pointer that moved during the wait does
+            // not: its swap installs a graph only once its setup lands, and
+            // one whose setup does not land keeps the running pattern, so
+            // the retry below is what gives that pattern a graph to keep.
+            // Otherwise retry, handing the retry what it may still recover,
+            // so that a failure it may not tears the registration down
+            // instead of spinning.
+            const supersededBy = retryReadinessTeardown.signal.aborted ||
+                !active
+              ? "a stop"
+              : startLifecycleEpoch !== this.#lifecycleEpoch
+              ? "a runtime cycle"
+              : registrations.get(key) !== cancel
+              ? "a newer registration"
+              : cancelNodes !== undefined
+              ? "a newer instantiation"
+              : undefined;
+            if (supersededBy !== undefined) {
+              logger.warn("piece-start-commit-superseded", () => [
+                `piece-start commit ${instantiateActionId} was not retried: ` +
+                `${supersededBy} took the piece over during its catch-up`,
+              ]);
               return;
             }
             // A retry reads the documents the catch-up loaded. One that could
@@ -5825,6 +5837,15 @@ export class Runner {
               return failure;
             }
           };
+          // The settlement of a commit whose setup writes landed. A retry
+          // says so at the level `piece-start-commit-recovering` is logged
+          // at, so that each recovery's log says how it ended.
+          const reportRecovered = (): undefined => {
+            if (retry === undefined) return;
+            logger.warn("piece-start-commit-recovered", () => [
+              `piece-start commit ${instantiateActionId} landed on its retry`,
+            ]);
+          };
           const commitWork = actualTx.commit().settled.then(
             async ({ error }): PieceInstantiationSettlement => {
               if (error !== undefined) {
@@ -5858,9 +5879,9 @@ export class Runner {
                 return failure;
               }
               const settlement = waveSettlementOf(actualTx);
-              if (settlement === undefined) return;
+              if (settlement === undefined) return reportRecovered();
               const settled = await settlement;
-              if (settled.error === undefined) return;
+              if (settled.error === undefined) return reportRecovered();
 
               const waveWithdrawalCause = settled.error.waveWithdrawalCause;
               if (waveWithdrawalCause === "wave-abandoned") {

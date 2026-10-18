@@ -7316,8 +7316,19 @@ supply; OW29/OW32/OW34 closed):
     waits for retry readiness, and instantiates the still-current
     pattern once into the next wave. A stop/stopAll/dispose aborts that
     readiness and any named-document pull through the outer registration's
-    cancellation signal; a runtime cycle, pointer change, or newer node
-    group wins through exact guards. Under server execution, an immediate
+    cancellation signal; a runtime cycle, a newer registration, or a newer
+    node group wins through exact guards. A pointer that moved during the
+    wait does not win: its swap installs a graph only once its setup lands,
+    and a swap whose setup does not land keeps the running pattern, so the
+    retry instantiates the running pattern and a swap that lands replaces
+    it. Every way a recovery ends is logged after its
+    `piece-start-commit-recovering`: `piece-start-commit-recovered` when
+    the retry's setup lands, `piece-start-commit-superseded` when something
+    else took the piece over, `piece-start-commit-abandoned`,
+    `piece-start-commit-failed`, or a further
+    `piece-start-commit-recovering` for another round. A recovery still
+    waiting for its catch-up has logged nothing further. Under server
+    execution, an immediate
     stale-read refusal follows the same catch-up and one-shot reinstantiation
     path: it is the commit-time form of losing the materialization race, not a
     terminal graph failure. A second recoverable failure tears the exact
