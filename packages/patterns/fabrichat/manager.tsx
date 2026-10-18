@@ -1655,7 +1655,11 @@ export interface FabriChatManagerOutput {
   /** The outcome of each request, by the `requestId` its caller chose. */
   requests: Record<string, ChatRequestOutcome>;
 
-  /** Notices this user's requests have produced that no one has delivered. */
+  /**
+   * Notices this user's requests have produced that no one has delivered,
+   * other than those whose room's roster lists a profile attesting their
+   * recipient.
+   */
   outgoingNotices: ChatManagerNotice[];
 
   /**
