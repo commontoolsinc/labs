@@ -1035,9 +1035,9 @@ thirty-six before the last; each `react` adds one reaction, to a different
 message each time, and leaves the messages as they were. The three rooms seed
 together, each in a child of its own, and all three finish before the first
 segment starts, so no seed child is alive and no setup work runs in a measured
-interval. One read-accounted sample each of `messages`
-and `send`, taken in a browser of its own, goes to stderr with the same counters
-the rendered lunch-poll benchmark records.
+interval. One read-accounted sample each of `messages` and `send`, taken in a
+browser of its own, goes to stderr with the same counters the rendered
+lunch-poll benchmark records.
 
 `react` adds to an existing reaction's tally rather than picking one from the
 row's reaction picker. At the shell's 1024-pixel viewport, the picker the row
