@@ -3,12 +3,13 @@
  * refused act's run throws, with a reason a person can read, and writes
  * nothing, so a client whose own event broke a stream's rules learns of it:
  * a send whose payload carries its text elsewhere than `body` among them.
- * Every refusal here is a runtime error the test requires, and the count is
- * exact, so a refusal that went back to a silent return fails it. An act that
- * would change nothing, such as a reaction added twice or a message deleted
- * twice, is no refusal and raises nothing. Alice, Bob and Carol run as this
- * lane's one principal, which holds OWNER in every space it creates, so what
- * tells them apart is their profiles; Carol's has not resolved.
+ * The test requires every refusal here, each by its reason, and no other
+ * runtime error, so a refusal that went back to a silent return, or gave
+ * another reason, fails it. An act that would change nothing, such as a
+ * reaction added twice or a message deleted twice, is no refusal and raises
+ * nothing. Alice, Bob and Carol run as this lane's one principal, which holds
+ * OWNER in every space it creates, so what tells them apart is their profiles;
+ * Carol's has not resolved.
  */
 import {
   type AddIntegrity,
@@ -307,6 +308,34 @@ export default pattern(() => {
       },
       { assertion: assert(() => bodies(directMessages) === "Just us") },
     ],
-    expectRuntimeErrors: 18,
+    // The reason for each refused act above, in the order the acts run.
+    expectRuntimeErrors: [
+      // Sends.
+      "Your profile hasn't loaded yet.",
+      "This send has no text in `body`.",
+      // Edits.
+      "Only its author can edit a message.",
+      "That message isn't in this chat.",
+      "This edit has no text in `body`.",
+      // The deletion, then the edit and deletion from Carol.
+      "Only its author can delete a message.",
+      "Your profile hasn't loaded yet.",
+      "Your profile hasn't loaded yet.",
+      // Reactions.
+      "Your profile hasn't loaded yet.",
+      "A reaction is a single emoji.",
+      // Removals.
+      "Only the person who reacted can remove a reaction.",
+      "Your profile hasn't loaded yet.",
+      "This names no reaction.",
+      // The obliteration in a room whose OWNERs may not obliterate.
+      "Messages in this chat can't be removed.",
+      // The deleted message's edit, reaction and removal.
+      "That message was deleted.",
+      "That message was deleted.",
+      "That message was deleted.",
+      // Bob's obliteration in the direct room.
+      "Only its author can remove a message in this chat.",
+    ],
   };
 });

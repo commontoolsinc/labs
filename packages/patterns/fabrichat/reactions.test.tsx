@@ -3,7 +3,7 @@
  * removing one is idempotent rather than a toggle, which reactions are
  * refused, how a message tallies its own, and that deleting a message takes
  * its reactions with it. A refused reaction's run fails with its reason, and
- * the test requires exactly those.
+ * the test requires exactly those, each by its reason.
  */
 import {
   action,
@@ -231,6 +231,12 @@ export default pattern(() => {
         ),
       },
     ],
-    expectRuntimeErrors: 3,
+    expectRuntimeErrors: [
+      // Text, and two emoji together.
+      "A reaction is a single emoji.",
+      "A reaction is a single emoji.",
+      // A reaction on the deleted message.
+      "That message was deleted.",
+    ],
   };
 });

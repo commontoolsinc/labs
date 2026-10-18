@@ -5,8 +5,8 @@
  * holds, and deletes no one else's message either way. Alice and Bob run here
  * as this lane's one principal, which holds OWNER in the room's space, so what
  * tells them apart is their profiles alone. Each act the room refuses fails
- * its run with a reason, and the test requires exactly those. `members.test.tsx`
- * and `direct.test.tsx` cover each kind's default.
+ * its run with a reason, and the test requires exactly those, each by its
+ * reason. `members.test.tsx` and `direct.test.tsx` cover each kind's default.
  */
 import {
   type AddIntegrity,
@@ -233,6 +233,16 @@ export default pattern(() => {
         ),
       },
     ],
-    expectRuntimeErrors: 5,
+    expectRuntimeErrors: [
+      // In the group room, Bob's deletion and obliteration of Alice's message,
+      // and his obliteration of his own.
+      "Only its author can delete a message.",
+      "Messages in this chat can't be removed.",
+      "Messages in this chat can't be removed.",
+      // In the direct room, his deletion of hers.
+      "Only its author can delete a message.",
+      // The obliteration bound to no policy.
+      "Messages in this chat can't be removed.",
+    ],
   };
 });
