@@ -476,6 +476,23 @@ const throwCfcReadOnly = (): never => {
   );
 };
 
+/**
+ * The Map intrinsics the read-only view dispatches through, captured when
+ * this module loads, so a `Map.prototype` member replaced afterwards cannot
+ * answer a view's read with the backing map.
+ */
+const mapIntrinsics = {
+  get: Map.prototype.get,
+  has: Map.prototype.has,
+  keys: Map.prototype.keys,
+  forEach: Map.prototype.forEach,
+  entries: Map.prototype.entries,
+  values: Map.prototype.values,
+  size: Object.getOwnPropertyDescriptor(Map.prototype, "size")!.get!,
+};
+
+const objectToString = Object.prototype.toString;
+
 // Exported for tests: the bypass vectors (descriptor recovery, Map
 // iteration leaks) are pinned by unit-testing the helper directly.
 export const readOnlyCfcView = <T>(value: T): T => {
@@ -506,38 +523,41 @@ export const readOnlyCfcView = <T>(value: T): T => {
           case "clear":
             return throwCfcReadOnly;
           case "size":
-            return target.size;
+            return mapIntrinsics.size.call(target);
           case "has":
-            return (key: unknown) => target.has(key);
+            return (key: unknown) => mapIntrinsics.has.call(target, key);
           case "keys":
-            return () => target.keys();
-          case "constructor":
-            return target.constructor;
+            return () => mapIntrinsics.keys.call(target);
           case "valueOf":
             return () => mapView;
           case "toString":
           case "toLocaleString":
-            return () => Object.prototype.toString.call(target);
+            return () => objectToString.call(target);
           case "get":
-            return (key: unknown) => readOnlyCfcView(target.get(key));
+            return (key: unknown) =>
+              readOnlyCfcView(mapIntrinsics.get.call(target, key));
           case "forEach":
             return (
               cb: (v: unknown, k: unknown, m: unknown) => void,
               thisArg?: unknown,
-            ) =>
-              target.forEach((v, k) =>
-                cb.call(thisArg, readOnlyCfcView(v), k, mapView)
+            ) => {
+              mapIntrinsics.forEach.call(
+                target,
+                (v, k) => cb.call(thisArg, readOnlyCfcView(v), k, mapView),
               );
+            };
           case "entries":
           case Symbol.iterator:
             return function* () {
-              for (const [k, v] of target.entries()) {
+              for (const [k, v] of mapIntrinsics.entries.call(target)) {
                 yield [k, readOnlyCfcView(v)];
               }
             };
           case "values":
             return function* () {
-              for (const v of target.values()) yield readOnlyCfcView(v);
+              for (const v of mapIntrinsics.values.call(target)) {
+                yield readOnlyCfcView(v);
+              }
             };
         }
         const member = Reflect.get(target, prop, target);

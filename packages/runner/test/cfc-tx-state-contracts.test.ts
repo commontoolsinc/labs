@@ -263,6 +263,41 @@ describe("CFC tx state contracts", () => {
     expect(frozen.size).toBe(1);
   });
 
+  it("the read-only view of a Map reads through the intrinsics captured at load, not `Map.prototype` as it stands", () => {
+    // A `Map.prototype` member replaced to return its receiver would, called
+    // on the backing map, answer `keys()`, `forEach()`, and `size` with that
+    // map. The view calls the intrinsics it captured when its module loaded.
+    const backing = new Map<string, string[]>([["a", ["b"]]]);
+    const view = readOnlyCfcView(backing);
+    const saved = {
+      keys: Map.prototype.keys,
+      forEach: Map.prototype.forEach,
+      size: Object.getOwnPropertyDescriptor(Map.prototype, "size")!,
+    };
+    const receiver = function (this: unknown) {
+      return this;
+    };
+    try {
+      Map.prototype.keys = receiver as typeof Map.prototype.keys;
+      Map.prototype.forEach = receiver as typeof Map.prototype.forEach;
+      Object.defineProperty(Map.prototype, "size", {
+        get: receiver,
+        configurable: true,
+      });
+
+      expect([...view.keys()]).toEqual(["a"]);
+      expect(view.size).toBe(1);
+      let visited = 0;
+      expect(view.forEach(() => visited++)).toBeUndefined();
+      expect(visited).toBe(1);
+      expect(view.constructor).toBeUndefined();
+    } finally {
+      Map.prototype.keys = saved.keys;
+      Map.prototype.forEach = saved.forEach;
+      Object.defineProperty(Map.prototype, "size", saved.size);
+    }
+  });
+
   it("noteCfcSinkReleaseReject lands in diagnostics", async () => {
     await withTx(async (_runtime, tx) => {
       tx.noteCfcSinkReleaseReject({
