@@ -256,14 +256,11 @@ native reviewed act as it admits a gesture on the room's rendered add control.
 
 ## Delivering notices
 
-Telling a member of a room they were admitted to is the system's to do, not a
-step to ask of the person who created the room, so a client SHOULD NOT show a
-person the notices waiting in their manager. Until a pattern can deliver to a
-principal it shares no space with, a notice waits in the manager's
-`outgoingNotices`, which lists none whose recipient is already on the room's
-roster, and nothing delivers it. A client that delivers one by a channel of its
-own reports it once it's delivered (see
-[`ChatManagerOutput`](ChatManagerOutput.md#delivering-notices)), and MUST
+Until a pattern can deliver to a principal it shares no space with, delivering a
+notice is the client's job. A client finds the notices waiting in its user's
+manager's `outgoingNotices`, which lists none whose recipient is already on the
+room's roster, and reports each one once it's delivered (see
+[`ChatManagerOutput`](ChatManagerOutput.md#delivering-notices)). A client MUST
 deliver only the notice: which room, and who sent it. It MUST NOT deliver any of
 the room's contents.
 

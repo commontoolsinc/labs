@@ -525,11 +525,10 @@ the entry. It never creates a second room.
 A notice has to reach a principal who may share no space with this user. Until a
 pattern can deliver one itself (see [first
 contact](FabriChatManager.md#first-contact)), the manager lists notices in
-`outgoingNotices` for a client to deliver, and no client delivers them yet (see
-[`clients.md`](clients.md#delivering-notices)). The list leaves out a notice
-whose recipient the room's roster already lists. A notice says which room, and
-who sent it: this user. A client MUST deliver only that, and MUST NOT deliver
-any of the room's contents. It then sends `delivered` with the notice's `id`.
+`outgoingNotices` and a client delivers them. The list leaves out a notice whose
+recipient the room's roster already lists. A notice says which room, and who
+sent it: this user. A client MUST deliver only that, and MUST NOT deliver any of
+the room's contents. It then sends `delivered` with the notice's `id`.
 
 A notice carries no credential. The recipient already has access through the
 grant, so a notice that reaches the wrong person gives them nothing but the
