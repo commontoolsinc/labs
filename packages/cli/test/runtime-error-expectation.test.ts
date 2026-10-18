@@ -5,9 +5,12 @@ import {
   unmetRuntimeErrorExpectation,
 } from "../lib/runtime-error-expectation.ts";
 
+const MALFORMED =
+  "`expectRuntimeErrors` is `true`, a positive whole count, or a non-empty list of strings, not";
+
 describe("runtime-error-expectation", () => {
   describe("runtimeErrorExpectation()", () => {
-    it("returns `true`, a whole count, or a copy of a list of strings", () => {
+    it("returns `true`, a positive whole count, or a copy of a non-empty list of strings", () => {
       expect(runtimeErrorExpectation(true)).toBe(true);
       expect(runtimeErrorExpectation(3)).toBe(3);
       expect(runtimeErrorExpectation(["a", "b"])).toEqual(["a", "b"]);
@@ -19,12 +22,13 @@ describe("runtime-error-expectation", () => {
     });
 
     it("throws for anything else, naming the value", () => {
-      for (const value of [null, -1, 1.5, "true", ["a", 1], {}]) {
+      for (const value of [null, -1, 0, 1.5, "true", [], ["a", 1], {}]) {
         expect(() => runtimeErrorExpectation(value)).toThrow(
-          "`expectRuntimeErrors` is `true`, a whole count, or a list of strings, not",
+          MALFORMED,
         );
       }
       expect(() => runtimeErrorExpectation("true")).toThrow('"true"');
+      expect(() => runtimeErrorExpectation(0)).toThrow(`${MALFORMED} \`0\``);
     });
   });
 
@@ -36,23 +40,15 @@ describe("runtime-error-expectation", () => {
       );
     });
 
-    it("returns `undefined` only for exactly the count expected, zero included", () => {
+    it("returns `undefined` only for exactly the count expected", () => {
       expect(unmetRuntimeErrorExpectation(2, ["Error: a", "Error: b"]))
         .toBeUndefined();
       expect(unmetRuntimeErrorExpectation(2, ["Error: a"])).toBe(
         "expected 2 runtime error(s), saw 1",
       );
-      expect(unmetRuntimeErrorExpectation(0, [])).toBeUndefined();
-      expect(unmetRuntimeErrorExpectation(0, ["Error: a"])).toBe(
-        "expected 0 runtime error(s), saw 1",
-      );
-    });
-
-    it("returns `undefined` for an empty list only when no error fired", () => {
-      expect(unmetRuntimeErrorExpectation([], [])).toBeUndefined();
-      expect(unmetRuntimeErrorExpectation([], ["Error: a"])).toBe(
-        "expected 0 runtime error(s), saw 1; unexpected: Error: a",
-      );
+      expect(
+        unmetRuntimeErrorExpectation(2, ["Error: a", "Error: b", "Error: c"]),
+      ).toBe("expected 2 runtime error(s), saw 3");
     });
 
     it("returns `undefined` for a list each of whose strings one error contains, in any order", () => {
@@ -81,7 +77,16 @@ describe("runtime-error-expectation", () => {
         unmetRuntimeErrorExpectation(["refusal", "refusal"], [
           "Error: refusal",
         ]),
-      ).toBe('expected 2 runtime error(s), saw 1; none contains "refusal"');
+      ).toBe(
+        'expected 2 runtime error(s), saw 1; no error left for "refusal"',
+      );
+    });
+
+    it("returns a reason naming a string as having no error left when the error holding it is paired with another", () => {
+      expect(unmetRuntimeErrorExpectation(["a", "Error: a"], ["Error: a"]))
+        .toBe(
+          'expected 2 runtime error(s), saw 1; no error left for "Error: a"',
+        );
     });
 
     it("returns `undefined` where a shorter string's error also holds a longer one", () => {

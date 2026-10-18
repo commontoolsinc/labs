@@ -256,9 +256,11 @@ pre-existing `allowRuntimeErrors` flag for scheduler-level errors; use
 `expectRuntimeErrors: true | <count> | ["<message>", …]` when the errors are
 the point — it REQUIRES them: `true` fails the run if none fire, a `<count>` if
 a different number fire, and a list unless the fired errors pair off one for
-each listed message, each error containing its message, in any order. Any other
-value fails the run. In a multi-user test each participant's expectation counts
-and tolerates its own errors only.)
+each listed message, each error containing its message, in any order. Leaving
+the flag out, or setting it to `false`, requires nothing; any other value fails
+the run, `0` and `[]` among them, since a test that raises no errors needs no
+flag. In a multi-user test each participant's expectation counts and tolerates
+its own errors only.)
 
 ## Multi-User Tests
 

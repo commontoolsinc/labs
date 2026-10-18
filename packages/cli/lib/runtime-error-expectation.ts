@@ -9,7 +9,9 @@
  * each string, the error's text containing it, in any order. A list pins what
  * each error says as well as how many there are, so an unrelated exception, or
  * a refusal giving another reason, does not stand in for the one expected.
- * The errors an expectation counts are tolerated.
+ * The errors an expectation counts are tolerated. Requiring no errors is what
+ * a test without an expectation already does, so a count of zero and an empty
+ * list are not expectations.
  */
 
 import { debugStr } from "@commonfabric/data-model";
@@ -18,25 +20,30 @@ import { debugStr } from "@commonfabric/data-model";
 export type RuntimeErrorExpectation = true | number | readonly string[];
 
 /**
- * The expectation a descriptor's `expectRuntimeErrors` states: `true`, a whole
- * count, or a list of strings, and `undefined` where it is absent or `false`.
+ * The expectation a descriptor's `expectRuntimeErrors` states: `true`, a
+ * positive whole count, or a non-empty list of strings, and `undefined` where
+ * it is absent or `false`.
  *
- * @throws If it is anything else, naming the value: an expectation misread as
- *   none would let a test that requires errors pass without them.
+ * @throws If it is anything else, `0` and `[]` included, naming the value: an
+ *   expectation misread as none would let a test that requires errors pass
+ *   without them.
  */
 export function runtimeErrorExpectation(
   value: unknown,
 ): RuntimeErrorExpectation | undefined {
   if (value === undefined || value === false) return undefined;
   if (value === true) return true;
-  if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
     return value;
   }
-  if (Array.isArray(value) && value.every((item) => typeof item === "string")) {
+  if (
+    Array.isArray(value) && value.length > 0 &&
+    value.every((item) => typeof item === "string")
+  ) {
     return [...value];
   }
   throw new Error(
-    debugStr`\`expectRuntimeErrors\` is \`true\`, a whole count, or a list of strings, not $quote${value}`,
+    debugStr`\`expectRuntimeErrors\` is \`true\`, a positive whole count, or a non-empty list of strings, not $quote${value}`,
   );
 }
 
@@ -44,7 +51,9 @@ export function runtimeErrorExpectation(
  * Why the runtime errors `errors` don't meet `expected`, for a person to read,
  * or `undefined` when they do. A list is met when its strings and the errors
  * pair off one to one, each string with an error containing it; the pairing
- * is searched for, so it is found whenever one exists.
+ * is searched for, so it is found whenever one exists. A string left unpaired
+ * is reported as one no error contains, or, where errors contain it but each
+ * is paired with another string, as one with no error left for it.
  */
 export function unmetRuntimeErrorExpectation(
   expected: RuntimeErrorExpectation,
@@ -86,7 +95,11 @@ export function unmetRuntimeErrorExpectation(
   if (missing.length === 0 && unclaimed.length === 0) return undefined;
   return [
     `expected ${expected.length} runtime error(s), saw ${errors.length}`,
-    ...missing.map((text) => `none contains ${JSON.stringify(text)}`),
+    ...missing.map((text) =>
+      errors.some((error) => error.includes(text))
+        ? `no error left for ${JSON.stringify(text)}`
+        : `none contains ${JSON.stringify(text)}`
+    ),
     ...unclaimed.map((error) => `unexpected: ${error.split("\n")[0]}`),
   ].join("; ");
 }

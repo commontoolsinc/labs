@@ -490,7 +490,7 @@ describe(
         );
         expect(failed).toBe(1);
         expect(results[0].error).toContain(
-          "`expectRuntimeErrors` is `true`, a whole count, or a list of strings, not",
+          "`expectRuntimeErrors` is `true`, a positive whole count, or a non-empty list of strings, not",
         );
         expect(results[0].error).toContain("1.5");
       });
