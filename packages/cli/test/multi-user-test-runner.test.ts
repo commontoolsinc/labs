@@ -482,6 +482,18 @@ describe(
           "[bob] Error: Bob's action is refused",
         );
       });
+
+      it("fails a run where a participant's expectation is malformed, naming the value", async () => {
+        const { failed, results } = await runTests(
+          fixture("malformed-runtime-errors.test.tsx"),
+          { root: FIXTURES },
+        );
+        expect(failed).toBe(1);
+        expect(results[0].error).toContain(
+          "`expectRuntimeErrors` is `true`, a whole count, or a list of strings, not",
+        );
+        expect(results[0].error).toContain("1.5");
+      });
     });
 
     describe("the shared space's access list", () => {

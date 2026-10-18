@@ -71,5 +71,18 @@ describe(
       expect(passed).toBe(1);
       expect(failed).toBe(1);
     });
+
+    it("fails a run whose expectation is malformed, naming the value", async () => {
+      const { passed, failed, results } = await runTests(
+        fixture("expected-malformed.test.tsx"),
+        { root: FIXTURES },
+      );
+      expect(passed).toBe(0);
+      expect(failed).toBe(1);
+      expect(results[0].error).toContain(
+        "`expectRuntimeErrors` is `true`, a whole count, or a list of strings, not",
+      );
+      expect(results[0].error).toContain("1.5");
+    });
   },
 );

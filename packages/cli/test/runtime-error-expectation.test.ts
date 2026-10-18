@@ -101,5 +101,16 @@ describe("runtime-error-expectation", () => {
         ]),
       ).toBeUndefined();
     });
+
+    it("returns `undefined` for an overlapping list whichever order its errors fire in", () => {
+      const expected = ["message refused", "profile"];
+      const errors = [
+        "Error: message refused: profile",
+        "Error: message refused",
+      ];
+      expect(unmetRuntimeErrorExpectation(expected, errors)).toBeUndefined();
+      expect(unmetRuntimeErrorExpectation(expected, errors.toReversed()))
+        .toBeUndefined();
+    });
   });
 });
