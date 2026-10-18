@@ -117,6 +117,34 @@ is appended to `profiles`. The home Profile tab renders the **profile picker**
 (`profile-picker.tsx`): it lists profiles, lets the user create more inline, pick
 the default, and stamp MRU. There is no `profileName` mirror field anymore.
 
+Each profile field holds a write redirect to an internal cell of the profile
+that holds the field's value, and the field's writer writes that cell. Two
+labels describe the field. The profile document's label at the field is
+minted when setup installs the field: it names the profile's creator on a
+profile created with the field, and no one on a profile that gained the field
+in a later release, since a source update is no principal's act. The value
+cell's own label is minted by the write that stored the value. Only the second
+says whose word the value is, so a reader that relies on who a field
+represents, such as a host showing a member's picture as their face, reads the
+value cell's label and takes the field as the owner's only when that label
+names the owner alone. A pattern reads it with
+`principalOf(profile.key(field), "represents-principal")`, and a host with
+`cfcLabelViewForResolvedTarget()`. Like every claim, it binds honest runtimes
+only: the memory server does not check a claim against the session that
+committed it ([`principal-of.md`](../../features/principal-of.md)).
+
+A field's writes are checked only once a write stores its policy in the value
+cell. A field with a default, such as `name` or `bio`, has its owner-protected
+policy stored with the default when setup writes it. On a profile created with
+the field, its creator is then its owner, and anyone else's write is refused.
+On a profile that gains the field in a later release, setup stores the policy
+on nobody's behalf, and the first principal to write the field becomes its
+owner. `picture` has no default. Its writer, `setPicture`, declares only that
+the value represents whoever writes it, so each write labels the picture with
+its writer, and no write is refused. A new field takes one of these two forms.
+A field with neither a default nor such a writer stores no policy, and nothing
+checks or labels its writes.
+
 The create passes `root: true`, so the profile is its space's root: the space's
 genesis commit reserves the root's address, the space cell's `defaultPattern`
 links the profile there, and a host holding only the profile space's DID
