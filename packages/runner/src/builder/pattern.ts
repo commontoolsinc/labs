@@ -1,6 +1,7 @@
 import type { InSpaceGrants, InSpaceOptions } from "@commonfabric/api";
 import {
   debugStr,
+  deepFreeze,
   hashStringOf,
   isDeepFrozen,
   isWalkableObjectOrArray,
@@ -702,7 +703,12 @@ function factoryFromPattern<T, R>(
       resultSchema,
       KeepAsCell.OnlyStream,
     ),
-    ...(derivedInternalCells.length > 0 ? { derivedInternalCells } : {}),
+    // Deep-frozen once built, partial causes included: the runtime keeps the
+    // id a partial cause names by the cause's identity only where it is
+    // deep-frozen.
+    ...(derivedInternalCells.length > 0
+      ? { derivedInternalCells: deepFreeze(derivedInternalCells) }
+      : {}),
     result,
     nodes: serializedNodes,
     // Important that this refers to patternFactory, as .program will be set on
