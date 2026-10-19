@@ -1143,6 +1143,24 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return response.space;
   }
 
+  /**
+   * Gives up this client's hold on a piece it started; see
+   * {@link RequestType.PieceRelease}. Resolves to whether it held the piece.
+   */
+  async releasePiece(
+    pieceId: string,
+    space: DID,
+    scope?: CellScope,
+  ): Promise<boolean> {
+    const response = await this.#conn.request<RequestType.PieceRelease>({
+      type: RequestType.PieceRelease,
+      pieceId,
+      space,
+      scope,
+    });
+    return response.value;
+  }
+
   async getPiece<T = unknown>(
     pieceId: string,
     space: DID,

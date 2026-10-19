@@ -59,6 +59,21 @@ export class PieceHandle<T = PieceType> {
     return res.value;
   }
 
+  /**
+   * Gives up this client's hold on the piece, which starting it (here or by
+   * opening it to run) took. The piece stops once no client holds it, unless
+   * something else keeps it running. Resolves to whether this client held it.
+   */
+  async release(): Promise<boolean> {
+    const res = await this.#conn.request<RequestType.PieceRelease>({
+      type: RequestType.PieceRelease,
+      pieceId: this.id(),
+      space: this.#cell.space(),
+      scope: this.#cell.ref().scope,
+    });
+    return res.value;
+  }
+
   async stop(): Promise<boolean> {
     const res = await this.#conn.request<RequestType.PieceStop>({
       type: RequestType.PieceStop,

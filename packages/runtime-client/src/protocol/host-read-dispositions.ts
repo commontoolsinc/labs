@@ -211,6 +211,7 @@ export const REQUEST_DISPOSITIONS = {
   [RequestType.PieceRemove]: write,
   [RequestType.PieceStart]: write,
   [RequestType.PieceStop]: write,
+  [RequestType.PieceRelease]: write,
   [RequestType.PieceGetAll]: reference,
   [RequestType.PieceSynced]: lifecycle,
   [RequestType.PieceGetSource]: {

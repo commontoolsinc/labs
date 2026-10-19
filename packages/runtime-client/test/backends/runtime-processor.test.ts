@@ -3148,6 +3148,8 @@ describe("runtime-processor", () => {
           remove: (_id: string, scope?: CellScope) => refuse(scope),
           startPiece: (_id: string, scope?: CellScope) => refuse(scope),
           stopPiece: (_id: string, scope?: CellScope) => refuse(scope),
+          releasePiece: (_id: string, _holder: object, scope?: CellScope) =>
+            refuse(scope),
         },
         space,
       });
@@ -3175,6 +3177,10 @@ describe("runtime-processor", () => {
       {
         handler: "handlePieceStop",
         request: { type: RequestType.PieceStop, pieceId, space },
+      },
+      {
+        handler: "handlePieceRelease",
+        request: { type: RequestType.PieceRelease, pieceId, space },
       },
       {
         handler: "handlePieceGetSource",

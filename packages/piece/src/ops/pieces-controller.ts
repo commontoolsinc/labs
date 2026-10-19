@@ -155,8 +155,13 @@ const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
  * RENDERS a piece needs both, while a caller that reads what a piece
  * exported needs the value it reads to be current without paying to run it.
  * A boolean asks for both or neither.
+ *
+ * `holder` makes the lifetime a start gives the piece one that holder can give
+ * up (`PiecesController.releasePiece()`), rather than a permanent one. A
+ * client that shows a piece holds it so that the piece stops once no client
+ * shows it.
  */
-export type PieceOpen = { reconcile: boolean; start: boolean };
+export type PieceOpen = { reconcile: boolean; start: boolean; holder?: object };
 
 const normalizePieceOpen = (open: boolean | PieceOpen): PieceOpen =>
   typeof open === "boolean" ? { reconcile: open, start: open } : open;
@@ -1026,7 +1031,7 @@ export class PiecesController<T = unknown> {
     asSchema?: JSONSchema,
     scope?: CellScope,
   ): Promise<Cell<T>> {
-    const { reconcile, start } = normalizePieceOpen(open);
+    const { reconcile, start, holder } = normalizePieceOpen(open);
     // Get the piece cell
     const addressed: Cell<unknown> = isCell(id)
       ? id
@@ -1093,7 +1098,11 @@ export class PiecesController<T = unknown> {
       // effect if already running.
       await timePiecePhase(
         "get.runtime.start",
-        () => this.runtime.start(piece),
+        () =>
+          this.runtime.start(
+            piece,
+            holder === undefined ? undefined : { holder },
+          ),
       );
       // A start that was in flight before the pointer moved may have
       // instantiated the outgoing pattern. Its watcher begins the follow as
@@ -1965,12 +1974,23 @@ export class PiecesController<T = unknown> {
    * writes of the graph it instantiates, and this rejects when that commit
    * failed, which leaves the piece stopped. Otherwise such a failure reaches
    * only the runtime's log; see `Runner.startWithCommit()`.
+   *
+   * With `holder`, the lifetime the start gives the piece is one that holder
+   * can give up through {@link releasePiece}, as for `PieceOpen.holder`. A
+   * held start does not wait for its setup commit, so the two options are
+   * refused together.
    */
   async startPiece<T = unknown>(
     pieceOrId: string | Cell<T>,
     scope?: CellScope,
-    options: { awaitSetupCommit?: boolean } = {},
+    options: { awaitSetupCommit?: boolean; holder?: object } = {},
   ): Promise<void> {
+    if (options.awaitSetupCommit && options.holder !== undefined) {
+      throw new Error(
+        "startPiece: a held start does not wait for its setup commit, so " +
+          "`awaitSetupCommit` and `holder` cannot be asked for together",
+      );
+    }
     const piece = typeof pieceOrId === "string"
       ? await timePiecePhase(
         "startPiece.get",
@@ -1990,13 +2010,36 @@ export class PiecesController<T = unknown> {
       () =>
         options.awaitSetupCommit
           ? this.runtime.startWithCommit(piece)
-          : this.runtime.start(piece),
+          : this.runtime.start(
+            piece,
+            options.holder === undefined
+              ? undefined
+              : { holder: options.holder },
+          ),
     );
     await timePiecePhase(
       "startPiece.result.pull",
       () => this.getResult(piece).pull(),
     );
     await timePiecePhase("startPiece.synced", () => this.synced());
+  }
+
+  /**
+   * Give up `holder`'s hold on a piece's lifetime, which a start made for that
+   * holder gave it (`PieceOpen.holder`). The piece stops once its last holder
+   * lets go, unless something else keeps it running; see
+   * `Runner.releaseHold()`. Returns whether `holder` held it.
+   */
+  async releasePiece<T = unknown>(
+    pieceOrId: string | Cell<T>,
+    holder: object,
+    scope?: CellScope,
+  ): Promise<boolean> {
+    const piece = typeof pieceOrId === "string"
+      ? await this.getPieceCell<T>(pieceOrId, false, undefined, scope)
+      : pieceOrId;
+    if (!piece) throw new Error("Piece not found");
+    return this.runtime.releaseHold(piece, holder);
   }
 
   /**
