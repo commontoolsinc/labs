@@ -5,8 +5,9 @@
  * open page over `/control`, so a shell beside the browser can drive and
  * follow runs in one long-lived page without touching the browser.
  *
- *     deno run --allow-read --allow-write --allow-net --allow-run=deno \
- *       --allow-env packages/memory/scripts/stream-leak-harness/serve.ts
+ *     deno run --allow-read --allow-write --allow-net --allow-env \
+ *       --allow-run="$(deno eval "console.log(Deno.execPath())")" \
+ *       packages/memory/scripts/stream-leak-harness/serve.ts
  *
  * Then open `http://localhost:8765/?mode=module-roundtrip&autostart=1`, or
  * open the page and post runs:
@@ -14,6 +15,8 @@
  *     curl -d '{"mode":"module-roundtrip","iterations":2000}' localhost:8765/run
  *     curl -d '{"command":"reload"}' localhost:8765/run
  */
+
+import { fromFileUrl } from "@std/path";
 
 const port = Number(Deno.args[0] ?? "8765");
 const directory = new URL("./", import.meta.url);
@@ -26,7 +29,7 @@ const bundle = await new Deno.Command(Deno.execPath(), {
     "--platform=browser",
     "--output",
     bundlePath,
-    new URL("harness.ts", directory).pathname,
+    fromFileUrl(new URL("harness.ts", directory)),
   ],
   stdout: "inherit",
   stderr: "inherit",

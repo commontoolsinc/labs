@@ -32,7 +32,10 @@ if (!page) throw new Error("harness page not found among Chrome targets");
 class Session {
   #socket: WebSocket;
   #next = 1;
-  #pending = new Map<number, (result: unknown) => void>();
+  #pending = new Map<
+    number,
+    { resolve: (result: unknown) => void; reject: (error: Error) => void }
+  >();
   #attached: Array<{ sessionId: string; type: string; url: string }> = [];
 
   constructor(socket: WebSocket) {
@@ -40,10 +43,13 @@ class Session {
     socket.onmessage = (event) => {
       const message = JSON.parse(event.data);
       if (message.id !== undefined) {
-        const resolve = this.#pending.get(message.id);
+        const pending = this.#pending.get(message.id);
         this.#pending.delete(message.id);
-        if (message.error) throw new Error(JSON.stringify(message.error));
-        resolve?.(message.result);
+        if (message.error) {
+          pending?.reject(new Error(JSON.stringify(message.error)));
+        } else {
+          pending?.resolve(message.result);
+        }
       } else if (message.method === "Target.attachedToTarget") {
         this.#attached.push({
           sessionId: message.params.sessionId,
@@ -57,11 +63,11 @@ class Session {
   /** Sends one command, to the page or to an attached `sessionId`. */
   send(method: string, params: unknown = {}, sessionId?: string) {
     const id = this.#next++;
-    return new Promise<Record<string, unknown>>((resolve) => {
-      this.#pending.set(
-        id,
-        (result) => resolve(result as Record<string, unknown>),
-      );
+    return new Promise<Record<string, unknown>>((resolve, reject) => {
+      this.#pending.set(id, {
+        resolve: (result) => resolve(result as Record<string, unknown>),
+        reject,
+      });
       this.#socket.send(JSON.stringify({ id, method, params, sessionId }));
     });
   }

@@ -13,6 +13,7 @@
 import {
   decodeCompressedMemoryMessage,
   encodeCompressedMemoryMessage,
+  type EncodedMemoryMessage,
 } from "../../v2/message-compression.ts";
 
 /** One run request from the page. */
@@ -106,26 +107,42 @@ export async function runHarness(
   const payload = buildPayload(request.payloadBytes);
   const bytes = TEXT_ENCODER.encode(payload);
   const encoded = await encodeCompressedMemoryMessage(payload);
-  if (!(encoded instanceof Uint8Array)) {
-    throw new Error("Payload did not compress into an envelope");
-  }
-  const step = await selectStep(request, payload, bytes, encoded);
-  const start = performance.now();
-  for (let completed = 0; completed < request.iterations; completed++) {
-    await step();
-    if ((completed + 1) % 100 === 0) {
-      report({ type: "progress", completed: completed + 1 });
+  const { step, cleanup } = await selectStep(request, payload, bytes, encoded);
+  try {
+    const start = performance.now();
+    for (let completed = 0; completed < request.iterations; completed++) {
+      await step();
+      if ((completed + 1) % 100 === 0) {
+        report({ type: "progress", completed: completed + 1 });
+      }
     }
+    const elapsedMs = performance.now() - start;
+    allocatePressure(request.pressureMegabytes);
+    report({
+      type: "done",
+      mode: request.mode,
+      iterations: request.iterations,
+      elapsedMs,
+      collected: collectGarbage(),
+    });
+  } finally {
+    cleanup?.();
   }
-  const elapsedMs = performance.now() - start;
-  allocatePressure(request.pressureMegabytes);
-  report({
-    type: "done",
-    mode: request.mode,
-    iterations: request.iterations,
-    elapsedMs,
-    collected: collectGarbage(),
-  });
+}
+
+/** One variant: its per-iteration body, and what to release after the run. */
+type Step = { step: () => Promise<void>; cleanup?: () => void };
+
+/** The envelope the decode variants replay; needs a compressible payload. */
+function requireEnvelope(
+  encoded: EncodedMemoryMessage,
+): Uint8Array<ArrayBuffer> {
+  if (!(encoded instanceof Uint8Array)) {
+    throw new Error(
+      "the decode variants need a payload above the compression threshold",
+    );
+  }
+  return encoded;
 }
 
 /**
@@ -164,27 +181,28 @@ function allocatePressure(megabytes: number): void {
   if (held.length < 0) throw new Error("unreachable");
 }
 
-/** Returns the per-iteration body of `request.mode`. */
+/** Returns the per-iteration body of `request.mode` and its cleanup. */
 async function selectStep(
   request: HarnessRequest,
   payload: string,
   bytes: Uint8Array<ArrayBuffer>,
-  encoded: Uint8Array<ArrayBuffer>,
-): Promise<() => Promise<void>> {
+  encoded: EncodedMemoryMessage,
+): Promise<Step> {
   const gzip = () => new CompressionStream("gzip");
+  const only = (step: () => Promise<void>): Step => ({ step });
   switch (request.mode) {
     case "module-roundtrip":
-      return async () => {
+      return only(async () => {
         const frame = await encodeCompressedMemoryMessage(payload);
         await decodeCompressedMemoryMessage(frame);
-      };
+      });
     case "module-roundtrip-concurrent":
-      return async () => {
+      return only(async () => {
         await Promise.all(Array.from({ length: 20 }, async () => {
           const frame = await encodeCompressedMemoryMessage(payload);
           await decodeCompressedMemoryMessage(frame);
         }));
-      };
+      });
     case "module-roundtrip-sizes": {
       const payloads = [
         1_100,
@@ -197,152 +215,159 @@ async function selectStep(
       ]
         .map(buildPayload);
       let turn = 0;
-      return async () => {
+      return only(async () => {
         const frame = await encodeCompressedMemoryMessage(
           payloads[turn++ % payloads.length],
         );
         await decodeCompressedMemoryMessage(frame);
-      };
+      });
     }
     case "module-encode":
-      return async () => {
+      return only(async () => {
         await encodeCompressedMemoryMessage(payload);
-      };
-    case "module-decode":
-      return async () => {
-        await decodeCompressedMemoryMessage(encoded);
-      };
-    case "module-decode-blob":
-      return async () => {
-        await decodeCompressedMemoryMessage(new Blob([encoded]));
-      };
+      });
+    case "module-decode": {
+      const envelope = requireEnvelope(encoded);
+      return only(async () => {
+        await decodeCompressedMemoryMessage(envelope);
+      });
+    }
+    case "module-decode-blob": {
+      const envelope = requireEnvelope(encoded);
+      return only(async () => {
+        await decodeCompressedMemoryMessage(new Blob([envelope]));
+      });
+    }
     case "ws-roundtrip-arraybuffer":
     case "ws-roundtrip-blob": {
       const socket = await openEcho(
         request.echoUrl,
         request.mode === "ws-roundtrip-blob" ? "blob" : "arraybuffer",
       );
-      return async () => {
-        const frame = await encodeCompressedMemoryMessage(payload);
-        const echoed = new Promise<MessageEvent>((resolve) => {
-          socket.addEventListener("message", resolve, { once: true });
-        });
-        socket.send(frame);
-        const message = await echoed;
-        await decodeCompressedMemoryMessage(message.data);
+      return {
+        step: async () => {
+          const frame = await encodeCompressedMemoryMessage(payload);
+          const echoed = new Promise<MessageEvent>((resolve) => {
+            socket.addEventListener("message", resolve, { once: true });
+          });
+          socket.send(frame);
+          const message = await echoed;
+          await decodeCompressedMemoryMessage(message.data);
+        },
+        cleanup: () => socket.close(),
       };
     }
     case "fetch-arraybuffer":
-      return async () => {
+      return only(async () => {
         await (await fetch(request.bytesUrl)).arrayBuffer();
-      };
+      });
     case "fetch-body-collect":
-      return async () => {
+      return only(async () => {
         await collectReadable((await fetch(request.bytesUrl)).body!);
-      };
+      });
     case "fetch-body-collect-release":
-      return async () => {
+      return only(async () => {
         await collectReadable((await fetch(request.bytesUrl)).body!, "release");
-      };
+      });
     case "fetch-body-collect-cancel":
-      return async () => {
+      return only(async () => {
         await collectReadable((await fetch(request.bytesUrl)).body!, "cancel");
-      };
+      });
     case "fetch-body-pipe-collect":
-      return async () => {
+      return only(async () => {
         await collectReadable(
           (await fetch(request.bytesUrl)).body!.pipeThrough(gzip()),
         );
-      };
+      });
     case "fetch-body-for-await":
-      return async () => {
+      return only(async () => {
         for await (const chunk of (await fetch(request.bytesUrl)).body!) {
           void chunk;
         }
-      };
+      });
     case "fetch-gzip-body-pipe-collect":
-      return async () => {
+      return only(async () => {
         await collectReadable(
           (await fetch(`${request.bytesUrl}&gzip=1`)).body!.pipeThrough(
             new DecompressionStream("gzip"),
           ),
         );
-      };
+      });
     case "fetch-slow-body-collect":
-      return async () => {
+      return only(async () => {
         await collectReadable((await fetch(request.slowUrl)).body!);
-      };
+      });
     case "fetch-slow-text":
-      return async () => {
+      return only(async () => {
         await (await fetch(request.slowUrl)).text();
-      };
+      });
     case "response-body-drop":
-      return () => {
+      return only(() => {
         void new Response(bytes).body;
         return Promise.resolve();
-      };
+      });
     case "response-empty-body-collect":
-      return async () => {
+      return only(async () => {
         await collectReadable(new Response(new Uint8Array(0)).body!);
-      };
+      });
     case "response-pipe-noread":
-      return () => {
+      return only(() => {
         void new Response(bytes).body!.pipeThrough(gzip());
         return Promise.resolve();
-      };
+      });
     case "response-body-collect":
-      return async () => {
+      return only(async () => {
         await collectReadable(new Response(bytes).body!);
-      };
+      });
     case "response-pipe-collect":
-      return async () => {
+      return only(async () => {
         await collectReadable(new Response(bytes).body!.pipeThrough(gzip()));
-      };
+      });
     case "response-pipe-collect-release":
-      return async () => {
+      return only(async () => {
         await collectReadable(
           new Response(bytes).body!.pipeThrough(gzip()),
           "release",
         );
-      };
+      });
     case "response-pipe-collect-cancel":
-      return async () => {
+      return only(async () => {
         await collectReadable(
           new Response(bytes).body!.pipeThrough(gzip()),
           "cancel",
         );
-      };
+      });
     case "response-pipe-arraybuffer":
-      return async () => {
+      return only(async () => {
         await new Response(new Response(bytes).body!.pipeThrough(gzip()))
           .arrayBuffer();
-      };
+      });
     case "response-arraybuffer-direct":
-      return async () => {
+      return only(async () => {
         await new Response(bytes).arrayBuffer();
-      };
+      });
     case "blob-pipe-collect":
-      return async () => {
+      return only(async () => {
         await collectReadable(new Blob([bytes]).stream().pipeThrough(gzip()));
-      };
+      });
     case "js-source-collect":
-      return async () => {
+      return only(async () => {
         await collectReadable(singleChunkStream(bytes));
-      };
+      });
     case "js-source-pipe-collect":
-      return async () => {
+      return only(async () => {
         await collectReadable(singleChunkStream(bytes).pipeThrough(gzip()));
-      };
+      });
     case "writer-collect":
-      return async () => {
+      return only(async () => {
         const stream = gzip();
         const writer = stream.writable.getWriter();
         const written = writer.write(bytes).then(() => writer.close());
         await collectReadable(stream.readable);
         await written;
-      };
+      });
     case "idle":
-      return () => Promise.resolve();
+      return only(() => Promise.resolve());
   }
 }
 
