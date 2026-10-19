@@ -3,8 +3,8 @@
 _What `#42` costs when a collection has a thousand members, or a million, and
 the three separable concerns hiding behind one static array._
 
-**Status:** Proposed. Nothing under "Options" is built, and the questions at the
-end are unanswered · **Updated:** 2026-09-20
+**Status:** Decided; nothing is built. The rulings are under "Decisions" ·
+**Updated:** 2026-10-19
 
 Typing `#42` in a piece's body inserts a mention of member 42 of the collection
 that piece is read through.
@@ -78,8 +78,8 @@ whole array and awaits `source.resolveAsCell()` for each entry. On a
 `CellHandle` that is not a local call: `resolveAsCell` issues a
 `RequestType.CellResolveAsCell` request over the client-to-runtime connection
 and awaits the response (`packages/runtime-client/src/cell-handle.ts`). The pass
-runs whenever the universe binds or changes — `_setupMentionableSubscription`,
-and the `updated()` branch that rebinds `mentionable` under
+runs whenever the universe binds or changes — `_setupMentionableSyncHandler`,
+and the `willUpdate()` branch that rebinds `mentionable` under
 `MentionableArraySchema`.
 
 A thousand members is a thousand requests to open one editor. A million is a
@@ -323,9 +323,12 @@ because one of them is that most of the machinery already exists somewhere else.
 
 **Invoking a handler returns nothing.** `IStreamable<T>.send()` is declared to
 return `void` (`packages/api/index.ts`), and every layer below it agrees. On the
-browser side, `CellHandle.send` and `sendStrict` return `Promise<void>`, which
-reports whether the write committed and nothing about what the handler computed
-(`packages/runtime-client/src/cell-handle.ts`). The DOM event that triggers a
+browser side, `CellHandle.send`, `sendStrict` and `sendReviewed` return
+`Promise<void>` (`packages/runtime-client/src/cell-handle.ts`). With
+`{ awaitHandling: true }` a strict send waits for the handler's run and rejects
+on its refusal, so the caller learns whether the handling committed, and still
+nothing about what it computed: the `CellSend` response is an `EmptyResponse`
+(`packages/runtime-client/src/protocol/types.ts`). The DOM event that triggers a
 handler travels as a one-way notification: the connection's own doc comment says
 it "carries no msgId, registers no pending entry, and the worker sends no
 response" (`packages/runtime-client/src/client/connection.ts`). On the worker
@@ -333,7 +336,8 @@ side the handler's return value is discarded at the call site — the reconciler
 registers `(event) => stream.withTx(undefined).send(event)`
 (`packages/html/src/worker/reconciler.ts`). `RequestType.CellSend` is documented
 to match: "remote confirmation is not waited for, so that a slow server cannot
-block cell IPC" (`packages/runtime-client/src/protocol/types.ts`).
+block cell IPC, unless the request waits for the event's handling"
+(`packages/runtime-client/src/protocol/types.ts`).
 
 **The result plumbing exists in the runner, and stops before the browser
 client.** A handler's return value is already written to a durable receipt cell
@@ -364,18 +368,19 @@ by a pattern.
 What a component holds otherwise is a `CellHandle`, whose every method is a
 value read (`get`, `sync`, `pull`, `resolveAsCell`, `getCfcLabel`) or a write
 reporting only commit or refusal (`set`, `setStrict`, `initialize`, `push`,
-`send`, `sendStrict`) — `packages/runtime-client/src/cell-handle.ts`. Upward
-communication from a Lit component is `this.emit(...)` over `dispatchEvent`,
+`send`, `sendStrict`, `sendReviewed`) —
+`packages/runtime-client/src/cell-handle.ts`. Upward communication from a Lit
+component is `this.emit(...)` over `dispatchEvent`,
 whose return value says only that the event was not cancelled
 (`packages/ui/src/v2/core/base-element.ts`).
 
 **The closest buildable substitute is write-then-pull.** A component writes a
-request into a cell, then calls `pull()` on the cell a pattern derives from it.
-`handleCellPull` does not just re-read: it calls `.pull()` and then
-`scheduler.idleWithPendingCommits()` before returning the value, with the
-comment "A client pull is the freshness barrier, not a cache sample… Cross the
-commit-aware fixpoint in the same request"
-(`packages/runtime-client/src/backends/runtime-processor.ts`). That is
+request into a cell, then calls `pull({ awaitDurability: true })` on the cell a
+pattern derives from it. `handleCellPull`
+(`packages/runtime-client/src/backends/runtime-processor.ts`) runs the runtime's
+own `Cell.pull()`, which demands the read's producers, and with that option
+"keeps the read demanded through the runtime-wide" commit-aware barrier
+(`packages/runner/src/cell.ts`) before the value is returned. That is
 architecturally an ask-and-await — a question written, the reactive work
 demanded, the answer read — and **no component in the tree does it.** Every
 `pull()` and `sync()` in `packages/ui` refreshes a value that was already there.
@@ -462,9 +467,9 @@ The editor stops holding a universe and asks, per query, for rows matching a
 prefix. Four places the question could be answered, with different costs:
 
 **B1 — answered by the pattern, through write-then-pull.** The component writes
-the query into a cell and pulls the cell the collection derives from it;
-`handleCellPull` crosses the commit-aware fixpoint before returning, so the
-answer reflects the question. Buildable with what exists and built by nobody.
+the query into a cell and pulls the cell the collection derives from it with
+`awaitDurability`, which crosses the commit-aware barrier before returning, so
+the answer reflects the question. Buildable with what exists and built by nobody.
 Costs a durable write per keystroke, needs a request cell per editor, and has no
 way to tell two questions in flight apart. The derivation itself still scans the
 member list unless the collection maintains an ordered structure, so the
@@ -602,15 +607,14 @@ questions in flight apart.
   resolves nowhere today. Either the editor becomes the read-mode renderer, or a
   mention-aware renderer is built, or the rendered markdown grows the
   reference-definition block the note's `[FS]` projection already emits
-  (`splitDefinitions`, `packages/patterns/notes/reference-address.ts`, used by
+  (`splitDefinitions`, `packages/patterns/notes/reference-block.ts`, used by
   the projection in `packages/patterns/notes/note.tsx`).
 
 **B2′** requires a request type on the client-to-runtime protocol and a
 `CellHandle` method that sends an event with a caller-supplied id and returns
 the receipt's value. The receipt itself needs nothing: it is written today,
-addressed by that id, and read back by the CLI. Whether the browser client
-should gain this at all is a decision for whoever owns the verb surface, and
-this document does not make it.
+addressed by that id, and read back by the CLI. "Decisions" below records that
+the browser client gains it.
 
 **Only B2′ requires the facility that does not exist**, and it is the one that
 would build it. A and C route around it by asking the runtime instead; B1
@@ -619,7 +623,8 @@ than a pattern one.
 
 ## Decisions
 
-Ruled by Mike on 2026-09-30. Each states what holds; where a ruling departs from
+Ruled by Mike on 2026-09-30, with the verb-call ruling amended on 2026-10-19.
+Each states what holds; where a ruling departs from
 what this document first proposed, it says so, because the departure is the part
 a reader would otherwise have to reconstruct.
 
@@ -633,8 +638,11 @@ merely honest: the partial answer has to be one an author can act on.
 This costs nothing to deliver. A universe row already copies the member's title
 beside its name (`MentionableRow` in
 `../../packages/patterns/collection-naming/mentionable.ts`), so a dropdown reads
-titles without expanding any member. Whether the editor component renders that
-title today is unverified and is the first thing to check when building this.
+titles without expanding any member. The editor's `#` completion already shows
+each candidate's display name beside its number, as the option's `detail`
+(`createShortNameCompletionSource` in `cf-code-editor.ts`), and a Topic's
+display name is its title. The row's `title` field is not what it reads, so a
+collection whose display name differs from its title shows the display name.
 
 **An unresolvable mention keeps its citation.** A stored mention holds the
 collection reference and the member name, and one that does not resolve renders
@@ -678,14 +686,22 @@ the separation is what makes the silent-unnaming failure impossible rather than
 merely avoided by the bound currently chosen. Whatever the dropdown reads, a
 pill's name does not depend on it.
 
-**The browser client's verb-call surface is a prerequisite.** A component cannot
-ask its pattern a question today; the receipt carrying a handler's result is
-written by default and read back by `cf piece call`, so the gap is a missing
-protocol request rather than a missing mechanism. This document first treated
-that as adjacent work. It is not: once the collection owns the query, the editor
-has to be able to ask the collection, so this design cannot be built until that
-surface exists. It belongs to whoever owns the verb surface, and this design
-depends on them rather than proposing to do it.
+**The browser client's verb-call surface is a prerequisite of completion, and
+this work builds it.** A component cannot ask its pattern a question today; the
+receipt carrying a handler's result is written by default and read back by
+`cf piece call`, so the gap is a missing protocol request rather than a missing
+mechanism. Once the collection owns the query, the editor has to be able to ask
+the collection, so completion cannot be built until that surface exists. The
+change is drafted here, as a general facility rather than a mention feature, and
+reviewed by the owner of the client-to-runtime protocol: a send that waits for
+its handling answers with the address of the handling's receipt, which the
+caller reads as a cell through the same gate as any other read.
+
+Storage, resolution and rendering do not depend on it. Resolving a stored
+mention reads one key of the collection's namespace, and a component handed
+that namespace as a cell reads a key with `CellHandle.key()`
+(`packages/runtime-client/src/cell-handle.ts`). That half is built first, and
+completion attaches to it once the surface exists.
 
 **The editor's short-name read is fixed separately, now.**
 [#7771](https://github.com/commonfabric/labs/issues/7771) — the code editor
@@ -694,6 +710,12 @@ reserves that for a universe row — is a rule the spec already states, and the
 fix is local to the component. None of the options here removes a raw-list
 universe, so none of them fixes it incidentally. A universe row now carries a
 member's number for the component to read instead.
+
+Deploying the fix has a precondition. A topic whose `mentionable` input is still
+linked to the board's raw `topics` list rather than its `mentionable` index
+shows the numbers topics publish, and after the fix shows none. Before the fix
+reaches the board, a topic created before the index existed is checked for that
+link, and any topic still holding it is rewired to the index.
 
 ## What this design does not cover
 
