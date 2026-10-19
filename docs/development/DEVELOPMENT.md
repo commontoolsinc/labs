@@ -1083,10 +1083,11 @@ that has to stay, such as one in a test that shows the overflow, sits under a
 - To run one test, `cd` into its package and run
   `deno task test --filter "test name"`.
   [Running one test by name](TESTING.md#running-one-test-by-name) describes
-  which name the pattern has to match. A bare `deno test path/to/test.ts` drops the `--preload` and permissions
-  that the package's `deno-test` task passes. In `packages/runner`, for
-  example, the preload installs the global fake `clock`, and without it a
-  test that calls `clock.settle()` fails with
+  which name the pattern has to match. A bare
+  `deno test --no-check path/to/test.ts` drops the `--preload` and
+  permissions that the package's `deno-test` task passes. In
+  `packages/runner`, for example, the preload installs the global fake
+  `clock`, and without it a test that calls `clock.settle()` fails with
   `ReferenceError: clock is not defined`.
 - To test a specific package, `cd` into the package directory and run
   `deno task test`.
