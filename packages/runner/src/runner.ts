@@ -553,18 +553,11 @@ type StartAttempt = {
   targetKey?: `${MemorySpace}/${ScopeKey}/${URI}`;
   // The root cell of that result, which a held lifetime stops by.
   targetCell?: Cell<unknown>;
-  // Whether a caller of this attempt asked for a permanent lifetime, as
-  // `start()` without a holder does. A caller that joins after the attempt
-  // claimed its lifetime claims its own from `claim`.
+  // The lifetimes this attempt's callers asked for, all claimed when it
+  // settles: permanent, for a caller that named no holder, and held, for each
+  // holder a caller named.
   permanent?: boolean;
-  // What the attempt left running when it settled, for the lifetimes its
-  // callers claim: the target, and the registration standing for it then. A
-  // caller claims only while that registration still stands.
-  claim?: {
-    target: `${MemorySpace}/${ScopeKey}/${URI}`;
-    cell: Cell<unknown>;
-    registration: Cancel;
-  };
+  holders?: Set<object>;
   // The exact registration THIS attempt's `#startCore()` created, when it
   // created one. A walk can also report success for a registration it did
   // NOT create (doStart's already-started returns, including the
@@ -4997,8 +4990,14 @@ export class Runner {
    * @throws Error naming the failed piece-start commit, with storage's
    * verdict, or whatever else cut the commit short, as its `cause`.
    */
-  async startWithCommit<T = any>(resultCell: Cell<T>): Promise<boolean> {
-    const { attempt, settled } = this.#joinOrBeginStart(resultCell);
+  async startWithCommit<T = any>(
+    resultCell: Cell<T>,
+    options: RunnerStartOptions = {},
+  ): Promise<boolean> {
+    const { attempt, settled } = this.#joinOrBeginStart(
+      resultCell,
+      options.holder,
+    );
     const started = await settled;
     const commits = attempt.instantiationCommits ?? [];
     for (const failure of await Promise.all(commits)) {
@@ -5016,54 +5015,44 @@ export class Runner {
   /**
    * Helper for `start()` and `startWithCommit()`, which returns the current
    * in-flight start attempt for `resultCell`'s document, or begins one, along
-   * with this caller's outcome: the attempt's, once the caller has claimed
-   * the lifetime it asked for, for `holder` or permanent.
+   * with its outcome, having asked it for the lifetime this caller wants: held
+   * by `holder`, or permanent without one.
    */
   #joinOrBeginStart<T>(
     resultCell: Cell<T>,
     holder?: object,
   ): { attempt: StartAttempt; settled: Promise<boolean> } {
-    const { attempt, settled } = this.#joinOrBeginAttempt(resultCell);
-    // Asked for before the attempt settles, so a permanent lifetime is claimed
-    // in the same step that finds the start still current, as it always was.
-    // A caller joining later claims from the attempt's record of that step.
-    if (holder === undefined) attempt.permanent = true;
-    return {
-      attempt,
-      settled: settled.then((running) => {
-        if (running) this.#claimLifetime(attempt, holder);
-        return running;
-      }),
-    };
+    const joined = this.#joinOrBeginAttempt(resultCell);
+    if (holder === undefined) joined.attempt.permanent = true;
+    else (joined.attempt.holders ??= new Set()).add(holder);
+    return joined;
   }
 
   /**
-   * Claims, for `holder` or permanently, the lifetime `attempt` left running
-   * when it settled, provided the registration it found then still stands. A
-   * stop or a replacement since then owns what is there now.
+   * Claims the lifetimes `attempt`'s callers asked for, for the result at
+   * `target` that the attempt left running.
    */
-  #claimLifetime(attempt: StartAttempt, holder: object | undefined): void {
-    const claim = attempt.claim;
-    if (claim === undefined) return;
-    if (this.#cancels.get(claim.target) !== claim.registration) return;
-    if (holder === undefined) {
-      this.#independentlyStartedResults.add(claim.target);
-      return;
-    }
-    let held = this.#heldLifetimes.get(claim.target);
+  #claimLifetimes(
+    attempt: StartAttempt,
+    target: `${MemorySpace}/${ScopeKey}/${URI}`,
+    cell: Cell<unknown>,
+  ): void {
+    if (attempt.permanent) this.#independentlyStartedResults.add(target);
+    if (attempt.holders === undefined) return;
+    // Only a registration this start installed is the holders' to end. A
+    // result that was already running belongs to whatever started it.
+    const installed = attempt.installedRegistration !== undefined &&
+        this.#cancels.get(target) === attempt.installedRegistration
+      ? attempt.installedRegistration
+      : undefined;
+    let held = this.#heldLifetimes.get(target);
     if (held === undefined) {
-      held = {
-        cell: claim.cell,
-        holders: new Set(),
-        // Only a registration this start installed is the holders' to end. A
-        // result that was already running belongs to whatever started it.
-        registration: attempt.installedRegistration === claim.registration
-          ? claim.registration
-          : undefined,
-      };
-      this.#heldLifetimes.set(claim.target, held);
+      held = { cell, holders: new Set(), registration: installed };
+      this.#heldLifetimes.set(target, held);
+    } else if (held.registration === undefined) {
+      held.registration = installed;
     }
-    held.holders.add(holder);
+    for (const holder of attempt.holders) held.holders.add(holder);
   }
 
   /**
@@ -5092,27 +5081,26 @@ export class Runner {
 
   /**
    * Gives up every hold `holder` has, as {@link releaseHold} does for one.
-   * Returns how many it had.
    */
-  releaseHolder(holder: object): number {
-    let released = 0;
+  releaseAllHolds(holder: object): void {
     for (const [key, held] of [...this.#heldLifetimes]) {
-      if (!held.holders.delete(holder)) continue;
-      released++;
-      if (held.holders.size === 0) this.#endHeldLifetime(key, held);
+      if (held.holders.delete(holder) && held.holders.size === 0) {
+        this.#endHeldLifetime(key, held);
+      }
     }
-    return released;
   }
 
   #endHeldLifetime(
     key: `${MemorySpace}/${ScopeKey}/${URI}`,
     held: HeldLifetime,
   ): void {
+    // A start still resolving may be about to hold the result. The entry stays,
+    // holding no one, so that start inherits the registration to end.
+    if ((this.#activeStartAttemptsByDoc.get(key)?.size ?? 0) > 0) return;
     if (this.#heldLifetimes.get(key) === held) this.#heldLifetimes.delete(key);
     if (held.registration === undefined) return;
     if (this.#cancels.get(key) !== held.registration) return;
     if (this.#independentlyStartedResults.has(key)) return;
-    if ((this.#activeStartAttemptsByDoc.get(key)?.size ?? 0) > 0) return;
     if (this.#usesScopedPrograms(held.cell)) return;
     this.#stopResult(held.cell);
   }
@@ -5120,14 +5108,14 @@ export class Runner {
   /** Whether something holds a lifetime of its own for the result at `key`. */
   #hasOwnLifetime(key: `${MemorySpace}/${ScopeKey}/${URI}`): boolean {
     return this.#independentlyStartedResults.has(key) ||
-      this.#heldLifetimes.has(key);
+      (this.#heldLifetimes.get(key)?.holders.size ?? 0) > 0;
   }
 
   /**
    * A launch named the result at `key`: whatever runs there is now also its,
    * so ending a held lifetime no longer ends the registration.
    */
-  #launchNamed(key: `${MemorySpace}/${ScopeKey}/${URI}`): void {
+  #disownHeldRegistration(key: `${MemorySpace}/${ScopeKey}/${URI}`): void {
     const held = this.#heldLifetimes.get(key);
     if (held !== undefined) held.registration = undefined;
   }
@@ -5157,9 +5145,8 @@ export class Runner {
       const settled = this.#doStart(resultCell, new Set(), attempt)
         .then((started) => {
           // This start gives the result a lifetime of its own, so an enclosing
-          // pattern releasing it later leaves it running: a permanent one,
-          // claimed here when a caller asked for it, or a held one, which each
-          // holding caller claims from the record left here. An attempt whose
+          // pattern releasing it later leaves it running: permanent, or held
+          // by the holders its callers named. An attempt whose
           // target a stop superseded claims nothing: the registration under
           // the key belongs to whatever replaced it, and a stop that won the
           // race leaves no registration at all. Both cases report that this
@@ -5171,16 +5158,17 @@ export class Runner {
           const stillRunning = started && target !== undefined &&
             this.#isStartAttemptCurrentFor(attempt, target) &&
             this.#cancels.has(target);
+          // Settled: a later caller begins an attempt of its own, which finds
+          // the result running, rather than joining one whose lifetimes are
+          // already claimed.
+          for (const key of attempt.generationsByDoc.keys()) {
+            if (this.#inFlightStartsByDoc.get(key) === attempt) {
+              this.#inFlightStartsByDoc.delete(key);
+            }
+          }
           const cell = attempt.targetCell;
-          const registration = target === undefined
-            ? undefined
-            : this.#cancels.get(target);
-          if (
-            stillRunning && target !== undefined && cell !== undefined &&
-            registration !== undefined
-          ) {
-            attempt.claim = { target, cell, registration };
-            if (attempt.permanent) this.#claimLifetime(attempt, undefined);
+          if (stillRunning && target !== undefined && cell !== undefined) {
+            this.#claimLifetimes(attempt, target, cell);
           }
           return stillRunning;
         })
@@ -5247,7 +5235,7 @@ export class Runner {
     }
     if (this.#independentlyStartedResults.has(key)) return;
     const held = this.#heldLifetimes.get(key);
-    if (held !== undefined) {
+    if (held !== undefined && held.holders.size > 0) {
       // The launch lets go of what its holders still hold, so what runs is
       // theirs from now on: the last of them to let go ends it.
       held.registration = registration;
@@ -7393,7 +7381,7 @@ export class Runner {
       return undefined;
     }
     if (this.#cancels.has(key)) {
-      this.#launchNamed(key);
+      this.#disownHeldRegistration(key);
       return undefined;
     }
 
@@ -8931,7 +8919,7 @@ export class Runner {
     // a release leaves a result started in its own right running, and such a
     // result keeps that lifetime across the retirement.
     const docKey = this.#getDocKey(resultCell);
-    this.#launchNamed(docKey);
+    this.#disownHeldRegistration(docKey);
     const refusedRegistration = this.#registrationsInstalledByRefusedRuns.get(
       docKey,
     );

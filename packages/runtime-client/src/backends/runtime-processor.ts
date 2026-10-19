@@ -1587,7 +1587,7 @@ export class RuntimeProcessor {
     // Last, once nothing of the client's still reads them: the pieces it
     // started stop, unless another client still holds one or something else
     // keeps it running.
-    this.#runtime.releaseHolder(client);
+    this.#runtime.releaseAllHolds(client);
   }
 
   #hostSelectedCell(ref: CellRef): Cell<unknown> {

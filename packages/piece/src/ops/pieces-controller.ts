@@ -1098,11 +1098,7 @@ export class PiecesController<T = unknown> {
       // effect if already running.
       await timePiecePhase(
         "get.runtime.start",
-        () =>
-          this.runtime.start(
-            piece,
-            holder === undefined ? undefined : { holder },
-          ),
+        () => this.runtime.start(piece, { holder }),
       );
       // A start that was in flight before the pointer moved may have
       // instantiated the outgoing pattern. Its watcher begins the follow as
@@ -1976,21 +1972,13 @@ export class PiecesController<T = unknown> {
    * only the runtime's log; see `Runner.startWithCommit()`.
    *
    * With `holder`, the lifetime the start gives the piece is one that holder
-   * can give up through {@link releasePiece}, as for `PieceOpen.holder`. A
-   * held start does not wait for its setup commit, so the two options are
-   * refused together.
+   * can give up through {@link releasePiece}, as for `PieceOpen.holder`.
    */
   async startPiece<T = unknown>(
     pieceOrId: string | Cell<T>,
     scope?: CellScope,
     options: { awaitSetupCommit?: boolean; holder?: object } = {},
   ): Promise<void> {
-    if (options.awaitSetupCommit && options.holder !== undefined) {
-      throw new Error(
-        "startPiece: a held start does not wait for its setup commit, so " +
-          "`awaitSetupCommit` and `holder` cannot be asked for together",
-      );
-    }
     const piece = typeof pieceOrId === "string"
       ? await timePiecePhase(
         "startPiece.get",
@@ -2009,13 +1997,8 @@ export class PiecesController<T = unknown> {
       "startPiece.runtime.start",
       () =>
         options.awaitSetupCommit
-          ? this.runtime.startWithCommit(piece)
-          : this.runtime.start(
-            piece,
-            options.holder === undefined
-              ? undefined
-              : { holder: options.holder },
-          ),
+          ? this.runtime.startWithCommit(piece, { holder: options.holder })
+          : this.runtime.start(piece, { holder: options.holder }),
     );
     await timePiecePhase(
       "startPiece.result.pull",

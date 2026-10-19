@@ -125,7 +125,7 @@ describe("held start lifetimes", () => {
     await runtime.start(two, { holder: leaving });
     await runtime.start(two, { holder: staying });
 
-    expect(runtime.releaseHolder(leaving)).toBe(2);
+    runtime.releaseAllHolds(leaving);
     expect(running(one)).toBe(false);
     expect(running(two)).toBe(true);
     expect(runtime.releaseHold(two, leaving)).toBe(false);
@@ -237,6 +237,21 @@ describe("held start lifetimes", () => {
     runtime.runner.stop(piece);
   });
 
+  it("hands a release that a start in flight declines to that start", async () => {
+    const piece = await storedPiece("released while another start resolves");
+    const first = {};
+    const second = {};
+    await runtime.start(piece, { holder: first });
+
+    const opening = runtime.start(piece, { holder: second });
+    runtime.releaseHold(piece, first);
+    await expect(opening).resolves.toBe(true);
+    expect(running(piece)).toBe(true);
+
+    runtime.releaseHold(piece, second);
+    expect(running(piece)).toBe(false);
+  });
+
   it("discards held lifetimes on an explicit stop", async () => {
     const piece = await storedPiece("stopped while held");
     const holder = {};
@@ -252,6 +267,7 @@ describe("held start lifetimes", () => {
   it("answers that a holder that holds nothing gave nothing up", async () => {
     const piece = await storedPiece("never held");
     expect(runtime.releaseHold(piece, {})).toBe(false);
-    expect(runtime.releaseHolder({})).toBe(0);
+    runtime.releaseAllHolds({});
+    expect(running(piece)).toBe(false);
   });
 });

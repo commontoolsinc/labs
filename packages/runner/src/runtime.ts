@@ -4808,10 +4808,10 @@ export class Runtime {
 
   /**
    * Gives up every hold `holder` has on a piece's lifetime; see
-   * `Runner.releaseHolder()`.
+   * `Runner.releaseAllHolds()`.
    */
-  releaseHolder(holder: object): number {
-    return this.runner.releaseHolder(holder);
+  releaseAllHolds(holder: object): void {
+    this.runner.releaseAllHolds(holder);
   }
 
   /**
@@ -4819,8 +4819,11 @@ export class Runtime {
    * it instantiates, rejecting when that commit failed; see
    * `Runner.startWithCommit()`.
    */
-  startWithCommit<T = any>(resultCell: Cell<T>): Promise<boolean> {
-    return this.runner.startWithCommit(resultCell);
+  startWithCommit<T = any>(
+    resultCell: Cell<T>,
+    options?: RunnerStartOptions,
+  ): Promise<boolean> {
+    return this.runner.startWithCommit(resultCell, options);
   }
 
   /**

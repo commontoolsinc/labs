@@ -107,12 +107,11 @@ registration, so it voids neither the claim nor the report.
 ## Held lifetimes
 
 A start can name a *holder*, and then the lifetime it gives the result belongs
-to that holder rather than lasting for good. A worker serving several clients
-holds every piece a client opens to run or starts for that client, so a piece
-stops once no client shows it; a worker that kept every piece any client ever
-opened running would run them for its whole life. While any holder holds it, a
-held lifetime protects the result exactly as a permanent one does: an
-enclosing pattern releasing it leaves it running.
+to that holder rather than lasting until a stop. A host serving several
+clients holds each piece a client starts for that client, and gives up the
+client's holds when it leaves. While any holder holds it, a held lifetime
+protects the result exactly as a permanent one does: an enclosing pattern
+releasing it leaves it running.
 
 Giving up the last hold is a *release*, not a stop. It ends the registration a
 held start installed and nothing else, and only while nothing else has claimed
@@ -121,19 +120,22 @@ the result:
 - A result that was already running when the first held start reached it
   belongs to whatever started it, so ending the held lifetime leaves it.
 - A launch that names the result after the held start — a pattern
-  instantiating it as a child, a synced run of it — makes the running
-  registration that launch's too, and the launch's own release governs it.
-- A permanent lifetime, from a start with no holder, outlasts every hold.
-- A start still in flight declines the release, as it does a child's.
+  instantiating it as a child, a run of it — makes the running registration
+  that launch's too, and the launch's own release governs it.
+- A permanent lifetime, from a start that names no holder, outlasts every
+  hold.
+- A start still in flight inherits the release: the registration stays the
+  holders' to end, and the start's holders, if it has any, end it when they
+  let go.
 - A scoped program belongs to all its selecting instances and is never ended
   by giving up a hold.
 
 When an enclosing pattern releases a child that holders still hold, the
-registration becomes the holders': the last of them to let go ends it. A start
-that joins an in-flight attempt claims the kind of lifetime it asked for, so a
-held and a permanent start of one result leave it permanent. An explicit stop
-discards held lifetimes along with permanent ones; a holder's later release
-finds nothing to give up, and returns that it held nothing.
+registration becomes the holders': the last of them to let go ends it. Every
+caller of a start claims the kind of lifetime it asked for when the start
+settles, so a held and a permanent start of one result leave it permanent. An
+explicit stop discards held lifetimes along with permanent ones; a holder's
+later release finds nothing to give up.
 
 ## Rolling back with the transaction
 
