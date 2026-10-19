@@ -371,8 +371,20 @@ await commonfabric.rt.getLoggerCounts()
 // module-delegation registry and how often its snapshot was built, the
 // worker's own subscription and mount tables, and cumulative CFC commit
 // refusals by reason. Take two readings apart to see which tracked collection
-// is growing; growth in what the entries hold, or in a structure not counted
-// here, does not show.
+// is growing; growth in a structure not counted here does not show.
+//
+// Four views say where the growth sits. `storage.bySpace` ranks the open
+// spaces by the approximate JSON size of their documents, measured across
+// reads within a node budget (`measuredDocuments` against `documents` says
+// how far the measurement has got; the rest of the spaces past the first 64
+// add up under `bySpaceOmitted`). `storage.wire` counts the frames the memory
+// connections have sent and received and the bytes the open sockets still
+// hold queued (`null` for a session factory that reports none, as the
+// emulated one is). `runtime.immutableSnapshotsBySpace` counts the snapshots
+// by the space each was read out of. `ipc` counts the `MessagePort`s the
+// worker holds and has closed, and what each outbound channel has carried:
+// every message counted, one in sixteen measured, `approxBytes` scaled from
+// the sample (`null` for a processor with no client registry behind it).
 (await commonfabric.rt.getLoggerCounts()).sizes
 
 // The storage counts above add every open space together. Each open space's
