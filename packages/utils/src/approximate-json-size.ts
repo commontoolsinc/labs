@@ -41,10 +41,12 @@ export type InstanceMeasure = { bytes: number } | { view: unknown };
 /** What a caller may hand the walk. */
 export type ApproximateJsonSizeOptions = {
   /**
-   * How to measure an object that is neither an array, a byte buffer, a
-   * `Map` nor a `Set`, for a caller whose values hold instances that keep
-   * their payload private, as the Fabric classes do: `undefined` to have the
+   * How to measure an object that is neither an array, a byte buffer nor an
+   * iterable, for a caller whose values hold instances that keep their
+   * payload private, as the Fabric classes do: `undefined` to have the
    * instance walked through its own enumerable properties like any object.
+   * A view may itself hold an iterable, which the walk consumes only as far
+   * as its node limit lets it.
    */
   instanceMeasure?: (instance: object) => InstanceMeasure | undefined;
 
@@ -71,13 +73,15 @@ const FALSE_LENGTH = 5;
 /**
  * Measures `value` as {@link ApproximateJsonSize} describes. Plain objects,
  * arrays and class instances are walked through their own enumerable
- * properties, an instance first offered to `options.instanceMeasure`; a
- * `Map` or a `Set` through its entries, as an array of them would be; an
- * `ArrayBuffer` or a view onto one counts its byte length and is not
- * walked. The walk expects a tree, as every JSON-derived or codec-encoded
- * value is: a cycle would not end it short of `options.nodeLimit`. A sparse
- * array costs its length in time, as its JSON would, and nothing in memory,
- * since a leaf is counted where it is found and never queued.
+ * properties, an instance first offered to `options.instanceMeasure`; an
+ * iterable other than an array, a `Map`, a `Set` or an iterator among them,
+ * through what it yields, as an array of it would be, and only as far as
+ * the node limit lets the walk go; an `ArrayBuffer` or a view onto one
+ * counts its byte length and is not walked. The walk expects a tree, as
+ * every JSON-derived or codec-encoded value is: a cycle would not end it
+ * short of `options.nodeLimit`. A sparse array costs its length in time, as
+ * its JSON would, and nothing in memory, since a leaf is counted where it
+ * is found and never queued.
  */
 export function approximateJsonSize(
   value: unknown,
@@ -137,27 +141,35 @@ export function approximateJsonSize(
       }
       continue;
     }
-    if (current instanceof Map || current instanceof Set) {
-      bytes += 2 + Math.max(0, current.size - 1);
-      for (const entry of current) {
+    if (isIterable(current)) {
+      // The limit is checked before each item is pulled, so an iterator
+      // yields nothing the walk will not visit.
+      bytes += 2;
+      let items = 0;
+      const iterator = current[Symbol.iterator]();
+      for (;;) {
         if (nodes >= nodeLimit) {
           complete = false;
+          iterator.return?.();
           break;
         }
-        if (current instanceof Map) {
-          bytes += 3;
-          visit(entry[0]);
-          visit(entry[1]);
-        } else {
-          visit(entry);
-        }
+        const next = iterator.next();
+        if (next.done === true) break;
+        if (items > 0) bytes += 1;
+        items++;
+        visit(next.value);
       }
       continue;
     }
     const measure = instanceMeasure?.(current);
     if (measure !== undefined) {
-      if ("bytes" in measure) bytes += measure.bytes;
-      else visit(measure.view);
+      if ("bytes" in measure) {
+        bytes += measure.bytes;
+      } else if (nodes >= nodeLimit) {
+        complete = false;
+      } else {
+        visit(measure.view);
+      }
       continue;
     }
     bytes += 2;
@@ -175,4 +187,10 @@ export function approximateJsonSize(
     bytes += Math.max(0, members - 1);
   }
   return { bytes, nodes, complete };
+}
+
+/** Whether `value` yields items the walk visits in place of its properties. */
+function isIterable(value: object): value is Iterable<unknown> {
+  return typeof (value as { [Symbol.iterator]?: unknown })[Symbol.iterator] ===
+    "function";
 }

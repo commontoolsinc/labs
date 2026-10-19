@@ -108,6 +108,41 @@ describe("approximateJsonSize()", () => {
     expect(partial).toMatchObject({ nodes: 50, complete: false });
   });
 
+  it("stops before visiting an instance's view once the node limit is reached", () => {
+    // Views that are empty reach no child-loop guard, so the guard has to
+    // sit ahead of the view itself.
+    class Empty {}
+    const instanceMeasure = (instance: object) =>
+      instance instanceof Empty ? { view: {} } : undefined;
+    const queued = Array.from({ length: 98 }, () => new Empty());
+
+    const partial = approximateJsonSize(queued, {
+      instanceMeasure,
+      nodeLimit: 100,
+    });
+
+    expect(partial.nodes).toBe(100);
+    expect(partial.complete).toBe(false);
+  });
+
+  it("consumes an iterable only as far as the node limit lets it", () => {
+    let pulled = 0;
+    const endless = {
+      *[Symbol.iterator]() {
+        while (true) {
+          pulled++;
+          yield "item";
+        }
+      },
+    };
+
+    const partial = approximateJsonSize({ items: endless }, { nodeLimit: 10 });
+
+    expect(partial.complete).toBe(false);
+    expect(partial.nodes).toBe(10);
+    expect(pulled).toBe(8);
+  });
+
   it("walks a `Map` and a `Set` through their entries", () => {
     const value = {
       m: new Map([["k", "v"], ["key", "value"]]),
@@ -119,7 +154,7 @@ describe("approximateJsonSize()", () => {
         m: [["k", "v"], ["key", "value"]],
         s: ["a", "bb"],
       }).length,
-      nodes: 9,
+      nodes: 11,
       complete: true,
     });
   });

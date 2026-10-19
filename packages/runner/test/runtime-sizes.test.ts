@@ -1,7 +1,11 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { UnknownValue } from "@commonfabric/data-model/codec-common";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import {
+  FabricBytes,
+  FabricRegExp,
+} from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -297,6 +301,23 @@ describe("runtime-sizes", () => {
       const storage = runtime.getSizes().storage!;
       expect(storage.measuredDocuments).toBe(storage.documents);
       expect(storage.approxBytes).toBeGreaterThanOrEqual(1_000_000);
+    });
+
+    it("counts a stored unknown value's preserved state and a regular expression's source in its space's approximate size", async () => {
+      const runtime = createRuntime();
+      const tx = runtime.edit();
+      runtime.getCell(space, "sized-unknown", { type: "object" }, tx).set({
+        payload: new UnknownValue("FutureType@1", "x".repeat(1_000_000)),
+      });
+      runtime.getCell(space, "sized-regexp", { type: "object" }, tx).set({
+        payload: new FabricRegExp("es2025", "y".repeat(1_000_000), ""),
+      });
+      await tx.commit().settled;
+      await storageManager!.synced();
+
+      const storage = runtime.getSizes().storage!;
+      expect(storage.measuredDocuments).toBe(storage.documents);
+      expect(storage.approxBytes).toBeGreaterThanOrEqual(2_000_000);
     });
 
     it("counts the snapshots read out of a space's documents under that space, and the rest under `(none)`", () => {

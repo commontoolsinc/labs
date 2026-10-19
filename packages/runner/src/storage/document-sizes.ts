@@ -12,12 +12,20 @@
  */
 
 import {
+  type FabricValue,
+  isFabricSpecialObject,
+} from "@commonfabric/data-model";
+import { NULL_LIVE_ENVIRONMENT } from "@commonfabric/data-model/codec-common";
+import { createDefaultJsonRegistry } from "@commonfabric/data-model/codecs";
+import {
   FabricError,
-  FabricLink,
   FabricMap,
   FabricSet,
 } from "@commonfabric/data-model/fabric-instances";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import {
+  FabricBytes,
+  FabricKeyPair,
+} from "@commonfabric/data-model/fabric-primitives";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { EntityDocument } from "@commonfabric/memory/v2";
 import {
@@ -79,15 +87,24 @@ export type MeasurableSpace = {
   getDocumentSizes(budget: MeasureBudget): SpaceDocumentSizes;
 };
 
+/** The codecs the Fabric classes hand the walk their state through. */
+const fabricCodecs = createDefaultJsonRegistry();
+
 /**
  * How the walk measures a Fabric class, which keeps its payload where the
- * walk cannot see it: a `FabricBytes` counts its bytes, and the instance
- * classes hand back their state as a view the walk visits in their place,
- * within the same node budget: a `FabricError` its fields and extras, a
- * `FabricLink` its payload, a `FabricMap` or `FabricSet` its contents. The
- * view shares the instance's values and allocates at most one small object.
- * Everything else is left to the walk, the Fabric primitives among them,
- * whose payloads are a few dozen bytes and walk as the empty object.
+ * walk cannot see it: as a view of its state that the walk visits in its
+ * place, within the same node budget. The view is what the class's own
+ * codec encodes it to, one level deep, which shares the instance's strings
+ * and values and allocates a wrapper around them; so an `UnknownValue` or
+ * `ProblematicValue` hands over the state it preserves, a `FabricRegExp`
+ * its source, flags and flavor, a `FabricLink` its payload. Four classes
+ * are measured otherwise: a `FabricBytes` counts its bytes outright; a
+ * `FabricError` hands over its fields and its extras as the lazy iterator
+ * `extraEntries()` returns, so a budget runs out inside a large extras bag
+ * without the bag being copied; a `FabricMap` or `FabricSet` hands over its
+ * contents, their codecs having no encoding yet; a `FabricKeyPair` hands
+ * over its algorithm alone, so its material stays where it is. An object
+ * that is no Fabric class, or whose codec refuses it, is left to the walk.
  */
 function fabricInstanceMeasure(instance: object): InstanceMeasure | undefined {
   if (instance instanceof FabricBytes) return { bytes: instance.length };
@@ -99,14 +116,25 @@ function fabricInstanceMeasure(instance: object): InstanceMeasure | undefined {
         message: instance.message,
         stack: instance.stack,
         cause: instance.cause,
-        ...Object.fromEntries(instance.extraEntries()),
+        extras: instance.extraEntries(),
       },
     };
   }
-  if (instance instanceof FabricLink) return { view: instance.payload };
   if (instance instanceof FabricMap) return { view: instance.map };
   if (instance instanceof FabricSet) return { view: instance.set };
-  return undefined;
+  if (instance instanceof FabricKeyPair) {
+    return { view: { algorithm: instance.algorithm } };
+  }
+  if (!isFabricSpecialObject(instance)) return undefined;
+  const codec = fabricCodecs.codecFromValue(instance as FabricValue);
+  if (typeof codec !== "object") return undefined;
+  try {
+    return {
+      view: codec.encode(instance as FabricValue, NULL_LIVE_ENVIRONMENT),
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 /**

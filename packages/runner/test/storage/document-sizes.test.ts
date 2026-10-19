@@ -1,9 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import {
+  ProblematicValue,
+  UnknownValue,
+} from "@commonfabric/data-model/codec-common";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import {
   FabricBytes,
   FabricHash,
+  FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
 import type { EntityDocument } from "@commonfabric/memory/v2";
 import { approximateJsonSize } from "@commonfabric/utils/approximate-json-size";
@@ -211,7 +216,28 @@ describe("DocumentSizeEstimate", () => {
         });
       });
 
-      it("walks a Fabric primitive as the empty object it is, without encoding it", () => {
+      it("counts any Fabric class by the state its codec hands over, a preserved unknown value and a regular expression's source among them", () => {
+        const estimate = new DocumentSizeEstimate();
+        const payloads: EntityDocument[] = [
+          { value: new UnknownValue("FutureType@1", "x".repeat(1_000_000)) },
+          {
+            value: new ProblematicValue(
+              "FutureType@1",
+              "x".repeat(1_000_000),
+              "bad state",
+            ),
+          },
+          { value: new FabricRegExp("es2025", "x".repeat(1_000_000), "") },
+        ];
+
+        for (const payload of payloads) {
+          const measured = estimate.measure([payload], { remaining: 1_000 });
+          expect(measured.measuredDocuments).toBe(1);
+          expect(measured.approxBytes).toBeGreaterThanOrEqual(1_000_000);
+        }
+      });
+
+      it("counts a hash by the state its codec hands over, more than the empty object it walks as", () => {
         const estimate = new DocumentSizeEstimate();
         const value: EntityDocument = {
           value: { hash: new FabricHash(new Uint8Array(32), "fid1") },
@@ -219,9 +245,44 @@ describe("DocumentSizeEstimate", () => {
 
         const measured = estimate.measure([value], { remaining: 1_000 });
 
-        expect(measured.approxBytes).toBe(
-          JSON.stringify({ value: { hash: {} } }).length,
+        expect(measured.approxBytes).toBeGreaterThan(
+          JSON.stringify({ value: { hash: {} } }).length + 32,
         );
+      });
+
+      it("consumes an error's extras only as far as the budget lets it, whatever the bag holds", () => {
+        // The same budget stops at the same point in a bag ten times the
+        // size, which is what says the bag is not copied ahead of the walk.
+        const withExtras = (count: number): EntityDocument => ({
+          value: {
+            payload: new FabricError({
+              type: "Error",
+              message: "many extras",
+              stack: undefined,
+              cause: undefined,
+              extras: Array.from(
+                { length: count },
+                (_, i) => [`key${i}`, 0] as [string, number],
+              ),
+            }),
+          },
+        });
+        const small = { remaining: 1_000 };
+        const large = { remaining: 1_000 };
+
+        const fewer = new DocumentSizeEstimate().measure(
+          [withExtras(10_000)],
+          small,
+        );
+        const more = new DocumentSizeEstimate().measure(
+          [withExtras(100_000)],
+          large,
+        );
+
+        expect(small.remaining).toBe(0);
+        expect(large.remaining).toBe(0);
+        expect(fewer).toMatchObject({ truncatedDocuments: 1 });
+        expect(more).toEqual(fewer);
       });
 
       it("stops inside a document the budget runs out in, holding its size as a lower bound", () => {
