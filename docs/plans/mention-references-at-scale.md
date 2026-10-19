@@ -469,8 +469,8 @@ prefix. Four places the question could be answered, with different costs:
 **B1 — answered by the pattern, through write-then-pull.** The component writes
 the query into a cell and pulls the cell the collection derives from it with
 `awaitDurability`, which crosses the commit-aware barrier before returning, so
-the answer reflects the question. Buildable with what exists and built by nobody.
-Costs a durable write per keystroke, needs a request cell per editor, and has no
+the answer reflects the question. Buildable with what exists and built by
+nobody. Costs a durable write per keystroke, needs a request cell per editor, and has no
 way to tell two questions in flight apart. The derivation itself still scans the
 member list unless the collection maintains an ordered structure, so the
 _server_ cost is unchanged at a million members — what improves is delivery.
@@ -727,13 +727,14 @@ coordinated with the Topics owner. Stage 8 waits on the verb-call surface.
 
 1. **The stored citation.** `MentionRef`
    (`packages/ui/src/v2/core/mention-refs.ts`) and `MentionRefSchema`
-   (`packages/runner/src/component-read-contract.ts`) gain an optional citation — the collection, as a reference, and the member name —
-   beside `destination`, which stays. A topic's reference graph is built from
-   each mention's `destination` (`packages/patterns/topics/topic.tsx`), so a
-   mention keeps the pointer every reader of it uses today and adds the name it
-   was cited by. Nothing writes a citation yet.
-   `packages/ui/src/v2/components/cf-code-editor/docs/mention-refs.md` says
-   what the field means.
+   (`packages/runner/src/component-read-contract.ts`) gain an optional
+   citation — the collection, as a reference, and the member name — beside
+   `destination`, which stays. A topic's reference graph is built from each
+   mention's `destination` (`packages/patterns/topics/topic.tsx`), so a mention
+   keeps the pointer every reader of it uses today and adds the name it was
+   cited by. Nothing writes a citation yet.
+   `packages/ui/src/v2/components/cf-code-editor/docs/mention-refs.md` says what
+   the field means.
 2. **Reading a collection's promise.** One predicate decides whether a
    collection's declaration permits storing a name: unique across history,
    permanent, never reused (`NamingPolicy`,
