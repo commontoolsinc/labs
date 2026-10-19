@@ -28,6 +28,7 @@ import type {
   ChatRoomChoice,
   LoomInput,
   LoomOutput,
+  LoomStyle,
   MeetingAssociationCell,
   Panel,
   PanelAdmission,
@@ -35,6 +36,7 @@ import type {
   PanelRetarget,
   PanelTitle,
   ParticipantProfile,
+  PortableMeetingIdentity,
   Presentation,
   PrivatePanel,
   ViewerState,
@@ -253,8 +255,39 @@ const ensureChatRoom = handler<void, { chatRoom: ChatRoomCell }>(
   },
 );
 
+/** Returns the supported portable keys when `value` carries their full contract. */
+function portableMeetingIdentity(
+  value: unknown,
+): PortableMeetingIdentity | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return undefined;
+  if (!("scheme" in value) || value.scheme !== "ical-uid-slot") {
+    return undefined;
+  }
+  const itemKey = "item_key" in value ? value.item_key : undefined;
+  const occurrenceKey = "occurrence_key" in value
+    ? value.occurrence_key
+    : undefined;
+  if (
+    typeof itemKey !== "string" || itemKey.length !== 64 ||
+    !/^[0-9a-f]{64}$/.test(itemKey) ||
+    typeof occurrenceKey !== "string" || occurrenceKey.length !== 64 ||
+    !/^[0-9a-f]{64}$/.test(occurrenceKey)
+  ) return undefined;
+  return {
+    scheme: "ical-uid-slot",
+    item_key: itemKey,
+    occurrence_key: occurrenceKey,
+  };
+}
+
 /**
  * Binds an empty Loom to one meeting key and confirms a same-key replay.
+ * A matching binding can acquire portable evidence once; conflicting evidence
+ * leaves the association intact. Legacy replays preserve portable metadata.
+ * The identity arrives as raw event data so invalid values remain visible to
+ * the validator instead of being omitted by a typed projection.
  * A different key or unrecognized stored value leaves the association intact.
  * The read participates in the handler transaction, so competing bindings
  * retry against the association that committed first. A request whose reply
@@ -271,11 +304,17 @@ const bindMeeting = handler<
       Record<string, unknown> | Default<Record<PropertyKey, never>>
     >;
   }
->(({ key, reply }, { meeting, storedFields }) => {
+>((event, { meeting, storedFields }) => {
+  const { key, portableIdentity, reply } = event;
   if (reply?.equals(meeting)) return;
   if (
     typeof key !== "string" || key.length !== 64 || !/^[0-9a-f]{64}$/.test(key)
   ) {
+    reply?.set({ status: "invalid-key" });
+    return;
+  }
+  const identity = portableMeetingIdentity(portableIdentity);
+  if ("portableIdentity" in event && identity === undefined) {
     reply?.set({ status: "invalid-key" });
     return;
   }
@@ -300,19 +339,65 @@ const bindMeeting = handler<
       reply?.set({ status: "invalid-state" });
       return;
     }
-    reply?.set({
-      status: storedKey === key ? "already-bound" : "conflict",
-      key: storedKey,
-    });
+    if (storedKey !== key) {
+      reply?.set({ status: "conflict", key: storedKey });
+      return;
+    }
+    if (identity !== undefined) {
+      if ("portableIdentity" in current) {
+        const storedIdentity = portableMeetingIdentity(
+          meeting.get()?.portableIdentity,
+        );
+        if (storedIdentity === undefined) {
+          reply?.set({ status: "invalid-state" });
+          return;
+        }
+        if (
+          storedIdentity.item_key !== identity.item_key ||
+          storedIdentity.occurrence_key !== identity.occurrence_key
+        ) {
+          reply?.set({ status: "conflict", key: storedKey });
+          return;
+        }
+      } else {
+        meeting.key("portableIdentity").set(identity);
+      }
+    }
+    reply?.set({ status: "already-bound", key: storedKey });
     return;
   }
   if (Object.keys(current).length !== 0) {
     reply?.set({ status: "invalid-state" });
     return;
   }
-  meeting.set({ key });
+  meeting.set(
+    identity === undefined ? { key } : { key, portableIdentity: identity },
+  );
   reply?.set({ status: "bound", key });
 });
+
+/** The portable appearance a viewer can consume, or no style. */
+function normalizedStyle(selected: LoomStyle): LoomStyle {
+  if (
+    selected === null || !selected || typeof selected.id !== "string" ||
+    /^[a-z][a-z0-9-]{0,63}$/.exec(selected.id)?.[0] !== selected.id ||
+    !["native", "light", "dark"].includes(selected.mode)
+  ) {
+    return null;
+  }
+  return { id: selected.id, mode: selected.mode };
+}
+
+/** Validates and replaces the confirmed appearance in one write. */
+const setStyle = handler<{ style: LoomStyle }, { style: Writable<LoomStyle> }>(
+  (event, { style }) => {
+    const selected = normalizedStyle(event.style);
+    if (event.style !== null && selected === null) {
+      throw new Error("Invalid Loom style identifier or mode");
+    }
+    style.set(selected);
+  },
+);
 
 /** Sets the Loom's title, which is also its name. */
 const retitleLoom = handler<{ title: string }, { title: Writable<string> }>(
@@ -611,6 +696,7 @@ export default pattern<LoomInput, LoomOutput>(
   (
     {
       title,
+      style,
       panels,
       presentation,
       participants,
@@ -788,6 +874,7 @@ export default pattern<LoomInput, LoomOutput>(
         </cf-theme>
       ),
       title,
+      style: normalizedStyle(style.get()),
       panels,
       presentation,
       pieceRegistry,
@@ -806,6 +893,7 @@ export default pattern<LoomInput, LoomOutput>(
       ensureChatRoom: ensureChatRoom({ chatRoom }),
       meeting,
       bindMeeting: bindMeeting({ meeting, storedFields: meeting }),
+      setStyle: setStyle({ style }),
       retitleLoom: retitleLoom({ title }),
       retitlePanel: retitlePanel({ panels }),
       retargetPanel: retargetPanel({ panels }),

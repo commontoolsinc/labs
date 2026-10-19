@@ -6,7 +6,10 @@ import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import type { FabricValue } from "@commonfabric/data-model";
-import { entityRefToString } from "@commonfabric/data-model/cell-rep";
+import {
+  entityRefToString,
+  linkRefFrom,
+} from "@commonfabric/data-model/cell-rep";
 import { valueFromDataUri } from "@commonfabric/data-model/codec-data-uri";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
@@ -23,6 +26,7 @@ import { Runtime } from "../src/runtime.ts";
 import { externalRefTo, resolvedSchema } from "./schema-ref-helpers.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { inlineCellValue } from "../src/immutable-cell.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -55,6 +59,25 @@ describe("data URI inlining", () => {
     await runtime?.dispose();
     await storageManager?.close();
   });
+
+  for (const method of ["set", "setRaw"] as const) {
+    it(`expands immutable defaults before ${method} stores an ordinary link schema`, async () => {
+      const snapshot = runtime.getImmutableCell(space, { answer: 42 });
+      const holder = runtime.getCell(space, `schema-default-${method}`);
+      holder.withTx(tx)[method]({
+        ref: linkRefFrom({
+          id: "of:target",
+          space,
+          schema: { default: snapshot.getAsLink() },
+        }),
+      });
+      expect((await tx.commit().settled).error).toBeUndefined();
+      const stored = holder.getRaw() as { ref: ReturnType<typeof linkRefFrom> };
+      const schema = parseLink(stored.ref)!.schema!;
+      expect(resolvedSchema(schema)).toEqual({ default: { answer: 42 } });
+      tx = runtime.edit();
+    });
+  }
 
   describe("findAndInlineDataUriLinks", () => {
     it("returns a link-free array holding NaN by reference", () => {
@@ -590,12 +613,12 @@ describe("data URI inlining", () => {
       expect(rawValue).toBe("test");
     });
 
-    it("should surface the storage error for a foreign-media-type data URI", () => {
-      // Such a link is not inlined, so the write treats it as an ordinary
-      // link and reads through it to diff against what it names. That read
-      // reports the media type, as the storage layer's typed error. Landing
-      // on that error is also what pins the inlining re-entry as unreached;
-      // the re-entry recurs on a value the inlining call leaves alone.
+    it("stores a foreign-media-type data URI as an ordinary link, which a read through it refuses", () => {
+      // Such a link is not inlined, so the write stores it as it is and reads
+      // nothing of what it names: a link write takes no dependency on its
+      // source. The inlining re-entry is unreached, since it recurs on a
+      // value the inlining call leaves alone. A read through the link is
+      // where the storage layer reports the media type, as its typed error.
       const targetCell = runtime.getCell(space, "target", undefined, tx);
 
       const link = {
@@ -607,9 +630,11 @@ describe("data URI inlining", () => {
         },
       };
 
+      targetCell.set(link);
+      expect(targetCell.getRaw()).toEqual(link);
       let error: { name?: string } | undefined;
       try {
-        targetCell.set(link);
+        targetCell.get();
       } catch (caught) {
         error = caught as { name?: string };
       }
@@ -928,9 +953,9 @@ describe("data URI inlining", () => {
       return link;
     };
 
-    /** The schema of the link at `ref` in the document `id` encodes. */
-    const schemaInside = (id: string) =>
-      parseLink(valueFromDataUri(id).ref)!.schema;
+    /** The schema of the link at `ref` in the document `id` addresses. */
+    const schemaInside = (id: `${string}:${string}`) =>
+      parseLink((inlineCellValue(id) as { ref: unknown }).ref)!.schema;
 
     it("resolves on a read of a stored array element", () => {
       storedLink();

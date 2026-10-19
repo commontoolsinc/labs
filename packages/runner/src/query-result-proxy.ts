@@ -18,8 +18,8 @@ import {
 } from "./storage/interface.ts";
 import { ignoreReadForScheduling } from "./storage/reactivity-log.ts";
 import {
+  cfcAcquisitionViewForDereferenceTraces,
   type CfcLabelView,
-  cfcLabelViewForDereferenceTraces,
   cloneCfcLabelView,
   mergeCfcLabelViews,
   rebaseCfcLabelView,
@@ -417,9 +417,12 @@ function createViewProxy<T>(
   };
 
   link = resolved.link;
+  // What the resolution adds to the view is how the value was reached, the
+  // restrictions of the slots it left; the labels of what it reached are
+  // read where they are.
   cfcLabelView = mergeCfcLabelViews([
     cloneCfcLabelView(cfcLabelView),
-    cfcLabelViewForDereferenceTraces(viewTx, resolved.traces),
+    cfcAcquisitionViewForDereferenceTraces(viewTx, resolved.traces),
   ]);
   // A stream position is declared by the link's schema: the stamp the builder
   // puts on a stream's alias, which the stored redirect carries onto the

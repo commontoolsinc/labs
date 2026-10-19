@@ -2,9 +2,10 @@ import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 
-import type {
-  CreateHarnessPromptLoopOptions,
-  HarnessPromptLoopResult,
+import {
+  CfHarnessPromptLoop,
+  type CreateHarnessPromptLoopOptions,
+  type HarnessPromptLoopResult,
 } from "@commonfabric/cf-harness/prompt-loop";
 import type { HarnessTranscriptEvent } from "@commonfabric/cf-harness/contracts/transcript";
 import { HarnessControlError } from "@commonfabric/cf-harness/control-errors";
@@ -112,6 +113,9 @@ describe("runHarnessJob()", () => {
 
       /** Leaves the harness to read the process's environment. */
       processEnv?: boolean;
+
+      /** Classifies the task with a real loop on the job's own engine. */
+      classify?: boolean;
     } = {},
   ) => {
     const seen: Seen = {};
@@ -152,6 +156,12 @@ describe("runHarnessJob()", () => {
               });
             },
             runTranscript: () => Promise.reject(new Error("not a resume")),
+            ...(options.classify
+              ? {
+                classifyTask: (task: string) =>
+                  new CfHarnessPromptLoop(loopOptions).classifyTask(task),
+              }
+              : {}),
           };
         },
       },
@@ -288,6 +298,19 @@ describe("runHarnessJob()", () => {
       expect(seen.loopOptions?.model).toBe("scripted");
     });
 
+    it("records the task's classification in the job's run state and orients the prompt by it", async () => {
+      const { result, seen } = await runScripted(
+        plainSpec({ task: "what's on Thursday?" }),
+        answering("Nothing."),
+        { classify: true },
+      );
+
+      expect(result.outcome).toBe("completed");
+      expect(seen.loopOptions?.engine?.getRunState().taskClassification)
+        .toMatchObject({ tags: ["find"], path: "rule" });
+      expect(seen.systemPrompt).not.toContain("When you delegate");
+    });
+
     it("passes no fabric session and no input cell", async () => {
       const { result, seen } = await runScripted(
         plainSpec(),
@@ -415,6 +438,30 @@ describe("runHarnessJob()", () => {
       expect(
         (seen.loopOptions?.inputCells ?? []).map((cell) => cell.name),
       ).toEqual(["book"]);
+    });
+
+    it("admits the spec's foreign spaces to the fabric session", async () => {
+      // A piece handed in from another space is reached in that space.
+      const other = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+      const { seen } = await runScripted(
+        plainSpec({
+          fabric: {
+            host: "https://toolshed.example",
+            space: SPACE,
+            identityKeyPath: join(runRoot, "unused.key"),
+            maxConfidentiality: [
+              { type: "https://cfc.test/atom/user", subject: "me" },
+            ] as never,
+            inputs: {},
+            foreignSpaces: { [other]: "https://toolshed.example" },
+          },
+        }),
+        answering("Titan"),
+      );
+
+      expect(seen.loopOptions?.fabricSession?.foreignSpaces).toEqual({
+        [other]: "https://toolshed.example/",
+      });
     });
 
     /** A fabric part with no input cells, as a local job's is. */

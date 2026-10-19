@@ -2,6 +2,7 @@
 
 import type {
   Default,
+  JSONValue,
   NAME,
   PerSession,
   PerSpace,
@@ -122,10 +123,27 @@ export type ChatRoomCell = Writable<
   ChatRoomRecord | Default<Record<PropertyKey, never>>
 >;
 
+/** Caller-computed portable keys for one iCalendar occurrence. */
+export interface PortableMeetingIdentity {
+  /** The UID and typed original-slot hash contract. */
+  scheme: "ical-uid-slot";
+
+  /** Canonical lowercase SHA-256 item key. */
+  item_key: string;
+
+  /** Canonical lowercase SHA-256 occurrence key. */
+  occurrence_key: string;
+
+  [field: string]: JSONValue;
+}
+
 /** The meeting occurrence associated with this Loom, absent while unbound. */
 export interface MeetingAssociation {
-  /** Canonical lowercase 64-character hexadecimal meeting occurrence key. */
+  /** Immutable lowercase 64-character hexadecimal legacy meeting key. */
   key?: string;
+
+  /** Portable occurrence evidence supplied by an authorized caller. */
+  portableIdentity?: PortableMeetingIdentity;
 
   [field: string]: unknown;
 }
@@ -146,12 +164,29 @@ export type BindMeetingResult =
 /** A meeting key and an optional cell receiving this request's outcome. */
 export interface BindMeetingRequest {
   key: string;
+
+  /** Raw portable identity evidence that bindMeeting validates. */
+  portableIdentity?: JSONValue;
+
   reply?: Writable<BindMeetingResult>;
 }
+
+/** Confirmed portable appearance shared by every participant; null clears it. */
+export type LoomStyle = {
+  /** Catalog identifier interpreted by the viewer. */
+  id: string;
+
+  /** Explicit rendering mode, or the catalog's native mode. */
+  mode: "native" | "light" | "dark";
+} | null;
 
 /** Shared state supplied when a Loom is instantiated. */
 export interface LoomInput {
   title?: PerSpace<Writable<string | Default<"Shared Loom">>>;
+
+  /** Confirmed appearance; transient previews stay in the viewer. */
+  style?: PerSpace<Writable<LoomStyle | Default<null>>>;
+
   panels?: PerSpace<Writable<Writable<Panel>[] | Default<[]>>>;
   presentation?: PerSpace<
     Writable<Presentation | Default<{ stagedPanels: [] }>>
@@ -238,6 +273,13 @@ export interface LoomOutput {
   [NAME]: string;
   [UI]: VNode;
   title: string;
+
+  /** Confirmed appearance for all participants. */
+  style: LoomStyle;
+
+  /** Replaces the complete style and mode atomically; null clears it. */
+  setStyle: Stream<{ style: LoomStyle }>;
+
   viewerState: PerSession<Writable<ViewerState>>;
   panels: Writable<Panel>[];
   presentation: Presentation;

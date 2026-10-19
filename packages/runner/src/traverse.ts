@@ -76,8 +76,12 @@ import {
 } from "./cfc.ts";
 import { cfcEnvelopeLabelDocumentHashes } from "./cfc/label-documents.ts";
 import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
-import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
 import { FABRIC_SPECIAL_OBJECT_BRAND } from "./fabric-special-object-brand.ts";
+import {
+  immutableCellsFor,
+  mintedFromUnstoredValue,
+  pinImmutableCell,
+} from "./immutable-cell.ts";
 import { type LastNode, readMaybeLink } from "./link-resolution.ts";
 import {
   type IMemorySpaceValueAddress,
@@ -246,9 +250,9 @@ const _memoIdDigests = new LRUCache<string, string>({
 });
 
 /**
- * Fixed-size stand-in for a document id that carries its own content.
+ * Fixed-size traversal key for a document identifier.
  *
- * A data URI names the value it holds, so an inline document's id is as long
+ * A legacy data URI names the value it holds, so its id is as long
  * as the document — tens of thousands of characters for a component that
  * holds a list. A key built from that id costs a copy and a hash of every one
  * of those characters, and the traversal builds one key per node it visits
@@ -511,6 +515,16 @@ const _plainSchemaPlanCache = new WeakMap<
 /** Exact `{ type }` schemas have no traversal semantics beyond this check. */
 function isPlainTypeSchema(schema: JSONSchemaObj, type: string): boolean {
   return schema.type === type && Object.keys(schema).length === 1;
+}
+
+/**
+ * Whether `value` satisfies a plain-schema plan's primitive `type`: the type
+ * `value` has, or `"number"` for a `bigint`, which is an integer and so a
+ * number under schemaTypeMatchesValueType's subtype rule.
+ */
+function matchesPlainType(value: unknown, type: PlainPrimitiveType): boolean {
+  const valueType = getPlainJsonType(value);
+  return valueType === type || (type === "number" && valueType === "integer");
 }
 
 /**
@@ -1581,7 +1595,7 @@ export type PointerCycleTracker = CompoundCycleTracker<
  * than in the one a position is in.
  *
  * A traversal that moves a value to another address without following a
- * link, as an inline array item moves to a `data:` document of its own,
+ * link, as an inline array item moves to an immutable document of its own,
  * records that as a copy.
  */
 export interface LinkCrossingRoute {
@@ -1637,6 +1651,17 @@ export type TraversalContext = {
    * names (`loadLabelSchemaDoc`).
    */
   traverseCells: boolean;
+
+  /**
+   * Whether an inline object or array held in an array is traversed at its
+   * address in the document that stores it. Otherwise the traversal gives
+   * such an element a `snapshot:` address naming its frozen value, which
+   * is what gives the object a read returns its value identity. A walk that
+   * selects documents for a storage engine sets this: it returns no object,
+   * so the snapshot buys it nothing, and its storage holds no document at a
+   * snapshot address, so those reads cannot select stored documents.
+   */
+  inlineArrayItemsInPlace: boolean;
 
   /**
    * Reports a followed link whose target document is absent from the local
@@ -1781,6 +1806,7 @@ export function createTraversalContext(
     schemaTracker,
     scopeKeyIdentity,
     traverseCells,
+    inlineArrayItemsInPlace: false,
     onMissingLinkTarget,
     missingLinkTargets: 0,
     missingLinkTargetDocs: new Set<string>(),
@@ -2099,13 +2125,13 @@ function getNormalizedLink(
     throw new Error("Unable to create link to non-value address");
   }
   const { space, id, path } = address;
-  return {
+  return pinImmutableCell({
     space,
     id,
     scope: address.scope ?? "space",
     path: path.slice(1),
     ...(schema !== undefined && { schema }),
-  };
+  }, id);
 }
 
 // Value traversed must be a DAG, though it may have aliases or cell links
@@ -3134,6 +3160,14 @@ function trackVisitedDoc(
  * is closure-transitive, so gating at the two places a schema enters a
  * traversal (the selector, a link) covers every interior resolution.
  *
+ * A referrer minted from a value no space has stored
+ * (`mintedFromUnstoredValue`) is the one exception: no query delivers such
+ * a document, and no space holds the closure behind its links' references,
+ * so a document the registry holds is taken from there — unread, untracked,
+ * and not credited to the space — and the verdict for such a referrer is
+ * the registry's. A document the registry lacks is read from the space as
+ * for a stored referrer.
+ *
  * Documents are read in the referrer's space at the canonical `"space"`
  * scope: schema documents are installed space-scoped, so a session- or
  * user-scoped referrer must not redirect the read to its own partition.
@@ -3145,20 +3179,33 @@ function loadExternalSchemaDocs(
   context: TraversalContext,
 ): boolean {
   if (!containsExternalSchemaRef(schema)) return true;
+  // A link inside a document minted from a value no space has stored was
+  // never written, so no space holds the closure its schema's reference
+  // names, and the registry that minted the reference does
+  // (`docs/specs/content-addressed-schemas.md`, "Space boundaries"). For
+  // such a referrer the registry decides, and what it supplies is never
+  // counted as available in the referrer's space: a stored document's
+  // reference is held to what that space delivers.
+  const registryHeld = mintedFromUnstoredValue(referrer.id);
   loadSchemaDocClosure(
     tx,
     referrer,
     collectExternalSchemaRefHashes(schema),
     context,
+    registryHeld,
   );
 
   // The verdict: every hash transitively reachable from the schema's own
   // refs was collected in this traversal (this call or an earlier one — the
-  // per-context set accumulates).
+  // per-context set accumulates), or, for a registry-held referrer, is in
+  // the registry, where a document read from the space was registered too.
   const { missing } = walkSchemaDocumentClosure({
     roots: collectExternalSchemaRefHashes(schema),
     load: (hash) => {
-      if (!context.schemaDocsAvailable.has(`${referrer.space}/${hash}`)) {
+      if (
+        !registryHeld &&
+        !context.schemaDocsAvailable.has(`${referrer.space}/${hash}`)
+      ) {
         return undefined;
       }
       const document = lookupSchemaDocument(hash);
@@ -3170,12 +3217,20 @@ function loadExternalSchemaDocs(
   return missing.size === 0;
 }
 
+/**
+ * Helper for {@link loadExternalSchemaDocs}, which loads and verifies the
+ * closure behind `initialHashes` in `referrer`'s space. With `registryHeld`,
+ * a document the registry holds is taken from there without a read, and is
+ * not recorded as available in the space.
+ */
 function loadSchemaDocClosure(
   tx: IExtendedStorageTransaction,
   referrer: IMemorySpaceAddress,
   initialHashes: ReadonlySet<string>,
   context: TraversalContext,
+  registryHeld: boolean,
 ): void {
+  const fromRegistry = new Set<string>();
   walkSchemaDocumentClosure({
     roots: initialHashes,
     load: (hash) => {
@@ -3187,6 +3242,15 @@ function loadSchemaDocClosure(
       };
       const key = getTrackerKey(address, context.scopeKeyIdentity);
       if (context.schemaDocsLoaded.has(key)) return { kind: "settled" };
+      // A document the registry lacks is read from the space the referrer is
+      // addressed in, as for a stored document.
+      if (registryHeld) {
+        const registered = lookupSchemaDocument(hash);
+        if (registered !== undefined) {
+          fromRegistry.add(hash);
+          return { kind: "verified", schema: registered };
+        }
+      }
       context.schemaDocsLoaded.add(key);
       // A plain read: loads the document AND records the dependency, so an
       // absent document's later arrival re-triggers the reader.
@@ -3219,8 +3283,11 @@ function loadSchemaDocClosure(
     },
     onVerified: (hash, schema) => {
       registerSchemaDocument(hash, schema);
-      // Loaded in this space and verified.
-      context.schemaDocsAvailable.add(`${referrer.space}/${hash}`);
+      // Loaded in this space and verified; one the registry supplied was not
+      // loaded here, and the space is not credited with it.
+      if (!fromRegistry.has(hash)) {
+        context.schemaDocsAvailable.add(`${referrer.space}/${hash}`);
+      }
     },
     onMissing: (hash, miss) => {
       // An absent document was reported where its read failed. One that is
@@ -3553,7 +3620,14 @@ export function combineSchemaForLink(
   if (linkDefault === undefined) {
     return parentSchema;
   }
-  const key = internSchemaPairAsKey(parentSchema, linkSchema);
+  // The result holds nothing of the link schema but its default, so the key
+  // is the reader's schema and that default. Each document a link is read
+  // out of holds the link's schema as an object of its own, and a key over
+  // the whole link schema would hash one whole schema per document. The
+  // second delimiter keeps this key apart from the pair key above.
+  const key = `${internSchemaAsTaggedHashString(parentSchema)}|default|${
+    hashStringOf(linkDefault)
+  }`;
   const cached = _combineLinkSchemaCache.get(key);
   if (cached !== undefined) return cached;
   return internSet(
@@ -4922,6 +4996,13 @@ export class SchemaObjectTraverser<V extends FabricValue>
           this.#isValidType(schemaObj, "boolean")
         ? { ok: this.#traversePrimitive(doc, schemaObj) }
         : fail(TRAVERSE_FAILURES.invalidType);
+    } else if (typeof doc.value === "bigint") {
+      // A `bigint` is an integer, so a `number` schema accepts it too, by
+      // schemaTypeMatchesValueType's subtype rule.
+      return isPlainTypeSchema(schemaObj, "integer") ||
+          this.#isValidType(schemaObj, "integer")
+        ? { ok: this.#traversePrimitive(doc, schemaObj) }
+        : fail(TRAVERSE_FAILURES.invalidType);
     } else if (isSigilLink(doc.value)) {
       this.tx.read(doc.address, READ_FOR_SCHEDULING);
       // When traversing a pointer, use the unresolved schema, so we have
@@ -5099,7 +5180,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     if (isSigilLink(doc.value)) return undefined;
 
     if (plan.kind === "primitive") {
-      return getPlainJsonType(doc.value) === plan.type
+      return matchesPlainType(doc.value, plan.type)
         ? { ok: doc.value }
         : fail(TRAVERSE_FAILURES.invalidType);
     }
@@ -5120,7 +5201,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       let valid = true;
       doc.value.forEach((item, index) => {
         reads.paths.push(appendToPath(doc.address.path, index.toString()));
-        if (getPlainJsonType(item) === itemPlan.type) {
+        if (matchesPlainType(item, itemPlan.type)) {
           newValue[index] = item;
         } else if (itemPlan.type === "undefined") {
           newValue[index] = undefined;
@@ -5164,7 +5245,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       const propPath = appendToPath(doc.address.path, propKey);
       reads.paths.push(propPath);
       if (childPlan.kind === "primitive" && !isSigilLink(propValue)) {
-        if (getPlainJsonType(propValue) === childPlan.type) {
+        if (matchesPlainType(propValue, childPlan.type)) {
           newValue[propKey] = propValue;
         }
       } else {
@@ -5426,7 +5507,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // cell to hold the object, except when it is requested as Cell. While
       // this means updates aren't propagated, it seems like the right trade-off
       // for stability of links and the ability to mutate them without creating
-      // loops (see below).
+      // loops (see below). A traversal whose context sets
+      // `inlineArrayItemsInPlace` traverses the element where it is stored
+      // instead.
       //
       // This makes
       // ```ts
@@ -5435,7 +5518,6 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // cell.set(array);
       // ```
       // work as expected. Handle boolean items values for element schema
-      // let createdDataURI = false;
       // const maybeLink = parseLink(item, arrayLink);
       if (isSigilLink(item)) {
         const elementLink = parseLink(item, curDoc.address);
@@ -5566,32 +5648,38 @@ export class SchemaObjectTraverser<V extends FabricValue>
           );
         }
       } else if (
+        !this.context.inlineArrayItemsInPlace &&
         arrayItemUsesValueIdentity(item, curSelector.schema)
       ) {
-        // We create an element link, but this is just to establish the id if we encounter
-        // other links in our data value and we need to construct a relative link.
+        // An inline object or array gets a `snapshot:` address naming its
+        // frozen value, so that the object a read returns copies
+        // the data when written elsewhere; a link to this slot would name
+        // whatever the slot holds next.
+        //
+        // A context that sets `inlineArrayItemsInPlace` does not take this
+        // branch. Its traversal goes through the element at its address in
+        // the document that stores it, like any other nested value, so it
+        // mints no id and issues no read at a snapshot address.
+        //
+        // The element link exists to give the snapshot an id for the links
+        // inside the element that name no document.
         const elementLink = getNormalizedLink(
           curDoc.address,
           curSelector.schema,
         );
-        // Replace doc with a DataCellURI style doc. It keeps this document's
-        // space, which is where a link inside the element resolves the
-        // references in its schema.
-        // Need to read recursively here
+        // Keep the source dependency and the space that owns schema refs.
+        // The whole element is read recursively, then shared by the snapshot
+        // with its relative-link origin, without a link-rewriting walk.
         this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
+        const snapshot = immutableCellsFor(this.tx).createElement(
+          curDoc.value,
+          elementLink,
+        );
         const elementAddress = curDoc.address;
-        // TODO(@ubik2): ideally, we wouldn't use this path in query traversal.
-        // Right now, we aren't passing both the link info and doc info, so we
-        // will override the doc here.
-        // I could switch based off the traverseCells flag (true for queries),
-        // but I don't want to have that change behavior here.
         curDoc = {
           ...curDoc,
-          address: {
-            ...curDoc.address,
-            id: dataUriFromValueWithResolvedLinks(curDoc.value, elementLink),
-            path: ["value"],
-          },
+          address: { ...curDoc.address, id: snapshot.id, path: ["value"] },
+          value: snapshot.value,
         };
         // Our selector's path needs to be updated to match the new doc
         curSelector.path = curDoc.address.path;
@@ -6291,6 +6379,9 @@ function getPlainJsonType(
   if (value === undefined) return "undefined";
   if (isString(value)) return "string";
   if (typeof value === "number") return "number";
+  // A `bigint` is an integer, which schemaTypeMatchesValueType's subtype rule
+  // reads as a "number" too.
+  if (typeof value === "bigint") return "integer";
   if (isBoolean(value)) return "boolean";
   if (Array.isArray(value)) return "array";
   // A `FabricPrimitive` reports its specific type name; a schema saying

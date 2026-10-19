@@ -21,7 +21,7 @@ in the same change.
 flags](#appendix-a-removed-and-never-shipped-flags) rather than deleting the
 > record, so the history stays discoverable.
 
-**Last reviewed:** 2026-09-29. Each flag's section carries the date its status
+**Last reviewed:** 2026-10-15. Each flag's section carries the date its status
 was last checked against the code.
 
 ## Summary table
@@ -38,6 +38,7 @@ was last checked against the code.
 | [`viewScopedReplication` / `webViewScopedReplication`](#viewscopedreplication--webviewscopedreplication) | `EXPERIMENTAL_VIEW_SCOPED_REPLICATION` / `EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION`, or `RuntimeOptions.experimental` | global off; web inherits global | Bernhard Seefeld (2026-09-09) | validate view selection and guarded previews, then graduate per client class | experimental, off by default |
 | [`viewScopedReplicationV1`](#viewscopedreplicationv1) | Memory hello capability | available when server execution is on | Bernhard Seefeld (2026-09-09) | retain as protocol negotiation until older clients and servers retire | optional capability |
 | [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | **off** (`SERVER_EXECUTION_DEFAULT_ENABLED = false`; explicit `true` selects the other arm) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | soak on main at the ON default, then delete the flag and OFF path | Serving stack and OW28 scoped compilation have direct coverage; Phase-7 gate dispositions govern a renewed rollout; the section's dated entries carry each flip; stable `default`/`opposite` CI roles keep both postures guarded and make a default flip data-only |
+| [`localSessionDocuments`](#localsessiondocuments) | `EXPERIMENTAL_LOCAL_SESSION_DOCUMENTS` env / shell build define, or `RuntimeOptions.experimental`; clients adopt the deployment value | off | Bernhard Seefeld (#8919) | validate local session semantics and performance, then graduate for client execution | implemented, opt-in; requires validation-only commit support |
 | [`sharedMemoryConnection`](#sharedmemoryconnection) | `EXPERIMENTAL_SHARED_MEMORY_CONNECTION` env, or `RuntimeOptions.experimental`; the shell adopts it from its deployment, and an explicit build define of the same name overrides it | off | Bernhard Seefeld (2026-09-29) | turn on once a deployment's routing serves a connection carrying several spaces, then delete the flag and the connection-per-space path | implemented, off by default |
 | [`connectionAuth`](#connectionauth) | Memory hello capability | advertised by a host that verifies `connection.auth`; toolshed does under `sharedMemoryConnection` | Bernhard Seefeld (2026-09-29) | retain as protocol negotiation until signed `session.open` retires | optional capability |
 | [`agentBuiltin`](#agentbuiltin) | `EXPERIMENTAL_AGENT_BUILTIN` env, or `RuntimeOptions.experimental` | on | Bernhard Seefeld (agent requests stage 3) | delete the flag after the default-on posture soaks | implemented, on by default |
@@ -352,15 +353,13 @@ flags it adopts from the deployment it runs against.
   states, no shippable intermediates (spec README §3.4); deliberately named
   unlike v1's `SERVER_PRIMARY_EXECUTION` so the archived v1 documents never
   alias it. Both states, defined:
-  - **OFF (explicit `false` selects it regardless of the constant): the
-    pre-v2 behavior, byte-for-byte.** Every client
-    runtime runs and commits derivations exactly as it does today, and every
-    client commit is `authored`-class — `derived` is never claimed off the
-    flag. The commit `class` metadata is still *written* in this arm (it is
-    written in every arm from stage A onward — protocol.md §1), but nothing
-    is enforced from it, and `stream-data` behaves as today. Any OFF-arm
-    behavioral diff from a v2 stage is a phase-gate failure by itself
-    (testing.md §2).
+  - **OFF (explicit `false` selects it regardless of the constant): client
+    execution.** Each client runtime runs derivations and handlers. Documents
+    of all scopes synchronize by default. The opt-in
+    [`localSessionDocuments`](#localsessiondocuments) flag keeps session
+    documents local while preserving mixed-transaction rollback. Every
+    client commit is `authored`-class. Commit class metadata is written, but
+    server-execution admission is disabled. `stream-data` runs on the client.
   - **ON (explicit `true` selects it regardless of the constant): the v2
     posture.** With stages A–F landed
     this means: the per-class admission rows of protocol.md §2 are enforced
@@ -433,18 +432,20 @@ flags it adopts from the deployment it runs against.
   entry here, and a delta in the plan's live coordination block; workflow
   job topology, probes, skip placement, coverage ownership, test record
   variants, and every other document follow automatically.
-  Single-process harnesses do not
-  read the constant: a bare `new Runtime` and the `patternTest` /
-  `localDev` / `unitTest` presets have no serving host, so they resolve the
-  ambient baseline (OFF) by construction — the unit suites and `cf test`
-  run the derive-and-commit model (which is why the flip does not reach
-  the no-server pattern-tests lane and its `topics/multi-user.test.tsx`,
-  the lane-posture item the topics measurement report recorded for the
-  flip decision). `cf test` also refuses an explicit
-  `EXPERIMENTAL_SERVER_EXECUTION=true`, since it hosts no serving loop and
-  its clients' events would go unserved. A test that runs ON in one process
-  needs a serving loop beside its memory server, or the events its clients
-  append are admitted and never delivered;
+  A bare `new Runtime` and the `patternTest` / `localDev` / `unitTest`
+  presets do not read the constant: they have no serving host, so they
+  resolve the ambient baseline (OFF) by construction, and the unit suites
+  run the derive-and-commit model. A single-process harness that hosts a
+  serving loop does read it. `cf test` builds its runtimes with
+  `patternTest`, but resolves the posture itself as a deployed entry point
+  does, and hosts a serving loop beside its memory server when that is ON.
+  The integration runner sets the flag OFF for its `pattern-tests` and
+  `generated-patterns` targets, which is why the flip does not reach the
+  pattern-tests lane and its `topics/multi-user.test.tsx`, the lane-posture
+  item the topics measurement report recorded for the flip decision. A test
+  that runs ON in one process needs a serving loop beside its memory
+  server, or the events its clients append are admitted and never
+  delivered;
   `@commonfabric/runner/executor/serving-memory-server.deno` supplies one,
   in-process (`startServingMemoryServer`) or on a localhost websocket for
   `remoteClient` runtimes (`listenServingMemoryServer`), with its serving
@@ -614,7 +615,7 @@ flags it adopts from the deployment it runs against.
   — what a view checks, where it diverges from an eager read, and where a
   schema-less read takes over.
 - **Design, measurements and staging.**
-  [`../plans/lazy-cell-materialization.md`](../plans/lazy-cell-materialization.md).
+  [`../history/plans/lazy-cell-materialization.md`](../history/plans/lazy-cell-materialization.md).
 
 **Validation and rollback limits.** Off is not qualified as an equivalent
 rollback. Eager reads can hand `undefined` to a body whose schema promises a
@@ -755,6 +756,54 @@ holds the measurements and the conditions for revisiting.
   `packages/runner/test/agent-sink-governance.test.ts`.
 - **Path to removal.** Remove the env mapping, the runtime option and its
   authority entry, and the refusal branch after the default-on posture soaks.
+
+### `localSessionDocuments`
+
+- **Toggle:** `EXPERIMENTAL_LOCAL_SESSION_DOCUMENTS=true`, or
+  `RuntimeOptions.experimental.localSessionDocuments: true`. Server-authoritative
+  for deployed clients; the shell adopts the deployment value unless its build
+  define explicitly overrides it.
+- **Default:** off. An omitted option or explicit `false` synchronizes session
+  documents. `serverExecution: true` always synchronizes them, regardless of
+  this flag.
+- **Added by:** Bernhard Seefeld (#8919).
+- **Purpose:** in client-execution mode, keep the replica's own session instance
+  local. Its reads create no remote watches, and outgoing commits omit its
+  operations and read dependencies. Explicitly named foreign session instances
+  use server reads and admission; they are not treated as locally absent.
+  Transactions whose reads, writes, and preconditions are entirely local settle
+  without opening a connection. A commit whose writes are all local but that
+  read a shared document travels as a validation-only commit, because its
+  session writes are only as good as those reads: a rejected verdict rolls
+  them back, and it is what runs a handler again against fresh state, since
+  no later frame does. Mixed commits roll back session writes on rejection.
+  Runtimes sharing a storage manager must agree on the effective
+  session-storage policy.
+- **Toolshed:** publishes the deployment's flag for clients but keeps its own
+  webhook runtime's session documents synchronized, so their values remain in
+  the server store across runtime recreation.
+- **Rollout:** deploy memory-server support for validation-only commits before
+  enabling the flag. Older servers reject session writes that require
+  shared-read validation. Leave the flag off until that support is deployed.
+- **Removal path:** validate rollback, route replacement, scoped reactivity,
+  and the performance benefit with the flag enabled; then graduate local
+  session storage for client execution and remove the flag. Server execution
+  retains session synchronization.
+- **Tests:** `packages/runner/test/storage/local-session-documents.test.ts`
+  covers omitted, false, and true values in both execution modes. Cross-runtime
+  session fixtures run with the flag off and are explicitly skipped when it is
+  on; their user-scope counterparts run in both settings.
+- **Status (2026-10-16):** implemented, off by default. On the FabriChat
+  room cold load it removes the session writes from a load's commits and
+  spares the three commits a load makes that read nothing shared, while 167
+  of the 168 it empties still carry shared reads and travel for validation;
+  the load's other counts and its wall time stay where they were
+  (`docs/history/development/performance/2026-10-16-fabrichat-room-cold-load-local-session-documents.md`).
+  Settling those commits on the client without the round trip cuts the
+  server's commits to one a load and leaves the client's counts and wall time
+  unchanged, so the round trip is not on the load's critical path; the
+  validation stays for rollback. The remaining cost of the flag is the server
+  recording a commit for each validation-only round trip.
 
 ### `sharedMemoryConnection`
 
@@ -1858,10 +1907,11 @@ they resolve their posture from that deployment first — the environment
 supplies their overrides, not their starting point. Their wiring is
 [Clients that are not built alongside their
 server](#clients-that-are-not-built-alongside-their-server). The CLI's
-LOCAL modes (`cf test`, `cf check`) run against emulated storage, have no
-deployment to ask, and do read the environment alone, through this same
-mapping. `cf test` refuses an environment that turns `serverExecution` on,
-because nothing in it serves the events its clients commit.
+LOCAL modes (`cf test`, `cf check`) run against storage of their own, have
+no deployment to ask, and do read the environment alone, through this same
+mapping. `cf test` then applies the first-party default where the
+environment leaves `serverExecution` unset, and on the ON arm hosts the
+serving loop a deployment would run.
 
 ### Browser-side (build-time defines)
 

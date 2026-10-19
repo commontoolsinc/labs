@@ -103,12 +103,23 @@ that contract, before code in this repository relies on it.
 | Kind | The space |
 | --- | --- |
 | `fabrichat-room` | A standalone FabriChat room's own space, a chat-only social space whose root is the room, at the address the space's genesis commit reserves for a root `inSpace(..., { root: true })` places ([FabriChat](../specs/fabrichat/README.md)) |
+| `loom` | A social Loom's own space, created by a loom daemon's share sidecar or the host's [meeting-room allocator](meeting-room-allocation.md). A legacy Loom space may declare no kind. Its root is the Loom pattern's root (`packages/patterns/loom/main.tsx`), a piece of the space itself, which the sidecar reserves at the Loom's own publication cause (`{purpose: "loom-publication-root", publication: <seed>}`), not at the address `inSpace(..., { root: true })` reserves. A reader that needs more than the claim checks that the root is a piece of the space whose public composition is a Loom's (`panels`, and the `addPanel` and `removePanel` streams), as the loom daemon's Home-catalogue adapter does before registering one. A loom offer grants its recipient WRITE or OWNER; read-only access comes only through an invitation link |
 
 Home's share intake reads the kind: it admits an offer of a `fabrichat-room`
 space only when the space declares that kind, and refuses an offer of a space
-declaring another kind or none, for good, since the kind never changes. A host
+declaring another kind or none, for good, since the kind never changes. It
+does not yet admit a `loom` offer, which it skips for a loom daemon to admit;
+admitting one needs the intake's root check to take the `loom` root contract
+above rather than the reserved address. A host
 that cannot tell the kind leaves the offer to be vetted again;
-[the private inbox](private-inbox.md#the-share-intake) describes the intake.
+[the private inbox](private-inbox.md#the-share-intake) describes the intake. The
+labs shell's join of a room the user visits uses the kind to select a locator:
+`fabrichat-room` uses that strict root contract, while every other kind,
+including an undeclared kind, uses the root's explicit `chatRoom` link
+([joining a room the user visits](private-inbox.md#joining-a-room-the-user-visits)).
+The declaration may name a room document in the container's own space or a
+foreign standalone room passing the strict root contract. A container's root
+must belong to its own space, but need not use a reserved root address.
 
 A container that hosts a chat among other things declares its own kind, not
 `fabrichat-room`. A kind says what a space is; it is not a list of what the
@@ -123,7 +134,8 @@ whose root is no chat room at all. A reader that needs more than the claim
 checks the rest itself: for a `fabrichat-room` space, at least that the root
 the space links is a piece of the space itself, at the address the space's
 genesis commit reserves for it, since a member with `WRITE` can link another
-document as the root. The share intake checks both.
+document as the root. The share intake checks both, and so does the shell's
+join of a room the user visits.
 
 ## On the wire
 

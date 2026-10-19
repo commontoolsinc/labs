@@ -111,6 +111,14 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
     "profile repair-root:expect",
     "the receipt from the operator-reviewed inspection",
   ],
+  [
+    "piece follow:expect",
+    "the pattern the caller inspected the piece running",
+  ],
+  [
+    "piece follow:expect-revision",
+    "the revision head the caller inspected, or none",
+  ],
   ["piece new:request-key", "an opaque caller retry key"],
   [
     "ingest mint:gmail-access-token",

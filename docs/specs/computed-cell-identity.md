@@ -100,9 +100,15 @@ result cell and that partial cause:
 createRef({}, { parent, type: "internal", cause: descriptor.partialCause })
 ```
 
-(`packages/runner/src/link-utils.ts`, `getDerivedInternalCellLink`). The
-result is a `FabricHash`: hash bytes plus an algorithm tag, stringified as
-`<tag>:<base64urlHash>`, e.g. `fid1:abc…`
+(`packages/runner/src/derived-internal-cell-ids.ts`,
+`DerivedInternalCellIds.idFor()`, which `getDerivedInternalCellLink` in
+`packages/runner/src/link-utils.ts` calls; a runtime keeps the ids it has
+hashed, by result cell and partial cause). A partial cause that is an object is
+kept by its identity and must be deep-frozen, as the builder leaves every cause
+it assigns; `idFor()` throws for one that is not. The result is a
+`FabricHash`: hash bytes plus an algorithm tag, stringified as
+`<tag>:<base64urlHash>`, e.g.
+`fid1:abc…`
 (`packages/data-model/src/fabric-primitives/FabricHash.ts`). The hash is
 opaque: nothing about the preimage — including `type: "internal"` or the
 partial cause — is recoverable from the id. `hashOf` mints the `fid1` tag at
@@ -377,8 +383,7 @@ Rules:
   default covers everything it cannot classify.
 
 Below the URI layer nothing routes on the scheme: storage and the memory
-engine treat `URI` as an opaque string key (only `data:` URIs get special
-routing), so computed docs flow as ordinary documents. The scheme is learned
+engine treat `URI` as an opaque string key (`snapshot:` and Fabric `data:` URIs are read locally), so computed docs flow as ordinary documents. The scheme is learned
 only by the URI codecs (`uri-utils.ts`, `fabric-import-specifier.ts`,
 `fabric-ref-resolution.ts`) and read by the engine's drop policy via
 `entityKindOfIdString`.
