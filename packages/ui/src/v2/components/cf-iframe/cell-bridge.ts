@@ -459,23 +459,31 @@ function cellContextResources(
 
 /**
  * The names of the fields `cell` holds: the keys of its value while the
- * worker admits the read, or, while it refuses it, the fields the worker
- * lists, each of which answers for its own reads. None when the worker
- * refuses even the list, or answers that the cell holds no record.
+ * worker admits the read, and the fields the worker lists. The list names
+ * what the read leaves out, which is every field of a cell whose read is
+ * refused, each of which answers for its own reads, and the cell fields of a
+ * record a view binds inline (`$context={{ state, output }}`), whose read
+ * stops at the record. None when the worker refuses both, or answers that
+ * the cell holds no record.
  */
 async function fieldNames<T>(cell: CellHandle<T>): Promise<string[]> {
+  const names = new Set<string>();
   try {
     const current = await cell.pull();
-    return current && typeof current === "object" ? Object.keys(current) : [];
+    if (current && typeof current === "object") {
+      for (const name of Object.keys(current)) names.add(name);
+    }
   } catch (error) {
     if (!(error instanceof CellReadRefusedError)) throw error;
   }
   try {
-    return Object.keys((await cell.fields()) ?? {});
+    for (const name of Object.keys((await cell.fields()) ?? {})) {
+      names.add(name);
+    }
   } catch (error) {
-    if (error instanceof CellReadRefusedError) return [];
-    throw error;
+    if (!(error instanceof CellReadRefusedError)) throw error;
   }
+  return [...names];
 }
 
 /** Builds the convenience bridge used by `cf-iframe`'s `context` property. */
@@ -496,7 +504,13 @@ export function createCellContextBridge(context: object): FabricBridge {
   return createFabricBridge(resources);
 }
 
-/** Resolves every named child of a bound context into one concrete resource. */
+/**
+ * Resolves every named child of a bound context into one concrete resource.
+ * A child is named by the context's schema, by the fields the context holds,
+ * or by `resourceKinds`. The last is what names a stream: the worker lists a
+ * record's fields as cells, and a stream is not one, so a record bound inline
+ * with no schema of its own names its streams only through the kinds given.
+ */
 export async function resolveCellContextBridge(
   context: CellHandle<Record<string, unknown>>,
   resourceKinds: Readonly<Record<string, CellContextResourceKind>> = {},
@@ -510,6 +524,7 @@ export async function resolveCellContextBridge(
     ...Object.keys(properties),
     ...contextNames,
     ...await fieldNames(root),
+    ...Object.keys(resourceKinds),
   ]);
   const entries = await Promise.all([...names].map(async (name) => {
     const source = context.key(name);

@@ -32,6 +32,12 @@ describe("bidirectional binding validation", () => {
     expect(() => h("cf-input", { $value: [1, 2, 3] })).toThrow();
   });
 
+  it("throws when `$context` is a nested record holding no cell", () => {
+    expect(() =>
+      h("cf-iframe", { $context: { order: { glaze: "maple" }, count: 2 } })
+    ).toThrow("$context");
+  });
+
   it("returns a vnode for non-`$` props holding any value", () => {
     const vnode = h("div", {
       value: "string",

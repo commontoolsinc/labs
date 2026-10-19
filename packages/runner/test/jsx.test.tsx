@@ -107,6 +107,41 @@ describe("jsx", () => {
       }
     });
 
+    it("stores each cell of a record given to a binding prop as a cell link", async () => {
+      const signer = await Identity.fromPassphrase("jsx binding records");
+      const runtime = new Runtime({
+        storageManager: StorageManager.emulate({ as: signer }),
+        apiUrl: new URL("http://localhost"),
+      });
+      try {
+        const tx = runtime.edit();
+        const glaze = runtime.getCell(signer.did(), "glaze", undefined, tx);
+        glaze.set("maple");
+        const fillings = runtime.getCell(
+          signer.did(),
+          "fillings",
+          undefined,
+          tx,
+        );
+        fillings.set(["custard"]);
+
+        const vnode = h("cf-iframe", {
+          $context: { glaze, order: { fillings, count: 2 } },
+        }, []);
+        const context = (vnode.props as any).$context;
+
+        expect(context.glaze["/"]["link@1"].id).toBe(
+          glaze.getAsNormalizedFullLink().id,
+        );
+        expect(context.order.fillings["/"]["link@1"].id).toBe(
+          fillings.getAsNormalizedFullLink().id,
+        );
+        expect(context.order.count).toBe(2);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
     it("keeps a binding prop as a cell when there is no link context", async () => {
       const signer = await Identity.fromPassphrase(
         "jsx standalone binding props",

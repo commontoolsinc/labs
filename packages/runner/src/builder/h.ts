@@ -7,6 +7,7 @@ import {
   type UiPromptSlotProps,
   type VNode,
 } from "@commonfabric/api";
+import { isPlainObject } from "@commonfabric/utils/types";
 
 import { isCell } from "../cell.ts";
 import { KeepAsCell } from "../link-utils.ts";
@@ -51,8 +52,46 @@ function bindingTargetLink(value: unknown): unknown {
   return value;
 }
 
+/** Whether `value` is a cell, or a query result read from one. */
+function isBindable(value: unknown): boolean {
+  return isCell(value) || isCellResult(value);
+}
+
+/**
+ * Whether `value`, a plain object or an array, holds a cell among its
+ * members, at any depth reached through plain objects and arrays.
+ */
+function holdsCell(value: object): boolean {
+  return Object.values(value).some((member) =>
+    isBindable(member) ||
+    ((isPlainObject(member) || Array.isArray(member)) && holdsCell(member))
+  );
+}
+
+/**
+ * Returns `value`, a plain object or an array, with each cell among its
+ * members, at any depth, replaced by the link a binding to that cell carries.
+ */
+function bindingRecordLinks(value: object): unknown {
+  const member = (entry: unknown): unknown =>
+    isBindable(entry)
+      ? bindingTargetLink(entry)
+      : isPlainObject(entry) || Array.isArray(entry)
+      ? bindingRecordLinks(entry)
+      : entry;
+  return Array.isArray(value) ? value.map(member) : Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, member(entry)]),
+  );
+}
+
 /**
  * JSX factory function for creating virtual DOM nodes.
+ *
+ * A `$` prop binds what it is given, so its value is a cell, or a record of
+ * them: a plain object holding cells among its members, which the component
+ * reaches member by member. Anything else is refused, since a binding to a
+ * value that holds no cell would have nothing to write to.
+ *
  * @param name - The element name or component function
  * @param props - Element properties
  * @param children - Child elements
@@ -87,13 +126,16 @@ export const h: HFunction = Object.assign(
               "\n" +
               "And then using it like `<Item {item} />`",
           );
-        } else if (!isCell(value) && !isCellResult(value)) {
+        } else if (isBindable(value)) {
+          props![key] = bindingTargetLink(value);
+        } else if (isPlainObject(value) && holdsCell(value)) {
+          props![key] = bindingRecordLinks(value);
+        } else {
           throw new Error(
             `Bidirectionally bound property ${key} is not reactive\n` +
               "Use pattern parameter or create a cell using new Writable()",
           );
         }
-        props![key] = bindingTargetLink(value);
       });
       return { type: "vnode", name, props, children: children.flat() };
     }
