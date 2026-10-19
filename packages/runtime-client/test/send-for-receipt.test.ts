@@ -165,8 +165,8 @@ async function completerRoom(serverExecution: boolean) {
 
 /**
  * `promise`, under a stuck-condition net when a serving loop is running,
- * whose lease timer keeps the process from going quiet on a send that never
- * settles.
+ * whose lease timer keeps the process from going quiet on a send, or a read
+ * of the receipt it wrote, that never settles.
  */
 const settled = <T>(
   serverExecution: boolean,
@@ -192,9 +192,13 @@ describe("send-for-receipt", () => {
           );
 
           expect(receipt).toBeDefined();
-          expect(await receipt!.asSchema(candidatesSchema).pull()).toEqual({
-            candidates: ["kindly", "kindness"],
-          });
+          expect(
+            await settled(
+              serverExecution,
+              receipt!.asSchema(candidatesSchema).pull(),
+              "the completion's receipt",
+            ),
+          ).toEqual({ candidates: ["kindly", "kindness"] });
         });
 
         it("returns a receipt of each handling's own", async () => {
@@ -211,12 +215,20 @@ describe("send-for-receipt", () => {
           );
 
           expect(first!.equals(second)).toBe(false);
-          expect(await first!.asSchema(candidatesSchema).pull()).toEqual({
-            candidates: ["boldly", "boldness"],
-          });
-          expect(await second!.asSchema(candidatesSchema).pull()).toEqual({
-            candidates: ["darkly", "darkness"],
-          });
+          expect(
+            await settled(
+              serverExecution,
+              first!.asSchema(candidatesSchema).pull(),
+              "the first completion's receipt",
+            ),
+          ).toEqual({ candidates: ["boldly", "boldness"] });
+          expect(
+            await settled(
+              serverExecution,
+              second!.asSchema(candidatesSchema).pull(),
+              "the second completion's receipt",
+            ),
+          ).toEqual({ candidates: ["darkly", "darkness"] });
         });
 
         it("rejects with the reason when the handling is refused, as `sendStrict()` with `awaitHandling` does", async () => {
@@ -251,9 +263,13 @@ describe("send-for-receipt", () => {
 
           expect(answer.receipt).toBeDefined();
           const receipt = room.client.getCellFromRef(answer.receipt!);
-          expect(await receipt.asSchema(candidatesSchema).pull()).toEqual({
-            candidates: ["gladly", "gladness"],
-          });
+          expect(
+            await settled(
+              serverExecution,
+              receipt.asSchema(candidatesSchema).pull(),
+              "the reviewed completion's receipt",
+            ),
+          ).toEqual({ candidates: ["gladly", "gladness"] });
         });
       },
     );
