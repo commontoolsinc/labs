@@ -606,7 +606,7 @@ describe("readLLMResponse()", () => {
    * the body's `ReadableStream` in WebKit.
    */
   function responseCountingBodyReads(
-    body: BodyInit,
+    body: BodyInit | null,
     contentType: string,
   ): { response: Response; bodyReads: () => number } {
     let bodyReads = 0;
@@ -643,6 +643,16 @@ describe("readLLMResponse()", () => {
     );
     expect(seen).toEqual(["hel", "hello"]);
     expect(bodyReads()).toBeGreaterThan(0);
+  });
+
+  it("throws for a successful response with no body, with or without a callback", async () => {
+    for (const callback of [undefined, () => {}]) {
+      const { response } = responseCountingBodyReads(null, "text/event-stream");
+
+      await expect(readLLMResponse(response, callback)).rejects.toThrow(
+        "No response body",
+      );
+    }
   });
 
   it("reads a JSON reply whole, with or without a callback", async () => {

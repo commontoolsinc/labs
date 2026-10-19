@@ -688,8 +688,13 @@ export async function readLLMResponse(
   // `ReadableStream` a later `text()` then drains, and a body drained through
   // a stream whose last pull is still pending when the load ends stays
   // reachable for the life of the realm; `text()` on an untouched body reads
-  // it without a stream.
-  return parseLLMReply(await response.text(), id);
+  // it without a stream. A body that reads as nothing, which is what a
+  // bodyless response reads as, is refused the way a missing stream is above.
+  const text = await response.text();
+  if (!text) {
+    throw new Error("No response body");
+  }
+  return parseLLMReply(text, id);
 }
 
 /**
