@@ -19,11 +19,13 @@ import { StorageManager } from "../../src/storage/cache.deno.ts";
 // identity tests use the real compiler stack in their own files. All three
 // scans the stack offers are counted, so a step that parses a module through
 // any of them shows up here. So is each resolution of a program, which parses
-// every module it reaches on its own.
+// every module it reaches on its own, and every parse the runner makes through
+// the stack's `typescript`, which is how record assembly reads a compiled body.
 const scans = spy(compiler.scanModuleDeclarations);
 const importScans = spy(compiler.collectImportSpecifiers);
 const dataFileScans = spy(compiler.collectDataFileNames);
 const resolves = spy(compiler.TypeScriptCompiler.prototype.resolveProgram);
+const parses = spy(compiler.ts.createSourceFile);
 
 /** The stack's compiler, with each program resolution recorded in `resolves`. */
 class CountingCompiler extends compiler.TypeScriptCompiler {
@@ -37,6 +39,12 @@ class CountingCompiler extends compiler.TypeScriptCompiler {
 await ensureCompilerStack(() =>
   Promise.resolve({
     ...compiler,
+    ts: new Proxy(compiler.ts, {
+      get: (target, key, receiver) =>
+        key === "createSourceFile"
+          ? parses
+          : Reflect.get(target, key, receiver),
+    }),
     scanModuleDeclarations: scans,
     collectImportSpecifiers: importScans,
     collectDataFileNames: dataFileScans,
@@ -88,6 +96,16 @@ async function scannedDuring(work: () => Promise<unknown>): Promise<string[]> {
   return [scans, importScans, dataFileScans].flatMap((s, i) =>
     s.calls.slice(starts[i]).map((call) => call.args[0].contents)
   );
+}
+
+/**
+ * Runs `work` and returns the text of every parse it made through the
+ * stack's `typescript`.
+ */
+async function parsedDuring(work: () => Promise<unknown>): Promise<string[]> {
+  const start = parses.calls.length;
+  await work();
+  return parses.calls.slice(start).map((call) => call.args[1]);
 }
 
 /**
@@ -155,6 +173,47 @@ describe("engine", () => {
       expect(scanned.filter((text) => text === MAIN)).toHaveLength(1);
       expect(scanned.filter((text) => text === WORDS)).toHaveLength(1);
       expect(scanned).not.toContain(DATA);
+    }
+  });
+
+  it("parses no compiled body on a cache hit whose artifacts list their imports", async () => {
+    const first = await engine.compileToRecordGraph(PROGRAM);
+    const code = first.modules.filter((module) => !module.isData);
+    const bodies = code.map((module) => module.js);
+    const bodiesOnly = new Map(
+      code.map((module) => [module.identity, { js: module.js }]),
+    );
+    const listed = new Map(
+      code.map((module) => [
+        module.identity,
+        { js: module.js, importSpecs: module.importSpecs },
+      ]),
+    );
+
+    // A body with no list is parsed for its imports, which shows the count
+    // sees record assembly at all.
+    const unlisted = await parsedDuring(() =>
+      engine.compileToRecordGraph(PROGRAM, {
+        precompiledModulesFor: () => Promise.resolve(bodiesOnly),
+      })
+    );
+    let hit: Awaited<ReturnType<Engine["compileToRecordGraph"]>>;
+    const parsed = await parsedDuring(async () => {
+      hit = await engine.compileToRecordGraph(PROGRAM, {
+        precompiledModulesFor: () => Promise.resolve(listed),
+      });
+    });
+
+    expect(unlisted.filter((text) => bodies.includes(text)).sort()).toEqual(
+      [...bodies].sort(),
+    );
+    expect(parsed.filter((text) => bodies.includes(text))).toEqual([]);
+    for (const [specifier, record] of first.graph.records) {
+      const { imports, exports } = hit!.graph.records.get(specifier)!;
+      expect({ imports, exports }).toEqual({
+        imports: record.imports,
+        exports: record.exports,
+      });
     }
   });
 

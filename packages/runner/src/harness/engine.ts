@@ -678,12 +678,18 @@ export class Engine extends EventTarget {
         BuilderSourceSitesV1
       >();
       const precompiledPolicyManifests = new Map<string, readonly unknown[]>();
+      // A cached body whose artifact lists its runtime imports is not parsed
+      // again to find them.
+      const precompiledImportSpecs = new Map<string, readonly string[]>();
 
       if (fullHit) {
         logger.info("compile-cache-hit", () => ["compileToRecordGraph", id]);
         for (const file of moduleFiles) {
           const artifact = cached!.get(identityByPath.get(file.name)!)!;
           precompiledBodies.set(file.name, artifact.js);
+          if (artifact.importSpecs !== undefined) {
+            precompiledImportSpecs.set(file.name, artifact.importSpecs);
+          }
           if (artifact.sourceMap !== undefined) {
             precompiledSourceMaps.set(
               file.name,
@@ -793,6 +799,7 @@ export class Engine extends EventTarget {
         precompiledBodies,
         precompiledSourceMaps,
         precompiledBuilderSourceSites,
+        precompiledImportSpecs,
         runtimeModules: runtimeModulesOption,
         specifierAliases,
         // Carried onto the graph under their stored (prefix-free) names, the
@@ -884,7 +891,8 @@ export class Engine extends EventTarget {
       // identity space (the engine's `/<id>` path prefix never leaks out). Each
       // carries the AUTHORED TS source (for the source set — pre-helper-injection,
       // matching what identity hashed), the compiled JS (for the compiled set),
-      // and the internal import edges as specifier → dependency-identity links.
+      // the internal import edges as specifier → dependency-identity links, and
+      // a code module's runtime import specifiers as its record lists them.
       // On a cache hit these mirror the artifacts just loaded. Built over the
       // pristine module set so `source` and the edges are over authored bytes.
       const dataFileSet = new Set(dataPaths);
@@ -928,6 +936,10 @@ export class Engine extends EventTarget {
         // what a warm load reads, and it must carry everything the runtime
         // needs to run the pattern.
         const isData = dataFileSet.has(file.name);
+        const specifier = graph.specifierByPath.get(file.name);
+        const record = specifier === undefined
+          ? undefined
+          : graph.records.get(specifier);
         return {
           identity,
           filename: storedFilenameFor(file.name, id, mounts),
@@ -935,6 +947,7 @@ export class Engine extends EventTarget {
           js: isData ? file.contents : (emittedBody ?? ""),
           ...(isData ? { isData: true } : {}),
           ...(sourceMap === undefined ? {} : { sourceMap }),
+          ...(record === undefined ? {} : { importSpecs: [...record.imports] }),
           ...(emittedBody === undefined ||
               precompiledBuilderSourceSites.get(file.name) === undefined
             ? {}

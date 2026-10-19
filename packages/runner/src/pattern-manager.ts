@@ -2052,6 +2052,9 @@ export class PatternManager {
                 ...(doc.policyManifests === undefined
                   ? {}
                   : { policyManifests: doc.policyManifests }),
+                ...(doc.importSpecs === undefined
+                  ? {}
+                  : { importSpecs: doc.importSpecs }),
               });
             }
             if (

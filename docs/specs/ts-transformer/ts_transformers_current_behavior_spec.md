@@ -72,6 +72,15 @@ These string-level steps run in `transformCfDirective()`
 (`src/core/cf-helpers.ts`) before any AST transformer, because symbol binding
 happens before the transformer pipeline runs.
 
+A caller may also pass a rewrite of the authored text (`AuthoredSourceRewrite`),
+which is handed the parse the scan and the guard read and whose result takes
+the authored text's place between the prepended import and the trailer. The
+rewrite runs after the guard and the shim choice, so it must leave the module
+binding the names it bound. The runner splits imports that take a default
+export beside or inside a named-import list this way
+(`normalizeMixedModuleImports`, `packages/runner/src/harness/pretransform.ts`),
+so the pretransform parses each authored module once.
+
 TypeScript's subsequent JSX emit uses `__cfHelpers.h` for elements and
 `__cfHelpers.h.fragment` for fragment tags
 (`packages/js-compiler/typescript/options.ts`). Both resolve through the
