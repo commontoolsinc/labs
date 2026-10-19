@@ -52,13 +52,10 @@ storing its number is asked again, that asking is itself a write, and the topic
 stores the number if it has not already.
 
 A number reaches every surface through that one publication rather than through
-each display, and
-[#7771](https://github.com/commontoolsinc/labs/issues/7771) is why:
-`cf-code-editor` takes a mention's short name off the destination piece where
-the list it was handed is the raw member list, which the spec reserves for a
-universe row. A topic not yet rewired to the board's derived universe completes
-over the topics themselves, so what each topic publishes is what that editor
-offers for `#42`.
+each display. `cf-code-editor` takes a mention's short name only off a row of
+the universe it completes over, as the spec asks, so a topic not yet rewired to
+the board's derived universe completes over the topics themselves and its
+editor offers nothing for `#42` and shows no number on a pill.
 
 The board's `backfillNames` is now the whole of the operator procedure for the
 topics filed before the namespace. It numbers every topic the namespace does
@@ -135,12 +132,12 @@ the topic storing `42`.
 
 The publication is where a number reaches every surface, and one property is
 what each of them reads: a topic's header, the board's cards, the `index` rows,
-and the entries of whatever universe a topic's editor completes over. That last
-one is why the publication rather than each display carries it. A topic filed
+and the rows of the universe a topic's editor completes over. A topic filed
 before the board derived its universe reads the raw topics list until an
 operator rewires it, and a board cannot rewire it, because a parent writes a
-member's result and never a member's argument, so a topic's own publication is
-the only thing such an editor has to offer for `#42`.
+member's result and never a member's argument. Such an editor reads no number
+off an entry that is a topic rather than a row, so it offers nothing for `#42`
+until the topic is rewired.
 
 A topic that stores no number publishes none, renders without failing, and
 shows no badge on its own header or on its board card. Addressing is unchanged
