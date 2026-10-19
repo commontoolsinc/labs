@@ -8,11 +8,7 @@ import {
 } from "@commonfabric/data-model";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isInertPlainObject } from "@commonfabric/utils/objects";
-import {
-  isObjectNotArray,
-  isObjectOrArray,
-  isPlainObject,
-} from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import {
   ARRAY_SUBSCHEMA_KEYS,
   RECORD_SUBSCHEMA_KEYS,
@@ -89,6 +85,7 @@ import {
   type Frame,
   type ICell,
   isModule,
+  isPattern,
   isReactive,
   JSONObject,
   type JSONSchema,
@@ -1490,33 +1487,27 @@ export function freezePartialCauses(pattern: Pattern): void {
   if (pattern.derivedInternalCells !== undefined) {
     deepFreeze(pattern.derivedInternalCells);
   }
-  const seen = new Set<object>();
-  freezeAliasCauses(pattern.result, seen);
+  // TODO(danfuzz): Walk with `data-model`'s value visitor once that is ready
+  // for use outside its package.
+  visitValue(pattern.result as FactoryInput<unknown>, freezeAliasCause);
   for (const node of pattern.nodes) {
-    freezeAliasCauses(node.inputs, seen);
-    freezeAliasCauses(node.outputs, seen);
+    visitValue(node.inputs as FactoryInput<unknown>, freezeAliasCause);
+    visitValue(node.outputs as FactoryInput<unknown>, freezeAliasCause);
   }
 }
 
 /**
- * Helper for {@link freezePartialCauses}, which deep-freezes the partial cause
- * of every `$alias` binding within `value`. Bindings sit in plain records and
- * arrays, so the walk descends only those: a module or a cell reached in a
- * node's inputs holds no binding of this pattern's.
+ * Helper for {@link freezePartialCauses}, the `visitValue()` callback, which
+ * deep-freezes the partial cause of an `$alias` binding and returns `null` so
+ * that the walk descends no further into it. An embedded pattern or a module
+ * is not descended either: the causes it holds are its own, frozen when it was
+ * built.
  */
-function freezeAliasCauses(value: unknown, seen: Set<object>): void {
-  if (value === null || typeof value !== "object" || seen.has(value)) return;
-  seen.add(value);
+function freezeAliasCause(value: unknown): null | undefined {
   if (isAliasBinding(value)) {
     const { partialCause } = value.$alias;
     if (partialCause !== undefined) deepFreeze(partialCause);
-    return;
+    return null;
   }
-  if (Array.isArray(value)) {
-    for (const item of value) freezeAliasCauses(item, seen);
-  } else if (isPlainObject(value)) {
-    for (const member of Object.values(value)) {
-      freezeAliasCauses(member, seen);
-    }
-  }
+  return isPattern(value) || isModule(value) ? null : undefined;
 }
