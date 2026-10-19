@@ -163,6 +163,32 @@ Deno.test("every workflow and composite action is valid YAML", async () => {
   );
 });
 
+Deno.test("cache-only binary builders install their entrypoint graphs", async () => {
+  const installAction = await Deno.readTextFile(
+    new URL("../.github/actions/deno-install/action.yml", import.meta.url),
+  );
+  const toolshedDockerfile = await Deno.readTextFile(
+    new URL("../Dockerfile.toolshed", import.meta.url),
+  );
+
+  for (
+    const entrypoint of [
+      "packages/toolshed/index.ts",
+      "packages/cli/mod.ts",
+    ]
+  ) {
+    assertStringIncludes(installAction, entrypoint);
+  }
+  assertStringIncludes(
+    installAction,
+    'deno install --entrypoint --cached-only "${frozen_arg[@]}"',
+  );
+  assertStringIncludes(
+    toolshedDockerfile,
+    "deno install --entrypoint --frozen packages/toolshed/index.ts",
+  );
+});
+
 Deno.test("CI browser tests use the runner's installed Chrome", async () => {
   const contents = await workflow("deno.yml");
   const configuredPath = contents.match(
