@@ -19,7 +19,6 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
 import type { FabricValue } from "@commonfabric/data-model";
-import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
 import {
   MultiRuntimeHarness,
   type MultiRuntimeSession,
@@ -288,11 +287,7 @@ describe("fabrichat spaces across runtimes", () => {
     await member.send(
       "sendMessage",
       {
-        requestId: "invited-message",
-        version: {
-          body: "A message from the invited member",
-          sentAt: new FabricEpochNsec(BigInt(Date.now()) * 1_000_000n),
-        },
+        body: "A message from the invited member",
       },
       { surface: "ChatSendSurface", action: "ChatSend" },
       { piece: room },

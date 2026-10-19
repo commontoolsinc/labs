@@ -118,12 +118,16 @@ import {
 import type { ConsoleMethod } from "./harness/console.ts";
 import { Engine } from "./harness/index.ts";
 import type { CompiledModuleArtifact } from "./harness/types.ts";
-import { immutableCellsFor, ownImmutableCells } from "./immutable-cell.ts";
+import {
+  immutableCellsFor,
+  liveImmutableSnapshotCount,
+  liveImmutableSnapshotsBySpace,
+  ownImmutableCells,
+} from "./immutable-cell.ts";
 import type { ConsoleMessage } from "./interface.ts";
 import { addressKey } from "./link-types.ts";
 import {
   CellLink,
-  inlineExternalSchemaRefsInValue,
   isCellLink,
   isNormalizedFullLink,
   isSigilLink,
@@ -131,6 +135,10 @@ import {
   NormalizedLink,
   parseLink,
 } from "./link-utils.ts";
+import {
+  ModuleDelegationRegistry,
+  type ModuleDelegationSnapshot,
+} from "./module-delegations.ts";
 import { ModuleRegistry } from "./module.ts";
 import type { PatternCoverageCollector } from "./pattern-coverage.ts";
 import {
@@ -153,6 +161,11 @@ import {
   type RunSyncedWithCommitOptions,
 } from "./runner.ts";
 import { brandRuntime } from "./runtime-brand.ts";
+import {
+  boundedCounts,
+  CfcRejectionTally,
+  type RuntimeSizes,
+} from "./runtime-sizes.ts";
 import { Action, Scheduler } from "./scheduler.ts";
 import {
   type CommitBackpressurePolicy,
@@ -1541,6 +1554,11 @@ export class Runtime {
   #queues = new Map<string, AsyncSemaphoreQueue>();
   #writeDebugContext = new WriteDebugContextStorage<string>();
   #cfcStats: CfcRuntimeStats = initialCfcRuntimeStats();
+  readonly #cfcRejections = new CfcRejectionTally();
+
+  /** `editWithRetry()` calls whose commit was rejected and that are waiting
+   * to attempt again. */
+  #retryingEdits = 0;
 
   /**
    * The hooks every transaction `edit()` opens reports its CFC work through.
@@ -1556,41 +1574,28 @@ export class Runtime {
   readonly #policyManifestSpaces = new Map<string, Set<MemorySpace>>();
 
   /**
-   * Attesting space → successor module identity → direct predecessor identities
-   * whose writer authority it inherits. Entries come only from verified source
-   * closures or integrity-valid compiled closures in that same space.
-   * Transactions receive a transitive, immutable snapshot at creation so an
-   * in-flight authorization decision cannot change when another module loads,
-   * and authorization in one space can never borrow another space's delegation
-   * metadata.
+   * The writer-authority delegations this runtime has learned from verified
+   * source closures and integrity-valid compiled closures, by attesting
+   * space. `edit()` hands every transaction the registry's published
+   * transitive snapshot, so an in-flight authorization decision cannot
+   * change when another module loads, and authorization in one space can
+   * never borrow another space's delegation metadata.
    */
-  readonly #moduleDelegations = new Map<
-    MemorySpace,
-    Map<string, Set<string>>
-  >();
+  readonly #moduleDelegations = new ModuleDelegationRegistry();
 
+  /**
+   * Records that, in `space`, each successor identity in `delegations`
+   * inherits the writer authority of its predecessors. A registration that
+   * adds nothing leaves the published snapshot as it was; one that adds a
+   * delegation publishes a new snapshot, which the transactions created from
+   * then on receive, and leaves every transaction already open with the one
+   * it was created with.
+   */
   registerModuleDelegations(
     space: MemorySpace,
     delegations: ReadonlyMap<string, ReadonlySet<string>>,
   ): void {
-    if (typeof space !== "string" || space.length === 0) return;
-    const spaceDelegations = this.#moduleDelegations.get(space) ?? new Map();
-    for (const [identity, predecessors] of delegations) {
-      if (typeof identity !== "string" || identity.length === 0) continue;
-      const merged = spaceDelegations.get(identity) ?? new Set<string>();
-      for (const predecessor of predecessors) {
-        if (
-          typeof predecessor === "string" && predecessor.length > 0 &&
-          predecessor !== identity
-        ) {
-          merged.add(predecessor);
-        }
-      }
-      if (merged.size > 0) spaceDelegations.set(identity, merged);
-    }
-    if (spaceDelegations.size > 0) {
-      this.#moduleDelegations.set(space, spaceDelegations);
-    }
+    this.#moduleDelegations.register(space, delegations);
   }
 
   /**
@@ -1603,69 +1608,25 @@ export class Runtime {
     identity: string,
     predecessor: string,
   ): boolean {
-    const spaceDelegations = this.#moduleDelegations.get(space);
-    if (spaceDelegations === undefined) return false;
-    const visited = new Set<string>();
-    const pending = [...(spaceDelegations.get(identity) ?? [])];
-    while (pending.length > 0) {
-      const next = pending.pop()!;
-      if (next === predecessor) return true;
-      if (visited.has(next)) continue;
-      visited.add(next);
-      for (const ancestor of spaceDelegations.get(next) ?? []) {
-        pending.push(ancestor);
-      }
-    }
-    return false;
+    return this.#moduleDelegations.grants(space, identity, predecessor);
   }
 
-  #moduleDelegationSnapshot(sourceUpdate?: PreparedSourceUpdate): Map<
-    MemorySpace,
-    ReadonlyMap<string, readonly string[]>
-  > {
-    const snapshot = new Map<
-      MemorySpace,
-      ReadonlyMap<string, readonly string[]>
-    >();
-    const delegations = new Map(this.#moduleDelegations);
-    if (sourceUpdate !== undefined) {
-      const proposal = this.patternManager.sourceUpdateDelegations(
-        sourceUpdate,
-      );
-      const combined = new Map(delegations.get(proposal.space));
-      for (const [identity, predecessors] of proposal.delegations) {
-        combined.set(
-          identity,
-          new Set([
-            ...(combined.get(identity) ?? []),
-            ...predecessors,
-          ]),
-        );
-      }
-      delegations.set(proposal.space, combined);
-    }
-    for (const [space, spaceDelegations] of delegations) {
-      const spaceSnapshot = new Map<string, readonly string[]>();
-      for (const identity of spaceDelegations.keys()) {
-        const inherited = new Set<string>();
-        const pending = [...(spaceDelegations.get(identity) ?? [])];
-        while (pending.length > 0) {
-          const predecessor = pending.pop()!;
-          if (predecessor === identity || inherited.has(predecessor)) continue;
-          inherited.add(predecessor);
-          for (const ancestor of spaceDelegations.get(predecessor) ?? []) {
-            pending.push(ancestor);
-          }
-        }
-        if (inherited.size > 0) {
-          spaceSnapshot.set(identity, [...inherited].sort());
-        }
-      }
-      if (spaceSnapshot.size > 0) {
-        snapshot.set(space, spaceSnapshot);
-      }
-    }
-    return snapshot;
+  /**
+   * Helper for `edit()`, which picks the delegation snapshot a transaction
+   * is pinned to: the published one, or, for a transaction staging the
+   * source update `sourceUpdate`, that update's proposed delegations layered
+   * over it for the update's space alone, so the transaction can authorize
+   * the successor's writes before the update commits.
+   */
+  #moduleDelegationSnapshot(
+    sourceUpdate: PreparedSourceUpdate | undefined,
+  ): ModuleDelegationSnapshot {
+    if (sourceUpdate === undefined) return this.#moduleDelegations.snapshot;
+    const proposal = this.patternManager.sourceUpdateDelegations(sourceUpdate);
+    return this.#moduleDelegations.snapshotWith(
+      proposal.space,
+      proposal.delegations,
+    );
   }
 
   registerCfcPolicyManifests(
@@ -2725,6 +2686,9 @@ export class Runtime {
     wrapped.setCfcServingIdentity(
       this.servingPosture ? this.userIdentityDID : undefined,
     );
+    wrapped.setCfcClientIdentity(
+      this.servingPosture ? undefined : this.userIdentityDID,
+    );
     wrapped.setCfcModuleDelegations(
       this.#moduleDelegationSnapshot(options.sourceUpdate),
     );
@@ -2808,6 +2772,9 @@ export class Runtime {
           refusals: [...refusal.refusals],
           terminal: refusal.terminal,
         });
+      },
+      onCommitRejected: (reasons) => {
+        this.#cfcRejections.add(reasons);
       },
       onDigestInvalidation: () => {
         this.#cfcStats.cfcDigestInvalidations += 1;
@@ -3182,6 +3149,35 @@ export class Runtime {
     this.#cfcStats = initialCfcRuntimeStats();
   }
 
+  /**
+   * The sizes of the structures this runtime holds live, most read from the
+   * structure's own count and the per-space views from one bounded pass
+   * each, so the read is safe at any moment; `runtime-sizes.ts` says what
+   * each pass costs. A tracked collection that keeps growing shows up here,
+   * and the space whose documents or snapshots grow with it; growth in a
+   * structure not counted here does not. The storage figure is `null` for a
+   * storage manager that reports no sizes.
+   */
+  getSizes(): RuntimeSizes {
+    return {
+      scheduler: this.scheduler.getSizes(),
+      storage: this.storageManager.getSizes?.() ?? null,
+      patterns: this.patternManager.getSizes(),
+      runtime: {
+        immutableSnapshots: liveImmutableSnapshotCount(),
+        pendingAsyncWork: this.#pendingAsyncWork.size,
+        retryingEdits: this.#retryingEdits,
+        modules: this.moduleRegistry.size,
+        policyManifests: this.#policyManifests.size,
+        moduleDelegations: this.#moduleDelegations.getSizes(),
+        immutableSnapshotsBySpace: boundedCounts(
+          liveImmutableSnapshotsBySpace(),
+        ),
+      },
+      cfcRejectionsByReason: this.#cfcRejections.snapshot(),
+    };
+  }
+
   getWriteDebugContext(): string | undefined {
     return this.#writeDebugContext.getStore() ?? this.scheduler.currentActionId;
   }
@@ -3356,10 +3352,12 @@ export class Runtime {
         if (error) {
           if (signal.aborted) return stoppedResult();
           if (maxRetries > 0 && isRetryableCommitRejection(error)) {
-            await this.awaitCommitRetryReadiness(
-              error,
-              signal,
-            );
+            this.#retryingEdits += 1;
+            try {
+              await this.awaitCommitRetryReadiness(error, signal);
+            } finally {
+              this.#retryingEdits -= 1;
+            }
             if (signal.aborted) return stoppedResult();
             return this.editWithRetry<T>(fn, maxRetries - 1, options);
           } else {
@@ -4306,29 +4304,30 @@ export class Runtime {
     cfcLabelView?: CfcLabelView,
   ): Cell<any> {
     // Builder artifacts and cells enter through their encodable forms. Frozen
-    // Fabric input remains shared; unstored links need inline schema closures.
-    // Renderer trust is identity-based authority, so a marked event is copied
-    // before it becomes ordinary immutable data.
+    // Fabric input remains shared. A link's schema stays in the form the
+    // caller held it: a reference among them names a closure the registry
+    // holds, and a reader of the snapshot resolves it there
+    // (`mintedFromUnstoredValue`). Renderer trust is identity-based
+    // authority, so a marked event is copied before it becomes ordinary
+    // immutable data.
     const store = immutableCellsFor(this);
     const readerSchema = internCellLinkSchema(schema);
     const snapshot = store.create(
-      inlineExternalSchemaRefsInValue(
-        fabricFromConvertibleJsValue(
-          flattenBuilderArtifacts(data, {
-            isLeaf: isRendererTrustedEvent,
-            replaceOther: (value) =>
-              isRendererTrustedEvent(value)
-                ? deepFreeze(cloneIfNecessary(
-                  fabricFromConvertibleJsValue(
-                    flattenBuilderArtifacts(value, {
-                      replaceOther: cellAsLink,
-                    }),
-                  ),
-                  { frozen: false },
-                ))
-                : cellAsLink(value),
-          }),
-        ),
+      fabricFromConvertibleJsValue(
+        flattenBuilderArtifacts(data, {
+          isLeaf: isRendererTrustedEvent,
+          replaceOther: (value) =>
+            isRendererTrustedEvent(value)
+              ? deepFreeze(cloneIfNecessary(
+                fabricFromConvertibleJsValue(
+                  flattenBuilderArtifacts(value, {
+                    replaceOther: cellAsLink,
+                  }),
+                ),
+                { frozen: false },
+              ))
+              : cellAsLink(value),
+        }),
       ),
     );
     const cell = createCell(
@@ -4793,6 +4792,15 @@ export class Runtime {
 
   start<T = any>(resultCell: Cell<T>): Promise<boolean> {
     return this.runner.start(resultCell);
+  }
+
+  /**
+   * Starts a piece and waits for the commit of the setup writes of the graph
+   * it instantiates, rejecting when that commit failed; see
+   * `Runner.startWithCommit()`.
+   */
+  startWithCommit<T = any>(resultCell: Cell<T>): Promise<boolean> {
+    return this.runner.startWithCommit(resultCell);
   }
 
   /**

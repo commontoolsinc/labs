@@ -1,11 +1,13 @@
 import type {
+  FabricExecValue,
   InSpaceGrants,
   InSpaceOptions,
-  JSONSchemaObj,
 } from "@commonfabric/api";
 import {
   debugStr,
+  deepFreeze,
   hashStringOf,
+  isDeepFrozen,
   isWalkableObjectOrArray,
 } from "@commonfabric/data-model";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -24,7 +26,7 @@ import {
   SPACE_KIND_MAX_LENGTH,
 } from "@commonfabric/memory/v2/space-kind";
 
-import { type AliasBinding } from "../alias-binding.ts";
+import { type AliasBinding, isAliasBinding } from "../alias-binding.ts";
 import {
   exportCell,
   isCell,
@@ -41,6 +43,7 @@ import {
   getStableInternalPathSegment,
   KeepAsCell,
   sanitizeAndFreezeSchemaForLinks,
+  sanitizeAndInternSchemaForLinks,
   sanitizeSchemaForLinks,
 } from "../link-utils.ts";
 import {
@@ -78,7 +81,7 @@ import {
   patternToEncodableForm,
   withAliasBindings,
 } from "./to-encodable-form.ts";
-import { traverseValue } from "./traverse-utils.ts";
+import { traverseValue, visitValue } from "./traverse-utils.ts";
 import {
   type CellScope,
   type DerivedInternalCellDescriptor,
@@ -86,6 +89,7 @@ import {
   type Frame,
   type ICell,
   isModule,
+  isPattern,
   isReactive,
   JSONObject,
   type JSONSchema,
@@ -554,6 +558,34 @@ function factoryFromPattern<T, R>(
       });
     }
   });
+  // The binding's schema position emits like a link's: a reference under
+  // the flag, keeping FabricValue-bearing schema content (defaults) out of
+  // the otherwise plain binding record; inline otherwise, and inline
+  // whenever decomposition refuses or the schema is a bare boolean. The
+  // reference is minted from the canonical strip of a deep-frozen schema,
+  // which the strip memoizes by identity and decomposition by the strip's,
+  // so a cell bound at many positions decomposes its schema once; a mutable
+  // schema is stripped as it is rather than frozen in place. An inline
+  // schema is a strip of its own per position, the refused decomposition's
+  // included: `createRef()` hashes an object it reaches twice in one cause
+  // as `null`, so two positions sharing one object would derive other ids.
+  const externalizeAlias = getContentAddressedSchemasConfig();
+  const aliasSchemaFor = (
+    schema: JSONSchema | undefined,
+  ): JSONSchema | undefined => {
+    if (schema === undefined || typeof schema === "boolean") return schema;
+    if (externalizeAlias && isDeepFrozen(schema)) {
+      const canonical = sanitizeAndInternSchemaForLinks(schema, KeepAsCell.All);
+      if (typeof canonical === "object") {
+        const externalized = externalizeSchema(canonical);
+        if (externalized !== canonical) return externalized;
+      }
+    }
+    const own = sanitizeSchemaForLinks(schema, KeepAsCell.All);
+    return externalizeAlias && typeof own === "object"
+      ? externalizeSchema(own)
+      : own;
+  };
   const resolveCellAlias: CellAliasResolver = (
     cell, // opaque cell that we found
     serializationPath, // path where we encountered the cell
@@ -579,18 +611,7 @@ function factoryFromPattern<T, R>(
       }
     }
 
-    const rawSanitizedSchema = cellReference.schema !== undefined
-      ? sanitizeSchemaForLinks(cellReference.schema, KeepAsCell.All)
-      : undefined;
-    // The binding's schema position emits like a link's: a reference under
-    // the flag, keeping FabricValue-bearing schema content (defaults) out
-    // of the otherwise plain binding record; inline otherwise, and inline
-    // whenever decomposition refuses or the schema is a bare boolean.
-    const sanitizedSchema = rawSanitizedSchema !== undefined &&
-        typeof rawSanitizedSchema === "object" &&
-        getContentAddressedSchemasConfig()
-      ? externalizeSchema(rawSanitizedSchema as JSONSchemaObj)
-      : rawSanitizedSchema;
+    const sanitizedSchema = aliasSchemaFor(cellReference.schema);
     const partialCause = derivedInternalPartialCausesByRoot.get(top);
     if (partialCause !== undefined) {
       if (!deepEqual(partialCause, cellReference.partialCause)) {
@@ -696,6 +717,7 @@ function factoryFromPattern<T, R>(
     // What `JSON.stringify(SomePattern)` returns, which pattern source uses.
     toJSON: () => patternToEncodableForm(patternFactory),
   };
+  freezePartialCauses(pattern);
 
   const makePatternFactory = (
     defaultScope?: CellScope,
@@ -977,7 +999,7 @@ function assignComputedCellKinds(
 ): void {
   const collectCellRoots = (value: unknown): Set<OpaqueCell<any>> => {
     const roots = new Set<OpaqueCell<any>>();
-    traverseValue(value as FactoryInput<unknown>, (item) => {
+    visitValue(value as FactoryInput<unknown>, (item) => {
       if (isCellResultForDereferencing(item)) item = getCellOrThrow(item);
       if (isCell(item)) roots.add(exportCell(item).cell);
       return item;
@@ -1457,3 +1479,38 @@ export function getTopFrame(): Frame | undefined {
 
 /** The full type of the `pattern` function including all overloads. */
 export type PatternBuilder = typeof pattern;
+
+/**
+ * Deep-freezes every partial cause `pattern` holds: its manifest of derived
+ * internal cells, and the `partialCause` of each `$alias` binding in its
+ * nodes and its result. The runtime keeps the id a partial cause names by the
+ * cause's identity, and refuses a cause that is an object but not deep-frozen.
+ * The builder calls this on every pattern it builds.
+ */
+export function freezePartialCauses(pattern: Pattern): void {
+  if (pattern.derivedInternalCells !== undefined) {
+    deepFreeze(pattern.derivedInternalCells);
+  }
+  // TODO(danfuzz): Walk with `data-model`'s value visitor once that is ready
+  // for use outside its package.
+  visitValue(pattern.result, freezeAliasCause);
+  for (const node of pattern.nodes) {
+    visitValue(node.inputs, freezeAliasCause);
+    visitValue(node.outputs, freezeAliasCause);
+  }
+}
+
+/**
+ * Helper for {@link freezePartialCauses}, the `visitValue()` callback, which
+ * deep-freezes the partial cause of an `$alias` binding and returns `null` so
+ * that the walk descends no further into it. An embedded pattern is not
+ * descended either: the causes it holds are its own, frozen when it was built.
+ */
+function freezeAliasCause(value: FabricExecValue): null | undefined {
+  if (isAliasBinding(value)) {
+    const { partialCause } = value.$alias;
+    if (partialCause !== undefined) deepFreeze(partialCause);
+    return null;
+  }
+  return isPattern(value) ? null : undefined;
+}

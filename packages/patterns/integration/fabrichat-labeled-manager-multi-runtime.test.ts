@@ -87,10 +87,11 @@ describe("fabrichat labeled manager across runtimes", () => {
       { piece: room },
     );
     await harness.settle();
-    const activity = await ada.read(["recentActivity"], { piece: room });
-    expect(activity).toHaveLength(1);
+    expect(await ada.read(["messages", "count"], { piece: room })).toBe(1);
     expect(
-      await ada.read(["recentActivity", 0, "what", "body"], { piece: room }),
+      await ada.read(["messages", "latest", "messages", 0, "body"], {
+        piece: room,
+      }),
     ).toBe("Hello");
 
     await ada.send(
@@ -118,9 +119,14 @@ describe("fabrichat labeled manager across runtimes", () => {
 
     // Nothing the room keeps in its space reads her manager either, so the
     // policy gate refused none of the room's own commits on the way: a
-    // computed there that read the manager, as whether to show a chip's
-    // direct-chat control once did, would carry its label into the room's
-    // space and be refused.
+    // computed there whose value another pattern takes, and so a document
+    // the room's space holds to its policy, would carry her label into the
+    // room's space and be refused if it read the manager. A computed only the
+    // room's view reads is held to that policy only when the labeled data it
+    // reads comes from another space, and here her label reaches the room
+    // through the wish's result, which the room's space holds, so this count
+    // says nothing of one. `fabrichat-flat-manager-send.test.ts`, whose
+    // manager keeps its label in her home space, does.
     const counts = await ada.loggerCounts();
     expect(counts.cfc?.["write-policy-gate"]?.total ?? 0).toBe(0);
   });

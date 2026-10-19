@@ -1,6 +1,6 @@
 /**
  * Profile availability changes no ownership and removes no participant links.
- * A sender can delete and obliterate a message after their profile disappears.
+ * Deletion needs a resolved profile; owner moderation does not.
  */
 import {
   action,
@@ -29,13 +29,8 @@ export default pattern(() => {
   const records = testRoomStorage({});
   const room = FabriChatRoomCore({
     messages: records.messages,
-    reactionLists: records.reactionLists,
-    requests: records.requests,
-    usedTimes: records.usedTimes,
-    activity: records.activity,
-    counters: records.counters,
     roster,
-    about: { kind: "direct" },
+    about: { kind: "group" },
     myProfile: profile,
   });
   const message: MessageCell = records.messages.key(0);
@@ -53,7 +48,7 @@ export default pattern(() => {
       { action: room.addParticipant, event: { profile: listed } },
       {
         action: room.sendMessage,
-        event: { requestId: "send", target: { value: "Private text" } },
+        event: { target: { value: "Private text" } },
         trustedUi: { surface: "ChatSendSurface", action: "ChatSend" },
       },
       {
@@ -73,20 +68,18 @@ export default pattern(() => {
       },
       {
         action: room.deleteMessage,
-        event: { requestId: "delete", message },
+        event: { message },
         trustedUi: { surface: "ChatDeleteSurface", action: "ChatDelete" },
       },
       {
         assertion: assert(() =>
-          typeof message.get().body === "object" &&
-          message.get().earlierVersions.length === 1 &&
-          bodyText(message.get()) === "This message was deleted." &&
+          message.get().body === "Private text" &&
           room.participants.length === 2
         ),
       },
       {
         action: room.obliterateMessage,
-        event: { requestId: "obliterate", message },
+        event: { message },
         trustedUi: {
           surface: "ChatObliterateSurface",
           action: "ChatObliterate",
@@ -94,15 +87,14 @@ export default pattern(() => {
       },
       {
         assertion: assert(() =>
-          message.get().authorProfile?.get() === undefined &&
-          message.get().earlierVersions.length === 0 &&
+          message.get().authorProfile === undefined &&
           bodyText(message.get()) === "This message was removed." &&
           room.participants.length === 1 && equals(room.participants[0], listed)
         ),
       },
       {
         action: room.obliterateMessage,
-        event: { requestId: "obliterate-again", message },
+        event: { message },
         trustedUi: {
           surface: "ChatObliterateSurface",
           action: "ChatObliterate",
@@ -110,9 +102,11 @@ export default pattern(() => {
       },
       {
         assertion: assert(() =>
-          room.recentActivity.length === 1 && room.recentActivity[0].seq === 3
+          bodyText(message.get()) === "This message was removed." &&
+          room.participants.length === 1 && equals(room.participants[0], listed)
         ),
       },
     ],
+    expectRuntimeErrors: ["Your profile hasn't loaded yet."],
   };
 });

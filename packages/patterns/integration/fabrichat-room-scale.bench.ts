@@ -13,11 +13,11 @@
  * - `send <size>` is its `send`: a message sent from the composer of a room
  *   already showing, timed until the message's row renders.
  *
- * A room renders a row for every message it holds, and hides the rows that
- * are not part of the main conversation's view rather than leaving them out,
- * so a room of three hundred messages builds three hundred rows even where
- * the room's own `latest` holds a hundred. The curve is what says what that
- * costs.
+ * A room renders a row for every message of its main conversation, however
+ * many its own `latest` holds, so a room of three hundred messages builds a
+ * main-conversation row for each of them except the replies in the thread
+ * the fixture seeds, which are rows of the thread pane alone. The curve is
+ * what says what that costs.
  *
  * Every room has the twelve members of the fixed-size benchmark, each with a
  * profile of their own, so the members' share of a load is the same at every
@@ -59,12 +59,15 @@ const SIZES = [10, 30, 100, 300];
  *
  * A room is seeded a message at a time, each a trusted send through a member's
  * runtime that waits for the room to record it before the next member writes,
- * so seeding time grows with the size, and each size seeds two rooms. The
- * sizes above the limit are declared and skipped rather than left out, so the
- * curve they belong to is written down and running them is one setting:
- * `CF_FABRICHAT_SCALE_LIMIT` raises it.
+ * so seeding time grows with the size, and each size seeds two rooms. On the
+ * runner the Benchmarks workflow uses, a hundred-message room takes about seven
+ * minutes to seed and over a minute and a half to load, and a send into it
+ * does not settle within the browser driver's five-minute bound, so the
+ * default stops below it. The sizes above the limit are declared and skipped
+ * rather than left out, so the curve they belong to is written down and
+ * running them is one setting: `CF_FABRICHAT_SCALE_LIMIT` raises it.
  */
-const DEFAULT_SCALE_LIMIT = 100;
+const DEFAULT_SCALE_LIMIT = 30;
 
 const SCALE_LIMIT = sizeFromEnv(
   "CF_FABRICHAT_SCALE_LIMIT",

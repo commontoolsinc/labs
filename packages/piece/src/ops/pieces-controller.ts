@@ -43,11 +43,14 @@ import {
   type IExtendedStorageTransaction,
   inSpaceRootCause,
   isCell,
+  isEarlierRelease,
   isLink,
+  isPieceRoot,
   isStoredArgumentSchemaRefusal,
   isStream,
   type JSONSchema,
   KeepAsCell,
+  knownPieceReleasedAt,
   memoryHostNote,
   type MemorySpace,
   type Module,
@@ -59,6 +62,7 @@ import {
   PatternManager,
   type PatternSetupCommitReceipt,
   PatternSetupPostCommitError,
+  pieceSourceMovedPast,
   type PieceSourceTransition,
   preparePieceSourceTransitionBaseline,
   Runtime,
@@ -121,7 +125,10 @@ import {
   type JoinVisitDecision,
   joinVisitedRoomOf,
 } from "./join-visited-room.ts";
-import { reconcilePieceSource } from "./piece-origin.ts";
+import {
+  advertisedSystemRelease,
+  reconcilePieceSource,
+} from "./piece-origin.ts";
 import { ensurePrivateInboxOf } from "./private-inbox.ts";
 import { repairProfileRootsOf } from "./profile-space-root.ts";
 import { type ShareIntake, startShareIntakeOf } from "./share-intake.ts";
@@ -1054,7 +1061,15 @@ export class PiecesController<T = unknown> {
     // operate on the real piece rather than the wrapper. The sync above already
     // made the canonical cell local, so this resolves over local links with no
     // further sync. Idempotent for a normal top-level piece.
-    let piece = addressed.resolveAsCell();
+    //
+    // The root of a document carrying a pattern pointer is the piece, whatever
+    // its value links to. A pattern returning a sub-pattern's result as its
+    // whole result stores a redirect to the child's result at its root, and
+    // following it would start the child alone and leave stale everything the
+    // root derives for the child.
+    let piece = isPieceRoot(this.runtime, addressed)
+      ? addressed
+      : addressed.resolveAsCell();
 
     if (reconcile && !viewScoped) {
       const outcome = await timePiecePhase(
@@ -1945,10 +1960,16 @@ export class PiecesController<T = unknown> {
    * In view-scoped mode this synchronizes the name and opaque UI tip; the
    * retained root watch demands server execution, while mounted renderers
    * own local graph registration.
+   *
+   * With `awaitSetupCommit`, the start waits for the commit of the setup
+   * writes of the graph it instantiates, and this rejects when that commit
+   * failed, which leaves the piece stopped. Otherwise such a failure reaches
+   * only the runtime's log; see `Runner.startWithCommit()`.
    */
   async startPiece<T = unknown>(
     pieceOrId: string | Cell<T>,
     scope?: CellScope,
+    options: { awaitSetupCommit?: boolean } = {},
   ): Promise<void> {
     const piece = typeof pieceOrId === "string"
       ? await timePiecePhase(
@@ -1966,7 +1987,10 @@ export class PiecesController<T = unknown> {
     }
     await timePiecePhase(
       "startPiece.runtime.start",
-      () => this.runtime.start(piece),
+      () =>
+        options.awaitSetupCommit
+          ? this.runtime.startWithCommit(piece)
+          : this.runtime.start(piece),
     );
     await timePiecePhase(
       "startPiece.result.pull",
@@ -2711,13 +2735,16 @@ export class PiecesController<T = unknown> {
       // so start() observes the committed patternIdentity rather than the
       // pre-transaction snapshot held by the caller's cell.
       rootToStart = await this.getDefaultPattern(false) ?? root;
-      // Only when the origin CONFIRMED the pinned pattern. Then a disagreeing
+      // Only when the origin CONFIRMED the pinned pattern, or offered an
+      // earlier release than it, which the root keeps. Then a disagreeing
       // setup marker says the document is staged by another version while the
       // right one is pinned, which is a stale document rather than a stale
       // pattern. A root the origin did not confirm may be pinned to a pattern
       // that is simply wrong for it, and re-staging that one buys nothing the
       // repair below cannot do with the failure in hand.
-      if (outcome === "current" || outcome === "migrated") {
+      if (
+        outcome === "current" || outcome === "migrated" || outcome === "ahead"
+      ) {
         rootToStart = await this.#restageRootSetupIfStale(rootToStart);
       }
     }
@@ -3173,6 +3200,38 @@ export class PiecesController<T = unknown> {
       );
     }
 
+    // A root this runtime cannot load is ahead of it rather than dead when its
+    // history records its move from the official source to the pinned one and
+    // the host offers that source at an earlier release than the pinned one:
+    // the host is one a deploy has not yet restarted. Swapping back would undo
+    // the update, and every runtime that can load it would make it again, so
+    // the root keeps it, as the reconciler keeps it against the same offer.
+    // A host offering the source at a later release, or with no order between
+    // the two, may be a rollback, which the heal takes as before. The order is
+    // read again inside the swap's transaction. The revision a heal writes
+    // records the official release time, as an adopting revision does, so the
+    // root stays ordered against later offers.
+    const officialReleasedAt = await advertisedSystemRelease(
+      runtime,
+      space,
+      officialUrlPath,
+      officialRef.identity,
+    );
+    const behindPinnedRelease = (root: Cell<NameSchema>) =>
+      reason === "unloadable" &&
+      pieceSourceMovedPast(root, officialRef, pinnedRef) &&
+      isEarlierRelease(
+        officialReleasedAt,
+        knownPieceReleasedAt(root, pinnedRef),
+      );
+    const movedBackReason = () =>
+      `would move the root back to ${officialRef.identity}#` +
+      `${officialRef.symbol}, an earlier release than the pinned one, which ` +
+      `its history records moving from and this runtime is behind`;
+    if (behindPinnedRelease(rootToStart)) {
+      throw clearError(movedBackReason(), migrationError);
+    }
+
     const sourceSnapshot = getPieceSourceSnapshot(rootToStart);
     if (sourceSnapshot === undefined) {
       throw clearError("has no source state to update", migrationError);
@@ -3190,14 +3249,23 @@ export class PiecesController<T = unknown> {
       operation: "origin-update",
       origin: officialUrlPath,
       expected: sourceSnapshot,
+      ...(officialReleasedAt === undefined
+        ? {}
+        : { releasedAt: officialReleasedAt }),
     };
+    let movedBack = false;
     const swapResult = await runtime.editWithRetry((tx) => {
+      movedBack = false;
       const rootTx = rootToStart.withTx(tx);
       const currentRef = getPatternIdentityRef(rootTx);
       if (
         currentRef?.identity !== pinnedRef.identity ||
         currentRef?.symbol !== pinnedRef.symbol
       ) {
+        return false;
+      }
+      if (behindPinnedRelease(rootTx)) {
+        movedBack = true;
         return false;
       }
       applyPieceSourceTransition(
@@ -3236,6 +3304,7 @@ export class PiecesController<T = unknown> {
         swapResult.error,
       );
     }
+    if (movedBack) throw clearError(movedBackReason(), migrationError);
     if (!swapResult.ok) {
       // The root was repointed by a concurrent heal between the failed repair
       // and this swap. We must NOT overwrite the newer identity (the whole

@@ -20,35 +20,37 @@ space. The default app does not instantiate this starter.
 
 ## Room behavior
 
-Messages retain exact epoch nanoseconds, live profile links, previous versions,
-and explicit reply placement. Reactions are separate authored records. Reviewed
-controls admit sends, edits, deletions, reactions, and permanent removal.
-Ownership checks in writers use the authenticated principal, independently of
-profile selection. Only the author may edit or delete a message. A direct room
-also lets the author obliterate it. The room's `ownersMayObliterate` policy
-controls owner moderation, defaulting to true for group rooms and false for
-direct rooms. Display controls use the principal attested by the viewer's
-profile. Without that attestation, original-sender controls are unavailable. The
-runtime exposes the authenticated principal only inside handlers. Selecting
-another person's attested profile can therefore offer controls the handler
-refuses; view rights cannot fully identify the authenticated viewer yet. Room
-records and request bookkeeping use separately protected documents from their
-creation metadata.
+Messages are pushed records, identified by their cells, with live profile links
+and explicit reply placement. Edits replace text in place; deletion keeps an
+author and obliteration leaves an authorless tombstone. Reactions are separate
+authored records. Times come from the handler clock and need not be unique. The
+room relies on the runtime's once-per-event delivery, so it keeps no message
+request ledger, activity log, or version history.
 
-The room offers the latest 100 main-conversation messages and up to 50 fixed
-session windows. A window retains original message links, so edits and removal
-remain visible without moving the window when new messages arrive. The UI has
-thread navigation, older-message navigation, version history, and a composer
-shared by placements in the same session. A refused send preserves its draft.
-Private per-request outcomes report success or refusal, and remain terminal on
-replay. Members can retitle a room through its reviewed title control. Thread
-summaries expose reply counts and latest replies without opening a window.
+Ownership checks in writers compare the authenticated principal with the
+record's `authored-by` attestation, independently of profile selection. Only the
+author may edit or delete a message. A direct room also lets the author
+obliterate it. The room's `ownersMayObliterate` policy controls owner
+moderation, defaulting to true for group rooms and false for direct rooms.
+Editing, deleting, and reacting require a resolved profile. Obliteration depends
+on ownership and moderation rights and works without a readable profile.
 
-Activity has a ten-minute retention window; writers prune expired entries when
-recording the next event. The expiration watermark is independent of permanent
-removal. Request identities remain remembered after removal. They are retained
-for the room's lifetime because the runtime does not establish a finite maximum
-event redelivery delay.
+Display controls use the principal attested by the viewer's profile. Without
+that attestation, original-sender controls are unavailable. The runtime exposes
+the authenticated principal only inside handlers. Selecting another person's
+attested profile can therefore offer controls the handler refuses; view rights
+cannot fully identify the authenticated viewer yet. Participant links remain in
+the roster when their profiles are unreadable.
+
+The room offers the latest 100 main-conversation messages and derives thread
+summaries in one pass through the messages. Its UI has thread and older-message
+navigation, retitling, and a composer shared by placements in the same session.
+Message bodies preserve the exact submitted text, while whitespace-only bodies
+are refused. Replies cannot target deleted messages or quote a thread-only
+message in the main conversation. A refused send preserves its draft; a
+successful send clears only the draft that still matches the submitted text.
+Message-act refusals throw with a reason, and add and retitle requests retain
+private outcomes.
 
 ## Manager and clients
 

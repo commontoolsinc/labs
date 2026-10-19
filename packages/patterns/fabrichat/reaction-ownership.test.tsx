@@ -1,9 +1,7 @@
 /** Verifies that selecting another reactor's profile grants no removal authority. */
 import {
-  action,
   type AddIntegrity,
   assert,
-  FabricEpochNsec,
   multiUserTest,
   pattern,
   TESTS,
@@ -28,11 +26,6 @@ export const setup = pattern<Record<string, never>, Setup>(() => {
     room: FabriChatRoomCore({
       about: { kind: "group" },
       messages: records.messages,
-      reactionLists: records.reactionLists,
-      requests: records.requests,
-      usedTimes: records.usedTimes,
-      activity: records.activity,
-      counters: records.counters,
       myProfile: profile,
     }),
     message: records.messages.key(0),
@@ -42,27 +35,16 @@ export const setup = pattern<Record<string, never>, Setup>(() => {
 const gesture = { surface: "ChatReactSurface", action: "ChatReact" };
 
 export const alice = pattern<{ setup: Setup }>(({ setup }) => {
-  const version = new Writable({
-    body: "Reaction ownership",
-    sentAt: new FabricEpochNsec(0n),
-  });
   return {
     [TESTS]: [
       {
-        action: action(() =>
-          version.key("sentAt").set(
-            new FabricEpochNsec(BigInt(Date.now()) * 1_000_000n),
-          )
-        ),
-      },
-      {
         action: setup.room.sendMessage,
-        event: { requestId: "send", version },
+        event: { body: "Reaction ownership" },
         trustedUi: { surface: "ChatSendSurface", action: "ChatSend" },
       },
       {
         action: setup.room.sendReaction,
-        event: { requestId: "react", message: setup.message, emoji: "😺" },
+        event: { message: setup.message, emoji: "😺" },
         trustedUi: gesture,
       },
       {
@@ -79,7 +61,10 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
       },
       {
         action: setup.room.deleteReaction,
-        event: { requestId: "remove", message: setup.message, emoji: "😺" },
+        event: {
+          message: setup.message,
+          reaction: setup.message.key("reactions").key(0),
+        },
         trustedUi: { surface: "ChatReactSurface", action: "ChatUnreact" },
       },
       {
@@ -101,7 +86,10 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => ({
     },
     {
       action: setup.room.deleteReaction,
-      event: { requestId: "remove", message: setup.message, emoji: "😺" },
+      event: {
+        message: setup.message,
+        reaction: setup.message.key("reactions").key(0),
+      },
       trustedUi: { surface: "ChatReactSurface", action: "ChatUnreact" },
     },
     {
@@ -111,6 +99,7 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => ({
     },
     { label: "bob-tried-removal" },
   ],
+  expectRuntimeErrors: ["Only the person who reacted can remove a reaction."],
 }));
 
 export default multiUserTest({ setup, participants: { alice, bob } });

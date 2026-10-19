@@ -54,11 +54,11 @@ calls it from `#instantiateNode`. The pre-sync calls it from
 from the plan. The list-children pass is the one caller that binds a node
 without it: `#syncListSlotResolutions` and `#syncResumeListChildren` derive a
 list coordinator's inputs through `#buildRawNodeInputs`, the binder a raw
-node's plan uses. The bindings a pre-sync's plan computes against a stored
-argument are held until the plan the node's instantiation makes takes them
-(`NodeBindingMemo`, `packages/runner/src/node-binding-memo.ts`); a binding
-against a stand-in is computed and not held. "One plan per node" below says
-which part of a plan that covers.
+node's plan uses. The bindings the first plan of a node computes against a
+stored argument are held for every later plan of it (`NodeBindingMemo`,
+`packages/runner/src/node-binding-memo.ts`); a binding against a stand-in is
+computed and not held. "One plan per node" below says which part of a plan
+that covers.
 
 The pre-sync (`#syncCellsForRunningPattern`) names the result document and
 then syncs what each node's plan names (`#cellsNodePlanReads`): a JavaScript
@@ -86,7 +86,13 @@ the next round plan the level below. An instance whose result document holds
 no argument link is planned against the inputs its parent's node binds it
 to. An instance with a stored setup is recorded in `#presyncNamedInstances`,
 under the pattern it was planned with, once a round has planned all of its
-nodes and none of that round's syncs has failed.
+nodes and none of that round's syncs has failed. An instance whose pattern
+pointer or setup marker names a pattern other than the one it is planned
+with is set up again by its parent's start, and that setup judges every slot
+its stored argument holds against the new argument schema, slots no plan
+reads among them. Once the round's syncs have landed, such an instance's
+stored argument has its direct link targets, and the result document owning
+each, named the way the root's are (`#syncStoredArgumentLinkTargets`).
 
 `runSynced` runs the same pre-sync before setup. On a fresh start the result
 document has no `argument` meta link yet, so the plans bind against an
@@ -163,14 +169,17 @@ transaction: the result is a function of the node, its pattern's manifest and
 argument schema, the result cell's link and the argument link, for a given
 kind of module. The runner holds that part by those four and by the kind of
 module the node resolved to, with the pattern a pattern node's module holds,
-from the plan a pre-sync makes of a node until the plan its instantiation
-makes takes it (`NodeBindingMemo`,
-`packages/runner/src/node-binding-memo.ts`), so the two plans share one
-binding, a running node's bindings are held by the node alone, and a pattern
-node's bound child is the same pattern object in both plans, under which the
-child's own nodes are found again. A binding against a stand-in argument is
-not held: the instance it belongs to is instantiated against the argument
-document its setup writes.
+from the first plan made of a node for every later plan of it — a pre-sync's,
+a name-sync's, the instantiation's — across a load (`NodeBindingMemo`,
+`packages/runner/src/node-binding-memo.ts`), so every plan of a node shares
+one binding and one inputs document, and a pattern node's bound child is the
+same pattern object in every plan, under which the child's own nodes are
+found again. A pattern is named by its content identity when it has one and
+a node by its position among its nodes, since the pattern embedded in a
+parent's graph and the one loaded by identity for the instance's own start
+are two objects of one identity holding the same nodes. A binding against a
+stand-in argument is not held: the instance it belongs to is instantiated
+against the argument document its setup writes.
 
 Resolving what the bound outputs redirect to (`writes`, a raw node's resolved
 output spot, a pattern node's `childResultCell`) reads link slots through the
@@ -200,8 +209,12 @@ plan syncs. `LINK_HOPS`, `ArgumentLinkRoot`, `narrowChildSchema`, and
 `isReferenceOnlySchema` go with them. One walk stays, one hop wide: the
 stored argument's direct link targets and the result document owning each
 are named root-only (`#syncStoredArgumentLinkTargets`), because setup's
-supplied-link proof reads them and that read is no node's. It runs last in
-the pre-sync, after every plan sync and coordinator sync has been issued, so
+supplied-link proof reads them and that read is no node's. A nested instance
+that its parent's start sets up again under another pattern has the same
+walk over its own stored argument, because that setup reads each stored slot
+through the link it holds, and that read is no node's either. The root's walk
+runs last in the pre-sync, after every plan sync and coordinator sync has
+been issued, so
 a document a plan reads is asked for under that plan's schema before the
 root-only naming asks for it. Among plans the requests go out together, in
 pattern order, and no order among them is claimed; what the ordering
@@ -498,7 +511,10 @@ Exit: no resumed action's first run is released by a timer.
       instance's own start, asked under the same pattern, skips the
       argument walk: the pre-sync's plans are the plans a name-sync would
       build, so a name-sync could request nothing the pre-sync did not. The
-      owned cells are still probed, since an absent one is owed a seed. The
+      owned cells are still probed, since an absent one is owed a seed; a
+      derived cell owed none is probed by its record, since its value is
+      its computation's to produce and a name-sync would deliver the same
+      record. The
       instance wave also names the policy manifests each nested pattern
       declares, as the root wave names the root's.
 - [x] Test: a tree whose rows receive, through the root's argument, a link

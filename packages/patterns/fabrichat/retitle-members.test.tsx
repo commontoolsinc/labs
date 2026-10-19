@@ -19,14 +19,7 @@ import {
   VIEWS,
   Writable,
 } from "commonfabric";
-import {
-  type ActivityCounters,
-  type MessagesValue,
-  type ReactionList,
-  type RequestMemo,
-  type SentActivity,
-  type UsedTime,
-} from "./room-records.tsx";
+import { type MessagesValue } from "./room-records.tsx";
 import { FabriChatRoomCore } from "./room.tsx";
 import {
   CHAT_RETITLE_ACTION,
@@ -52,11 +45,6 @@ const retitleGesture = {
 /** One room's records, which every participant's room over them shares. */
 interface Records {
   messages: Writable<MessagesValue>;
-  reactionLists: Writable<ReactionList[]>;
-  requests: Writable<RequestMemo[]>;
-  usedTimes: Writable<UsedTime[]>;
-  activity: Writable<SentActivity[]>;
-  counters: Writable<ActivityCounters[]>;
   titles: Writable<TitleRecord[]>;
 }
 
@@ -69,11 +57,6 @@ interface Setup {
 /** A room's records, with none of them holding anything yet. */
 const freshRecords = () => ({
   messages: Writable.of<MessagesValue>([] as MessagesValue),
-  reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
-  requests: Writable.of<RequestMemo[]>([]),
-  usedTimes: Writable.of<UsedTime[]>([]),
-  activity: Writable.of<SentActivity[]>([]),
-  counters: Writable.of<ActivityCounters[]>([]),
   titles: Writable.of<TitleRecord[]>([]),
 });
 
@@ -108,22 +91,12 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
     myProfile: profile,
     ...groupRoom,
     messages: setup.group.messages,
-    reactionLists: setup.group.reactionLists,
-    requests: setup.group.requests,
-    usedTimes: setup.group.usedTimes,
-    activity: setup.group.activity,
-    counters: setup.group.counters,
     titles: setup.group.titles,
   } as RoomArg);
   const direct = FabriChatRoomCore({
     myProfile: profile,
     ...directRoom,
     messages: setup.direct.messages,
-    reactionLists: setup.direct.reactionLists,
-    requests: setup.direct.requests,
-    usedTimes: setup.direct.usedTimes,
-    activity: setup.direct.activity,
-    counters: setup.direct.counters,
     titles: setup.direct.titles,
   } as RoomArg);
 
@@ -157,22 +130,12 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
     myProfile: profile,
     ...groupRoom,
     messages: setup.group.messages,
-    reactionLists: setup.group.reactionLists,
-    requests: setup.group.requests,
-    usedTimes: setup.group.usedTimes,
-    activity: setup.group.activity,
-    counters: setup.group.counters,
     titles: setup.group.titles,
   } as RoomArg);
   const direct = FabriChatRoomCore({
     myProfile: profile,
     ...directRoom,
     messages: setup.direct.messages,
-    reactionLists: setup.direct.reactionLists,
-    requests: setup.direct.requests,
-    usedTimes: setup.direct.usedTimes,
-    activity: setup.direct.activity,
-    counters: setup.direct.counters,
     titles: setup.direct.titles,
   } as RoomArg);
 
@@ -210,11 +173,6 @@ export const carol = pattern<{ setup: Setup }>(({ setup }) => {
     myProfile: profile,
     ...groupRoom,
     messages: setup.group.messages,
-    reactionLists: setup.group.reactionLists,
-    requests: setup.group.requests,
-    usedTimes: setup.group.usedTimes,
-    activity: setup.group.activity,
-    counters: setup.group.counters,
     titles: setup.group.titles,
   } as RoomArg);
 

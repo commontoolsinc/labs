@@ -38,21 +38,11 @@ export const setup = pattern<Record<string, never>, Setup>(() => {
   return {
     room: FabriChatRoomCore({
       messages: records.messages,
-      reactionLists: records.reactionLists,
-      requests: records.requests,
-      usedTimes: records.usedTimes,
-      activity: records.activity,
-      counters: records.counters,
       about: { kind: "direct" },
       myProfile: profile,
     }),
     alternate: FabriChatRoomCore({
       messages: records.messages,
-      reactionLists: records.reactionLists,
-      requests: records.requests,
-      usedTimes: records.usedTimes,
-      activity: records.activity,
-      counters: records.counters,
       about: { kind: "direct" },
       myProfile: alternate,
     }),
@@ -72,7 +62,7 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => ({
   [TESTS]: [
     {
       action: setup.room.sendMessage,
-      event: { requestId: "alice-send", target: { value: "Alice's message" } },
+      event: { target: { value: "Alice's message" } },
       trustedUi: sendGesture,
     },
     { assertion: assert(() => setup.message.get().body === "Alice's message") },
@@ -82,21 +72,20 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => ({
     {
       action: setup.alternate.editMessage,
       event: {
-        requestId: "alice-edit",
         message: setup.message,
-        target: { value: "Still Alice's message" },
+        target: { value: "  Still Alice's message  " },
       },
       trustedUi: editGesture,
     },
     {
       assertion: assert(() =>
-        setup.message.get().body === "Still Alice's message" &&
-        setup.message.get().earlierVersions.length === 1
+        setup.message.get().body === "  Still Alice's message  " &&
+        setup.message.get().editedAt !== undefined
       ),
     },
     {
       action: setup.alternate.deleteMessage,
-      event: { requestId: "alice-delete", message: setup.message },
+      event: { message: setup.message },
       trustedUi: deleteGesture,
     },
     {
@@ -107,23 +96,23 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => ({
     },
     {
       action: setup.alternate.obliterateMessage,
-      event: { requestId: "alice-obliterate", message: setup.message },
+      event: { message: setup.message },
       trustedUi: obliterateGesture,
     },
     {
       assertion: assert(() =>
-        setup.message.get().authorProfile?.get() === undefined &&
-        setup.message.get().earlierVersions.length === 0
+        setup.message.get().authorProfile === undefined &&
+        typeof setup.message.get().body === "object"
       ),
     },
     {
       action: setup.room.sendMessage,
-      event: { requestId: "alice-send", target: { value: "Resurrected" } },
+      event: { target: { value: "A new message" } },
       trustedUi: sendGesture,
     },
     {
       assertion: assert(() =>
-        setup.room.messages.count === 1 &&
+        setup.room.messages.count === 2 &&
         typeof setup.message.get().body === "object"
       ),
     },
@@ -136,7 +125,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => ({
     {
       action: setup.room.editMessage,
       event: {
-        requestId: "bob-edit",
         message: setup.message,
         target: { value: "Hijacked" },
       },
@@ -145,27 +133,26 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => ({
     { assertion: assert(() => setup.message.get().body === "Alice's message") },
     {
       action: setup.room.deleteMessage,
-      event: { requestId: "bob-delete", message: setup.message },
+      event: { message: setup.message },
       trustedUi: deleteGesture,
     },
     { assertion: assert(() => setup.message.get().body === "Alice's message") },
     {
       action: setup.room.obliterateMessage,
-      event: { requestId: "bob-obliterate", message: setup.message },
+      event: { message: setup.message },
       trustedUi: obliterateGesture,
     },
     { assertion: assert(() => setup.message.get().body === "Alice's message") },
-    {
-      assertion: assert(() =>
-        ["bob-edit", "bob-delete", "bob-obliterate"].every((id) => {
-          const outcome = setup.room.messageRequests[id];
-          return outcome?.status === "refused" &&
-            outcome.code === "not-allowed";
-        })
-      ),
-    },
     { label: "bob-refused" },
+  ],
+  expectRuntimeErrors: [
+    "Only its author can edit a message.",
+    "Only its author can delete a message.",
+    "Only its author can remove a message in this chat.",
   ],
 }));
 
-export default multiUserTest({ setup, participants: { alice, bob } });
+export default multiUserTest({
+  setup,
+  participants: { alice, bob: { pattern: bob, access: "OWNER" } },
+});

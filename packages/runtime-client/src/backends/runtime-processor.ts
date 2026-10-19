@@ -63,7 +63,6 @@ import {
   type Cell,
   ContextualFlowControl,
   encodeSqliteParams,
-  ensurePieceRunningVerdict,
   entityIdFrom,
   type EventIntentOutcome,
   getCellOrThrow,
@@ -77,6 +76,7 @@ import {
   isCell,
   isCellResult,
   isLoopbackHostname,
+  isPieceRoot,
   markDurableReadTx,
   type NormalizedFullLink,
   normalizeSpaceHost,
@@ -100,7 +100,6 @@ import {
   SpaceNotFoundError,
   transactionFailureMessage,
 } from "@commonfabric/runner";
-import { NestedRenderReferenceSchema } from "@commonfabric/runner/component-read-contract";
 import {
   cfcLabelViewForResolvedCell,
   type CfcModulePolicySource,
@@ -129,7 +128,6 @@ import {
   readCustodyAnswer,
 } from "@commonfabric/runner/cfc/custody-seal";
 import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
-import { asPatternIdentityRef } from "@commonfabric/runner/meta-seam";
 import { bindNativeUiControl } from "@commonfabric/runner/native-ui";
 import {
   NameSchema,
@@ -317,6 +315,7 @@ import {
   type VDomMountRequest,
   type VDomMountResponse,
   type VDomUnmountRequest,
+  type WorkerIpcSizes,
   type WriteStackTraceResponse,
 } from "@/protocol/mod.ts";
 import type { RemoteResponse, VDomOp } from "@/protocol/types.ts";
@@ -1091,6 +1090,12 @@ export class RuntimeProcessor {
     this.#runtime.retrySpaceAccess(space)
   );
 
+  /**
+   * What the worker's ports have carried, read from the client registry
+   * that owns them; `null` where no registry stands behind this processor.
+   */
+  readonly #ipcSizes: () => WorkerIpcSizes | null;
+
   private constructor(
     runtime: Runtime,
     cc: PiecesController,
@@ -1099,8 +1104,10 @@ export class RuntimeProcessor {
     telemetry: RuntimeTelemetry,
     securityContext: RuntimeSecurityContext,
     clients: () => Iterable<WorkerClient> = () => [ownerClient],
+    ipcSizes: () => WorkerIpcSizes | null = () => null,
   ) {
     this.#runtime = runtime;
+    this.#ipcSizes = ipcSizes;
     this.#cc = cc;
     this.#spaces.set(initSpace, cc);
     this.#identity = identity;
@@ -3118,8 +3125,8 @@ export class RuntimeProcessor {
    * someone else's space. Opening the root of this runtime's identity's own
    * Home also starts the worker's housekeeping over Home, as
    * `handleEnsureHomePatternRunning()` does: the adoption of legacy space
-   * entries, the private inbox ensure and the share intake, each once per
-   * worker. It returns without waiting for any of them.
+   * entries, the private inbox ensure, the profile root repair and the share
+   * intake, each once per worker. It returns without waiting for any of them.
    *
    * @throws The server's refusal when this runtime's identity may not read
    *   the space, whether or not a root is still held from before.
@@ -3198,7 +3205,8 @@ export class RuntimeProcessor {
    * the schema it is read under — so what this loads is what deciding the
    * address takes: the requested document, and behind a redirect the document
    * the redirect lands in, whose metadata says whether it is a piece and what
-   * result schema a cell inside it takes. Serving a slug document, the server
+   * result schema a cell inside it takes. A requested document carrying a
+   * pattern pointer is the piece itself, and its redirect is not followed. Serving a slug document, the server
    * resolves the redirect through the links on its path, which is the floor
    * for an address a redirect answers. Nothing here reads the target's value,
    * so whatever that value reaches stays cold until a caller subscribes to
@@ -3234,10 +3242,15 @@ export class RuntimeProcessor {
     // arrives, plus what the server resolves at the address itself when the
     // value stored there is a link.
     await requestedCell.sync();
-    const redirect = parseLink(
-      requestedCell.getRaw(),
-      requestedCell.getAsNormalizedFullLink(),
-    );
+    // A piece's root is the piece, even when its value is a redirect, as it is
+    // for a pattern that returns a sub-pattern's result whole. Only a
+    // document that is no piece names one.
+    const redirect = isPieceRoot(this.#runtime, requestedCell)
+      ? undefined
+      : parseLink(
+        requestedCell.getRaw(),
+        requestedCell.getAsNormalizedFullLink(),
+      );
     if (redirect?.overwrite === "redirect") {
       const target = this.#runtime.getCellFromLink({
         ...redirect,
@@ -3681,6 +3694,19 @@ export class RuntimeProcessor {
       timing,
       flags,
       cfc: this.#runtime.getCfcStats(),
+      compileCache: { ...this.#runtime.patternManager.getCompileCacheStats() },
+      sizes: {
+        ...this.#runtime.getSizes(),
+        worker: {
+          cellSubscriptions: this.#subscriptions.size,
+          operationSubscriptions: this.#operationSubscriptions.size,
+          operationSessions: this.#operationSessions.size,
+          presenceMemberships: this.#presenceMemberships.size,
+          vdomMounts: this.#vdomMounts.size,
+          spaces: this.#spaces.size,
+        },
+        ipc: this.#ipcSizes(),
+      },
     };
   }
 
@@ -4221,7 +4247,6 @@ export class RuntimeProcessor {
     let active = true;
     let cancelRender: (() => void) | undefined;
     let cancelView: (() => void) | undefined;
-    let cancelProducer: (() => void) | undefined;
     const mount = {
       reconciler,
       client,
@@ -4229,7 +4254,6 @@ export class RuntimeProcessor {
         active = false;
         cancelRender?.();
         cancelView?.();
-        cancelProducer?.();
       },
     };
     this.#vdomMounts.set(key, mount);
@@ -4237,81 +4261,7 @@ export class RuntimeProcessor {
       if (active) cancelRender = reconciler.mount(cell);
       return { rootId: reconciler.getRootNodeId() };
     };
-    if (!this.#runtime.viewScopedReplicationRequested) {
-      // A nested render can reach a persisted output whose local producer has
-      // never run. Follow only its reference here; the reconciler retains the
-      // original cell and decides which of its contents may reach the page.
-      const reference = rawCell.asSchema<Cell<unknown>>(
-        NestedRenderReferenceSchema,
-      );
-      let target: Cell<unknown> | undefined;
-      let starting: AbortController | undefined;
-      let cancelMetadata: Cancel | undefined;
-      const clearMetadata = () => {
-        cancelMetadata?.();
-        cancelMetadata = undefined;
-      };
-      const unsubscribe = reference.sink((next) => {
-        if (!active) return;
-        const resolved = isCell(next) ? next.resolveAsCell() : undefined;
-        if (resolved?.equals(target) || !resolved && !target) return;
-        starting?.abort();
-        clearMetadata();
-        target = resolved;
-        if (!resolved) return;
-        const attempt = new AbortController();
-        starting = attempt;
-        const current = () =>
-          active && starting === attempt && !attempt.signal.aborted;
-        const start = () => {
-          void ensurePieceRunningVerdict(
-            this.#runtime,
-            resolved.getAsNormalizedFullLink(),
-            { signal: attempt.signal, propagateErrors: true },
-          ).then((verdict) => {
-            if (!current() || verdict.started) return;
-            if (verdict.reason !== "no-pattern-meta" || !verdict.root) {
-              throw new Error(`Cannot start rendered piece: ${verdict.reason}`);
-            }
-            // A render can precede the commit that installs its producer.
-            // Metadata arriving on the observed root re-arms the same target.
-            const root = this.#runtime.getCellFromLink({
-              ...verdict.root,
-              path: [],
-            });
-            let queued = false;
-            const changed = () => {
-              if (queued || !current()) return;
-              queued = true;
-              queueMicrotask(() => {
-                if (!current()) return;
-                clearMetadata();
-                start();
-              });
-            };
-            const cancelPattern = root.sinkMeta("patternIdentity", (value) => {
-              if (asPatternIdentityRef(value)) changed();
-            });
-            const cancelResult = root.sinkMeta("result", (value) => {
-              if (parseLink(value, root)) changed();
-            });
-            cancelMetadata = () => {
-              cancelPattern();
-              cancelResult();
-            };
-          }).catch((error) => {
-            if (current()) mountErrorSink(client)(error);
-          });
-        };
-        start();
-      });
-      cancelProducer = () => {
-        starting?.abort();
-        clearMetadata();
-        unsubscribe();
-      };
-      return render();
-    }
+    if (!this.#runtime.viewScopedReplicationRequested) return render();
     return this.#runtime.viewReplication.mount(
       rawCell,
       key,
@@ -4378,6 +4328,7 @@ export class RuntimeProcessor {
       identity: Identity,
       telemetry: RuntimeTelemetry,
       securityContext: RuntimeSecurityContext,
+      ipcSizes?: () => WorkerIpcSizes | null,
     ): RuntimeProcessor;
   } {
     return {
@@ -4388,6 +4339,7 @@ export class RuntimeProcessor {
         identity,
         telemetry,
         securityContext,
+        ipcSizes,
       ) =>
         new RuntimeProcessor(
           runtime,
@@ -4396,6 +4348,8 @@ export class RuntimeProcessor {
           identity,
           telemetry,
           securityContext,
+          undefined,
+          ipcSizes,
         ),
     };
   }
@@ -4411,11 +4365,13 @@ export class RuntimeProcessor {
    * requests at once, and a host the check could not reach is reported to
    * the clients connected when it answers. A caller that needs storage and
    * pieces to have converged waits on `synced()`. `clients` resolves the
-   * current authorized recipients of runtime-wide notifications.
+   * current authorized recipients of runtime-wide notifications, and
+   * `ipcSizes` what their channels have carried, for the sizes read.
    */
   static async initialize(
     data: InitializationData,
     clients: () => Iterable<WorkerClient> = () => [ownerClient],
+    ipcSizes: () => WorkerIpcSizes | null = () => null,
   ): Promise<RuntimeProcessor> {
     const apiUrlObj = new URL(data.apiUrl);
     // Memory alone moves to the memory URL. LLM requests, patterns and the
@@ -4544,6 +4500,7 @@ export class RuntimeProcessor {
       telemetry,
       securityContextFrom(data, identity.did()),
       clients,
+      ipcSizes,
     );
     processor.#health = health;
     processor.#awaitedHealth = data.awaitHealth === true;

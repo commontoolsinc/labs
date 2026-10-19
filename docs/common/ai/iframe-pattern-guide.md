@@ -3,9 +3,9 @@
 Use this guide to build a Common Fabric pattern whose application lives inside
 one sandboxed `cf-iframe`. The wrapper is deliberately mechanical: it exposes
 three named Cell resources (`input`, `state`, and `output`), optionally exposes
-SQLite databases and presence rooms, embeds the guest and its dependencies into
-one HTML string, and returns the state and output through the normal pattern
-result.
+SQLite databases, presence rooms, and streams the guest sends events to, embeds
+the guest and its dependencies into one HTML string, and returns the state and
+output through the normal pattern result.
 
 No other pattern guide is required for this shape.
 
@@ -308,6 +308,39 @@ TSX compilation, hook readiness, fine-grained direct Cell subscriptions,
 stable resolved items, SQLite query hooks, cleanup, and browser verification.
 Do not combine the two guest bootstraps.
 
+## Style with the ambient theme
+
+The guest wears the theme of the page around its iframe. The nearest `cf-theme`
+above the `cf-iframe` provides it: before the guest's own styles, the guest
+receives that theme's `--cf-theme-*` custom properties declared on `:root`,
+followed by a base stylesheet written against them:
+[`guest-base-sheet.ts`](../../../packages/ui/src/v2/components/cf-theme/guest-base-sheet.ts).
+The guest's root also carries the resolved scheme as `data-color-scheme`
+(`light` or `dark`). The sheet styles `html`, `body`, headings, links, buttons,
+form fields, code, and rules, and provides these classes:
+
+| Class | What it draws |
+| --- | --- |
+| `cf-surface` | the raised ground of a panel |
+| `cf-card` | a bordered, padded, rounded surface |
+| `cf-inset` | a recessed ground, for wells and code |
+| `cf-pill` | a small, fully rounded label |
+| `cf-muted` | secondary text |
+| `cf-primary`, `cf-accent`, `cf-brand` | a solid fill with its ink |
+| `cf-success`, `cf-warning`, `cf-danger` | a status fill with its ink |
+| `cf-stack`, `cf-row` | a vertical or horizontal flex layout with the theme's gap |
+
+The values follow the page: a theme change, or a switch between light and dark,
+restyles a running guest without reloading it. So write guest HTML with those
+elements, the `cf-*` classes, and `var(--cf-theme-…)` for anything else, such as
+`color: var(--cf-theme-color-text-muted)` or
+`font-family: var(--cf-theme-font-mono)`, and spell no color or font of your
+own. A literal color or font in the guest stays the same on every page, and
+reads wrong on the first one whose theme differs. The base sheet sits in a
+cascade layer, so any rule of the guest's own overrides it whatever its
+specificity; reserve that for a look the pattern deliberately owns, such as a
+game's art.
+
 ## Optional SQLite
 
 Declare database tables in `IFRAME_PATTERN`. The wrapper creates the database,
@@ -473,6 +506,208 @@ over the stored positions. On release, write the position to the Cell, and
 clear the facet only after that write and a `pull()` have settled, so peers do
 not see the shape return to where it was in between.
 `packages/patterns/iframe-cursor-canvas/` is a complete example.
+
+## Optional streams
+
+A stream lets the guest send an event to one of the pattern's verbs, a handler
+that runs in the pattern rather than in the iframe. Use one when the change
+belongs to the pattern: data the pattern owns and checks, an operation other
+callers reach through the same verb, or work that only the pattern can start.
+
+When the pattern exposes an action as a verb, have the guest perform that
+action by sending the verb an event wherever it can, rather than making the
+same change through its own cell writes. One handler then decides what the
+action does, whether a person clicks in the frame or `cf piece call`, another
+pattern, or an agent sends it, and a change to the action's checks or effects
+reaches every caller at once. This is a preference, not a requirement: a direct
+write stays correct for an action the pattern exposes no verb for, and for one
+whose verb does not fit the interaction.
+
+Work that only the pattern can start is how a guest calls `agent()`,
+`generateText()`, `generateObject()`, and the other LLM built-ins in a
+user-triggered way. Each
+built-in is a reactive node in the pattern body, which the guest cannot call,
+and it makes a new request whenever its inputs change. A verb makes the user's
+action the trigger: the guest sends the event when the user clicks, the
+handler writes the task or prompt the built-in reads, and the result reaches
+the guest through `input`. Writing the prompt from the guest's own `state`
+would also start a request, but on every change to it, such as each keystroke
+in a prompt field.
+
+Declare each stream by name in `IFRAME_PATTERN`, and the event it carries in an
+exported `IframeStreamEvents` interface:
+
+```typescript
+// Shown at module scope.
+export interface AddItemEvent {
+  id: string;
+  text: string;
+}
+
+export interface IframeStreamEvents {
+  addItem: AddItemEvent;
+}
+
+export const IFRAME_PATTERN = {
+  name: "VerbListFrame",
+  displayName: "Verb list",
+  stateScope: "space",
+  outputScope: "space",
+  frameHeight: "100vh",
+  databases: {},
+  streams: ["addItem"],
+} as const;
+```
+
+A stream's name is a TypeScript identifier, distinct from `input`, `state`,
+`output`, every database, and every presence room. The wrapper takes each
+stream as a required pattern input of type
+`Stream<IframeStreamEvents["addItem"], unknown>`, so it accepts a verb whatever
+result the verb declares, and grants it to the guest under the same name.
+
+Since the verb is an input of the wrapper, a pattern of your own declares it
+and passes it in. Generate the wrapper to `frame.tsx` instead of `main.tsx`,
+and write `main.tsx` by hand:
+
+```tsx
+// Shown at module scope.
+import {
+  action,
+  type Default,
+  NAME,
+  pattern,
+  type Stream,
+  UI,
+  type VNode,
+  type Writable,
+} from "commonfabric";
+import {
+  type AddItemEvent,
+  type IframeOutputData,
+  type IframeStateData,
+  type ListItem,
+} from "./contract.ts";
+import Frame from "./frame.tsx";
+
+interface VerbListInput {
+  items?: Writable<ListItem[] | Default<[]>>;
+}
+
+interface VerbListOutput {
+  [NAME]: string;
+  [UI]: VNode;
+  items: ListItem[];
+  state: IframeStateData;
+  output: IframeOutputData;
+  addItem: Stream<AddItemEvent>;
+}
+
+export default pattern<VerbListInput, VerbListOutput>(({ items }) => {
+  const addItem = action(({ id, text }: AddItemEvent) => {
+    const trimmed = text.trim();
+    if (trimmed === "") throw new Error("An item needs text.");
+    if (items.get().some((item) => item.id === id)) return;
+    items.push({ id, text: trimmed });
+  });
+  const { state, output, [UI]: view } = Frame({ input: { items }, addItem });
+  return { [NAME]: "Verb list", [UI]: view, items, state, output, addItem };
+});
+```
+
+The items belong to this pattern: the guest reads them as `input` and changes
+them only through the verb, and a caller with no browser, such as
+`cf piece call`, sends the same verb. Return the frame's `state` and `output`
+as a generated wrapper would, and destructure them from the frame's result
+rather than reading `frame.state`, which would put a derived copy in the
+piece's result instead of the frame's cell.
+
+The guest sends through `fabric.stream(name)`, from the handler of the user's
+action, so an event goes out only when someone acts and never on a load or
+reload of the frame:
+
+```typescript
+// Shown at module scope.
+import { connectFabric } from "@commonfabric/iframe-sandbox/guest";
+import { type AddItemEvent } from "./contract.ts";
+
+const fabric = connectFabric();
+const addItem = fabric.stream<AddItemEvent>("addItem");
+const add = document.querySelector<HTMLButtonElement>("#add")!;
+const field = document.querySelector<HTMLInputElement>("#new-item")!;
+
+add.addEventListener("click", () => {
+  const text = field.value.trim();
+  void addItem.send({ id: crypto.randomUUID(), text }).then(() => {
+    if (field.value.trim() === text) field.value = "";
+  }).catch((cause) => console.warn(cause));
+});
+```
+
+`send()` goes out once every cell operation the guest made before it has
+settled, so the handler reads what they wrote. It resolves once the handler's
+run has committed, with no value: a verb's
+declared result does not reach the guest, so read the effect through `input`
+or `state`. It rejects with the reason when the runtime refuses the event or
+the run, including an error the handler throws, so show that message where the
+user acted. The guest's sink can deliver the change before `send()` resolves,
+so keep the draft that produced the event until the send settles. The event is
+not a trusted gesture: the guest's code sent it, not a control the host draws,
+so a write gated on a reviewed action refuses it.
+
+For an LLM call, the verb writes what the built-in reads, and the frame's input
+carries the built-in's state back. An empty task or prompt makes no request, so
+nothing runs before the first event. `agent()` identifies a request by its task
+text and the addresses of its inputs, not by the values they hold, and answers
+a request it has seen from its record, so the verb counts each ask into the
+task: asking the same question again is then a new request.
+
+```tsx
+// Shown at module scope.
+import {
+  action,
+  agent,
+  computed,
+  NAME,
+  pattern,
+  UI,
+  Writable,
+} from "commonfabric";
+import Frame from "./frame.tsx";
+
+export default pattern(() => {
+  const request = new Writable<{ question: string; asked: number }>({
+    question: "",
+    asked: 0,
+  });
+  const ask = action(({ text }: { text: string }) => {
+    request.set({ question: text.trim(), asked: request.get().asked + 1 });
+  });
+  const task = computed(() => {
+    const { question, asked } = request.get();
+    return question === "" ? "" : `Question ${asked}: ${question}`;
+  });
+  const answer = agent<{ answer: string }>({
+    task,
+    inputs: {},
+    resultSchema: {
+      type: "object",
+      properties: { answer: { type: "string" } },
+      required: ["answer"],
+    },
+  });
+  const { [UI]: view } = Frame({
+    input: { pending: answer.pending, answer: answer.result },
+    ask,
+  });
+  return { [NAME]: "Ask", [UI]: view, ask };
+});
+```
+
+A built-in that already returns a stream needs no verb of its own:
+`llmDialog()` returns `addMessage`, which the frame can take directly, with the
+stream's event type `BuiltInLLMMessage` in `IframeStreamEvents`.
+
+`packages/patterns/iframe-verb-list/` is a complete example.
 
 ## Generate the wrapper
 

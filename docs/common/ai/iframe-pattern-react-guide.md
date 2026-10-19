@@ -341,6 +341,7 @@ in progress. Divide state by the lifecycle that owns it:
 | --- | --- | --- |
 | Durable collaborative data | Fabric Cell or SQLite | records, committed positions, shared edges |
 | Live status others see and nobody keeps | A presence room | pointers, a peer's drag in flight, who is here |
+| Actions the pattern exposes as verbs, or work only it can start | A verb the pattern passes in as a stream | adding to a list through the pattern's `addItem`, asking `agent()` or an LLM built-in |
 | Local user intent not yet committed | React state or refs | a text draft, open menu, active drag, pending selection |
 | Third-party interaction state | The library's local component state | `dragging`, measured bounds, viewport, focus, selection handles |
 | Pure presentation | Derived during render | labels, colors, filtered rows |
@@ -376,6 +377,15 @@ A presence room is declared in the contract and read through
 component renders from them in state or an external store.
 [Optional presence](./iframe-pattern-guide.md#optional-presence) in the
 iframe pattern guide is the contract.
+
+A verb is declared in the contract's `streams`, and the guest sends it an event
+through `fabric.stream(name).send(event)` from the event handler where the user
+acted, which is how a guest calls `agent()` and the other LLM built-ins in a
+user-triggered way. When the pattern exposes an action as a verb, prefer
+sending that verb an event over making the same change through Cell writes. Keep the draft that produced the event, and show any error
+the send rejects with, until the send settles.
+[Optional streams](./iframe-pattern-guide.md#optional-streams) in the iframe
+pattern guide is the contract.
 
 ### Reconcile asynchronous gestures by identity
 
@@ -451,7 +461,10 @@ replace the text under the user's cursor.
 The generated wrapper bundles JavaScript imports, but a React library can also
 depend on stylesheet rules that give its viewport, measurement wrappers,
 overlays, portals, and controls their geometry. Theme colors alone are not
-enough. Put the required structural rules in `guest.html` so the document stays
+enough; the guest receives the `--cf-theme-*` variables and
+the `cf-*` classes described in
+[Style with the ambient theme](./iframe-pattern-guide.md#style-with-the-ambient-theme),
+so components spell no color or font of their own. The required structural rules still belong in `guest.html` so the document stays
 self-contained under the iframe CSP. Give `html`, `body`, `#root`, and every
 intermediate layout container an explicit height, and give custom measured
 items a stable width or size when the library expects one.

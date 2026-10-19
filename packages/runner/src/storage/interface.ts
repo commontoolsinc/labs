@@ -96,7 +96,9 @@ import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import type {
   PendingCommitContext,
   SpaceStorageDiagnostic,
+  SpaceStorageSizes,
   StorageDiagnostics,
+  StorageSizes,
 } from "./diagnostics.ts";
 
 export type {
@@ -143,11 +145,20 @@ export class ReplicaLoadFailureError extends Error {
     readonly failure: ReplicaLoadFailure,
     cause: unknown,
   ) {
-    super(
-      cause instanceof Error ? cause.message : String(cause),
-      { cause },
-    );
+    super(loadFailureMessage(cause), { cause });
   }
+}
+
+/**
+ * Returns the message a load failure's cause carries. A pull reports its
+ * failure as a plain result object rather than an `Error`, so the message is
+ * read off any object that has one; a cause without one is stringified.
+ */
+function loadFailureMessage(cause: unknown): string {
+  return typeof cause === "object" && cause !== null && "message" in cause &&
+      typeof cause.message === "string"
+    ? cause.message
+    : String(cause);
 }
 
 export const toReplicaLoadFailureError = (
@@ -554,6 +565,9 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
 
   /** Snapshot pending work without waiting for durability or starting I/O. */
   getDiagnostics?(): StorageDiagnostics;
+
+  /** The sizes of the structures held across every open space. */
+  getSizes?(): StorageSizes;
 
   /**
    * Whether any registered commit is still unconfirmed. Every write flows
@@ -1415,6 +1429,16 @@ export interface IStorageTransaction {
   derivedWrites?: boolean;
 
   /**
+   * The first user- or session-scoped instance, as `<space>/<scope>/<id>`,
+   * that this transaction read through a link while the instance was missing
+   * and another derivation registered in the same runtime writes the
+   * document. Set by link resolution on a serving runtime only, where such an
+   * instance is one the serving loop has not produced yet, and read by the
+   * reactive action's commit, which a run that read one does not make.
+   */
+  unproducedScopedInstance?: string;
+
+  /**
    * The scope INSTANCE identity this transaction's scoped reads and writes
    * resolve against when it is NOT the storage manager's own session
    * (server-execution v2 stage A — OW17's tx→replica identity seam,
@@ -1947,6 +1971,12 @@ export interface TransactionSealDestination {
    * pass for a transaction this returns `true` for: writes that reach no
    * store and no reader cross no boundary. Absent, the commit treats no
    * transaction as discarded, and leaves what becomes of its writes to `seal`.
+   *
+   * The answer is for the moment it is asked and binds nothing: a destination
+   * may answer differently later, in either direction, and `seal` decides for
+   * itself when it runs. A commit therefore asks again right before it seals,
+   * in the same synchronous stretch as the seal's own decision, rather than
+   * trusting what a preparation ahead of it was told.
    */
   discards?(tx: IExtendedStorageTransaction): boolean;
 
@@ -3213,6 +3243,9 @@ export interface ISpaceReplica extends ISpace {
   /** Existing session progress without starting I/O or awaiting commits. */
   getDiagnostics?(): SpaceStorageDiagnostic;
 
+  /** The sizes of the structures this replica holds. */
+  getSizes?(): SpaceStorageSizes;
+
   /**
    * Return a state for the requested entry or returns `undefined` if replica
    * does not have it. The state carries `since`, the commit sequence the
@@ -3339,7 +3372,9 @@ export interface ISpaceReplica extends ISpace {
    * is watched and delivered, no local write to it is pending, and its value
    * is neither a refused write folded locally nor an own write promoted past
    * what a push has covered. An absent document a push delivered is
-   * confirmed.
+   * confirmed, and so is a content-addressed document in space scope holding
+   * the content its id names that the replica's own accepted commit stored,
+   * whether or not a frame delivered it.
    */
   isConfirmedDocument?(
     id: URI,
@@ -3506,6 +3541,23 @@ export interface ISpaceReplica extends ISpace {
     coverClass?: CommitClass;
     pendingLocalSeqs: number[];
   };
+
+  /**
+   * Resolves once every client speculation layer standing over the document
+   * now (entries sealed `speculative: true` — speculation.md §1) has settled,
+   * by retirement or withdrawal; `undefined` when none stands. A layer sealed
+   * after the call is not waited for.
+   *
+   * A layer masks the document's durable state, so a change to that state
+   * beneath it changes nothing visible and notifies nothing, and neither does
+   * its retirement over a durable value equal to its own. A reader of the
+   * durable view waits on this to learn of either.
+   */
+  whenSpeculationSettled?(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): Promise<void> | undefined;
 
   /**
    * The store seq a local commit's accept committed at (speculation.md

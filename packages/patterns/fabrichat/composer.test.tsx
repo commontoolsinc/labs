@@ -19,15 +19,7 @@ import {
   hasText,
   propValue,
 } from "../test/vnode-helpers.ts";
-import {
-  type ActivityCounters,
-  type MessageRecord,
-  type MessagesValue,
-  type ReactionList,
-  type RequestMemo,
-  type SentActivity,
-  type UsedTime,
-} from "./room-records.tsx";
+import { type MessageRecord, type MessagesValue } from "./room-records.tsx";
 import { FabriChatRoomCore } from "./room.tsx";
 import {
   CHAT_SEND_ACTION,
@@ -63,11 +55,6 @@ export default pattern(() => {
     myProfile: aliceProfile,
     about: { kind: "group" as const },
     messages,
-    reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
-    requests: Writable.of<RequestMemo[]>([]),
-    usedTimes: Writable.of<UsedTime[]>([]),
-    activity: Writable.of<SentActivity[]>([]),
-    counters: Writable.of<ActivityCounters[]>([]),
   } as RoomArg);
 
   return {
@@ -137,9 +124,48 @@ export default pattern(() => {
       // replies.
       { action: action(() => clickButton(alice[UI], "Thread")) },
       {
+        action: action(() =>
+          fireEvent(
+            findNodeByProp(alice[UI], "inputId", "fabrichat-thread-message"),
+            "onInput",
+            typed("   "),
+          )
+        ),
+      },
+      {
+        action: alice.threadComposerSend,
+        event: typed("   "),
+        trustedUi: sendGesture,
+      },
+      {
+        assertion: assert(() =>
+          propValue(
+              findNodeByProp(alice[UI], "inputId", "fabrichat-thread-message"),
+              "value",
+            ) === "   " && messages.get().length === 3
+        ),
+      },
+      {
+        action: action(() =>
+          fireEvent(
+            findNodeByProp(alice[UI], "inputId", "fabrichat-thread-message"),
+            "onInput",
+            typed("In the thread"),
+          )
+        ),
+      },
+      {
         action: alice.threadComposerSend,
         event: typed("In the thread"),
         trustedUi: sendGesture,
+      },
+      {
+        assertion: assert(() =>
+          propValue(
+              findNodeByProp(alice[UI], "inputId", "fabrichat-thread-message"),
+              "value",
+            ) === "" && messages.get().length === 4
+        ),
       },
       // The reply once sent, the main composer composes none.
       {
@@ -153,6 +179,60 @@ export default pattern(() => {
             "Hello@- |   Preserved  @- | Quoting@main | In the thread@thread | Plain@-"
         ),
       },
+      // A submitted event may arrive after the next draft is already typed.
+      {
+        action: action(() =>
+          fireEvent(
+            findNodeByProp(alice[UI], "inputId", "fabrichat-message"),
+            "onInput",
+            typed("next draft"),
+          )
+        ),
+      },
+      {
+        action: alice.composerSend,
+        event: typed("previous draft"),
+        trustedUi: sendGesture,
+      },
+      {
+        assertion: assert(() =>
+          propValue(
+              findNodeByProp(alice[UI], "inputId", "fabrichat-message"),
+              "value",
+            ) === "next draft" &&
+          messages.get().length === 6 &&
+          (messages.get()[5] as MessageRecord).body === "previous draft"
+        ),
+      },
+      {
+        action: action(() =>
+          fireEvent(
+            findNodeByProp(alice[UI], "inputId", "fabrichat-thread-message"),
+            "onInput",
+            typed("next draft"),
+          )
+        ),
+      },
+      {
+        action: alice.threadComposerSend,
+        event: typed("previous draft"),
+        trustedUi: sendGesture,
+      },
+      {
+        assertion: assert(() =>
+          propValue(
+              findNodeByProp(alice[UI], "inputId", "fabrichat-thread-message"),
+              "value",
+            ) === "next draft" &&
+          messages.get().length === 7 &&
+          (messages.get()[6] as MessageRecord).body === "previous draft" &&
+          (messages.get()[6] as MessageRecord).replyTo?.shownIn === "thread"
+        ),
+      },
+    ],
+    expectRuntimeErrors: [
+      "This send has no text in `body`.",
+      "This send has no text in `body`.",
     ],
   };
 });

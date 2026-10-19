@@ -32,6 +32,11 @@
  *
  * Every body is derived from its index, so two rooms of one size carry the
  * same text and their timings are comparable.
+ *
+ * Each act waits for its effect in the acting member's copy of the room. A
+ * room handler that refuses an act throws instead of writing, and the error
+ * the member's runtime reports for it ends that wait, so the seed fails with
+ * the refusal's reason rather than waiting for an effect that never comes.
  */
 
 import type { DID } from "@commonfabric/identity";
@@ -273,21 +278,63 @@ export function reactedMessages(
 }
 
 /**
- * Resolves with the value of `cell` once `holds` accepts it, reading each
- * value the cell takes rather than asking again on a schedule.
+ * The waits of one member's runtime for the effects of what the member did,
+ * each ended by whichever comes first: the effect, or an error an action of
+ * that runtime reports. A handler that refuses an act throws rather than
+ * writing, so the effect a wait looks for would never arrive, and the error is
+ * the only word of the refusal there is.
  */
-function until<T>(
-  cell: Cell<T | undefined>,
-  holds: (value: T | undefined) => boolean,
-): Promise<T> {
-  const { promise, resolve } = Promise.withResolvers<T>();
-  let held = false;
-  const cancel = cell.sink((value) => {
-    if (held || !holds(value)) return;
-    held = true;
-    resolve(value as T);
-  });
-  return promise.finally(cancel);
+export class MemberWaits {
+  #pending = new Set<(error: Error) => void>();
+
+  /**
+   * Constructs an instance which ends the pending waits on the errors
+   * `scheduler` reports. A scheduler keeps every handler it is given, so one
+   * instance serves the whole life of its runtime.
+   */
+  constructor(scheduler: { onError(handler: (error: Error) => void): void }) {
+    scheduler.onError((error) => {
+      for (const fail of [...this.#pending]) fail(error);
+    });
+  }
+
+  /**
+   * Resolves with the value of `cell` once `holds` accepts it, reading each
+   * value the cell takes rather than asking again on a schedule.
+   *
+   * @throws Error naming `what`, with the action's error as its `cause`, when
+   *   an action of the runtime fails before the value arrives.
+   */
+  until<T>(
+    what: string,
+    cell: {
+      sink(callback: (value: T | undefined) => void): () => void;
+    },
+    holds: (value: T | undefined) => boolean,
+  ): Promise<T> {
+    const { promise, resolve, reject } = Promise.withResolvers<T>();
+    let settled = false;
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(
+        new Error(
+          `${what} did not happen: an action failed with: ${error.message}`,
+          { cause: error },
+        ),
+      );
+    };
+    this.#pending.add(fail);
+    const cancel = cell.sink((value) => {
+      if (settled || !holds(value)) return;
+      settled = true;
+      resolve(value as T);
+    });
+    return promise.finally(() => {
+      this.#pending.delete(fail);
+      cancel();
+    });
+  }
 }
 
 /**
@@ -326,6 +373,9 @@ interface MemberSession {
 
   /** Requests this member has sent, which their request ids count. */
   sent: number;
+
+  /** The member's waits for the effects of what they did. */
+  waits: MemberWaits;
 }
 
 /**
@@ -342,6 +392,7 @@ async function openMember(
     apiUrl,
     identity,
   });
+  const waits = new MemberWaits(controller.runtime.scheduler);
   try {
     const home = (await controller.ensureDefaultPattern()).getCell();
     await controller.runtime.idle();
@@ -356,9 +407,13 @@ async function openMember(
       await sendTrusted(controller, home.key("createProfile"), {
         target: { value: memberName(index) },
       }, PROFILE_CREATE);
-      await until(profiles, (list) => (list ?? []).length > 0);
+      await waits.until(
+        `${memberName(index)}'s profile creation`,
+        profiles,
+        (list) => (list ?? []).length > 0,
+      );
     }
-    return { index, identity, controller, home, sent: 0 };
+    return { index, identity, controller, home, sent: 0, waits };
   } catch (error) {
     await controller.dispose();
     throw error;
@@ -400,7 +455,8 @@ async function createRoom(
     title: ROOM_TITLE,
     members: others.map((identity) => identity.did()),
   }, CHAT_START);
-  const outcome = await until(
+  const outcome = await starter.waits.until(
+    `${memberName(starter.index)}'s creation of the room`,
     manager.key("requests").key(requestId) as Cell<
       { status?: string; reason?: string } | undefined
     >,
@@ -439,40 +495,33 @@ function countOf(member: MemberSession): Cell<number | undefined> {
 }
 
 /**
- * Sends one message as `member` and waits until the room has recorded it, and
- * until their copy of the room counts `total` entries.
+ * Sends one message as `member`, which `what` names, and waits until their
+ * copy of the room counts `total` entries, which it does once the room has
+ * recorded it.
  */
 async function writeAs(
   member: MemberSession,
+  what: string,
   event: Record<string, unknown>,
   total: number,
 ): Promise<void> {
-  const requestId = `seed-${member.index}-${member.sent++}`;
-  await sendTrusted(member.controller, member.room!.key("sendMessage"), {
-    requestId,
-    ...event,
-  }, CHAT_SEND);
-  await settleRequest(member, requestId);
-  await until(countOf(member), (count) => (count ?? 0) >= total);
+  member.sent++;
+  await sendTrusted(
+    member.controller,
+    member.room!.key("sendMessage"),
+    event,
+    CHAT_SEND,
+  );
+  await member.waits.until(
+    `${memberName(member.index)}'s send of ${what}`,
+    countOf(member),
+    (count) => (count ?? 0) >= total,
+  );
 }
 
-/** Waits for the room's outcome of `member`'s request, and throws a refusal. */
-async function settleRequest(
-  member: MemberSession,
-  requestId: string,
-): Promise<void> {
-  const outcome = await until(
-    member.room!.key("messageRequests").key(requestId) as Cell<
-      { status?: string; code?: string; reason?: string } | undefined
-    >,
-    (value) => value?.status !== undefined,
-  );
-  if (outcome.status !== "done") {
-    throw new Error(
-      `The room refused ${memberName(member.index)}'s request ${requestId}: ` +
-        `${outcome.code ?? "?"} ${outcome.reason ?? ""}`,
-    );
-  }
+/** How many reactions `message` holds, as `member`'s copy of the room has it. */
+function reactionCountOf(message: Cell<unknown>): Cell<number | undefined> {
+  return message.key("reactions").key("length") as Cell<number | undefined>;
 }
 
 /**
@@ -486,14 +535,31 @@ async function reactAs(
   main: number,
   written: number,
 ): Promise<void> {
-  const requestId = `seed-${member.index}-${member.sent++}`;
-  await until(countOf(member), (count) => (count ?? 0) >= written);
+  member.sent++;
+  await catchUp(member, written);
+  const message = await mainMessage(member, index, main);
+  const before = (await reactionCountOf(message).pull()) ?? 0;
   await sendTrusted(member.controller, member.room!.key("sendReaction"), {
-    requestId,
-    message: await mainMessage(member, index, main),
+    message,
     emoji: SEEDED_REACTION,
   }, CHAT_REACT);
-  await settleRequest(member, requestId);
+  await member.waits.until(
+    `${memberName(member.index)}'s reaction to message ${index + 1}`,
+    reactionCountOf(message),
+    (count) => (count ?? 0) > before,
+  );
+}
+
+/**
+ * Waits until `member`'s copy of the room counts `written` entries, so that
+ * what they do next reads the room as it stands.
+ */
+function catchUp(member: MemberSession, written: number): Promise<number> {
+  return member.waits.until(
+    `${memberName(member.index)}'s catch-up to ${written} entries`,
+    countOf(member),
+    (count) => (count ?? 0) >= written,
+  );
 }
 
 /** The main conversation's message at `index`, as `member`'s room holds it. */
@@ -603,8 +669,8 @@ export async function seedFabrichatRoom(
         // The author's copy has every earlier message before they write, so
         // their write reads the room as it stands rather than conflicting
         // with the message before it.
-        await until(countOf(author), (count) => (count ?? 0) >= written);
-        await writeAs(author, {
+        await catchUp(author, written);
+        await writeAs(author, `message ${index + 1}`, {
           target: { value: messageBody(index) },
         }, ++written);
         options.onMessage?.(written, total);
@@ -623,8 +689,8 @@ export async function seedFabrichatRoom(
     for (const [thread, root] of roots.entries()) {
       for (let reply = 0; reply < repliesPerThread; reply++) {
         const author = reply % 2 === 0 ? last : helper;
-        await until(countOf(author), (count) => (count ?? 0) >= written);
-        await writeAs(author, {
+        await catchUp(author, written);
+        await writeAs(author, `reply ${reply + 1} in thread ${thread + 1}`, {
           target: { value: replyBody(thread, reply) },
           replyTo: {
             message: await mainMessage(author, root, messageCount),
@@ -653,7 +719,8 @@ export async function seedFabrichatRoom(
         );
       }
       const joined = acted.size + 1;
-      await until(
+      await visitor.waits.until(
+        `${memberName(index)}'s join by visit`,
         visitor.room!.key("roster") as Cell<unknown[] | undefined>,
         (list) => (list ?? []).length >= joined,
       );
@@ -662,7 +729,11 @@ export async function seedFabrichatRoom(
     }
 
     const roster = helper.room!.key("roster") as Cell<unknown[] | undefined>;
-    await until(roster, (list) => (list ?? []).length >= memberCount);
+    await helper.waits.until(
+      `${memberName(helper.index)}'s view of the full roster`,
+      roster,
+      (list) => (list ?? []).length >= memberCount,
+    );
 
     for (const member of [...open]) await release(member);
     return {
@@ -737,11 +808,14 @@ export async function seedFabrichatRoomOutOfProcess(
         `--reaction-every=${options.reactionEvery ?? DEFAULT_REACTION_EVERY}`,
         `--out=${output}`,
       ],
+      // The child's progress, and the reason it gives up, reach the caller's
+      // log as they happen rather than only once the child has exited.
+      stderr: "inherit",
     });
     if (!result.success) {
       throw new Error(
         `Seeding a ${options.messageCount}-message room failed ` +
-          `(exit ${result.code}):\n${new TextDecoder().decode(result.stderr)}`,
+          `(exit ${result.code}); the seed's own stderr above says why`,
       );
     }
     return JSON.parse(await Deno.readTextFile(output)) as FabrichatRoomFixture;

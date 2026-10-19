@@ -835,6 +835,9 @@ type CalculatorRequest = {
       const stringOrUnknown = {
         anyOf: [{ type: "string" }, { type: "unknown" }],
       };
+      const unknownOrString = {
+        anyOf: [{ type: "unknown" }, { type: "string" }],
+      };
       expect(
         await schemaOf(
           alias(
@@ -858,7 +861,7 @@ type CalculatorRequest = {
         ),
       ).toEqual({
         type: "object",
-        properties: { x: stringOrUnknown },
+        properties: { x: unknownOrString },
         required: ["x"],
       });
       expect(
@@ -871,7 +874,7 @@ type CalculatorRequest = {
         ),
       ).toEqual({
         type: "object",
-        properties: { x: { type: "unknown" }, y: stringOrUnknown },
+        properties: { x: { type: "unknown" }, y: unknownOrString },
         required: ["y"],
       });
       expect(
@@ -2100,7 +2103,6 @@ type CalculatorRequest = {
         ),
       ).toEqual({
         anyOf: [
-          fooAndBar,
           {
             type: "object",
             properties: {
@@ -2110,6 +2112,7 @@ type CalculatorRequest = {
             },
             required: ["x", "y", "w"],
           },
+          fooAndBar,
         ],
       });
       expect(
@@ -2430,13 +2433,13 @@ type CalculatorRequest = {
         anyOf: [
           {
             type: "object",
-            properties: { x: { type: "unknown" }, y: { type: "string" } },
-            required: ["x", "y"],
+            properties: { z: { type: "number" } },
+            required: ["z"],
           },
           {
             type: "object",
-            properties: { z: { type: "number" } },
-            required: ["z"],
+            properties: { x: { type: "unknown" }, y: { type: "string" } },
+            required: ["x", "y"],
           },
         ],
       });

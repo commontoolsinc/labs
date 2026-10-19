@@ -31,8 +31,7 @@ interface ChatThreadSummary {
   of the thread each replies to. It is the number of messages a window onto
   the thread shows besides the root, when the window holds the whole thread. A
   `"main"` reply to the root is in no thread, and isn't counted.
-- **`latestReplyAt`** is the greatest `sentAt` among those messages. Since
-  `sentAt` is unique in the room, it also identifies that reply.
+- **`latestReplyAt`** is the greatest `sentAt` among those messages.
 
 ## Deleted and obliterated replies
 

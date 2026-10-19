@@ -64,10 +64,8 @@ describe("node-binding-memo", () => {
         bindings.bindingFor(b, () => second.id);
         expect(first.id.length + second.id.length).toBeLessThan(300);
         expect(bindings.size).toBe(1);
-        expect(bindings.takeBindingFor(a, () => "of:evicted"))
-          .toBe("of:evicted");
-        expect(bindings.takeBindingFor(b, () => "of:missing"))
-          .toBe(second.id);
+        expect(bindings.bindingFor(a, () => "of:evicted")).toBe("of:evicted");
+        expect(bindings.bindingFor(b, () => "of:missing")).toBe(second.id);
       } finally {
         store.dispose();
       }
@@ -110,6 +108,37 @@ describe("node-binding-memo", () => {
       expect(second).toBe(first);
     });
 
+    it("returns the held binding for a pattern named by one content identity and a node by its position", () => {
+      // Two pattern objects of one content identity hold the same nodes at
+      // the same positions, so a subject naming the pattern by that
+      // identity and the node by its position reaches one binding from
+      // either object.
+      const bindings = memo();
+      const first = bindings.bindingFor(
+        subject({ node: 2, pattern: "fid1:tree\0default" }),
+        () => ({ n: 1 }),
+      );
+      const second = bindings.bindingFor(
+        subject({ node: 2, pattern: "fid1:tree\0default" }),
+        () => ({ n: 2 }),
+      );
+
+      expect(second).toBe(first);
+      expect(bindings.size).toBe(1);
+    });
+
+    it("computes a binding for a node position apart from one for an object", () => {
+      // A position and an object standing for a node never share a key,
+      // whatever number the memo gives the object.
+      const bindings = memo();
+      const node = {};
+      bindings.bindingFor(subject({ node }), () => ({ n: 1 }));
+
+      expect(bindings.bindingFor(subject({ node: 0 }), () => ({ n: 2 })).n)
+        .toBe(2);
+      expect(bindings.size).toBe(2);
+    });
+
     describe("binds again for a subject that differs", () => {
       // Each case binds one subject, then a second that differs from it in
       // the one member named, and reads what the second call returns.
@@ -117,8 +146,11 @@ describe("node-binding-memo", () => {
       const base = subject();
       const cases: [string, Partial<NodeBindingSubject>][] = [
         ["node", { node: {} }],
+        ["node position", { node: 1 }],
         ["pattern", { pattern: {} }],
+        ["pattern identity", { pattern: "fid1:other\0default" }],
         ["implementation", { implementation: {} }],
+        ["implementation identity", { implementation: "fid1:child\0row" }],
         ["variant", { variant: "raw:map" }],
         ["result document", { resultLink: linkTo("other") }],
         ["result path", { resultLink: linkTo("result", { path: ["a"] }) }],
@@ -226,49 +258,6 @@ describe("node-binding-memo", () => {
 
       expect(bindings.size).toBe(1);
       expect(bindings.bindingFor(b, () => ({ n: 7 })).n).toBe(1_500);
-    });
-  });
-
-  describe("takeBindingFor()", () => {
-    it("returns the binding held and holds none for the subject afterwards", () => {
-      const bindings = memo();
-      const bound = subject();
-      const held = bindings.bindingFor(bound, () => ({ n: 1 }));
-      const taken = bindings.takeBindingFor(bound, () => ({ n: 2 }));
-
-      expect(taken).toBe(held);
-      expect(bindings.size).toBe(0);
-      expect(bindings.bindingFor(bound, () => ({ n: 3 })).n).toBe(3);
-    });
-
-    it("returns what `bind` computes for a subject it holds nothing for, and holds nothing", () => {
-      const bindings = memo();
-      const bound = subject();
-
-      expect(bindings.takeBindingFor(bound, () => ({ n: 4 })).n).toBe(4);
-      expect(bindings.size).toBe(0);
-    });
-
-    it("leaves the bindings of other subjects held", () => {
-      const bindings = memo();
-      const [taken, kept] = [subject(), subject()];
-      bindings.bindingFor(taken, () => ({ n: 1 }));
-      const held = bindings.bindingFor(kept, () => ({ n: 2 }));
-      bindings.takeBindingFor(taken, () => ({ n: 3 }));
-
-      expect(bindings.size).toBe(1);
-      expect(bindings.bindingFor(kept, () => ({ n: 4 }))).toBe(held);
-    });
-
-    it("computes a binding once the schema registry has cleared", () => {
-      const bindings = memo();
-      const bound = subject();
-      bindings.bindingFor(bound, () => ({ n: 1 }));
-      // The last lease out clears the registry, which starts a new epoch.
-      acquireSchemaRegistryLease()();
-
-      expect(bindings.takeBindingFor(bound, () => ({ n: 2 })).n).toBe(2);
-      expect(bindings.size).toBe(0);
     });
   });
 

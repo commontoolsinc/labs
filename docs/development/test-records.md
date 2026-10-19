@@ -453,6 +453,14 @@ builds the preload argument and those permissions together, given the
 invocation's own flags, the spool, the repository root, and the skip
 list where there is one.
 
+The preload also listens for the `error` and `unhandledrejection` events,
+without handling them. Either event before a file's hooks and tests begin can
+mean the file's module stopped part way through loading, after registering only
+some of its tests, so the preload marks that file's names as interrupted. A lane
+then does not read them as everything the file holds. The preload registers a
+`Deno.test.beforeAll` hook of its own, which Deno runs once the module has
+settled, to know when that is.
+
 It grants the reads as one `--allow-read` list and the write as one
 `--allow-write` list, and leaves out a list for a permission the flags
 already hold everywhere. Deno merges two path lists for one permission,
@@ -543,7 +551,9 @@ driving the same function does not, since the files it hands over are that
 test's fixtures. `recordsSpooledBy` from
 `@commonfabric/test-support/records` pins both halves of that: it points
 recording at a fresh spool, runs the function, and hands back every record
-the function left there.
+the function left there. It throws instead when the function left a record
+line the record parser refuses, since every reader of the store drops that
+line.
 
 A harness a test drives as a child process takes it the other way round,
 since the child reads its own environment: the test hands the child an
@@ -551,6 +561,18 @@ empty `CF_TEST_RECORDS_DIR`, which is recording off. `tasks/integration.ts`
 does that for the `cf` children whose files it times itself, and
 `packages/deno-web-test/test/utils.ts` for the fixture projects it runs the
 browser harness over.
+
+Two narrower checks back the rule up. The pattern runner and the browser
+harness record nothing for a test file that no repository holds, which is
+what a fixture in a temporary directory is, whatever spool the run
+inherited. And the record parser every reader shares drops a record whose
+`file`, or whose pattern test name, is absolute or climbs above the
+repository root. The parser cannot tell every fixture's record from a real
+one: a run whose working directory is the fixture's own directory names its
+files without climbing at all. Neither check reaches a fixture kept inside
+the repository, such as those under `packages/cli/test/fixtures`. For those,
+the caller's decision not to record is the only thing that keeps them out of
+the store.
 
 The child inherits every variable the test's own process carries, so a
 test that starts one names each recording variable it cares about,

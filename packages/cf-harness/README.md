@@ -202,13 +202,22 @@ What works today:
     space. A handle `describe_handle` has not answered for in this run is
     refused, so a value is read after its shape was looked at; the handle table
     records the answer on the entry. A link at the read position is followed; a
-    link inside the value returns as the linked document's handle. What it reads
-    is measured through its own transaction against the release ceiling with the
-    model as the sink, the measurement `call_verb` and `run_pattern` apply to
-    their results; a refused read names the offending atoms and that
-    `delegate_task` can hand the handle to a subagent; a value above the
-    session's read ceiling, which subagents inherit, is refused naming that
-    ceiling. A released read's label joins the run's model context)
+    link inside the value returns as the linked document's handle. A position in
+    a derived document no run has written yet runs the piece behind the handle,
+    as `call_verb` does, and reads what it derives; a run not authorized for
+    side effects, as the policy gate decides for a side-effect tool, is refused
+    instead, naming that the piece has not run. Running it commits the piece's
+    derived values to the piece's space, a foreign one included, where a commit
+    the session may not make is refused after the value was read locally; a
+    handle on such a document itself names no piece to run, and the refusal says
+    to read it through the piece's handle. "Holds nothing at that path" means
+    the path does not exist. What it reads is measured through its own
+    transaction against the release ceiling with the model as the sink, the
+    measurement `call_verb` and `run_pattern` apply to their results; a refused
+    read names the offending atoms and that `delegate_task` can hand the handle
+    to a subagent; a value above the session's read ceiling, which subagents
+    inherit, is refused naming that ceiling and the atoms the value carries. A
+    released read's label joins the run's model context)
   - `search_patterns` (present only when the run configures a pattern index with
     `--pattern-index-url`; finds published patterns by hashtag or free text and
     reports each one's kind, evidence quality, declared shapes, and import
@@ -2033,18 +2042,22 @@ references are leads until inspected.
 A fresh CLI run tags its task before assembling the prompt
 (`src/task-classification.ts`) with every kind of work it calls for: `respond`,
 `find`, `act`, `pieces`, `author`. A keyword rule reads the task and what the
-run holds (input cells, attached patterns, a browser); when no rule applies, one
-call to the cheap research model tags it; a failed call, a no-tag answer, or a
-five-second timeout falls back to every tag, and the timeout cancels the call.
-The tags, the path that chose them (`rule`, `model`, `fallback`), a fallback's
-reason (`no-model`, `no-tag`, `model-error`, `timeout`), and the
-classification's wall time are recorded as `taskClassification` in
-`run-state.json` and `run-report.json`; a model call's attempts and tokens land
-in the run report and the run's total usage like research's. Only an `author`
-task gets the opening research pass. The parent's orientation follows the tags:
-`pieces` and `author` add the code-authoring framing (reading docs and skills,
-repairing code, acquiring a skill by its id), `pieces` a short held-pieces block
-(the input cells are the pieces of the loom the person is in; `describe_handle`,
+run holds (input cells, attached patterns, a browser). A task asking to use,
+call, run or invoke a verb, or to add something to "the" or "this" thing other
+than a loom, while the run holds input cells, is `pieces` and `act`. When no
+rule applies, the classifier assumes rather than asking a model: `find`, plus
+`pieces` when the run holds input cells, plus `act` when it has a browser and
+the task names an action verb the rule knows. A misread task still reaches what
+it needs, since the tool allow-list does not narrow; it takes longer. A
+classifier that throws falls back to every tag. The tags, the path that chose
+them (`rule`, `assumed`, `fallback`), and the classification's wall time are
+recorded as `taskClassification` in `run-state.json` and `run-report.json`.
+`scripts/task-classification-eval.ts` scores the rule against a cheap-model
+classifier over the playtest asks, by hand. Only an `author` task gets the
+opening research pass. The parent's orientation follows the tags: `pieces` and
+`author` add the code-authoring framing (reading docs and skills, repairing
+code, acquiring a skill by its id), `pieces` a short held-pieces block (the
+input cells are the pieces of the loom the person is in; `describe_handle`,
 `read_value`, and `call_verb` read and act on them) where any other task gets
 one sentence saying handles may be held, `author` alone the piece-targeting
 guidance, the instruction to verify an effect, and the revision-verification
@@ -2055,6 +2068,24 @@ opening-research rule, `act`, `pieces` and `author` delegation, `find` and `act`
 the Weaver command guidance, and `act` the browser guidance. The tool allow-list
 does not narrow, so a task given too few tags can still reach what it needs; a
 run with no classification carries all of the orientation.
+
+A tool descriptor is a contract: its name, its parameters with one-line
+descriptions, and a sentence or two on what the tool does and returns. Task tags
+never change them, so runs offering the same tools on the same runtime send the
+same descriptor bytes for every task, in the prefix their requests share. The
+rules for using a tool are guidance in `src/tool-guidance.ts`, opened as context
+messages for the tools the session's backings carry and fitted to the tags with
+the rest of the orientation: `author` gets writing, running and naming patterns
+(the confidentiality ceiling, a query's `LIMIT`, a composed pattern's error
+branch, pending results, `resultSchema`) and `pattern-author` delegation;
+`author`, `find` and `pieces` get building on research (`followUpTo`, naming the
+handle); `pieces` gets reading and acting on pieces (verbs, `fill`,
+`rowLabelReads`, research handles); `find` and `act` get the host's commands
+(`loomId`, `expectedVersion`, batching, `not_granted`) and how loom retrieval
+withholds a row; `find`, `act` and `pieces` get when to resolve a named piece,
+which `author` has inside piece targeting. A rule needed only once it fires is
+left to the tool's refusal or result, which explains itself. A subagent whose
+profile holds `run_pattern` carries its rules in its own system prompt.
 
 Opening research has a durable `openingResearch` checkpoint in `run-state.json`.
 The driver records pending intent before invocation, then records whether a kit
@@ -3742,6 +3773,14 @@ cell-labels snapshot is not among them, so demanding one under that citation was
 one check answering to two authorities, which is the shape AUD-15 and AUD-15a
 are already split along. AUD-9 now expresses the six and nothing else; AUD-24
 carries the snapshot as `extends`, and a finding from it renders as ours.
+
+**AUD-25 counts the links the snapshot's reader found.** Each cell record lists
+the path of every link its reader found in the cell, as `linkPaths`, and those
+are the links the check counts. A reference leaves a label entry of its own only
+where it carries a label, so a result that links its rows bare has no such entry
+to count, and the list is what keeps that run from reading as one whose cells
+hold no link. A record that lists no link paths is read by the entries a link's
+own label left.
 
 [audit/citations.ts](audit/citations.ts) holds that table and
 `audit/test/citation-drift.test.ts` reads every cited document and requires each

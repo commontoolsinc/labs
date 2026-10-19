@@ -18,15 +18,7 @@ import {
   VIEWS,
   Writable,
 } from "commonfabric";
-import {
-  type ActivityCounters,
-  type MessageRecord,
-  type MessagesValue,
-  type ReactionList,
-  type RequestMemo,
-  type SentActivity,
-  type UsedTime,
-} from "./room-records.tsx";
+import { type MessageRecord, type MessagesValue } from "./room-records.tsx";
 import { profileGesture, testRoomProfile } from "./room-test-fixture.ts";
 import { FabriChatMessageRow } from "./message-row.tsx";
 import { type ChatMessageRights, FabriChatRoomCore } from "./room.tsx";
@@ -38,7 +30,6 @@ import {
   CHAT_SEND_ACTION,
   CHAT_SEND_SURFACE,
   type ChatProfile,
-  type MessageActOutcome,
 } from "./schemas.tsx";
 
 type RoomArg = Parameters<typeof FabriChatRoomCore>[0];
@@ -73,19 +64,6 @@ const bodies = (messages: Cell<MessagesValue>): string =>
       : "<deleted>"
   ).join(" | ");
 
-/** The outcome `outcomes` records under `id`, as `status/code`. */
-const outcomeOf = (
-  outcomes: Record<string, MessageActOutcome> | undefined,
-  id: string,
-): string => {
-  const outcome = outcomes?.[id];
-  return outcome === undefined
-    ? "none"
-    : outcome.status === "refused"
-    ? `refused/${outcome.code}`
-    : outcome.status;
-};
-
 // The view's rights for the message at `index` of `messages`.
 const rightsAt = (
   rights: readonly ChatMessageRights[],
@@ -107,11 +85,6 @@ export const setup = pattern(() => {
     about: { kind: "group" as const, title: "Team" },
     ownersMayObliterate: false,
     messages: groupMessages,
-    reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
-    requests: Writable.of<RequestMemo[]>([]),
-    usedTimes: Writable.of<UsedTime[]>([]),
-    activity: Writable.of<SentActivity[]>([]),
-    counters: Writable.of<ActivityCounters[]>([]),
   };
 
   // A direct room whose OWNERs may obliterate.
@@ -120,11 +93,6 @@ export const setup = pattern(() => {
     about: { kind: "direct" as const },
     ownersMayObliterate: true,
     messages: directMessages,
-    reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
-    requests: Writable.of<RequestMemo[]>([]),
-    usedTimes: Writable.of<UsedTime[]>([]),
-    activity: Writable.of<SentActivity[]>([]),
-    counters: Writable.of<ActivityCounters[]>([]),
   };
   return { groupRecords, directRecords };
 });
@@ -138,22 +106,12 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
     about: setup.groupRecords.about,
     ownersMayObliterate: setup.groupRecords.ownersMayObliterate,
     messages: setup.groupRecords.messages,
-    reactionLists: setup.groupRecords.reactionLists,
-    requests: setup.groupRecords.requests,
-    usedTimes: setup.groupRecords.usedTimes,
-    activity: setup.groupRecords.activity,
-    counters: setup.groupRecords.counters,
     myProfile: profile,
   } as RoomArg);
   const direct = FabriChatRoomCore({
     about: setup.directRecords.about,
     ownersMayObliterate: setup.directRecords.ownersMayObliterate,
     messages: setup.directRecords.messages,
-    reactionLists: setup.directRecords.reactionLists,
-    requests: setup.directRecords.requests,
-    usedTimes: setup.directRecords.usedTimes,
-    activity: setup.directRecords.activity,
-    counters: setup.directRecords.counters,
     myProfile: profile,
   } as RoomArg);
   return {
@@ -186,11 +144,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       about: groupRecords.about,
       ownersMayObliterate: groupRecords.ownersMayObliterate,
       messages: groupRecords.messages,
-      reactionLists: groupRecords.reactionLists,
-      requests: groupRecords.requests,
-      usedTimes: groupRecords.usedTimes,
-      activity: groupRecords.activity,
-      counters: groupRecords.counters,
       myProfile: bobProfile,
     } as RoomArg,
   );
@@ -199,11 +152,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       about: directRecords.about,
       ownersMayObliterate: directRecords.ownersMayObliterate,
       messages: directRecords.messages,
-      reactionLists: directRecords.reactionLists,
-      requests: directRecords.requests,
-      usedTimes: directRecords.usedTimes,
-      activity: directRecords.activity,
-      counters: directRecords.counters,
       myProfile: bobProfile,
     } as RoomArg,
   );
@@ -220,11 +168,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
     cannotWrite: false,
     isOwner: true,
     messages: groupMessages,
-    reactionLists: groupRecords.reactionLists,
-    requests: groupRecords.requests,
-    usedTimes: groupRecords.usedTimes,
-    activity: groupRecords.activity,
-    counters: groupRecords.counters,
   } as RowArg);
 
   return {
@@ -259,7 +202,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       {
         action: bobInGroup.deleteMessage,
         event: {
-          requestId: "d-hers",
           message: messageOf(groupMessages.key(0)),
         },
         trustedUi: deleteGesture,
@@ -267,24 +209,17 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       {
         action: bobInGroup.obliterateMessage,
         event: {
-          requestId: "o-hers",
           message: messageOf(groupMessages.key(0)),
         },
         trustedUi: obliterateGesture,
       },
       {
         action: bobInGroup.obliterateMessage,
-        event: { requestId: "o-his", message: messageOf(groupMessages.key(1)) },
+        event: { message: messageOf(groupMessages.key(1)) },
         trustedUi: obliterateGesture,
       },
       {
         assertion: assert(() =>
-          outcomeOf(bobInGroup.messageRequests, "d-hers") ===
-            "refused/not-allowed" &&
-          outcomeOf(bobInGroup.messageRequests, "o-hers") ===
-            "refused/not-allowed" &&
-          outcomeOf(bobInGroup.messageRequests, "o-his") ===
-            "refused/not-allowed" &&
           bodies(groupMessages) === "Alice in the group | Bob in the group"
         ),
       },
@@ -306,29 +241,22 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       {
         action: bobInDirect.deleteMessage,
         event: {
-          requestId: "d-hers",
           message: messageOf(directMessages.key(0)),
         },
         trustedUi: deleteGesture,
       },
       {
-        assertion: assert(() =>
-          outcomeOf(bobInDirect.messageRequests, "d-hers") ===
-            "refused/not-allowed" &&
-          bodies(directMessages) === "Alice in private"
-        ),
+        assertion: assert(() => bodies(directMessages) === "Alice in private"),
       },
       {
         action: bobInDirect.obliterateMessage,
         event: {
-          requestId: "o-hers",
           message: messageOf(directMessages.key(0)),
         },
         trustedUi: obliterateGesture,
       },
       {
         assertion: assert(() =>
-          outcomeOf(bobInDirect.messageRequests, "o-hers") === "done" &&
           bodies(directMessages) === "<obliterated>" &&
           principalOf(directMessages.key(0), "authored-by") ===
             principalOf(bobProfile, "represents-principal") &&
@@ -338,21 +266,16 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
         ),
       },
 
-      // Removing the same tombstone again completes without new activity.
+      // Removing the same tombstone again leaves it removed.
       {
         action: bobInDirect.obliterateMessage,
         event: {
-          requestId: "o-again",
           message: messageOf(directMessages.key(0)),
         },
         trustedUi: obliterateGesture,
       },
       {
-        assertion: assert(() =>
-          outcomeOf(bobInDirect.messageRequests, "o-again") === "done" &&
-          directRecords.activity.get().length === 1 &&
-          directRecords.activity.get()[0].seq === 2
-        ),
+        assertion: assert(() => bodies(directMessages) === "<obliterated>"),
       },
 
       // An act bound to no policy lets no OWNER obliterate, though the room's
@@ -368,6 +291,17 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
         ),
       },
       { label: "bob-done" },
+    ],
+    expectRuntimeErrors: [
+      // In the group room, Bob's deletion and obliteration of Alice's message,
+      // and his obliteration of his own.
+      "Only its author can delete a message.",
+      "Messages in this chat can't be removed.",
+      "Messages in this chat can't be removed.",
+      // In the direct room, his deletion of hers.
+      "Only its author can delete a message.",
+      // The obliteration bound to no policy.
+      "Messages in this chat can't be removed.",
     ],
   };
 });

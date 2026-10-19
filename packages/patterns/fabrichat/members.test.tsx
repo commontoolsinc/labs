@@ -4,7 +4,9 @@
  * lets OWNERs, but deletes no one else's; a member with WRITE sends but can't
  * delete or obliterate someone else's; a reader with READ is offered no way to
  * write; and someone the list leaves out sees a placement of the room as not
- * theirs. Who is in the space is the space's business, not the room's.
+ * theirs. Who is in the space is the space's business, not the room's. Each
+ * act the room refuses fails its run with a reason, and each participant
+ * requires exactly its own refusals, each by its reason.
  *
  * The test lane doesn't enforce the list, so what this checks is what the room
  * decides from the level `spaceAccess()` reports, not what the memory server
@@ -27,14 +29,9 @@ import FabriChatPlacement from "./placement.tsx";
 import { profileGesture, testRoomProfile } from "./room-test-fixture.ts";
 import { FabriChatMessageRow } from "./message-row.tsx";
 import {
-  type ActivityCounters,
   type ComposerState,
   type MessageRecord,
   type MessagesValue,
-  type ReactionList,
-  type RequestMemo,
-  type SentActivity,
-  type UsedTime,
 } from "./room-records.tsx";
 import { FabriChatRoomCore } from "./room.tsx";
 import {
@@ -73,11 +70,6 @@ const typed = (text: string) => ({ type: "click", target: { value: text } });
 /** The room's records, which every participant's room shares. */
 interface Records {
   messages: Writable<MessagesValue>;
-  reactionLists: Writable<ReactionList[]>;
-  requests: Writable<RequestMemo[]>;
-  usedTimes: Writable<UsedTime[]>;
-  activity: Writable<SentActivity[]>;
-  counters: Writable<ActivityCounters[]>;
 }
 
 /** What every session receives from the setup. */
@@ -128,11 +120,6 @@ const groupRoom = {
 export const setup = pattern(() => ({
   records: {
     messages: Writable.of<MessagesValue>([] as MessagesValue),
-    reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
-    requests: Writable.of<RequestMemo[]>([]),
-    usedTimes: Writable.of<UsedTime[]>([]),
-    activity: Writable.of<SentActivity[]>([]),
-    counters: Writable.of<ActivityCounters[]>([]),
   },
 }));
 
@@ -141,11 +128,6 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
   const profile = Writable.of<TestProfile>({ name: "Alice" });
   const records = {
     messages: setup.records.messages,
-    reactionLists: setup.records.reactionLists,
-    requests: setup.records.requests,
-    usedTimes: setup.records.usedTimes,
-    activity: setup.records.activity,
-    counters: setup.records.counters,
   };
   const room = FabriChatRoomCore(
     { myProfile: profile, ...groupRoom, ...records } as RoomArg,
@@ -171,18 +153,14 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
       {
         action: room.deleteMessage,
         event: {
-          requestId: "d-bobs",
           message: messageOf(setup.records.messages.key(1)),
         },
         trustedUi: deleteGesture,
       },
       {
         assertion: assert(() => {
-          const outcome = room.messageRequests["d-bobs"];
-          return outcome?.status === "refused" &&
-            outcome.code === "not-allowed" &&
-            bodies(setup.records.messages) ===
-              "From Alice | From Bob | Bob again";
+          return bodies(setup.records.messages) ===
+            "From Alice | From Bob | Bob again";
         }),
       },
       // An OWNER may obliterate anyone's message in a group room, whose
@@ -195,7 +173,6 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
       {
         action: room.obliterateMessage,
         event: {
-          requestId: "o-bobs",
           message: messageOf(setup.records.messages.key(1)),
         },
         trustedUi: obliterateGesture,
@@ -209,6 +186,8 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
       { assertion: assert(() => room.canSend === true) },
       { label: "alice-done" },
     ],
+    // Her refused deletion of someone else's message.
+    expectRuntimeErrors: ["Only its author can delete a message."],
   };
 });
 
@@ -218,11 +197,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
   const profile = ownProfile.profile;
   const records = {
     messages: setup.records.messages,
-    reactionLists: setup.records.reactionLists,
-    requests: setup.records.requests,
-    usedTimes: setup.records.usedTimes,
-    activity: setup.records.activity,
-    counters: setup.records.counters,
   };
   const room = FabriChatRoomCore(
     { myProfile: profile, ...groupRoom, ...records } as RoomArg,
@@ -232,6 +206,9 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
     myProfile: profile,
     inThread: false,
     kind: "group" as const,
+    // The group room's policy, as the room binds its rows to it, so that what
+    // refuses his obliteration is his access rather than a missing policy.
+    ownersMayObliterate: true,
     composer: Writable.of({}),
     // Stand-ins for what the room derives; a row's streams read none of it.
     places: {},
@@ -289,7 +266,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       {
         action: room.deleteMessage,
         event: {
-          requestId: "d-alices",
           message: messageOf(setup.records.messages.key(0)),
         },
         trustedUi: deleteGesture,
@@ -300,14 +276,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
             "From Alice | From Bob | Bob again"
         ),
       },
-      // The room records his refused deletion as one he isn't allowed.
-      {
-        assertion: assert(() => {
-          const outcome = room.messageRequests["d-alices"];
-          return outcome?.status === "refused" &&
-            outcome.code === "not-allowed";
-        }),
-      },
       // He opens the editor on his own message.
       { action: action_start_edit },
       { assertion: assert(() => editorDisplay(onHis[UI]) === "block") },
@@ -315,6 +283,13 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       { await: "alice-done" },
       // Alice obliterated it, so the editor no longer offers him an edit.
       { assertion: assert(() => editorDisplay(onHis[UI]) === "none") },
+    ],
+    // His refused deletion and obliteration of Alice's message on its row,
+    // and his refused deletion of it through the room.
+    expectRuntimeErrors: [
+      "Only its author can delete a message.",
+      "Only an owner of this chat can remove a message.",
+      "Only its author can delete a message.",
     ],
   };
 });
@@ -324,11 +299,6 @@ export const carol = pattern<{ setup: Setup }>(({ setup }) => {
   const profile = Writable.of<TestProfile>({ name: "Carol" });
   const records = {
     messages: setup.records.messages,
-    reactionLists: setup.records.reactionLists,
-    requests: setup.records.requests,
-    usedTimes: setup.records.usedTimes,
-    activity: setup.records.activity,
-    counters: setup.records.counters,
   };
   const room = FabriChatRoomCore(
     { myProfile: profile, ...groupRoom, ...records } as RoomArg,
@@ -354,11 +324,6 @@ export const stranger = pattern<{ setup: Setup }>(({ setup }) => {
   const profile = Writable.of<TestProfile>({ name: "Stranger" });
   const records = {
     messages: setup.records.messages,
-    reactionLists: setup.records.reactionLists,
-    requests: setup.records.requests,
-    usedTimes: setup.records.usedTimes,
-    activity: setup.records.activity,
-    counters: setup.records.counters,
   };
   const room = FabriChatRoomCore(
     { myProfile: profile, ...groupRoom, ...records } as RoomArg,

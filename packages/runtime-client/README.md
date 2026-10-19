@@ -93,15 +93,6 @@ decides nothing, and no verdict is reported while it stands. `cf-cfc-authorship`
 draws its badge from this helper, and a host that draws no Lit component calls
 it directly.
 
-A VDOM mount activates the persisted piece that produces its resolved target.
-The mount watches reference changes, so selecting another linked piece also
-activates that piece in the viewer's runtime. Startup runs alongside rendering;
-normal subscriptions deliver the resulting view. Unmounting cancels pending
-startup and releases the reference watcher without stopping a graph that other
-consumers may use. Cells without pattern metadata remain ordinary render data.
-View-scoped replication supplies producers through its existing demand
-lifecycle.
-
 ## Diagnosing pending writes
 
 `RuntimeClient.getStorageDiagnostics()` asks the worker for a current storage
@@ -110,7 +101,14 @@ age, affected spaces, transaction state and known local/store sequence numbers.
 Per-space snapshots include the existing session ID, replica catch-up marker,
 unsettled sequences, conflict repairs and accepted writes waiting for coverage.
 These identifiers can be correlated with memory-server traces without exporting
-cell values or credentials. Reading the snapshot starts no storage I/O.
+cell values or credentials. Each per-space snapshot also carries the space's
+`sizes`: its share of the storage counts that `getLoggerCounts().sizes.storage`
+adds across every open space, such as documents, subscriptions and watched
+documents. Reading the snapshot starts no storage I/O. `getLoggerCounts().sizes`
+goes further in two directions: `storage.bySpace` ranks the open spaces by the
+approximate size of their documents, measured across reads within a budget, and
+`ipc` counts what each of the worker's ports has carried and how many it holds
+(`null` for a processor with no client registry behind it, as a test's is).
 
 The pending count measures promise registrations, not distinct writes. A write
 and its scheduler disposition can both appear. Lists contain at most 64 entries;
@@ -152,9 +150,11 @@ handler makes that the runtime refuses, such as one whose UI contract the event
 does not satisfy, resolves `sendStrict()` all the same.
 `sendStrict(event, { awaitHandling: true })` waits for the handler's run as
 well, and rejects with the reason when that run's commit is refused, when it
-throws, and when the event is dropped or refused admission. Under server
-execution the run it waits for is the served one, whose outcome reaches the
-worker as the consequence the serving loop recorded for the event.
+throws, and when the event is dropped or refused admission. A run that finishes
+without an error resolves it, whether or not it wrote anything; a handler that
+turns an event down throws, which fails its run and rejects the send. Under
+server execution the run it waits for is the served one, whose outcome reaches
+the worker as the consequence the serving loop recorded for the event.
 
 `CellHandle.sendReviewed(event, { surface, action })` sends a reviewed action
 from a control the host draws itself, bound to one trusted surface and one

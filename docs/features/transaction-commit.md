@@ -71,7 +71,12 @@ None of these reads tells confirmed state from what the replica holds locally.
 read-only transaction that reads past any speculation overlay, so every
 document it consumes is read at one instant, and reports whether each of those
 documents is confirmed: watched and delivered, with no pending local write and
-no value the replica made up locally. Every read counts, a `sample()` as much
+no value the replica made up locally. A content-addressed schema document in
+space scope that the replica's own accepted commit stored counts as confirmed
+whether or not a frame delivered it: the server ships such a document with a document that
+refers to it, a replica is not sent its own change to a document it holds, and
+content under a content-addressed id cannot change. Every read counts, a
+`sample()` as much
 as a `get()`. When they all are confirmed and the replica can say, it also
 returns the commit sequence the read is complete through: the `toSeq` of the
 last server push the replica applied whole, so that every commit at or below it
@@ -82,6 +87,19 @@ push, after a frame it failed to apply or applied with entries quarantined, and
 while its server runs server execution or does not say whether it does, since
 a co-hosted executor's wave commits can reach a push's stamped head before
 their changes reach the push.
+
+`readDurable(runtime, read)` runs `read` the same way, in any space, and
+returns what it read past the speculation overlay: confirmed state with this
+runtime's own pending writes over it, which under server execution is what the
+server wrote rather than this runtime's preview of it. A subscription to a cell
+delivers changes to what the cell shows, which a speculation layer masks, so a
+write that arrives beneath a layer delivers nothing, and neither does the
+layer's retirement over an equal value. `readDurable()` therefore also returns
+`speculationSettled`, present when a layer stood over a document the read
+consumed, which resolves once each such layer has retired or been withdrawn
+(`ISpaceReplica.whenSpeculationSettled()`). A reader waiting for the durable
+view to say something reads again on each change its subscription delivers and
+whenever `speculationSettled` resolves.
 
 Observe `receipt.verdict` when the next step requires knowing the commit's
 fate. Use `receipt.settled` when a retry needs the repaired read basis, when a

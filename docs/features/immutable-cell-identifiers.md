@@ -77,7 +77,10 @@ Array traversal (`traverse.ts`), `resolveAsCell()` (`cell.ts`), and lazy schema
 views (`schema-view.ts`) all create native snapshots. Their read dependencies
 remain on the original mutable array element. Moving an inline element's value
 behind an immutable ID changes its addressing, not what the computation depends
-on. A link or an explicitly declared cell handle already has its own identity.
+on. `resolveAsCell()` reads the containers on its way to an element for their
+shape alone, so a transaction that resolves a cell inside a document depends on
+that element and on the keys along the path, not on the rest of the document. A
+link or an explicitly declared cell handle already has its own identity.
 
 Traversal snapshots inline object or array elements read as values. An element
 requested as a cell keeps its array-slot address. A context with
@@ -88,11 +91,17 @@ objects.
 
 ## Schemas and outbound values
 
-A snapshot taken from storage retains a link's schema as given, including a
-content-addressed `cid:` reference. It is addressed in the source document's
-space, whose schema documents arrived with the source. `getImmutableCell()`
-accepts unstored input, so `inlineExternalSchemaRefsInValue` puts those link
-schemas into inline form where the schema registry can resolve them.
+A snapshot retains a link's schema as given, including a content-addressed
+`cid:` reference. One taken from storage is addressed in the source
+document's space, whose schema documents arrived with the source, and a
+reference inside it resolves there. One minted by `getImmutableCell()` from
+unstored input has no origin, and no space holds the closure behind its
+references; a reader resolves them in the schema registry, which minted them
+(`mintedFromUnstoredValue`). An element snapshot read out of either is
+classified by the document at the root of its origins. The portable
+boundaries alone still put link schemas into inline form
+(`inlineExternalSchemaRefsInValue`): a `data:` identifier, a value crossing
+the runtime boundary, and the content identity two snapshots compare by.
 
 A stored write (`normalizeAndDiff`) expands immutable links through
 `findAndInlineDataUriLinks`, including immutable defaults inside an ordinary

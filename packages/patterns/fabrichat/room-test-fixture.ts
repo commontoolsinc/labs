@@ -6,25 +6,13 @@ import {
   type TrustedActionWrite,
   Writable,
 } from "commonfabric";
-import type {
-  ReactionList,
-  SentActivity,
-  SentMessage,
-  StoredActivityCounters,
-  StoredRequestMemo,
-  StoredUsedTime,
-} from "./room-records.tsx";
+import type { SentMessage } from "./room-records.tsx";
 import type { ChatProfile } from "./schemas.tsx";
 
 /** Fresh protected records shared by the viewers of one test room. */
 export const testRoomStorage = pattern(() => {
   return {
     messages: Writable.of<SentMessage[]>([]),
-    reactionLists: Writable.of<ReactionList[]>([]),
-    requests: Writable.of<StoredRequestMemo[]>([]),
-    usedTimes: Writable.of<StoredUsedTime[]>([]),
-    activity: Writable.of<SentActivity[]>([]),
-    counters: Writable.of<StoredActivityCounters[]>([]),
   };
 });
 
