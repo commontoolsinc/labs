@@ -11,13 +11,19 @@
  * measured again when a read has more to spend on it.
  */
 
-import type { FabricValue } from "@commonfabric/data-model";
-import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
+import {
+  FabricError,
+  FabricLink,
+  FabricMap,
+  FabricSet,
+} from "@commonfabric/data-model/fabric-instances";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { EntityDocument } from "@commonfabric/memory/v2";
-import { approximateJsonSize } from "@commonfabric/utils/approximate-json-size";
-import { isInstance } from "@commonfabric/utils/types";
+import {
+  approximateJsonSize,
+  type InstanceMeasure,
+} from "@commonfabric/utils/approximate-json-size";
 
 /** One space's share of the documents a storage manager holds. */
 export type SpaceDocumentSizes = {
@@ -74,23 +80,33 @@ export type MeasurableSpace = {
 };
 
 /**
- * The size of a Fabric instance, which keeps its payload where a walk cannot
- * see it: a `FabricBytes` counts its bytes, and any other instance the
- * approximate size of its realm encoding, the form it crosses a realm in,
- * which shares the instance's strings and allocates a wrapper around them.
- * A plain object is left to the walk. An instance the codec refuses counts
- * as the empty object it walks as.
+ * How the walk measures a Fabric class, which keeps its payload where the
+ * walk cannot see it: a `FabricBytes` counts its bytes, and the instance
+ * classes hand back their state as a view the walk visits in their place,
+ * within the same node budget: a `FabricError` its fields and extras, a
+ * `FabricLink` its payload, a `FabricMap` or `FabricSet` its contents. The
+ * view shares the instance's values and allocates at most one small object.
+ * Everything else is left to the walk, the Fabric primitives among them,
+ * whose payloads are a few dozen bytes and walk as the empty object.
  */
-function fabricInstanceSize(instance: object): number | undefined {
-  if (instance instanceof FabricBytes) return instance.length;
-  if (!isInstance(instance)) return undefined;
-  try {
-    return approximateJsonSize(realmFromFabricValue(instance as FabricValue), {
-      instanceSize: fabricInstanceSize,
-    }).bytes;
-  } catch {
-    return undefined;
+function fabricInstanceMeasure(instance: object): InstanceMeasure | undefined {
+  if (instance instanceof FabricBytes) return { bytes: instance.length };
+  if (instance instanceof FabricError) {
+    return {
+      view: {
+        type: instance.type,
+        name: instance.name,
+        message: instance.message,
+        stack: instance.stack,
+        cause: instance.cause,
+        ...Object.fromEntries(instance.extraEntries()),
+      },
+    };
   }
+  if (instance instanceof FabricLink) return { view: instance.payload };
+  if (instance instanceof FabricMap) return { view: instance.map };
+  if (instance instanceof FabricSet) return { view: instance.set };
+  return undefined;
 }
 
 /**
@@ -182,7 +198,7 @@ export class DocumentSizeEstimate {
           if (size === undefined) continue;
         } else {
           size = approximateJsonSize(value, {
-            instanceSize: fabricInstanceSize,
+            instanceMeasure: fabricInstanceMeasure,
             nodeLimit: budget.remaining,
           });
           budget.remaining -= size.nodes;

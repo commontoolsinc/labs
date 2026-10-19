@@ -74,13 +74,54 @@ describe("approximateJsonSize()", () => {
         return this.#bytes.length;
       }
     }
-    const instanceSize = (instance: object) =>
-      instance instanceof Payload ? instance.length : undefined;
+    const instanceMeasure = (instance: object) =>
+      instance instanceof Payload ? { bytes: instance.length } : undefined;
 
-    expect(approximateJsonSize({ p: new Payload() }, { instanceSize }).bytes)
-      .toBe(2 + "p".length + 3 + 32);
+    expect(
+      approximateJsonSize({ p: new Payload() }, { instanceMeasure }).bytes,
+    ).toBe(2 + "p".length + 3 + 32);
     expect(approximateJsonSize({ p: new Payload() }).bytes)
       .toBe(JSON.stringify({ p: {} }).length);
+  });
+
+  it("walks the view the caller's hook gives of an instance, within the node limit", () => {
+    class Holder {
+      #state = { items: Array.from({ length: 1_000 }, () => "x") };
+      get state(): unknown {
+        return this.#state;
+      }
+    }
+    const instanceMeasure = (instance: object) =>
+      instance instanceof Holder ? { view: instance.state } : undefined;
+    const held = { h: new Holder() };
+
+    const whole = approximateJsonSize(held, { instanceMeasure });
+    const partial = approximateJsonSize(held, {
+      instanceMeasure,
+      nodeLimit: 50,
+    });
+
+    expect(whole.bytes).toBe(
+      JSON.stringify({ h: { items: Array(1_000).fill("x") } }).length,
+    );
+    expect(whole.complete).toBe(true);
+    expect(partial).toMatchObject({ nodes: 50, complete: false });
+  });
+
+  it("walks a `Map` and a `Set` through their entries", () => {
+    const value = {
+      m: new Map([["k", "v"], ["key", "value"]]),
+      s: new Set(["a", "bb"]),
+    };
+
+    expect(approximateJsonSize(value)).toEqual({
+      bytes: JSON.stringify({
+        m: [["k", "v"], ["key", "value"]],
+        s: ["a", "bb"],
+      }).length,
+      nodes: 9,
+      complete: true,
+    });
   });
 
   it("walks a class instance through its own enumerable properties alone", () => {

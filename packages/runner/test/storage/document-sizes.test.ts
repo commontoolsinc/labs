@@ -1,7 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import {
+  FabricBytes,
+  FabricHash,
+} from "@commonfabric/data-model/fabric-primitives";
 import type { EntityDocument } from "@commonfabric/memory/v2";
 import { approximateJsonSize } from "@commonfabric/utils/approximate-json-size";
 import {
@@ -183,6 +186,42 @@ describe("DocumentSizeEstimate", () => {
 
         expect(measured.measuredDocuments).toBe(1);
         expect(measured.approxBytes).toBeGreaterThanOrEqual(1_000_000);
+      });
+
+      it("walks a stored instance's state within the budget, so a large payload inside one is cut short like any other", () => {
+        const estimate = new DocumentSizeEstimate();
+        const value: EntityDocument = {
+          value: {
+            payload: new FabricError({
+              type: "Error",
+              message: "large cause",
+              stack: undefined,
+              cause: Array.from({ length: 50_000 }, () => 0),
+            }),
+          },
+        };
+        const budget = { remaining: 1_000 };
+
+        const measured = estimate.measure([value], budget);
+
+        expect(budget.remaining).toBe(0);
+        expect(measured).toMatchObject({
+          measuredDocuments: 0,
+          truncatedDocuments: 1,
+        });
+      });
+
+      it("walks a Fabric primitive as the empty object it is, without encoding it", () => {
+        const estimate = new DocumentSizeEstimate();
+        const value: EntityDocument = {
+          value: { hash: new FabricHash(new Uint8Array(32), "fid1") },
+        };
+
+        const measured = estimate.measure([value], { remaining: 1_000 });
+
+        expect(measured.approxBytes).toBe(
+          JSON.stringify({ value: { hash: {} } }).length,
+        );
       });
 
       it("stops inside a document the budget runs out in, holding its size as a lower bound", () => {

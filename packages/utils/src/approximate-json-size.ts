@@ -31,15 +31,22 @@ export type ApproximateJsonSize = {
   complete: boolean;
 };
 
+/**
+ * What a caller's `instanceMeasure` says of an instance: its size outright,
+ * or a view of its state for the walk to visit in its place, within the
+ * same node limit.
+ */
+export type InstanceMeasure = { bytes: number } | { view: unknown };
+
 /** What a caller may hand the walk. */
 export type ApproximateJsonSizeOptions = {
   /**
-   * The size of an object that is neither an array nor a byte buffer, for a
-   * caller whose values hold instances that keep their payload private, as
-   * the Fabric primitives do: `undefined` to have the instance walked
-   * through its own enumerable properties like any object.
+   * How to measure an object that is neither an array, a byte buffer, a
+   * `Map` nor a `Set`, for a caller whose values hold instances that keep
+   * their payload private, as the Fabric classes do: `undefined` to have the
+   * instance walked through its own enumerable properties like any object.
    */
-  instanceSize?: (instance: object) => number | undefined;
+  instanceMeasure?: (instance: object) => InstanceMeasure | undefined;
 
   /**
    * The most nodes the walk may visit before it stops and reports itself
@@ -64,7 +71,8 @@ const FALSE_LENGTH = 5;
 /**
  * Measures `value` as {@link ApproximateJsonSize} describes. Plain objects,
  * arrays and class instances are walked through their own enumerable
- * properties, an instance first offered to `options.instanceSize`; an
+ * properties, an instance first offered to `options.instanceMeasure`; a
+ * `Map` or a `Set` through its entries, as an array of them would be; an
  * `ArrayBuffer` or a view onto one counts its byte length and is not
  * walked. The walk expects a tree, as every JSON-derived or codec-encoded
  * value is: a cycle would not end it short of `options.nodeLimit`. A sparse
@@ -75,7 +83,7 @@ export function approximateJsonSize(
   value: unknown,
   options: ApproximateJsonSizeOptions = {},
 ): ApproximateJsonSize {
-  const { instanceSize, nodeLimit = Infinity } = options;
+  const { instanceMeasure, nodeLimit = Infinity } = options;
   let bytes = 0;
   let nodes = 0;
   const containers: object[] = [];
@@ -129,9 +137,27 @@ export function approximateJsonSize(
       }
       continue;
     }
-    const size = instanceSize?.(current);
-    if (size !== undefined) {
-      bytes += size;
+    if (current instanceof Map || current instanceof Set) {
+      bytes += 2 + Math.max(0, current.size - 1);
+      for (const entry of current) {
+        if (nodes >= nodeLimit) {
+          complete = false;
+          break;
+        }
+        if (current instanceof Map) {
+          bytes += 3;
+          visit(entry[0]);
+          visit(entry[1]);
+        } else {
+          visit(entry);
+        }
+      }
+      continue;
+    }
+    const measure = instanceMeasure?.(current);
+    if (measure !== undefined) {
+      if ("bytes" in measure) bytes += measure.bytes;
+      else visit(measure.view);
       continue;
     }
     bytes += 2;
