@@ -29,10 +29,11 @@ form for Common Fabric controls. No handler is needed for simple updates.
 <cf-select $value={category} items={[...]} />
 ```
 
-A `$` property binds a cell, or a record holding cells, such as
+A `$` property binds a cell, or a record whose every field is a cell, such as
 `<cf-iframe $context={{ state, output }} />`, whose component reaches each
-field's cell by name. A value holding no cell is refused when the view is
-built, since there would be nothing to write to.
+field's cell by name. Anything else, a record with a field that is not a cell
+among them, is refused when the view is built, since the binding would have
+nothing live to hand over for it.
 
 **Native HTML inputs are one-way only.** Always use the Common Fabric form
 components for inputs.

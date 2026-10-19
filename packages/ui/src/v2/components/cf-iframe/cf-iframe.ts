@@ -35,8 +35,8 @@ export const iframePresentationContext = createContext<
  *
  * @attr {string} src - String representation of HTML content to load within an iframe
  * @prop {string} script - Module source the guest runs once its document is
- *   parsed, inlined into the document by the sandbox, so a bundled guest is
- *   handed over as the bundler wrote it
+ *   parsed, which the sandbox inlines into the document and escapes there,
+ *   so a bundled guest need not be escaped into its document by hand
  * @prop {object} bridge - Explicit capability bridge
  * @prop {object} context - Convenience context. A cell, or a record of cells
  *   bound as `$context={{ state, output }}`, grants each of its fields as a

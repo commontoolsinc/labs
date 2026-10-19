@@ -1,6 +1,9 @@
 /**
  * Returns the document a guest is loaded as: `html`, with `script`, when there
- * is one, run as a module once the document has been parsed.
+ * is one, run as a module once the document has been parsed. An empty `html`
+ * is no guest at all, as when a host clears the frame or holds it closed
+ * while it prepares the guest's resources, so it stays empty and the script
+ * does not run.
  *
  * The script goes in as the text of an inline module `<script>` appended to
  * the document, which the parser places at the end of the body, so the guest
@@ -13,7 +16,7 @@
  * construct that would see the difference.
  */
 export function guestDocument(html: string, script?: string): string {
-  if (script === undefined || script === "") return html;
+  if (html === "" || script === undefined || script === "") return html;
   return `${html}<script type="module">${inlineScriptText(script)}</script>`;
 }
 

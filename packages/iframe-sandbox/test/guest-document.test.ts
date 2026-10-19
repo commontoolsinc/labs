@@ -13,6 +13,10 @@ describe("guest-document", () => {
       expect(guestDocument(html, "")).toBe(html);
     });
 
+    it("returns an empty document without the script", () => {
+      expect(guestDocument("", "console.log('glazed');")).toBe("");
+    });
+
     it("returns the document with the script appended as an inline module", () => {
       expect(guestDocument(html, "console.log('glazed');")).toBe(
         `${html}<script type="module">console.log('glazed');</script>`,
@@ -40,8 +44,8 @@ describe("guest-document", () => {
     it("escapes the script into text that computes what the original does", () => {
       const script = 'x = "</script><!--<script>" + `</Script>` + ' +
         '/^<!--$/u.test("<!--");';
-      const escaped = guestDocument("", script).slice(
-        '<script type="module">'.length,
+      const escaped = guestDocument("<p></p>", script).slice(
+        '<p></p><script type="module">'.length,
         -"</script>".length,
       );
       const read = (source: string) =>

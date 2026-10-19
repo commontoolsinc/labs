@@ -404,7 +404,10 @@ accessible HTML around the SVG the guest draws into:
 
 The document holds no `<script>` for the guest. The sandbox runs `guest.js` as
 the document's last module script once the document is parsed, so `#chart`,
-`#add`, and the alert region exist when the guest selects them.
+`#add`, and the alert region exist when the guest selects them. A Content
+Security Policy the document declares in a `<meta>` must admit inline scripts
+(`script-src 'unsafe-inline'`), since that is how the bundle arrives; a policy
+that does not leaves the guest blank.
 
 The sandbox does not grant arbitrary network access. Bundle modules, generate
 small assets locally, or pass data through `input`; do not depend on a CDN,

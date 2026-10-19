@@ -1073,7 +1073,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
         rootCell.set({
           type: "vnode",
           name: "cf-iframe",
-          props: { $context: { glaze, order: { fillings } } },
+          props: { $context: { glaze, fillings } },
           children: [],
         });
         runtime.prepareTxForCommit(tx);
@@ -1102,7 +1102,11 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
             slot.key("glaze").resolveAsCell().getAsNormalizedFullLink().id,
             glaze.getAsNormalizedFullLink().id,
           );
-          assertEquals(slot.key("order").get(), { fillings: ["custard"] });
+          assertEquals(
+            slot.key("fillings").resolveAsCell().getAsNormalizedFullLink().id,
+            fillings.getAsNormalizedFullLink().id,
+          );
+          assertEquals(slot.key("fillings").get(), ["custard"]);
         } finally {
           cancel();
         }

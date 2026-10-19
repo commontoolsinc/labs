@@ -260,8 +260,10 @@ metadata, styles, or sibling elements outside the React root:
 ```
 
 The document holds no `<script>` for the guest. The sandbox runs `guest.js` as
-the document's last module script once the document is parsed, so `#root`
-exists when the guest starts.
+the document's last module script once the document is parsed, so `#root` exists
+when the guest starts. A Content Security Policy the document declares in a
+`<meta>` must admit inline scripts (`script-src 'unsafe-inline'`), since that is
+how the bundle arrives; a policy that does not leaves the guest blank.
 
 ## Read and write Cells with hooks
 

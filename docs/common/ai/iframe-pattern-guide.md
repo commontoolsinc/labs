@@ -152,13 +152,18 @@ The parts the guest depends on:
 
 - `src` is the guest's document and `script` is its bundle. The sandbox runs the
   script as the document's last module script once the document is parsed, so
-  `guest.html` holds the markup and styles and no `<script>` for the guest.
+  `guest.html` holds the markup and styles and no `<script>` for the guest. A
+  Content Security Policy the document declares in a `<meta>` must admit inline
+  scripts (`script-src 'unsafe-inline'`), since that is how the bundle arrives;
+  a policy that does not leaves the guest blank.
 - `$context` binds a record of cells. Each field is a resource the guest asks
   for by name, and each reaches the guest live: the host resolves it to its
   concrete cell before the guest loads, so a `user`-scoped field is this user's
   cell, and a write lands where the cell does. A field can be a cell, a path of
-  one (`state.key("notes")`), a database, a presence room's cell, or a verb.
-  Without the `$`, `context` hands the guest a copy of the values instead.
+  one (`state.key("notes")`), a database, a presence room's cell, or a verb,
+  and nothing else: a record with a field that is not a cell is refused when
+  the view is built. Without the `$`, `context` hands the guest a copy of the
+  values instead.
 - `resourceKinds` says what the guest may do with a field. `readonly` grants
   reads only, which suits `input`: it belongs to whoever instantiated the piece.
   A field the record names with no kind is a cell the guest may write. Give
@@ -981,7 +986,8 @@ From the pattern's directory, write the guest's bundle:
 deno bundle --platform browser --minify guest.ts -o guest.js
 ```
 
-Run it again after every change to the guest or to anything it imports, and
+For a `guest.tsx`, name it in place of `guest.ts` here and in the `deno check`
+below. Run it again after every change to the guest or to anything it imports, and
 keep `guest.js` with the change: `main.tsx` reads the file as it is, so a stale
 bundle runs the guest as it was. `deno bundle` inlines the guest's imports,
 `@commonfabric/iframe-sandbox/guest` and pinned `npm:` modules among them, into

@@ -55,7 +55,9 @@ What the guides cannot leave to judgment:
 `packages/patterns/iframe-verb-list/` is the smallest complete example, with a
 verb; `packages/patterns/iframe-signal-atlas/` adds a per-user SQLite database
 and per-session output, and `packages/patterns/iframe-cursor-canvas/` a presence
-room.
+room. `packages/patterns/iframe-ring-loops/` is the exception, not a template:
+its `main.tsx` composes a `frame.tsx` that `tools/write-iframe-wrapper.ts`
+generates, and it has no `guest.js`. Do not copy its shape into a new pattern.
 
 Run the pattern or add a focused test when behavior, rather than only its data
 contract, changed. `deno task cf check` proves the pattern compiles, not that

@@ -51,9 +51,14 @@ frame.src = "<main id='root'></main>";
 `src` is the guest's document. `script`, when set, is module source the guest
 runs once that document is parsed: the element appends it to the document as an
 inline module script, escaping the `</script` and `<!--` sequences that would
-otherwise end the element early, so a bundler's output is handed over as it was
-written. The guest's policy admits it as it admits any inline script the
-document carries. A change to either reloads the guest.
+otherwise keep the element from ending where it should, as `<\/script` and
+`<\x21--`. Strings, templates and regular expressions read those escapes as the
+characters they replace, so the module computes what it was written to; only a
+raw template string, read through `String.raw`, sees the escape itself. The
+guest's policy admits the script as it admits any inline script the document
+carries, so a document that declares a policy of its own must allow inline
+scripts. An empty `src` is no guest, and runs no script. A change to either
+reloads the guest.
 
 A resource has a `kind`, optional schema and description, and only the
 operations the host supplies. A cell capability follows the runtime's Cell

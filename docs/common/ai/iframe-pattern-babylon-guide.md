@@ -430,7 +430,10 @@ Keep important state and actions outside the canvas as accessible HTML in
 
 The document holds no `<script>` for the guest. The sandbox runs `guest.js` as
 the document's last module script once the document is parsed, so `#scene` and
-the controls exist when the guest creates the engine.
+the controls exist when the guest creates the engine. A Content Security Policy
+the document declares in a `<meta>` must admit inline scripts (`script-src
+'unsafe-inline'`), since that is how the bundle arrives; a policy that does not
+leaves the guest blank.
 
 Use `type="button"`; a scene action must never submit a form or navigate the
 frame. Style the HTML around the canvas with the ambient theme the iframe

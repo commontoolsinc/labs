@@ -125,18 +125,35 @@ describe("jsx", () => {
         );
         fillings.set(["custard"]);
 
-        const vnode = h("cf-iframe", {
-          $context: { glaze, order: { fillings, count: 2 } },
-        }, []);
+        const vnode = h("cf-iframe", { $context: { glaze, fillings } }, []);
         const context = (vnode.props as any).$context;
 
+        expect(Object.keys(context)).toEqual(["glaze", "fillings"]);
         expect(context.glaze["/"]["link@1"].id).toBe(
           glaze.getAsNormalizedFullLink().id,
         );
-        expect(context.order.fillings["/"]["link@1"].id).toBe(
+        expect(context.fillings["/"]["link@1"].id).toBe(
           fillings.getAsNormalizedFullLink().id,
         );
-        expect(context.order.count).toBe(2);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("throws when a record given to a binding prop has a field that is not a cell", async () => {
+      const signer = await Identity.fromPassphrase("jsx mixed binding record");
+      const runtime = new Runtime({
+        storageManager: StorageManager.emulate({ as: signer }),
+        apiUrl: new URL("http://localhost"),
+      });
+      try {
+        const tx = runtime.edit();
+        const glaze = runtime.getCell(signer.did(), "glaze", undefined, tx);
+        glaze.set("maple");
+
+        expect(() =>
+          h("cf-iframe", { $context: { glaze, order: { count: 2 } } }, [])
+        ).toThrow("$context");
       } finally {
         await runtime.dispose();
       }
