@@ -184,8 +184,16 @@ Deno.test("cache-only binary builders install their entrypoint graphs", async ()
     'deno install --entrypoint --cached-only "${frozen_arg[@]}"',
   );
   assertStringIncludes(
+    installAction,
+    'deno install --entrypoint "${frozen_arg[@]}"',
+  );
+  assertStringIncludes(
     toolshedDockerfile,
     "deno install --entrypoint --frozen packages/toolshed/index.ts",
+  );
+  assertStringIncludes(
+    toolshedDockerfile,
+    "deno task build-binaries toolshed",
   );
 });
 
