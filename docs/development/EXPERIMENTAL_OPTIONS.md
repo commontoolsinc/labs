@@ -1584,15 +1584,19 @@ the per-epic implementation notes).
   a high-RTT link this dominates cold-load wall-clock. With the flag on,
   refreshes overlap up to a bounded window (`CONCURRENT_WATCH_REFRESH_WINDOW`,
   currently 8) in `storage/v2.ts`, and the memory client issues the whole
-  watch-mutation family (`watch.set` + `watch.add`) in an ordered issue phase so
-  wire order is preserved and application stays ordered. Watch removals derive
-  a full replacement set from session state, so they wait for preceding
-  responses to be applied before constructing that set. Later acquisitions
-  remain behind the removal in wire order. Each removal therefore drains the
-  in-flight window: acquisitions issued after it wait until every earlier
-  response has applied and the removal has been sent. Operation-watch
-  cancellations pay that drain. Independent acquisitions still overlap, and
-  same-tick microtask coalescing is unchanged.
+  watch-mutation family (`watch.set`, `watch.add` and `watch.remove`) in an
+  ordered issue phase so wire order is preserved and application stays
+  ordered. Watch removals wait for preceding responses to be applied before
+  they are sent. A removal by id (`session.watch.remove`, to a server
+  advertising `watchRemoveV1`) waits so that the watch intent it updates
+  holds every earlier acquisition; a removal by replacement (`watch.set`, to
+  an older server) also derives the full remaining set from that state. Later
+  acquisitions remain behind the removal in wire order. Each removal therefore
+  drains the in-flight window: acquisitions issued after it wait until every
+  earlier response has applied and the removal has been sent. Operation-watch
+  cancellations and document release passes pay that drain. Independent
+  acquisitions still overlap, and same-tick microtask coalescing is
+  unchanged.
 - **Current default and planned end state.** Off by default. It is a spike
   pending live measurement on a real (estuary-latency) load; the window size is
   a tuning value. End state is either graduation to always-on with a settled
