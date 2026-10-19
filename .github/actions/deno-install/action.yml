@@ -29,8 +29,9 @@ runs:
 
         if deno install --cached-only "${frozen_arg[@]}"; then
           echo "Deno dependencies are available in the local cache."
-          exit 0
+        else
+          echo "Deno cache is incomplete; fetching dependencies."
+          deno install "${frozen_arg[@]}"
         fi
 
-        echo "Deno cache is incomplete; fetching dependencies."
-        deno install "${frozen_arg[@]}"
+        echo "CF_DENO_DEPENDENCIES_INSTALLED=1" >> "$GITHUB_ENV"
