@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - main
+      - alex-daily
   pull_request:
     branches:
       - main
+      - alex-daily
     # A label is how a pull request asks for the full run or for more or
     # fewer of the tests chosen by score, so adding or removing one starts a
     # run that reads the labels it now carries. A re-run would read the
@@ -100,6 +102,17 @@ jobs:
       lanes: ${{ steps.count.outputs.lanes }}
       args: ${{ steps.count.outputs.args }}
     steps:
+      - &alex-daily-window
+        name: 🔎 Check the alex-daily publication window
+        if: github.event_name == 'push' && github.ref == 'refs/heads/alex-daily'
+        timeout-minutes: *work-timeout
+        run: |
+          now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          if [[ "$now" < '2026-10-19T22:15:16Z' || ! "$now" < '2026-10-22T22:15:16Z' ]]; then
+            echo '::error::alex-daily publication is outside the authorized Estuary demo window.'
+            exit 1
+          fi
+
       # A pull request's plan reads what the change touched, which is the
       # diff against the merge base, so it needs real history.
       - name: 📥 Checkout repository
@@ -493,10 +506,11 @@ jobs:
 
   build-toolshed:
     name: "Build Binary (toolshed)"
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/alex-daily')
     runs-on: ubuntu-latest
     timeout-minutes: *job-timeout
     steps:
+      - *alex-daily-window
       - name: 📥 Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -524,10 +538,11 @@ jobs:
   # shell, so this build has none of the endpoint checks that one makes.
   build-cf:
     name: "Build Binary (cf)"
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/alex-daily')
     runs-on: ubuntu-latest
     timeout-minutes: *job-timeout
     steps:
+      - *alex-daily-window
       - name: 📥 Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -550,7 +565,7 @@ jobs:
 
   attest-binaries:
     name: "Attest and Upload Binaries"
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/alex-daily')
     runs-on: ubuntu-latest
     timeout-minutes: *job-timeout
     # A release artifact must not outlive a failing test, the
@@ -723,6 +738,7 @@ jobs:
       # one of them and not the other was published by a build that stopped
       # between the two copies, and this publishes both of them again. See "One
       # commit, one set of artifacts" in docs/development/deploying.md.
+      - *alex-daily-window
       - name: 📤 Upload artifacts to Google Cloud Storage
         run: |
           BUCKET=gs://commontools-build-artifacts/workspace-artifacts

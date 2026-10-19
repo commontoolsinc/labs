@@ -843,8 +843,7 @@ Deno.test("Status waits for every job that runs a test", async () => {
   const ci = await parsedWorkflow("deno.yml");
   const status = ci.jobs.status;
   const release = Object.keys(ci.jobs).filter((id) =>
-    ci.jobs[id].if ===
-      "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+    ci.jobs[id].if?.startsWith("github.event_name == 'push' &&")
   );
   assertEquals(
     needsOf(status).sort(),
@@ -1623,7 +1622,9 @@ Deno.test("the run in tomorrow's order runs the CI suites and ships nothing", as
   for (const id of shipping) {
     assertEquals(
       ci.jobs[id].if,
-      "github.event_name == 'push' && github.ref == 'refs/heads/main'",
+      id === "attest-binaries"
+        ? "github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/alex-daily')"
+        : "github.event_name == 'push' && github.ref == 'refs/heads/main'",
       `${id} can run in a called run`,
     );
   }

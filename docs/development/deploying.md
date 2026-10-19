@@ -97,6 +97,14 @@ candidate hash, and every worker before proposing an update to the active
 
 ## One commit, one set of artifacts
 
+During the Estuary demo window, pushes to `alex-daily` also publish through
+the ordinary CI workflow. The window is inclusive of `2026-10-19T22:15:16Z`
+and exclusive of `2026-10-22T22:15:16Z`; planning, binary builds, and the final
+artifact upload check it. The source SHA and `alex-daily` branch remain in
+the producer run and build attestations. Pull requests targeting `alex-daily`
+use the normal selected-test plan. Rapids notifications and staging shell
+deployment remain restricted to `main`.
+
 The `build-toolshed` and `build-cf` jobs in `.github/workflows/deno.yml` build
 the binaries. Once every lane of the full run has passed, the `attest-binaries`
 job signs them, packs them into `labs-<commit>.tar.gz`, writes that
