@@ -938,6 +938,79 @@ describe("WebSocketTransport failure signaling", () => {
     });
   });
 
+  it("counts the frames it hands to the socket and the frames the socket delivers, by their UTF-8 size", async () => {
+    await withTransport(async (transport, socket) => {
+      transport.setReceiver(() => {});
+      const send = transport.send("abcé");
+      socket().openConnection();
+      await send;
+      socket().receive("xyz");
+      socket().receive("😀");
+
+      expect(transport.getSizes()).toEqual({
+        messagesSent: 1,
+        bytesSent: 5,
+        messagesReceived: 2,
+        bytesReceived: 7,
+      });
+    });
+  });
+
+  it("reports the bytes the open socket holds queued, and none without a socket", async () => {
+    await withTransport(async (transport, socket) => {
+      expect(transport.bufferedAmount).toBe(0);
+      const send = transport.send("abcd");
+      socket().openConnection();
+      await send;
+      Object.defineProperty(socket(), "bufferedAmount", { value: 42 });
+
+      expect(transport.bufferedAmount).toBe(42);
+    });
+  });
+
+  it("keeps a closed connection's traffic in the factory's totals", async () => {
+    const identity = await Identity.fromPassphrase(
+      "connection-sizes-remote-session",
+    );
+    await withTransport(async (_transport, socket) => {
+      const factory = new RemoteSessionFactory(
+        () => new URL("wss://memory.test/api/storage/memory"),
+        identity,
+        createNativeMemorySocket,
+      );
+      const flags = factory.serverFlags(identity.did());
+      const activeSocket = socket();
+      activeSocket.openConnection();
+      await activeSocket.whenSent(1);
+      expect(factory.getSizes()).toMatchObject({
+        transports: 1,
+        transportsClosed: 0,
+        socketsOpen: 1,
+        messagesSent: 1,
+        bytesSent: requireTextFrame(activeSocket.sent[0]).length,
+      });
+      const helloOk = encodeMemoryBoundary({
+        type: "hello.ok",
+        protocol: MEMORY_PROTOCOL,
+        flags: getMemoryProtocolFlags(),
+        sessionOpen: TEST_HELLO_SESSION_OPEN,
+      });
+      activeSocket.receive(helloOk);
+      await flags;
+
+      expect(factory.getSizes()).toEqual({
+        transports: 0,
+        transportsClosed: 1,
+        socketsOpen: 0,
+        messagesSent: 1,
+        bytesSent: requireTextFrame(activeSocket.sent[0]).length,
+        messagesReceived: 1,
+        bytesReceived: helloOk.length,
+        bufferedAmount: 0,
+      });
+    });
+  });
+
   it("dials once for two sends issued while the socket is opening", async () => {
     await withTransport(async (transport, socket) => {
       const first = transport.send("first");

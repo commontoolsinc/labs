@@ -23,6 +23,12 @@ export interface MemorySocket {
   /** WebSocket connection state. */
   readonly readyState: number;
 
+  /**
+   * Bytes queued for the network and not yet written, where the backend
+   * reports them; the sizes read shows them as what a slow peer holds up.
+   */
+  readonly bufferedAmount?: number;
+
   /** Registers a listener using WebSocket event names. */
   addEventListener<K extends keyof MemorySocketEvents>(
     type: K,

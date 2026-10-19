@@ -7391,7 +7391,43 @@ describe("runtime-processor", () => {
       expect(response.sizes).toEqual({
         ...runtimeSizes,
         worker: workerSizesAtRest,
+        ipc: null,
       });
+    });
+
+    it("carries what the client registry says its ports have carried", () => {
+      const ipc = {
+        openPorts: { open: 2, closed: 1 },
+        bytesSerialized: {
+          owner: {
+            messages: 4,
+            sampledMessages: 1,
+            sampledBytes: 100,
+            approxBytes: 400,
+          },
+          clients: {},
+          departedClients: {
+            messages: 0,
+            sampledMessages: 0,
+            sampledBytes: 0,
+            approxBytes: 0,
+          },
+        },
+      };
+      const processor = buildProcessor({
+        runtime: {
+          getCfcStats: () => cfcStats,
+          patternManager: { getCompileCacheStats: () => compileCacheStats },
+          getSizes: () => runtimeSizes,
+        },
+        ipcSizes: () => ipc,
+      });
+
+      const response = processor.getLoggerCounts({
+        type: RequestType.GetLoggerCounts,
+      });
+
+      expect(response.sizes.ipc).toEqual(ipc);
     });
 
     it("counts a cell subscription while it stands and not after its unsubscribe", () => {

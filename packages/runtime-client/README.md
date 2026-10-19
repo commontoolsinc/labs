@@ -104,7 +104,11 @@ These identifiers can be correlated with memory-server traces without exporting
 cell values or credentials. Each per-space snapshot also carries the space's
 `sizes`: its share of the storage counts that `getLoggerCounts().sizes.storage`
 adds across every open space, such as documents, subscriptions and watched
-documents. Reading the snapshot starts no storage I/O.
+documents. Reading the snapshot starts no storage I/O. `getLoggerCounts().sizes`
+goes further in two directions: `storage.bySpace` ranks the open spaces by the
+approximate size of their documents, measured across reads within a budget, and
+`ipc` counts what each of the worker's ports has carried and how many it holds
+(`null` for a processor with no client registry behind it, as a test's is).
 
 The pending count measures promise registrations, not distinct writes. A write
 and its scheduler disposition can both appear. Lists contain at most 64 entries;
