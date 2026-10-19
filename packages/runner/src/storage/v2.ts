@@ -7226,6 +7226,15 @@ export class SpaceReplica
           error,
         ]);
       }
+      // A later pass offers them again. Their selectors stay untracked, so a
+      // pull in the meantime asks the session for its watch rather than
+      // trusting one the failed request may already have removed.
+      for (const root of released) {
+        if (!this.#rootWatches.has(root.key)) {
+          this.#rootWatches.set(root.key, root);
+        }
+      }
+      return [];
     }
     return roots;
   }

@@ -1524,6 +1524,14 @@ the per-epic implementation notes).
 >   Older servers omit it, which parses as `false`, and a client then keeps its
 >   reports to itself rather than sending a message the server would refuse.
 >   It is permanent.
+> - **`watchRemoveV1`** is a build-inherent capability, hardwired to `true`.
+>   It advertises `session.watch.remove`, which removes watches by id and
+>   answers with only what changed (the memory protocol chapter's section
+>   4.3.9). Only the server advertises it; a client reads it from `hello.ok`
+>   and never offers it. Older servers omit it, which parses as `false`, and a
+>   client then removes a watch by replacing the session's watch set, and
+>   keeps the watches of documents nothing reads rather than releasing them.
+>   It is permanent.
 > - **`admissionNotice`** is a build-inherent capability, hardwired to `true`
 >   on both peers. It advertises the `session/admissible` push of the memory
 >   protocol chapter's section 4.2.2: a server tells a connection it refused a
