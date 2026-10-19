@@ -1484,8 +1484,7 @@ export type PatternBuilder = typeof pattern;
  * internal cells, and the `partialCause` of each `$alias` binding in its
  * nodes and its result. The runtime keeps the id a partial cause names by the
  * cause's identity, and refuses a cause that is an object but not deep-frozen.
- * The builder calls this on every pattern it builds; a pattern written by hand
- * reaches it through `patternLiteralForTestingOnly()`.
+ * The builder calls this on every pattern it builds.
  */
 export function freezePartialCauses(pattern: Pattern): void {
   if (pattern.derivedInternalCells !== undefined) {
@@ -1509,7 +1508,7 @@ function freezeAliasCauses(value: unknown, seen: Set<object>): void {
   if (value === null || typeof value !== "object" || seen.has(value)) return;
   seen.add(value);
   if (isAliasBinding(value)) {
-    const { partialCause } = value.$alias as { partialCause?: unknown };
+    const { partialCause } = value.$alias;
     if (partialCause !== undefined) deepFreeze(partialCause);
     return;
   }
