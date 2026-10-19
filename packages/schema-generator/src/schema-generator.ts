@@ -47,6 +47,7 @@ import {
   typeParameterOfType,
   unwrapTypeParentheses,
 } from "./typescript/type-node.ts";
+import { unionNodeMembersInOrder } from "./typescript/source-order.ts";
 import { resolveWriterBinding } from "./typescript/writer-binding.ts";
 import {
   cutsExpansion,
@@ -3492,7 +3493,8 @@ export class SchemaGenerator {
       // The one member that is neither `null` nor `undefined` is read at the
       // union's instantiation less those; any other member has none.
       const { instantiatedAs, ...unplaced } = context;
-      const valued = typeNode.types.filter((member) => {
+      const members = unionNodeMembersInOrder(typeNode);
+      const valued = members.filter((member) => {
         const kind = unwrapTypeParentheses(member);
         return kind.kind !== ts.SyntaxKind.UndefinedKeyword &&
           !(ts.isLiteralTypeNode(kind) &&
@@ -3501,7 +3503,7 @@ export class SchemaGenerator {
       const soleInstantiated = valued.length === 1 && instantiatedAs
         ? soleNonNullishMember(instantiatedAs)
         : undefined;
-      const memberSchemas = typeNode.types.map((member) =>
+      const memberSchemas = members.map((member) =>
         this.#analyzeTypeNodeStructure(
           member,
           checker,

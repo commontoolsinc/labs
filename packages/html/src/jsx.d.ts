@@ -4600,7 +4600,12 @@ interface CFMapAttributes<T> extends CFHTMLAttributes<T> {
   "oncf-click"?: (event: CustomEvent<{ lat: number; lng: number }>) => void;
   "oncf-bounds-change"?: (
     event: CustomEvent<
-      { bounds: CFMapBounds; center: CFMapLatLng; zoom: number }
+      {
+        bounds: CFMapBounds;
+        center: CFMapLatLng;
+        zoom: number;
+        userInitiated: boolean;
+      }
     >,
   ) => void;
   "oncf-marker-click"?: (

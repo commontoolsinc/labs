@@ -62,10 +62,11 @@ A transaction MUST contain operations, reads, or preconditions, unless it is a
 server wave carrying outbound appends. A validation-only transaction
 checks its reads and records a commit verdict without creating document revisions.
 With `localSessionDocuments` enabled, a client-executed commit whose writes
-are all documents of the client's own session instance settles on the client
-without a transaction, whatever it read; it uses this form when it carries a
-precondition on a shared document. Writes to an explicitly named foreign
-session instance are admitted by the server like any other shared write. Validation of all reads happens
+are all documents of the client's own session instance uses this form when it
+read a shared document or carries a shared precondition: the verdict decides
+whether its session writes stand, and a rejected one rolls them back. Writes
+to an explicitly named foreign session instance are admitted by the server
+like any other shared write. Validation of all reads happens
 before any writes are applied. Enabling local session storage requires
 servers that admit validation-only commits.
 
@@ -811,10 +812,10 @@ The client provider fires three notification types:
 A principal may read a space it cannot write, and a reactive computation it
 runs there still writes its outputs. Those writes are derived: running the
 computation again reproduces them. When the server refuses such a commit with
-an `AuthorizationError` it has not marked retriable, the client keeps each
-written document's new value instead of reverting it, as a _local fold_: the
-confirmed value at the same `seq`, with the refused write applied, held by
-that replica alone.
+an `AuthorizationError` it has not marked retriable, a client running under
+the `localFold` flag keeps each written document's new value instead of
+reverting it, as a _local fold_: the confirmed value at the same `seq`, with
+the refused write applied, held by that replica alone.
 
 - A document is folded only where the refused write sits directly on the
   confirmed version it was made over. Where a newer confirmed version arrived
@@ -834,6 +835,11 @@ that replica alone.
 
 Event handlers are not folded. Their writes are acts rather than derivations,
 and a refusal of one is reverted and reported.
+
+The fold is gated by the `localFold` experimental flag
+([registry](../../development/EXPERIMENTAL_OPTIONS.md#localfold)), off by
+default. Without it, a refused derived write is reverted as any other
+rejection is, and the computation runs again against the same refusal.
 
 ## 3.9 Commit Ordering
 

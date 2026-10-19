@@ -40,6 +40,7 @@ was last checked against the code.
 | [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | **off** (`SERVER_EXECUTION_DEFAULT_ENABLED = false`; explicit `true` selects the other arm) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | soak on main at the ON default, then delete the flag and OFF path | Serving stack and OW28 scoped compilation have direct coverage; Phase-7 gate dispositions govern a renewed rollout; the section's dated entries carry each flip; stable `default`/`opposite` CI roles keep both postures guarded and make a default flip data-only |
 | [`localSessionDocuments`](#localsessiondocuments) | `EXPERIMENTAL_LOCAL_SESSION_DOCUMENTS` env / shell build define, or `RuntimeOptions.experimental`; clients adopt the deployment value | off | Bernhard Seefeld (#8919) | validate local session semantics and performance, then graduate for client execution | implemented, opt-in; requires validation-only commit support |
 | [`sharedMemoryConnection`](#sharedmemoryconnection) | `EXPERIMENTAL_SHARED_MEMORY_CONNECTION` env, or `RuntimeOptions.experimental`; the shell adopts it from its deployment, and an explicit build define of the same name overrides it | off | Bernhard Seefeld (2026-09-29) | turn on once a deployment's routing serves a connection carrying several spaces, then delete the flag and the connection-per-space path | implemented, off by default |
+| [`localFold`](#localfold) | `EXPERIMENTAL_LOCAL_FOLD` env / shell build define, or `RuntimeOptions.experimental` | off | Robin McCollum (2026-10-14) | decide between the fold and reverting a refused derived write, then delete the flag and the losing arm | implemented, off by default |
 | [`connectionAuth`](#connectionauth) | Memory hello capability | advertised by a host that verifies `connection.auth`; toolshed does under `sharedMemoryConnection` | Bernhard Seefeld (2026-09-29) | retain as protocol negotiation until signed `session.open` retires | optional capability |
 | [`agentBuiltin`](#agentbuiltin) | `EXPERIMENTAL_AGENT_BUILTIN` env, or `RuntimeOptions.experimental` | on | Bernhard Seefeld (agent requests stage 3) | delete the flag after the default-on posture soaks | implemented, on by default |
 | [`cfcEnforcementMode`](#cfcenforcementmode)                                 | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse)                                                                    | `enforce-strict`                                                                     | Bernhard Seefeld (#3263)                              | the ladder stays; the default is at its top rung                                                                                                                                                                                  | implemented, on by default at the strictest rung                                |
@@ -771,22 +772,20 @@ holds the measurements and the conditions for revisiting.
   local. Its reads create no remote watches, and outgoing commits omit its
   operations and read dependencies. Explicitly named foreign session instances
   use server reads and admission; they are not treated as locally absent.
-  A commit whose writes are all local settles on the replica without a
-  round trip, whatever it read: a shared read names a document the replica
-  watches, so a write that outdates the read arrives as a frame and re-runs
-  the derivation, which is what a rejected verdict would have done after the
-  same frame. A commit carrying a precondition on a shared document still
-  travels, with no operations, since that precondition is checked against
-  the server's head. Mixed commits roll back session writes on rejection.
+  Transactions whose reads, writes, and preconditions are entirely local settle
+  without opening a connection. A commit whose writes are all local but that
+  read a shared document travels as a validation-only commit, because its
+  session writes are only as good as those reads: a rejected verdict rolls
+  them back, and it is what runs a handler again against fresh state, since
+  no later frame does. Mixed commits roll back session writes on rejection.
   Runtimes sharing a storage manager must agree on the effective
   session-storage policy.
 - **Toolshed:** publishes the deployment's flag for clients but keeps its own
   webhook runtime's session documents synchronized, so their values remain in
   the server store across runtime recreation.
 - **Rollout:** deploy memory-server support for validation-only commits before
-  enabling the flag. Older servers reject a session write that carries a
-  precondition on a shared document. Leave the flag off until that support is
-  deployed.
+  enabling the flag. Older servers reject session writes that require
+  shared-read validation. Leave the flag off until that support is deployed.
 - **Removal path:** validate rollback, route replacement, scoped reactivity,
   and the performance benefit with the flag enabled; then graduate local
   session storage for client execution and remove the flag. Server execution
@@ -801,9 +800,11 @@ holds the measurements and the conditions for revisiting.
   of the 168 it empties still carry shared reads and travel for validation;
   the load's other counts and its wall time stay where they were
   (`docs/history/development/performance/2026-10-16-fabrichat-room-cold-load-local-session-documents.md`).
-  The performance case for graduating it needs a load whose session-local
-  commits read nothing shared, or a client that settles a read-only commit
-  without the round trip.
+  Settling those commits on the client without the round trip cuts the
+  server's commits to one a load and leaves the client's counts and wall time
+  unchanged, so the round trip is not on the load's critical path; the
+  validation stays for rollback. The remaining cost of the flag is the server
+  recording a commit for each validation-only round trip.
 
 ### `sharedMemoryConnection`
 
@@ -880,6 +881,47 @@ holds the measurements and the conditions for revisiting.
   entry, the toolshed's override in `createToolshedRuntime`,
   `RemoteSessionFactory`'s connection-per-space path, and the `?space=`
   address parameter.
+
+### `localFold`
+
+- **Toggle via.** `EXPERIMENTAL_LOCAL_FOLD` environment variable (through the
+  canonical env registry) or `RuntimeOptions.experimental.localFold`;
+  browser-side, the build define of the same name
+  ([`packages/shell/felt.config.ts`](../../packages/shell/felt.config.ts) /
+  [`packages/shell/src/lib/env.ts`](../../packages/shell/src/lib/env.ts)),
+  baked at build time. Server-authoritative in `EXPERIMENTAL_FLAG_AUTHORITY`:
+  a deployed CLI adopts the posture the server publishes, with an explicit
+  `EXPERIMENTAL_*` still winning. The flag is consumed from the Runtime
+  instance, at the one place the scheduler marks a reactive run's transaction
+  as carrying derived writes
+  ([`packages/runner/src/scheduler/run.ts`](../../packages/runner/src/scheduler/run.ts));
+  there is no ambient control point.
+- **Added by.** Robin McCollum, 2026-10-14.
+- **Purpose.** Gates the _local fold_ of
+  [`docs/specs/memory-v2/03-commit-model.md`](../specs/memory-v2/03-commit-model.md)
+  §3.8.3. A principal may read a space it cannot write, and a reactive
+  computation it runs there still writes its outputs. With the flag off, a
+  write of that kind that the space refuses for lack of a grant is reverted
+  like any other rejection; the re-run then finds its input unchanged and
+  its output gone, writes again, and is refused again, for as long as the
+  scheduler's retry budget allows, and the replica reports a refusal for
+  each attempt. With the flag on, the replica keeps the write as a fold over
+  the document's confirmed value, so the re-run the refusal causes reads
+  what it computed and settles.
+- **Current default and planned end state.** Off by default. Set
+  `EXPERIMENTAL_LOCAL_FOLD=true` or pass
+  `RuntimeOptions.experimental.localFold: true` to keep refused derived
+  writes as folds. The end state is one arm: either the fold graduates to
+  unconditional behavior or the revert does, and the flag goes with the arm
+  that loses.
+- **Status on 2026-10-14.** Both arms are covered by
+  `packages/runner/test/refused-derived-write.test.ts`, and the plumbing by
+  `packages/runner/test/experimental-options.test.ts`.
+- **Path to removal.** Remove the env mapping, the runtime option and its
+  authority and shell-source entries, the shell define, and the gate in the
+  scheduler. If the fold loses, the fold machinery in
+  `packages/runner/src/storage/v2.ts`, the `derivedWrites` transaction flag,
+  and §3.8.3 go with it.
 
 ## Category 2: Contextual Flow Control enforcement rollout dials
 
@@ -1873,7 +1915,8 @@ The environment-backed flags (`EXPERIMENTAL_MODERN_CELL_REP`,
 `EXPERIMENTAL_COMPUTED_CELL_IDS`,
 `EXPERIMENTAL_LAZY_MATERIALIZATION`,
 `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE`,
-`EXPERIMENTAL_SERVER_EXECUTION`) reach the runtime through the
+`EXPERIMENTAL_SERVER_EXECUTION`, `EXPERIMENTAL_LOCAL_FOLD`) reach the runtime
+through the
 deployed processes. The runtime-only flags (`commitPreconditions`, the CFC
 dials) reach it only through the `RuntimeOptions` passed to `new Runtime(...)`.
 

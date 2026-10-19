@@ -44,6 +44,7 @@
     "./agent-run": "./src/agent-run.ts",
     "./entity-kind": "./src/entity-kind.ts",
     "./fabric-special-object-brand": "./src/fabric-special-object-brand.ts",
+    "./for-testing-only": "./src/for-testing-only.ts",
     "./experimental-posture": "./src/experimental-posture.ts",
     "./deployment-meta": "./src/deployment-meta.ts",
     "./space-host": "./src/space-host.ts",

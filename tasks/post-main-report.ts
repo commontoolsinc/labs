@@ -81,9 +81,10 @@ import {
   WORKFLOW_FILE,
   type WorkflowRun,
 } from "./ci-check-lib.ts";
-import { loadTopology } from "./test-topology.ts";
-import type { Suite } from "./test-topology/suite.ts";
-import { planOver, requestedRun } from "./ci-lane.ts";
+import { claimsFor, loadTopology } from "./test-topology.ts";
+import type { LocatableRecord, Suite } from "./test-topology/suite.ts";
+import { gainedSince, planOver, requestedRun } from "./ci-lane.ts";
+import { unknownIdentity } from "./test-selection/census.ts";
 import { isLaneMeasurement } from "./lane-measurement.ts";
 import {
   coverageGateIdentity,
@@ -585,19 +586,27 @@ async function manifestOfTheirRun(
  * holds neither the suites nor which units still exist. `run` is what the
  * pull request's labels asked its run to be: the full one, or a budgeted
  * one at a scale.
+ *
+ * `recorded` is what the run under report recorded. The tree places each
+ * of its records the manifest has no identity for in a unit, since such
+ * a test ran on the pull request wherever its unit did.
  */
 export function manifestView(
   manifest: Manifest,
   suites: readonly Suite[],
   changed: ReadonlySet<string>,
+  landed: ReadonlySet<string>,
+  recorded: Iterable<LocatableRecord>,
   run: { full: boolean; scale: number },
 ): Omit<PullRequestView, "ran"> {
   // A pull request's run, packed into as many lanes as it would take.
-  const packed = planOver({ suites, manifest, changed, ...run }).laid;
+  const packed = planOver({ suites, manifest, changed, landed, ...run }).laid;
   const selected = new Set<string>();
+  const placed = new Set<string>();
   for (const lane of packed.lanes) {
     for (const selection of lane.selections) {
       selected.add(testIdentityKey(selection.entry.test));
+      placed.add(`${selection.entry.suite}\t${selection.entry.unit}`);
     }
   }
   // A gate is in no lane, and the packing chose it all the same.
@@ -621,9 +630,28 @@ export function manifestView(
     newRealTestFailures.set(key, entry.inputs.catches);
     units.set(key, `${entry.suite}\t${entry.unit}`);
   }
+  const heldUnits = new Set(
+    [...heldWithUnit].flatMap((key) => units.get(key) ?? []),
+  );
+  for (const record of recorded) {
+    const key = testIdentityKey(record.test);
+    if (units.has(key)) continue;
+    const [claim, ...others] = claimsFor(suites, record);
+    if (claim?.unit === undefined || others.length > 0) continue;
+    const unit = `${claim.suite.id}\t${claim.unit}`;
+    units.set(key, unit);
+    // A unit that runs whole runs this test as well, so a unit held back
+    // for a flaky test in it held this one back too.
+    if (heldUnits.has(unit)) heldWithUnit.add(key);
+    // A unit nothing has measured is packed as one stand-in, so no lane
+    // being able to hold the stand-in holds of every test in the unit.
+    const standing = testIdentityKey(unknownIdentity(claim.suite, claim.unit));
+    if (unschedulable.has(standing)) unschedulable.add(key);
+  }
   return {
     manifest: true,
     selected,
+    placed,
     withheld,
     heldWithUnit,
     unschedulable,
@@ -833,7 +861,14 @@ export async function main(
     view = {
       ...(fetched.manifest === undefined || !requested.ok
         ? unknownPullRequest()
-        : manifestView(fetched.manifest, suites, changed, requested)),
+        : manifestView(
+          fetched.manifest,
+          suites,
+          changed,
+          await gainedSince(git, fetched.manifest.commit, parent),
+          reportsHere.flat(),
+          requested,
+        )),
       ...(ran === undefined ? {} : { ran: ran.outcomes }),
     };
   }

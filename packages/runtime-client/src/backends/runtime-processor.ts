@@ -76,6 +76,7 @@ import {
   isCell,
   isCellResult,
   isLoopbackHostname,
+  isPieceRoot,
   markDurableReadTx,
   type NormalizedFullLink,
   normalizeSpaceHost,
@@ -314,6 +315,7 @@ import {
   type VDomMountRequest,
   type VDomMountResponse,
   type VDomUnmountRequest,
+  type WorkerIpcSizes,
   type WriteStackTraceResponse,
 } from "@/protocol/mod.ts";
 import type { RemoteResponse, VDomOp } from "@/protocol/types.ts";
@@ -1088,6 +1090,12 @@ export class RuntimeProcessor {
     this.#runtime.retrySpaceAccess(space)
   );
 
+  /**
+   * What the worker's ports have carried, read from the client registry
+   * that owns them; `null` where no registry stands behind this processor.
+   */
+  readonly #ipcSizes: () => WorkerIpcSizes | null;
+
   private constructor(
     runtime: Runtime,
     cc: PiecesController,
@@ -1096,8 +1104,10 @@ export class RuntimeProcessor {
     telemetry: RuntimeTelemetry,
     securityContext: RuntimeSecurityContext,
     clients: () => Iterable<WorkerClient> = () => [ownerClient],
+    ipcSizes: () => WorkerIpcSizes | null = () => null,
   ) {
     this.#runtime = runtime;
+    this.#ipcSizes = ipcSizes;
     this.#cc = cc;
     this.#spaces.set(initSpace, cc);
     this.#identity = identity;
@@ -3195,7 +3205,8 @@ export class RuntimeProcessor {
    * the schema it is read under — so what this loads is what deciding the
    * address takes: the requested document, and behind a redirect the document
    * the redirect lands in, whose metadata says whether it is a piece and what
-   * result schema a cell inside it takes. Serving a slug document, the server
+   * result schema a cell inside it takes. A requested document carrying a
+   * pattern pointer is the piece itself, and its redirect is not followed. Serving a slug document, the server
    * resolves the redirect through the links on its path, which is the floor
    * for an address a redirect answers. Nothing here reads the target's value,
    * so whatever that value reaches stays cold until a caller subscribes to
@@ -3231,10 +3242,15 @@ export class RuntimeProcessor {
     // arrives, plus what the server resolves at the address itself when the
     // value stored there is a link.
     await requestedCell.sync();
-    const redirect = parseLink(
-      requestedCell.getRaw(),
-      requestedCell.getAsNormalizedFullLink(),
-    );
+    // A piece's root is the piece, even when its value is a redirect, as it is
+    // for a pattern that returns a sub-pattern's result whole. Only a
+    // document that is no piece names one.
+    const redirect = isPieceRoot(this.#runtime, requestedCell)
+      ? undefined
+      : parseLink(
+        requestedCell.getRaw(),
+        requestedCell.getAsNormalizedFullLink(),
+      );
     if (redirect?.overwrite === "redirect") {
       const target = this.#runtime.getCellFromLink({
         ...redirect,
@@ -3689,6 +3705,7 @@ export class RuntimeProcessor {
           vdomMounts: this.#vdomMounts.size,
           spaces: this.#spaces.size,
         },
+        ipc: this.#ipcSizes(),
       },
     };
   }
@@ -4311,6 +4328,7 @@ export class RuntimeProcessor {
       identity: Identity,
       telemetry: RuntimeTelemetry,
       securityContext: RuntimeSecurityContext,
+      ipcSizes?: () => WorkerIpcSizes | null,
     ): RuntimeProcessor;
   } {
     return {
@@ -4321,6 +4339,7 @@ export class RuntimeProcessor {
         identity,
         telemetry,
         securityContext,
+        ipcSizes,
       ) =>
         new RuntimeProcessor(
           runtime,
@@ -4329,6 +4348,8 @@ export class RuntimeProcessor {
           identity,
           telemetry,
           securityContext,
+          undefined,
+          ipcSizes,
         ),
     };
   }
@@ -4344,11 +4365,13 @@ export class RuntimeProcessor {
    * requests at once, and a host the check could not reach is reported to
    * the clients connected when it answers. A caller that needs storage and
    * pieces to have converged waits on `synced()`. `clients` resolves the
-   * current authorized recipients of runtime-wide notifications.
+   * current authorized recipients of runtime-wide notifications, and
+   * `ipcSizes` what their channels have carried, for the sizes read.
    */
   static async initialize(
     data: InitializationData,
     clients: () => Iterable<WorkerClient> = () => [ownerClient],
+    ipcSizes: () => WorkerIpcSizes | null = () => null,
   ): Promise<RuntimeProcessor> {
     const apiUrlObj = new URL(data.apiUrl);
     // Memory alone moves to the memory URL. LLM requests, patterns and the
@@ -4477,6 +4500,7 @@ export class RuntimeProcessor {
       telemetry,
       securityContextFrom(data, identity.did()),
       clients,
+      ipcSizes,
     );
     processor.#health = health;
     processor.#awaitedHealth = data.awaitHealth === true;

@@ -536,7 +536,8 @@ as `patternIdentity`, verified by a parity test against the real
   adopt.
 - **Assemble the program the worker assembles.** Resolving a pattern for a
   compile attaches every file that a `dataFile()` call in its closure reads,
-  and the compiler folds each one into the entry's hash. The light path
+  and the compiler folds each one into the hash of the module that reads it,
+  which the entry's hash covers. The light path
   attaches them by the same step (`attachDeclaredDataFiles`), and reads each
   one as a program stores it: strictly as UTF-8, keeping a leading byte order
   mark that decoding it as source would drop.
@@ -588,8 +589,13 @@ then start it:
    that hosts offering the two releases in turn leave the record as it is.
    Two answers stating the same time are not ordered, and an answer to a piece
    whose source records no time is not either. A running artifact that will
-   not load has nothing to keep and continues regardless, so the earlier
-   release is a rescue. A release time that is not one leaves the piece's
+   not load has nothing to start and continues regardless, so the earlier
+   release is a rescue, unless the piece's history records its move from the
+   offered source to the running one. A runtime older than the release a piece
+   moved to cannot load it either, and in that case is behind it rather than
+   holding a dead pattern: the piece keeps its source, as against any earlier
+   release, so a stale runtime and a current one sharing the piece do not move
+   it between the two. A release time that is not one leaves the piece's
    source as it is, like a failed identity request.
 5. Revalidate `{host}{url}` and every module in its complete authored import
    closure with the same `no-cache` fetch policy, then compile with the export

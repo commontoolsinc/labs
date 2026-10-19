@@ -51,6 +51,35 @@ export interface SeedLoadedRoomOptions {
   report: (message: string) => void;
 }
 
+/** The fixtures used by the fixed-size room benchmark. */
+export interface FabrichatBenchmarkRooms<Room> {
+  /** The room every segment but `send` and `react` visits. */
+  read: Room;
+
+  /** The room `send` writes to. */
+  send: Room;
+
+  /** The room `react` writes to. */
+  react: Room;
+}
+
+/**
+ * Seeds the fixed-size benchmark's rooms together, so that a run waits only as
+ * long as the slowest seed, and resolves only once every one has finished, so
+ * that no seed is still running while a segment measures. Rejects as soon as
+ * one seed does.
+ */
+export async function seedFabrichatBenchmarkRooms<Room>(
+  seed: (label: keyof FabrichatBenchmarkRooms<Room>) => Promise<Room>,
+): Promise<FabrichatBenchmarkRooms<Room>> {
+  const [read, send, react] = await Promise.all([
+    seed("read"),
+    seed("send"),
+    seed("react"),
+  ]);
+  return { read, send, react };
+}
+
 /**
  * Seeds a room, then loads it once as its starter, untimed, and returns it.
  *

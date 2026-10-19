@@ -464,6 +464,8 @@ async function reporting(
         if (args[0] === "rev-parse") {
           return Promise.resolve(`${"c".repeat(40)}\n`);
         }
+        if (args[0] === "cat-file") return Promise.resolve("");
+        if (args.includes("--diff-filter=A")) return Promise.resolve("");
         return Promise.resolve("packages/bakery/src/oven.ts\n");
       },
       topology: () => Promise.resolve(world.suites ?? []),
@@ -631,25 +633,46 @@ describe("post-main-report", () => {
 
     it("rebuilds the plan the pull request's labels asked for", () => {
       // Nothing chosen by score: the run held only what had to run.
-      const mandatoryOnly = manifestView(manifest, suites, new Set(), {
-        full: false,
-        scale: 0,
-      });
+      const mandatoryOnly = manifestView(
+        manifest,
+        suites,
+        new Set(),
+        new Set(),
+        [],
+        {
+          full: false,
+          scale: 0,
+        },
+      );
       expect(mandatoryOnly.selected.has(testIdentityKey(proves))).toBe(false);
       expect(mandatoryOnly.crowded).toBe(true);
       // Everything, the flaky test the default plan holds back included.
-      const full = manifestView(manifest, suites, new Set(), {
+      const full = manifestView(manifest, suites, new Set(), new Set(), [], {
         full: true,
         scale: 1,
       });
       expect(full.selected.has(testIdentityKey(kneads))).toBe(true);
       expect(full.withheld.size).toBe(0);
-      const unlabelled = manifestView(manifest, suites, new Set(), DEFAULT_RUN);
+      const unlabelled = manifestView(
+        manifest,
+        suites,
+        new Set(),
+        new Set(),
+        [],
+        DEFAULT_RUN,
+      );
       expect(unlabelled.selected.has(testIdentityKey(kneads))).toBe(false);
     });
 
     it("reports what the packing reached and what was held back", () => {
-      const view = manifestView(manifest, suites, new Set(), DEFAULT_RUN);
+      const view = manifestView(
+        manifest,
+        suites,
+        new Set(),
+        new Set(),
+        [],
+        DEFAULT_RUN,
+      );
       expect(view.manifest).toBe(true);
       expect(view.withheld.get(testIdentityKey(kneads))).toBe("flaky");
       expect(view.selected.has(testIdentityKey(proves))).toBe(true);
@@ -667,12 +690,15 @@ describe("post-main-report", () => {
         manifest,
         [{ ...suites[0]!, whole: [bakeryUnit] }],
         new Set(),
+        new Set(),
+        [],
         DEFAULT_RUN,
       );
       expect([...view.heldWithUnit]).toEqual([testIdentityKey(proves)]);
       expect(view.selected.has(testIdentityKey(proves))).toBe(false);
       expect(
-        manifestView(manifest, suites, new Set(), DEFAULT_RUN).heldWithUnit
+        manifestView(manifest, suites, new Set(), new Set(), [], DEFAULT_RUN)
+          .heldWithUnit
           .size,
       )
         .toBe(0);
@@ -697,6 +723,8 @@ describe("post-main-report", () => {
         },
         [{ ...suites[0]!, units: [bakeryUnit, oven] }],
         new Set(),
+        new Set(),
+        [],
         DEFAULT_RUN,
       );
       expect(view.crowded).toBe(true);
@@ -737,6 +765,8 @@ describe("post-main-report", () => {
           withGate,
           topology,
           new Set(["packages/bakery/src/x.ts"]),
+          new Set(),
+          [],
           DEFAULT_RUN,
         )
           .selected.has(testIdentityKey(gate)),
@@ -746,6 +776,8 @@ describe("post-main-report", () => {
           withGate,
           topology,
           new Set(["docs/README.md"]),
+          new Set(),
+          [],
           DEFAULT_RUN,
         )
           .selected.has(testIdentityKey(gate)),
@@ -753,7 +785,14 @@ describe("post-main-report", () => {
     });
 
     it("carries the flake counts and the new real test failures behind every entry", () => {
-      const view = manifestView(manifest, suites, new Set(), DEFAULT_RUN);
+      const view = manifestView(
+        manifest,
+        suites,
+        new Set(),
+        new Set(),
+        [],
+        DEFAULT_RUN,
+      );
       expect(view.flakes.get(testIdentityKey(kneads)))
         .toEqual({ flakes: 20, runs: 20 });
       // An entry with no counts is still a key, since membership is what
@@ -766,9 +805,93 @@ describe("post-main-report", () => {
     // Which unit a test lives in is what says whether a run that did not
     // record it ran its unit at all.
     it("carries the unit every entry lives in", () => {
-      const view = manifestView(manifest, suites, new Set(), DEFAULT_RUN);
+      const view = manifestView(
+        manifest,
+        suites,
+        new Set(),
+        new Set(),
+        [],
+        DEFAULT_RUN,
+      );
       expect(view.units.get(testIdentityKey(kneads)))
         .toBe(`workspace-unit\t${bakeryUnit}`);
+    });
+
+    describe("a test the manifest does not hold", () => {
+      // `rises` lives in `oven.test.ts`, which nothing has measured. The
+      // tree places it by the file its record names.
+
+      const oven = "packages/bakery/test/oven.test.ts";
+      const rises = { k: "unit", s: "bakery", n: "rises" };
+      const tree: Suite[] = [{
+        ...suites[0]!,
+        units: [bakeryUnit, oven],
+        locate: (record) =>
+          record.file === undefined
+            ? undefined
+            : { level: "unit", unit: record.file },
+      }];
+      const recorded = [{ test: rises, file: oven }];
+
+      it("is placed in its unit, and the unit is placed by the packing", () => {
+        const view = manifestView(
+          manifest,
+          tree,
+          new Set(),
+          new Set(),
+          recorded,
+          DEFAULT_RUN,
+        );
+        expect(view.units.get(testIdentityKey(rises)))
+          .toBe(`workspace-unit\t${oven}`);
+        expect(view.placed.has(`workspace-unit\t${oven}`)).toBe(true);
+      });
+
+      it("is held back with a unit that runs whole and holds a flaky test", () => {
+        // `kneads` is withheld and `bakery.test.ts` runs whole, so a new
+        // test recorded in it was held back with it.
+
+        const slices = { k: "unit", s: "bakery", n: "slices" };
+        const view = manifestView(
+          manifest,
+          [{ ...tree[0]!, whole: [bakeryUnit] }],
+          new Set(),
+          new Set(),
+          [{ test: slices, file: bakeryUnit }],
+          DEFAULT_RUN,
+        );
+        expect(view.heldWithUnit.has(testIdentityKey(slices))).toBe(true);
+      });
+
+      it("shares what no lane can hold with the unit nothing has measured", () => {
+        // The suite's fixed charge is past what any lane can hold, and the
+        // unit landed on the default branch before the change, so it is
+        // not forced in.
+
+        const view = manifestView(
+          {
+            ...manifest,
+            calibration: {
+              setupCost: {},
+              suites: {
+                "workspace-unit": {
+                  overhead: 10_000,
+                  correction: 1,
+                  unitOverhead: 0,
+                },
+              },
+              prologue: 0,
+            },
+          },
+          tree,
+          new Set(),
+          new Set([oven]),
+          recorded,
+          DEFAULT_RUN,
+        );
+        expect(view.placed.has(`workspace-unit\t${oven}`)).toBe(false);
+        expect(view.unschedulable.has(testIdentityKey(rises))).toBe(true);
+      });
     });
 
     // The tree decides what exists. A manifest naming a unit this tree no
@@ -779,6 +902,8 @@ describe("post-main-report", () => {
         manifest,
         [{ ...suites[0]!, units: [] }],
         new Set(),
+        new Set(),
+        [],
         DEFAULT_RUN,
       );
       expect(view.selected.size).toBe(0);

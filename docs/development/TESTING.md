@@ -40,6 +40,14 @@ cd packages/runner
 deno task test --filter "test name"
 ```
 
+`deno test --filter` compares the pattern with the names of top-level tests
+only. In a file written with `describe()` and `it()`, the top-level test is the
+`describe()`, and each `it()` inside it runs as a step of that test. So the
+pattern has to match the `describe()` name, and the whole block runs. A pattern
+that matches only an `it()` description matches nothing. The run then reports
+`0 passed | 0 failed`, with every test filtered out, and exits successfully, so
+check the passed count.
+
 The flag is passed to the `deno test` that the package's own task invokes, so
 the preload, the permissions, and the file globs that package's tests need are
 all still applied. The same holds for the packages that run their tests through

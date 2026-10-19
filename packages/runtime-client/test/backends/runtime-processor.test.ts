@@ -2609,6 +2609,9 @@ describe("runtime-processor", () => {
       };
     }
 
+    /** A runner that holds no session pattern pointer for any document. */
+    const noSessionPointers = { sessionPatternPointerFor: () => undefined };
+
     function redirectRaw(ref: CellRef) {
       return {
         "/": {
@@ -2647,6 +2650,7 @@ describe("runtime-processor", () => {
           },
         },
         runtime: {
+          runner: noSessionPointers,
           getCellFromEntityId: (_space: unknown, entityId: unknown) => {
             lookedUp.push(String(entityId));
             return requestedCell;
@@ -2684,6 +2688,7 @@ describe("runtime-processor", () => {
       target: unknown,
     ) {
       return {
+        runner: noSessionPointers,
         getCellFromEntityId: () => slugCell,
         getCellFromLink: (link: CellRef) =>
           link.path.length === 0 && link.id === landing.ref.id
@@ -2971,6 +2976,7 @@ describe("runtime-processor", () => {
       };
       const processor = buildProcessor({
         runtime: {
+          runner: noSessionPointers,
           getCellFromEntityId: () => slugCell,
           getCellFromLink: () => pieceCell,
         },
@@ -3023,6 +3029,7 @@ describe("runtime-processor", () => {
       };
       const processor = buildProcessor({
         runtime: {
+          runner: noSessionPointers,
           getCellFromEntityId: () => slugCell,
           getCellFromLink: () => targetCell,
         },
@@ -3038,6 +3045,58 @@ describe("runtime-processor", () => {
       });
 
       expect(result.piece.cell).toMatchObject(targetRef);
+    });
+    it("loads a keyless piece whose root redirects as the piece, without following the redirect", async () => {
+      // A piece set up in this runtime from a pattern with no durable pointer
+      // has only the runner's session pointer. Its root redirecting to a
+      // child's result does not make it a slug.
+
+      const pieceRef: CellRef = {
+        id: `of:${fid("keyless-piece")}` as CellRef["id"],
+        space,
+        scope: "space",
+        path: [],
+      };
+      const childRef: CellRef = {
+        id: `of:${fid("keyless-child")}` as CellRef["id"],
+        space,
+        scope: "space",
+        path: [],
+      };
+      const pieceCell = mockCell(pieceRef, { raw: redirectRaw(childRef) });
+      const calls: unknown[][] = [];
+      const processor = buildProcessor({
+        runtime: {
+          runner: {
+            sessionPatternPointerFor: (cell: unknown) =>
+              cell === pieceCell
+                ? { identity: "keyless:piece", symbol: "default" }
+                : undefined,
+          },
+          getCellFromEntityId: () => pieceCell,
+          getCellFromLink: () => {
+            throw new Error("the piece's redirect should not be followed");
+          },
+        },
+        cc: {
+          getSpace: () => space,
+          getPieceCell: (...args: unknown[]) => {
+            calls.push(args);
+            return Promise.resolve(pieceCell);
+          },
+        },
+        space,
+      });
+
+      const result = await processor.handlePieceGet({
+        type: RequestType.PieceGet,
+        pieceId: fid("keyless-piece"),
+        space,
+        runIt: true,
+      });
+
+      expect(calls.map(([, runIt]) => runIt)).toEqual([true]);
+      expect(result.piece.cell).toMatchObject(pieceRef);
     });
   });
 
@@ -7332,7 +7391,43 @@ describe("runtime-processor", () => {
       expect(response.sizes).toEqual({
         ...runtimeSizes,
         worker: workerSizesAtRest,
+        ipc: null,
       });
+    });
+
+    it("carries what the client registry says its ports have carried", () => {
+      const ipc = {
+        openPorts: { open: 2, closed: 1 },
+        bytesSerialized: {
+          owner: {
+            messages: 4,
+            sampledMessages: 1,
+            sampledBytes: 100,
+            approxBytes: 400,
+          },
+          clients: {},
+          departedClients: {
+            messages: 0,
+            sampledMessages: 0,
+            sampledBytes: 0,
+            approxBytes: 0,
+          },
+        },
+      };
+      const processor = buildProcessor({
+        runtime: {
+          getCfcStats: () => cfcStats,
+          patternManager: { getCompileCacheStats: () => compileCacheStats },
+          getSizes: () => runtimeSizes,
+        },
+        ipcSizes: () => ipc,
+      });
+
+      const response = processor.getLoggerCounts({
+        type: RequestType.GetLoggerCounts,
+      });
+
+      expect(response.sizes.ipc).toEqual(ipc);
     });
 
     it("counts a cell subscription while it stands and not after its unsubscribe", () => {

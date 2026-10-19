@@ -1,8 +1,9 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { dirname, relative } from "@std/path";
+import { dirname, fromFileUrl, relative } from "@std/path";
 import { parse as parseYaml } from "@std/yaml";
 import { getBinary } from "@astral/astral";
 import { COVERAGE_ARTIFACT } from "@commonfabric/test-support/records";
+import { BuildConfig } from "./build-binaries.ts";
 import { commandWords, withoutComments } from "./ci-workflow.ts";
 import { phaseOf } from "./ci-step-phases.ts";
 import {
@@ -163,6 +164,42 @@ Deno.test("every workflow and composite action is valid YAML", async () => {
   );
 });
 
+Deno.test("cache-only binary builders install their entrypoint graphs", async () => {
+  const installAction = await Deno.readTextFile(
+    new URL("../.github/actions/deno-install/action.yml", import.meta.url),
+  );
+  const toolshedDockerfile = await Deno.readTextFile(
+    new URL("../Dockerfile.toolshed", import.meta.url),
+  );
+  const root = fromFileUrl(new URL("../", import.meta.url));
+  const config = new BuildConfig({ root, toolshedFlags: [] });
+  const expectedEntrypoints = [
+    config.toolshedEntryPath(),
+    config.cliEntryPath(),
+  ].map((entrypoint) => relative(root, entrypoint).replaceAll("\\", "/"));
+  const listedEntrypoints = installAction.match(
+    /binary_entrypoints=\(\n(?<paths>(?: +\S+\n)+) +\)/,
+  )?.groups?.paths.trim().split(/\s+/);
+  const dockerEntrypoints = toolshedDockerfile.match(
+    /deno install --entrypoint --frozen (?<entrypoints>\S+(?: +\S+)*)/,
+  )?.groups?.entrypoints.split(/ +/);
+  const dockerBuilds = toolshedDockerfile.match(
+    /deno task build-binaries (?<binaries>\S+(?: +\S+)*)/,
+  )?.groups?.binaries.split(/ +/);
+
+  assertEquals(listedEntrypoints, expectedEntrypoints);
+  assertStringIncludes(
+    installAction,
+    'deno install --entrypoint --cached-only "${frozen_arg[@]}"',
+  );
+  assertStringIncludes(
+    installAction,
+    'deno install --entrypoint "${frozen_arg[@]}"',
+  );
+  assertEquals(dockerEntrypoints, [expectedEntrypoints[0]]);
+  assertEquals(dockerBuilds, ["toolshed"]);
+});
+
 Deno.test("CI browser tests use the runner's installed Chrome", async () => {
   const contents = await workflow("deno.yml");
   const configuredPath = contents.match(
@@ -286,10 +323,9 @@ Deno.test("every work step is bounded before its job is", async () => {
     );
   }
 
-  // The deploy jobs hand the work to a script that lives elsewhere — one on the
-  // bastion, one in Cloud Storage — and how long that takes is not this
-  // workflow's to say. They carry no bound, so none is asked of them here.
-  const unboundedJobs = new Set(["deploy-rapids", "deploy-shell-staging"]);
+  // The shell deploy hands the work to Cloud Storage, and how long that takes
+  // is not this workflow's to say. It carries no bound here.
+  const unboundedJobs = new Set(["deploy-shell-staging"]);
   const ci = await parsedWorkflow("deno.yml");
   for (const [jobId, job] of Object.entries(ci.jobs)) {
     if (unboundedJobs.has(jobId)) continue;
@@ -377,14 +413,16 @@ Deno.test("each comment job selects runs by the triggering run's own facts", asy
 // it reads is the change itself. That commit is on the default branch,
 // which is what makes it safe to run in a job holding a write token; a
 // pull request head in the same job would be running fork-authored code
-// with permission to comment as the repository.
+// with permission to comment as the repository. Its whole history is
+// there because the report lists what the default branch gained since
+// the commit a manifest was published from, as the lanes do.
 Deno.test("the run report checks out the commit it reports on", async () => {
   const comment = await workflow("pull-request-comments.yml");
   assertStringIncludes(
     comment,
     "ref: ${{ github.event.workflow_run.head_sha }}",
   );
-  assertStringIncludes(comment, "fetch-depth: 2");
+  assertStringIncludes(comment, "fetch-depth: 0");
 });
 
 //
@@ -888,7 +926,7 @@ Deno.test("nothing is released that the full run has not passed", async () => {
       `${id} does not wait for the full run`,
     );
   }
-  assertEquals(needsOf(ci.jobs["deploy-rapids"]), ["attest-binaries"]);
+  assertEquals(ci.jobs["deploy-rapids"], undefined);
 });
 
 Deno.test("Status fails unless every job passed and the lanes ran", async () => {
@@ -1456,7 +1494,7 @@ Deno.test("Deploy steps call the bastion wrapper the way it accepts", async () =
   // to the infra repository, so nothing else here sees it and the call sites
   // are checked instead. docs/development/deploying.md covers the seam.
 
-  const environments = ["estuary", "rapids"];
+  const environments = ["estuary"];
   // The revision has to expand to a full SHA, which is a property of what the
   // expression reads rather than of the expression itself. `github.ref_name`
   // would look just as much like a revision here and fail on the bastion, so
@@ -1495,12 +1533,8 @@ Deno.test("Deploy steps call the bastion wrapper the way it accepts", async () =
     }
   }
 
-  // Every workflow that calls the script is checked, so a new one is covered
-  // without being listed. The two that call it today are named to catch the
-  // case where the search comes back empty and the loop above does nothing.
-  for (const name of ["deno.yml", "deploy-production.yml"]) {
-    assert(callers.includes(name), `${name}: no deploy.sh call found`);
-  }
+  // Rapids uses its candidate receiver; this wrapper deploys production.
+  assertEquals(callers, ["deploy-production.yml"]);
 });
 
 Deno.test("every test-records artifact name is store-safe and unique", async () => {
@@ -1621,7 +1655,6 @@ Deno.test("the run in tomorrow's order runs the CI suites and ships nothing", as
   );
   assertEquals(shipping.sort(), [
     "attest-binaries",
-    "deploy-rapids",
     "deploy-shell-staging",
   ]);
   for (const id of shipping) {

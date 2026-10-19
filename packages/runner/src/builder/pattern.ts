@@ -1,6 +1,11 @@
-import type { InSpaceGrants, InSpaceOptions } from "@commonfabric/api";
+import type {
+  FabricExecValue,
+  InSpaceGrants,
+  InSpaceOptions,
+} from "@commonfabric/api";
 import {
   debugStr,
+  deepFreeze,
   hashStringOf,
   isDeepFrozen,
   isWalkableObjectOrArray,
@@ -21,7 +26,7 @@ import {
   SPACE_KIND_MAX_LENGTH,
 } from "@commonfabric/memory/v2/space-kind";
 
-import { type AliasBinding } from "../alias-binding.ts";
+import { type AliasBinding, isAliasBinding } from "../alias-binding.ts";
 import {
   exportCell,
   isCell,
@@ -76,7 +81,7 @@ import {
   patternToEncodableForm,
   withAliasBindings,
 } from "./to-encodable-form.ts";
-import { traverseValue } from "./traverse-utils.ts";
+import { traverseValue, visitValue } from "./traverse-utils.ts";
 import {
   type CellScope,
   type DerivedInternalCellDescriptor,
@@ -84,6 +89,7 @@ import {
   type Frame,
   type ICell,
   isModule,
+  isPattern,
   isReactive,
   JSONObject,
   type JSONSchema,
@@ -711,6 +717,7 @@ function factoryFromPattern<T, R>(
     // What `JSON.stringify(SomePattern)` returns, which pattern source uses.
     toJSON: () => patternToEncodableForm(patternFactory),
   };
+  freezePartialCauses(pattern);
 
   const makePatternFactory = (
     defaultScope?: CellScope,
@@ -992,7 +999,7 @@ function assignComputedCellKinds(
 ): void {
   const collectCellRoots = (value: unknown): Set<OpaqueCell<any>> => {
     const roots = new Set<OpaqueCell<any>>();
-    traverseValue(value as FactoryInput<unknown>, (item) => {
+    visitValue(value as FactoryInput<unknown>, (item) => {
       if (isCellResultForDereferencing(item)) item = getCellOrThrow(item);
       if (isCell(item)) roots.add(exportCell(item).cell);
       return item;
@@ -1472,3 +1479,38 @@ export function getTopFrame(): Frame | undefined {
 
 /** The full type of the `pattern` function including all overloads. */
 export type PatternBuilder = typeof pattern;
+
+/**
+ * Deep-freezes every partial cause `pattern` holds: its manifest of derived
+ * internal cells, and the `partialCause` of each `$alias` binding in its
+ * nodes and its result. The runtime keeps the id a partial cause names by the
+ * cause's identity, and refuses a cause that is an object but not deep-frozen.
+ * The builder calls this on every pattern it builds.
+ */
+export function freezePartialCauses(pattern: Pattern): void {
+  if (pattern.derivedInternalCells !== undefined) {
+    deepFreeze(pattern.derivedInternalCells);
+  }
+  // TODO(danfuzz): Walk with `data-model`'s value visitor once that is ready
+  // for use outside its package.
+  visitValue(pattern.result, freezeAliasCause);
+  for (const node of pattern.nodes) {
+    visitValue(node.inputs, freezeAliasCause);
+    visitValue(node.outputs, freezeAliasCause);
+  }
+}
+
+/**
+ * Helper for {@link freezePartialCauses}, the `visitValue()` callback, which
+ * deep-freezes the partial cause of an `$alias` binding and returns `null` so
+ * that the walk descends no further into it. An embedded pattern is not
+ * descended either: the causes it holds are its own, frozen when it was built.
+ */
+function freezeAliasCause(value: FabricExecValue): null | undefined {
+  if (isAliasBinding(value)) {
+    const { partialCause } = value.$alias;
+    if (partialCause !== undefined) deepFreeze(partialCause);
+    return null;
+  }
+  return isPattern(value) ? null : undefined;
+}

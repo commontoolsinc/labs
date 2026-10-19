@@ -377,16 +377,37 @@ describe("report", () => {
       expect(selectionOf(itself, key("kneads"))).toBe("skipped-there");
     });
 
-    // An identity the packing reached, and one the store has never seen,
-    // are both identities that run. A run with no record of either
-    // recorded less than it ran rather than running less than it should
-    // have, and saying there is no manifest would deny one there is.
+    // An identity the packing reached, and one the manifest does not hold
+    // whose unit it placed, are both identities that run. A run with no
+    // record of either recorded less than it ran rather than running less
+    // than it should have, and saying there is no manifest would deny one
+    // there is.
     it("separates a test that was to have run from one nothing knows", () => {
       const selected = knows(["kneads"], {
         selected: new Set([key("kneads")]),
       });
       expect(selectionOf(selected, key("kneads"))).toBe("unrecorded");
       expect(selectionOf(knows([]), key("kneads"))).toBe("unrecorded");
+      const placed = knows([], {
+        units: inOneUnit("kneads"),
+        placed: new Set(["workspace-unit\tbakery"]),
+      });
+      expect(selectionOf(placed, key("kneads"))).toBe("unrecorded");
+    });
+
+    // A test the manifest does not hold runs wherever its unit runs, so a
+    // unit the packing left out is the packing's decision about the test.
+    it("reports a test the manifest does not hold by what became of its unit", () => {
+      const passedOver = knows([], { units: inOneUnit("kneads") });
+      expect(selectionOf(passedOver, key("kneads"))).toBe("not-selected");
+      expect(selectionOf({ ...passedOver, crowded: true }, key("kneads")))
+        .toBe("crowded-out");
+      expect(
+        selectionOf(
+          { ...passedOver, unschedulable: new Set([key("kneads")]) },
+          key("kneads"),
+        ),
+      ).toBe("unschedulable");
     });
   });
 

@@ -149,8 +149,8 @@ what it can still run, so the two never disagree about the same test.
 
 `--verify` compares the units the topology enumerates against the identities
 this commit's manifest holds, in both directions. A unit the manifest holds
-nothing for is one every lane runs as unknown, and `--verify` fails on any. A
-coverage gate the manifest holds nothing for fails it too, and is reported as
+nothing for is one a lane has only a stand-in for, and `--verify` fails on any.
+A coverage gate the manifest holds nothing for fails it too, and is reported as
 offered at the floor of the score, since no lane runs a gate and its first
 record comes from the default branch. A manifest entry naming a unit the tree no
 longer enumerates is reported without failing, because a manifest is hours old
@@ -407,10 +407,12 @@ A run the next day's test-order workflow calls runs no `Status`, since the
 commit's own run already covers it.
 
 On a push, the jobs that build the `toolshed` and `cf` binaries run beside the
-lanes. `attest-binaries` waits for both builds and for `tests`,
-`deploy-shell-staging` waits for `tests`, and `deploy-rapids` waits for
-`attest-binaries`, so nothing is attested or deployed until every test has
-passed. A pull request builds nothing there: the `binaries` suites compile each
+lanes. `attest-binaries` waits for both builds and for `tests`, and
+`deploy-shell-staging` waits for `tests`, so nothing is attested or published
+until every test has passed. Rapids server deployment follows the coordinated
+infra candidate through `rapids-release.yml`; see
+[deploying](deploying.md#coordinated-rapids-releases). A pull request builds
+nothing there: the `binaries` suites compile each
 binary as a test that it still compiles. The servers the full run's lanes start
 are built by the lanes, from the same sources and the same build task, without
 the commit and the shell endpoints the release binaries carry; the jobs that
@@ -1792,7 +1794,8 @@ itself.
   for anything else, or the lanes filled what they left with other tests. Only
   those four are said, because the plan records nothing more specific about a
   test it did not place. A test the packing
-  reached, or one the store has never seen, with no record either way is a run
+  reached, or one the manifest does not hold whose unit the packing placed,
+  with no record either way is a run
   that recorded less than it ran — a test job that fails before it uploads
   leaves its share behind like that — which is said in those words rather than
   as a test the run did not reach. And a test its run recorded a skip for, where
@@ -2042,7 +2045,12 @@ recorded by that suite's runner.
 What must run for want of records is decided a unit at a time. A unit that
 no identity in the manifest locates to, under its own suite and variant,
 gets a stand-in and must run until a published manifest holds a record of it,
-so a new test file runs before anything knows what it is worth. A new test
+so a new test file runs in its own change before anything knows what it is
+worth. Once it has landed on the default branch, the full run there runs it,
+and a pull request tested before the next manifest is published runs it only
+where its budget has room: a file the default branch gained after the commit
+the manifest was published from is not forced in for want of records, and
+the exploration pass reaches its stand-in first. A new test
 inside a unit the manifest already knows is not made mandatory on its own.
 It runs whenever a lane runs its unit, because a lane's skip list names only
 identities the manifest holds. Where that unit is a file, the change that

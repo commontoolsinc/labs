@@ -10,7 +10,7 @@ import {
   isKeyableObjectOrArray,
   isWalkableObjectOrArray,
   refuseFabricInstance,
-  valueEqual,
+  valueEqualByWalk,
 } from "@commonfabric/data-model";
 import { type ACL, aclDocId } from "@commonfabric/memory/acl";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
@@ -212,6 +212,7 @@ import {
   type URI,
 } from "./storage/interface.ts";
 import {
+  internalVerifierRead,
   isDurableReadTx,
   machineryRead,
   markDurableReadTx,
@@ -359,13 +360,29 @@ const BOUND_CHILD_NODE_WEIGHT = 4096;
 const NAMING_PROBE_BUDGET = 256;
 
 /**
+ * The read metadata of `Runner.#documentPresent`, the presence probe that
+ * decides whether a run of a piece, or a swap of one to another pattern, waits
+ * for a name-sync (`Runner.#patternToNameBeforeRun`,
+ * `Runner.#swapReadsAbsent`). It reads through a read-only transaction of its
+ * own, and what it finds decides only when the run happens, never what it
+ * computes. So it is a runtime-internal read, which neither schedules nor
+ * taints, and which a runtime read ceiling does not measure: a document whose
+ * value the ceiling withholds is on the replica all the same, and the run's
+ * own reads of it are the reads the ceiling governs.
+ */
+const PRESENCE_PROBE_READ = {
+  ...ignoreReadForScheduling,
+  ...internalVerifierRead,
+};
+
+/**
  * How many times a named piece's run starts again after its start transaction
  * is refused retryably, matching the bound `Runtime.editWithRetry()` puts on
  * any other retrying writer, and how many times a piece's instantiation runs
- * again over successive layers of documents its commit claimed absent. Each
- * attempt waits for the refusal's catch-up first, so the bound caps a basis
- * that keeps moving, or a chain of links each reaching a document not yet
- * loaded, rather than a spin.
+ * again after its commit loses its basis to concurrent writes or claims absent
+ * successive layers of documents. Each attempt waits for the refusal's
+ * catch-up first, so the bound caps a basis that keeps moving, or a chain of
+ * links each reaching a document not yet loaded, rather than a spin.
  */
 const PIECE_RUN_START_MAX_RETRIES = 5;
 
@@ -467,14 +484,14 @@ const catchUpLoadFailure = (
 
 /**
  * What a piece's instantiation may still recover once an earlier attempt's
- * refused commit was recovered: another refusal claiming documents absent
- * ({@link refusalClaimsOnlyAbsence}), while rounds remain and only when it
- * names a document no earlier round's catch-up loaded. Any other refusal is
- * terminal.
+ * refused commit was recovered, while rounds remain: another stale read, or
+ * another refusal claiming documents absent ({@link refusalClaimsOnlyAbsence})
+ * when it names a document no earlier round's catch-up loaded. Any other
+ * refusal is terminal.
  */
 type InstantiationRetry = {
-  /** Rounds over documents claimed absent that the retry may still take. */
-  readonly absenceRoundsLeft: number;
+  /** Rounds the retry may still take, over stale reads and absences alike. */
+  readonly roundsLeft: number;
 
   /** The documents earlier rounds loaded, as {@link conflictKeys} names. */
   readonly loaded: ReadonlySet<string>;
@@ -1792,9 +1809,11 @@ export interface PieceSourceRevision {
 
   /**
    * When the deployment that served this revision's source released it, in
-   * milliseconds since the epoch (`pattern-release-time.ts`). Carried only by
-   * a revision adopted from a `system:` origin whose host states one; it is
-   * what keeps that piece from being moved to an earlier release.
+   * milliseconds since the epoch (`pattern-release-time.ts`). Carried by a
+   * revision adopted from a `system:` origin whose host states one, and by a
+   * later revision that leaves that same source in place, which carries the
+   * latest time known for it ({@link knownPieceReleasedAt}). It is what keeps
+   * the piece from being moved to an earlier release.
    */
   releasedAt?: number;
 }
@@ -1882,6 +1901,14 @@ export interface PieceSourceTransition {
 
   /** The release time the revision records (`PieceSourceRevision`). */
   releasedAt?: number;
+
+  /**
+   * Refuse the transition with {@link PIECE_RELEASE_OVERTAKEN} unless
+   * `releasedAt` is later than the latest release time known, when it
+   * commits, for the source the piece runs. Set by a step whose review relied
+   * on the candidate being the later release.
+   */
+  requireLaterRelease?: boolean;
 }
 
 /**
@@ -2569,10 +2596,11 @@ export class Runner {
    * In-flight settlements of self-minted piece instantiations, which commit
    * asynchronously. Their local graph is speculative until the commit and any
    * serving-wave settlement succeed, so a stale-read refusal or contribution
-   * drop tears down that exact node group and re-instantiates it once against
-   * the repaired view. This set is a deterministic test seam: disposal relies
-   * on the registration and lifecycle guards rather than waiting for a
-   * readiness gate or a wave that a closing serving loop may abandon.
+   * drop tears down that exact node group and re-instantiates it against the
+   * repaired view, for a bounded number of rounds. This set is a deterministic
+   * test seam: disposal relies on the registration and lifecycle guards rather
+   * than waiting for a readiness gate or a wave that a closing serving loop may
+   * abandon.
    */
   #pendingPieceInstantiationSettlements = new Set<Promise<unknown>>();
 
@@ -3906,10 +3934,11 @@ export class Runner {
     //
     // The conversion MUST precede the no-op gate. A raw result is not
     // necessarily a `FabricValue` — one carrying `toJSON`, say, only becomes one
-    // here — and `valueEqual` hashes its operands, so comparing a raw result
-    // throws `` `hashOf()`: unsupported object type `` instead of deciding
-    // anything. Converting first also makes the gate compare what a write
-    // would actually store, since the stored side is already a `FabricValue`.
+    // here — and the comparison reads its operands as `FabricValue`s, so
+    // comparing a raw result throws on what it cannot read instead of
+    // deciding anything. Converting first also makes the gate compare what a
+    // write would actually store, since the stored side is already a
+    // `FabricValue`.
     // A result can carry a builder artifact -- a pattern tool, say -- and an
     // artifact is not a `FabricValue`, so it is replaced before the
     // conversion. That keeps the gate below comparing what a write would
@@ -3920,7 +3949,7 @@ export class Runner {
     return {
       result,
       fabricResult,
-      changed: !valueEqual(fabricResult, previousResult),
+      changed: !valueEqualByWalk(fabricResult, previousResult),
     };
   }
 
@@ -5474,6 +5503,11 @@ export class Runner {
       pattern: Pattern;
       stage: (tx: IExtendedStorageTransaction) => void;
     } | undefined;
+    // The work the pattern watcher has in flight following a move of the
+    // piece's pointer, from seeing the move until it runs the incoming pattern
+    // or keeps the running one. A recovering instantiation waits it out: only
+    // once it settles is it known whether the move installed a graph.
+    const pointerFollows = new Set<Promise<unknown>>();
 
     // Helper to instantiate nodes for a pattern. Returns the settlement of the
     // transaction it commits itself, and nothing when it stages into `useTx`
@@ -5665,21 +5699,28 @@ export class Runner {
             active && startLifecycleEpoch === this.#lifecycleEpoch &&
             registrations.get(key) === cancel && cancelNodes === nodeCancel &&
             currentPatternKey === patternKeyAtInstantiation;
-          // `refusal` is how the commit was lost: its basis to the serving
-          // side, a policy manifest install to another participant, an
-          // absence claim over the documents `absent` names that the store
-          // holds, or none of these, which is terminal. One retry is enough
+          // `refusal` is how the commit was lost: its basis to a concurrent
+          // write, its whole contribution to the serving wave, a policy
+          // manifest install to another participant, an absence claim over
+          // the documents `absent` names that the store holds, or none of
+          // these, which is terminal. A dropped contribution takes one retry
+          // against the view the drop rolled back to. One retry is enough
           // for a lost install: a manifest never changes once present, so
           // once the catch-up has loaded it the install reads it as present
-          // and writes nothing, and the same refusal cannot recur. An absence
-          // claim can take a round per layer of documents instead: the retry
-          // reads each named document at the revision the catch-up loaded,
-          // and may follow a link in one to a document not yet loaded. The
-          // rounds are bounded by `PIECE_RUN_START_MAX_RETRIES`, and each has
-          // to name a document no earlier round loaded.
+          // and writes nothing, and the same refusal cannot recur. A lost
+          // basis can take a round per concurrent write that lands while the
+          // retry is in flight, since each round reads only what its own
+          // catch-up brought in. An absence claim can take a round per layer
+          // of documents: the retry reads each named document at the
+          // revision the catch-up loaded, and may follow a link in one to a
+          // document not yet loaded, so each such round has to name a
+          // document no earlier round loaded. The rounds of both kinds come
+          // from one budget, `PIECE_RUN_START_MAX_RETRIES`, the bound
+          // `Runtime.editWithRetry()` and a named piece's run start also put
+          // on a basis that keeps moving.
           const recoverInstantiation = async (
             error: unknown,
-            refusal: "absence" | "basis" | "manifest" | "terminal",
+            refusal: "absence" | "basis" | "dropped" | "manifest" | "terminal",
             absent: readonly string[] = [],
           ): PieceInstantiationSettlement => {
             if (!exactNodesAreCurrent()) {
@@ -5695,14 +5736,16 @@ export class Runner {
             }
             const recoverable = refusal !== "terminal" &&
               (retry === undefined ||
-                (refusal === "absence" && retry.absenceRoundsLeft > 0 &&
+                (refusal === "basis" && retry.roundsLeft > 0) ||
+                (refusal === "absence" && retry.roundsLeft > 0 &&
                   absent.some((key) => !retry.loaded.has(key))));
             if (!recoverable) {
               // Either this failure was never the recoverable class, or an
-              // earlier recovery leaves it none: the one retry lost the same
-              // way, or a round over documents claimed absent reached none
-              // not yet loaded, or the rounds are spent. The graph's setup
-              // does not become durable and the load has genuinely failed.
+              // earlier recovery leaves it none: the one retry of a manifest
+              // or of a dropped contribution lost the same way, or a round
+              // over documents claimed absent reached none not yet loaded, or
+              // the rounds are spent. The graph's setup does not become
+              // durable and the load has genuinely failed.
               const failure = this.#reportPieceStartCommitFailure(
                 instantiateActionId,
                 error,
@@ -5724,7 +5767,10 @@ export class Runner {
                 : refusal === "absence"
                 ? "claimed documents absent that the store holds; loading " +
                   "them, and instantiating once more if they load"
-                : "lost its basis to the serving side; re-instantiating once " +
+                : refusal === "dropped"
+                ? "had its contribution dropped from the serving wave; " +
+                  "re-instantiating once from the rolled-back view"
+                : "lost its basis to a concurrent write; re-instantiating " +
                   "from the caught-up view"),
               error,
             ]);
@@ -5742,18 +5788,53 @@ export class Runner {
               retryReadinessTeardown.signal,
             );
 
-            // A stop aborts the readiness/pull work above; a runtime cycle,
-            // pointer change, or newer instantiation during the wait owns the
-            // key now. Otherwise retry, handing the retry what it may still
-            // recover, so that a failure it may not tears the registration
-            // down instead of spinning.
-            if (
-              retryReadinessTeardown.signal.aborted || !active ||
-              startLifecycleEpoch !== this.#lifecycleEpoch ||
-              registrations.get(key) !== cancel ||
-              currentPatternKey !== patternKeyAtInstantiation ||
-              cancelNodes !== undefined
-            ) {
+            // A pointer that moved during the wait has a follow in flight,
+            // which either runs the incoming pattern or keeps the running
+            // one. The retry waits for it: a retry staged first would
+            // re-stage the running pattern's setup repair over a pointer
+            // that names another pattern, which the repair refuses, and its
+            // failure would tear down the piece the follow is about to run.
+            if (pointerFollows.size > 0) {
+              const tornDown = new Promise<void>((resolve) =>
+                retryReadinessTeardown.signal.addEventListener(
+                  "abort",
+                  () => resolve(),
+                  { once: true },
+                )
+              );
+              while (
+                pointerFollows.size > 0 &&
+                !retryReadinessTeardown.signal.aborted
+              ) {
+                await Promise.race([
+                  Promise.allSettled([...pointerFollows]),
+                  tornDown,
+                ]);
+              }
+            }
+
+            // A stop aborts the waits above; a runtime cycle, a newer
+            // registration, or a newer instantiation, the incoming pattern's
+            // among them, owns the key now. A follow that kept the running
+            // pattern installed no graph for it, so the retry below is what
+            // gives that pattern a graph to keep. Otherwise retry, handing
+            // the retry what it may still recover, so that a failure it may
+            // not tears the registration down instead of spinning.
+            const supersededBy = retryReadinessTeardown.signal.aborted ||
+                !active
+              ? "a stop"
+              : startLifecycleEpoch !== this.#lifecycleEpoch
+              ? "a runtime cycle"
+              : registrations.get(key) !== cancel
+              ? "a newer registration"
+              : cancelNodes !== undefined
+              ? "a newer instantiation"
+              : undefined;
+            if (supersededBy !== undefined) {
+              logger.warn("piece-start-commit-superseded", () => [
+                `piece-start commit ${instantiateActionId} was not retried: ` +
+                `${supersededBy} took the piece over during its catch-up`,
+              ]);
               return;
             }
             // A retry reads the documents the catch-up loaded. One that could
@@ -5781,13 +5862,13 @@ export class Runner {
               return await instantiatePattern(
                 pattern,
                 undefined,
-                refusal === "absence"
-                  ? {
-                    absenceRoundsLeft: (retry?.absenceRoundsLeft ??
+                refusal === "manifest" || refusal === "dropped"
+                  ? { roundsLeft: 0, loaded: new Set() }
+                  : {
+                    roundsLeft: (retry?.roundsLeft ??
                       PIECE_RUN_START_MAX_RETRIES) - 1,
                     loaded: new Set([...(retry?.loaded ?? []), ...absent]),
-                  }
-                  : { absenceRoundsLeft: 0, loaded: new Set() },
+                  },
               );
             } catch (retryError) {
               const failure = this.#reportPieceStartCommitFailure(
@@ -5797,6 +5878,15 @@ export class Runner {
               teardownRegistrationIfCurrent();
               return failure;
             }
+          };
+          // The settlement of a commit whose setup writes landed. A retry
+          // says so at the level `piece-start-commit-recovering` is logged
+          // at, so that each recovery's log says how it ended.
+          const reportRecovered = (): undefined => {
+            if (retry === undefined) return;
+            logger.warn("piece-start-commit-recovered", () => [
+              `piece-start commit ${instantiateActionId} landed on its retry`,
+            ]);
           };
           const commitWork = actualTx.commit().settled.then(
             async ({ error }): PieceInstantiationSettlement => {
@@ -5815,11 +5905,13 @@ export class Runner {
                     conflictKeys(error),
                   );
                 }
-                // Any other stale read recovers only where a serving side
-                // supplies the view the retry reads.
+                // So does any other stale read, refused by the server or by
+                // this replica's own consistency check: the retry reads the
+                // replica once the refusal's catch-up has brought the
+                // conflicting documents into it, whichever side wrote them.
                 if (
-                  this.#runtime.experimental.serverExecution === true &&
-                  isStaleReadConflict(error)
+                  isStaleReadConflict(error) ||
+                  isStorageTransactionInconsistent(error)
                 ) {
                   return await recoverInstantiation(error, "basis");
                 }
@@ -5831,9 +5923,9 @@ export class Runner {
                 return failure;
               }
               const settlement = waveSettlementOf(actualTx);
-              if (settlement === undefined) return;
+              if (settlement === undefined) return reportRecovered();
               const settled = await settlement;
-              if (settled.error === undefined) return;
+              if (settled.error === undefined) return reportRecovered();
 
               const waveWithdrawalCause = settled.error.waveWithdrawalCause;
               if (waveWithdrawalCause === "wave-abandoned") {
@@ -5857,7 +5949,7 @@ export class Runner {
               return await recoverInstantiation(
                 settled.error,
                 waveWithdrawalCause === "contribution-dropped"
-                  ? "basis"
+                  ? "dropped"
                   : "terminal",
               );
             },
@@ -5894,6 +5986,12 @@ export class Runner {
         follows.isCancelled = true;
         markCancelled();
       });
+      /** Records `work` among the follows a recovering instantiation waits out. */
+      const followingPointer = (work: Promise<unknown>): void => {
+        pointerFollows.add(work);
+        const settle = () => pointerFollows.delete(work);
+        work.then(settle, settle);
+      };
       // A hot-swap targets a DIFFERENT program over this piece's existing doc:
       // the incoming pattern's internal cells and its argument-schema
       // defaults have never been materialized here. A fresh start() does
@@ -6034,6 +6132,7 @@ export class Runner {
         // the cycle that sealed into it ends, so a caller in that cycle could
         // not wait for it (`patternPointerFollowed()`), and an event held on it
         // would hold the wave (`pendingPatternChangeFor()`).
+        followingPointer(setupWork);
         if (this.#runtime.sealDestinationInstalled) {
           this.#pendingWatcherPatternLoads.add(setupWork);
           setupWork.finally(() =>
@@ -6123,6 +6222,7 @@ export class Runner {
                 err,
               );
             });
+          followingPointer(named);
           this.#trackWatcherPatternLoad(pieceKey, follows, named);
           return;
         }
@@ -6208,13 +6308,51 @@ export class Runner {
                   "pointer as written",
                 ]);
               }
+              // A piece whose history records an update from `running` to
+              // the pointer is stopped here instead of rolled back. The
+              // check runs twice: before the rollback opens a transaction,
+              // and again through that transaction, so an update recorded
+              // between the two is honored too.
+              const standDown = (
+                running: { identity: string; symbol: string },
+              ) => {
+                logger.warn("pattern-pointer-ahead-of-runtime", () => [
+                  `durable patternIdentity ${newRef.identity}#${newRef.symbol}`,
+                  "is a recorded update from the running pattern",
+                  `${running.identity}#${running.symbol}, and this runtime`,
+                  "cannot load it; stopping the piece here rather than",
+                  "rolling the update back",
+                ]);
+                this.stop(resultCell);
+              };
+              if (
+                this.#runtime.cfcEnforcementMode !== "disabled" &&
+                revertTarget !== undefined &&
+                patternIdentityKey(revertTarget) !== newKey &&
+                pieceSourceMovedPast(resultCell, revertTarget, newRef)
+              ) {
+                // The piece's own history records a move from the pattern
+                // running here to the one this runtime cannot load: a newer
+                // runtime adopted a release this one cannot compile. The
+                // pointer is ahead of this runtime, not dead. Writing the
+                // running identity back would undo the adoption, and every
+                // start of the newer runtime would adopt again. Stopping the
+                // piece here writes nothing, leaves the adoption standing for
+                // every runtime that can load it, and keeps this runtime from
+                // writing the piece's documents under a version they have
+                // moved past.
+                standDown(revertTarget);
+                return;
+              }
               if (
                 this.#runtime.cfcEnforcementMode !== "disabled" &&
                 revertTarget !== undefined &&
                 patternIdentityKey(revertTarget) !== newKey
               ) {
                 const revertRef = revertTarget;
+                let recordedUpdateAtCommit = false;
                 const rollForward = this.#runtime.editWithRetry((tx) => {
+                  recordedUpdateAtCommit = false;
                   // Async pointer repair from the meta watcher's load
                   // promise — no scheduler run stamps it; bookkeeping
                   // per serving-loop.md §3d.
@@ -6231,12 +6369,31 @@ export class Runner {
                   if (!cur || patternIdentityKey(cur) !== newKey) {
                     return false;
                   }
+                  if (
+                    pieceSourceMovedPast(
+                      resultCell.withTx(tx),
+                      revertRef,
+                      newRef,
+                    )
+                  ) {
+                    recordedUpdateAtCommit = true;
+                    return false;
+                  }
                   resultCell.withTx(tx).setMetaRaw("patternIdentity", {
                     identity: revertRef.identity,
                     symbol: revertRef.symbol,
                   }, rawMetaWriteAuthorization);
                   return true;
                 }).then((result) => {
+                  if (recordedUpdateAtCommit) {
+                    if (
+                      active && startLifecycleEpoch === this.#lifecycleEpoch &&
+                      currentPatternKey === newKey
+                    ) {
+                      standDown(revertRef);
+                    }
+                    return;
+                  }
                   // Only reclaim the observed key while it is STILL the
                   // failed one — a valid repoint that raced this rollback
                   // has already advanced the watcher state, and clobbering
@@ -6311,6 +6468,7 @@ export class Runner {
               err,
             );
           });
+        followingPointer(watcherLoad);
         this.#trackWatcherPatternLoad(pieceKey, follows, watcherLoad);
       };
       addCancel(
@@ -6341,6 +6499,7 @@ export class Runner {
             }
             followPointer(newRef, newKey);
           });
+          followingPointer(followed);
           this.#trackWatcherPatternLoad(pieceKey, follows, followed);
         }),
       );
@@ -7400,7 +7559,7 @@ export class Runner {
           : ["value"],
         ...(link.scope !== undefined && { scope: link.scope }),
       },
-      { meta: ignoreReadForScheduling },
+      { meta: PRESENCE_PROBE_READ },
     ) !== undefined;
   }
 
@@ -9372,7 +9531,10 @@ export class Runner {
         undefined,
         cellTx(candidate),
       );
-      return valueEqual(candidateArgument.getRawUntyped(), argumentValue);
+      return valueEqualByWalk(
+        candidateArgument.getRawUntyped(),
+        argumentValue,
+      );
     };
   }
 
@@ -9595,7 +9757,10 @@ export class Runner {
             !Array.isArray(manifest) ||
             !manifest.some((entry) =>
               isObjectOrArray(entry) && "link" in entry &&
-              valueEqual(fabricFromConvertibleJsValue(entry.link), expectedLink)
+              valueEqualByWalk(
+                fabricFromConvertibleJsValue(entry.link),
+                expectedLink,
+              )
             )
           ) {
             defaultsPrepared = false;
@@ -14943,6 +15108,59 @@ export function getPieceSourceRevisions(
 }
 
 /**
+ * Whether the piece's recorded source history moved it from `from` to `to`:
+ * its latest revision names `to`, and either an earlier revision names `from`
+ * or a recorded transition displaced `from`. A transition whose predecessor's
+ * source is not retained records no baseline revision for it; it names that
+ * predecessor in the `displacedPattern` meta, stamped with the transition's
+ * own timestamp, which its revisions carry too. A later transition leaves that
+ * record in place, so a record whose timestamp matches a revision still in the
+ * history shows `from` was displaced before the latest revision was recorded.
+ * A history this runtime cannot read returns `false`.
+ *
+ * A runtime that cannot load `to` asks this to tell a source it is behind
+ * from one that is dead: when the piece moved from `from` to `to`, some
+ * runtime loaded `to`, so it is ahead of this one rather than unloadable
+ * everywhere. The history cannot tell the two apart for a source that every
+ * runtime has since lost, which it reads as ahead too.
+ */
+export function pieceSourceMovedPast(
+  resultCell: Cell<unknown>,
+  from: { identity: string; symbol: string },
+  to: { identity: string; symbol: string },
+): boolean {
+  let history: PieceSourceRevision[];
+  try {
+    history = getPieceSourceRevisions(resultCell);
+  } catch {
+    return false;
+  }
+  const latest = history.at(-1);
+  if (
+    latest === undefined ||
+    patternIdentityKey(latest.pattern) !== patternIdentityKey(to)
+  ) {
+    return false;
+  }
+  const fromKey = patternIdentityKey(from);
+  if (
+    history.slice(0, -1).some((revision) =>
+      patternIdentityKey(revision.pattern) === fromKey
+    )
+  ) {
+    return true;
+  }
+  const displaced = resultCell.getMetaRaw("displacedPattern", {
+    meta: ignoreReadForScheduling,
+  });
+  const displacedRef = asPatternIdentityRef(displaced);
+  return displacedRef !== undefined &&
+    patternIdentityKey(displacedRef) === fromKey &&
+    isObjectOrArray(displaced) &&
+    history.some((revision) => revision.timestamp === displaced.displacedAt);
+}
+
+/**
  * Read the outcome of the last attempt to follow this piece's active origin.
  *
  * A value this runtime cannot read is reported as absent. This state describes
@@ -15188,6 +15406,47 @@ export const PIECE_SOURCE_MOVED =
   "piece source changed while the source transition was being prepared";
 
 /**
+ * The reason a transition marked `requireLaterRelease` is refused: by the time
+ * it commits, the source the piece runs is known to have been released at or
+ * after the candidate, so the candidate is no longer the later release its
+ * review took it for.
+ *
+ * Exported so that the caller that set the requirement can tell this refusal
+ * from any other and review the candidate again.
+ */
+export const PIECE_RELEASE_OVERTAKEN =
+  "the piece's source was confirmed at a later release while the update was " +
+  "being prepared";
+
+/**
+ * The latest release time known for the source `resultCell` runs, `running`:
+ * the latest one recorded by the revisions naming it since the piece last
+ * moved to it from another source, or a later one the piece's reconciliation
+ * record confirms for it. `undefined` when none says.
+ */
+export function knownPieceReleasedAt(
+  resultCell: Cell<unknown>,
+  running: { identity: string; symbol: string },
+): number | undefined {
+  const history = getPieceSourceRevisions(resultCell);
+  let latest: number | undefined;
+  for (let index = history.length - 1; index >= 0; index--) {
+    const revision = history[index];
+    if (patternIdentityKey(revision.pattern) !== patternIdentityKey(running)) {
+      break;
+    }
+    if (revision.releasedAt !== undefined) {
+      latest = Math.max(latest ?? revision.releasedAt, revision.releasedAt);
+    }
+  }
+  const confirmed = getPieceReconciliation(resultCell)?.confirmed;
+  if (confirmed?.identity === running.identity) {
+    latest = Math.max(latest ?? confirmed.releasedAt, confirmed.releasedAt);
+  }
+  return latest;
+}
+
+/**
  * The session-side pattern the prepare/apply moved-guards below check a KEYLESS
  * piece's source state against. A keyless expected pattern is session-side by
  * construction — the durable pointer legitimately holds nothing and a
@@ -15278,6 +15537,16 @@ export function applyPieceSourceTransition(
   ) {
     throw new Error(PIECE_SOURCE_MOVED);
   }
+  // Read before anything below writes: the reconciliation record this
+  // transition clears may be the only place the latest time is kept.
+  const knownReleasedAt = knownPieceReleasedAt(candidate, current.pattern);
+  if (
+    transition.requireLaterRelease &&
+    (transition.releasedAt === undefined || knownReleasedAt === undefined ||
+      knownReleasedAt >= transition.releasedAt)
+  ) {
+    throw new Error(PIECE_RELEASE_OVERTAKEN);
+  }
   const history = getPieceSourceRevisions(candidate);
   if (
     history.some((revision) => revision.revisionId === transition.revisionId)
@@ -15327,6 +15596,14 @@ export function applyPieceSourceTransition(
     }, rawMetaWriteAuthorization);
   }
 
+  // A transition that leaves the source in place keeps the latest release
+  // time known for it, so a confirmation the cleared reconciliation record
+  // held still orders the piece's later updates.
+  const keepsSource =
+    patternIdentityKey(current.pattern) === patternIdentityKey(nextPattern);
+  const releasedAt = !keepsSource || knownReleasedAt === undefined
+    ? transition.releasedAt
+    : Math.max(transition.releasedAt ?? knownReleasedAt, knownReleasedAt);
   const recordedCurrent = history.at(-1);
   const currentOrigin = normalizePieceSourceOrigin(
     runtime,
@@ -15373,9 +15650,7 @@ export function applyPieceSourceTransition(
     ...(transition.selectedRevisionId === undefined
       ? {}
       : { selectedRevisionId: transition.selectedRevisionId }),
-    ...(transition.releasedAt === undefined
-      ? {}
-      : { releasedAt: transition.releasedAt }),
+    ...(releasedAt === undefined ? {} : { releasedAt }),
   });
   candidate.setMetaRaw(
     "patternSource",

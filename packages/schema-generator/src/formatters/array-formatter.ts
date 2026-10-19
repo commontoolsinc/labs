@@ -79,9 +79,18 @@ export class ArrayFormatter implements TypeFormatter {
 
     // Use formatChildType - it will auto-detect whether to use type-based
     // or node-based analysis based on whether the type is reliable
+    // A tuple's items are the union of its element types, which the checker
+    // lists in the order it created them; the tuple lists them in its own.
+    const elements = context.typeChecker.isTupleType(type)
+      ? (type as ts.Type & {
+        readonly resolvedTypeArguments?: readonly ts.Type[];
+      }).resolvedTypeArguments
+      : undefined;
     const items = this.#schemaGenerator.formatChildType(
       info.elementType,
-      context,
+      elements && info.elementType.isUnion()
+        ? { ...context, tupleItems: { items: info.elementType, elements } }
+        : context,
       spelledBy ?? info.elementNode,
       instantiatedElementType(context.instantiatedAs, context.typeChecker),
     );

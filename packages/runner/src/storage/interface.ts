@@ -145,11 +145,20 @@ export class ReplicaLoadFailureError extends Error {
     readonly failure: ReplicaLoadFailure,
     cause: unknown,
   ) {
-    super(
-      cause instanceof Error ? cause.message : String(cause),
-      { cause },
-    );
+    super(loadFailureMessage(cause), { cause });
   }
+}
+
+/**
+ * Returns the message a load failure's cause carries. A pull reports its
+ * failure as a plain result object rather than an `Error`, so the message is
+ * read off any object that has one; a cause without one is stringified.
+ */
+function loadFailureMessage(cause: unknown): string {
+  return typeof cause === "object" && cause !== null && "message" in cause &&
+      typeof cause.message === "string"
+    ? cause.message
+    : String(cause);
 }
 
 export const toReplicaLoadFailureError = (
@@ -539,6 +548,21 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    */
   subscribeSpaceSessionReplaced?(
     observer: (space: MemorySpace) => void,
+  ): Cancel;
+
+  /**
+   * Observes a space's remote subscription ending with an error, which
+   * `spaceSessionError()` reports from then on: for example a takeover, an
+   * authorization denial, or a client that gives up reconnecting. The space's
+   * documents receive no further updates unless a reopen after an access
+   * change (see `subscribeSpaceAccessChange()`) replaces the session, after
+   * which `spaceSessionError()` returns undefined again. An authorization
+   * denial also reaches `subscribeSpaceAccessLoss()` observers. Ordinary
+   * reconnects, normal closure, and spaces whose reads an authoritative local
+   * store supplies do not emit.
+   */
+  subscribeSpaceSessionError?(
+    observer: (space: MemorySpace, error: Error) => void,
   ): Cancel;
 
   /**
@@ -3363,7 +3387,9 @@ export interface ISpaceReplica extends ISpace {
    * is watched and delivered, no local write to it is pending, and its value
    * is neither a refused write folded locally nor an own write promoted past
    * what a push has covered. An absent document a push delivered is
-   * confirmed.
+   * confirmed, and so is a content-addressed document in space scope holding
+   * the content its id names that the replica's own accepted commit stored,
+   * whether or not a frame delivered it.
    */
   isConfirmedDocument?(
     id: URI,

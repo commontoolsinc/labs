@@ -865,16 +865,17 @@ describe("cfc-policy-manifest-shared-install", () => {
       expect(rtV.runner.isRunning(piece)).toBe(false);
     });
 
-    it("reports a refusal over the piece's own documents beside the manifest without running it again", async () => {
-      // With server execution off, a stale read over a revision of the
-      // piece's own documents is terminal, and naming the manifest beside
-      // them does not change that.
+    it("runs it again while rounds remain after refusals over the piece's own documents beside the manifest", async () => {
+      // A stale read over a revision of the piece's own documents takes the
+      // rounds any stale read does, and naming the manifest beside them does
+      // not make it a manifest refusal, whose one retry the second refusal
+      // here would end.
 
       const installedId = await setUpByFirstParticipant();
       const ownId = rtV.getCell(space, "per-user-piece")
         .getAsNormalizedFullLink().id;
       using commits = instantiationVerdicts((attempt) =>
-        attempt === 1
+        attempt <= 2
           ? {
             name: "ConflictError",
             message: `stale confirmed read: ${ownId} at seq 1 conflicted ` +
@@ -890,9 +891,10 @@ describe("cfc-policy-manifest-shared-install", () => {
 
       const { piece, failures } = await startAsVisitor();
 
-      expect(commits.verdicts).toHaveLength(1);
-      expect(failures).toHaveLength(1);
-      expect(rtV.runner.isRunning(piece)).toBe(false);
+      expect(commits.verdicts).toHaveLength(3);
+      expect(commits.verdicts[2]).toBeUndefined();
+      expect(failures).toEqual([]);
+      expect(rtV.runner.isRunning(piece)).toBe(true);
     });
 
     it("starts it again for the participant who set it up when the manifest cannot be loaded", async () => {
