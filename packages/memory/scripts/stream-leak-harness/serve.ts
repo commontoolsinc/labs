@@ -84,12 +84,17 @@ Deno.serve({ port }, (request) => {
     const { searchParams } = new URL(request.url);
     const chunks = Number(searchParams.get("chunks") ?? "4");
     const delayMs = Number(searchParams.get("delayMs") ?? "5");
+    const closeDelayMs = Number(searchParams.get("closeDelayMs") ?? "0");
+    const pause = (ms: number) =>
+      new Promise((resolve) => setTimeout(resolve, ms));
     const body = new ReadableStream<Uint8Array>({
       async start(controller) {
         for (let i = 0; i < chunks; i++) {
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          await pause(delayMs);
           controller.enqueue(new TextEncoder().encode(`{"chunk":${i}}\n`));
         }
+        // A delay of zero ends the body in the same turn as its last chunk.
+        if (closeDelayMs > 0) await pause(closeDelayMs);
         controller.close();
       },
     });
