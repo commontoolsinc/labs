@@ -1177,10 +1177,12 @@ export class Engine extends EventTarget {
       rootPaths: declaredRoots,
       dataPaths: canonicalDataFiles(entryFilename, options.dataFiles),
     }];
-    const attachedRoots = attachments.flatMap((sourcePackage) => [
-      sourcePackage.ownerPath,
-      ...sourcePackage.rootPaths,
-    ]);
+    // Resolution from the entry follows imports, and every owner in a closure
+    // is reached from its entry through import and root edges, so the roots
+    // alone name what that resolution does not reach.
+    const attachedRoots = attachments.flatMap((sourcePackage) =>
+      sourcePackage.rootPaths
+    );
     const attachedData = attachments.flatMap((sourcePackage) =>
       sourcePackage.dataPaths ?? []
     );
@@ -1384,7 +1386,7 @@ export class Engine extends EventTarget {
         ...sourcePackageImports(
           packageByOwner.get(file.name),
           identityByPath,
-          (name) => storedFilenameFor(name, undefined, mounts),
+          storedNameFor,
         ),
       ];
       const policyManifests = out === undefined
