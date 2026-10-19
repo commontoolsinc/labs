@@ -40,7 +40,7 @@ target. In particular:
   watch specs as historical subscriptions keyed by `atSeq`
 - steady-state topology shrink does not yet drive automatic unwatch/removal
   semantics; clients should only rely on `removes` from explicit watch-set
-  replacement in this pass
+  replacement and removal in this pass
 - branch lifecycle commands are not yet exposed on the v2 wire; current branch
   creation keeps its fork-seq semantics until that cutover lands
 

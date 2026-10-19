@@ -1248,6 +1248,9 @@ export function encodeSqliteParams(
   ) as SqliteParamsWire;
 }
 
+/** What a cell holds when its storage manager hands out no document hold. */
+const NO_DOCUMENT_HOLD = {};
+
 export function createCell<T>(
   runtime: Runtime,
   link?: NormalizedLink,
@@ -1404,8 +1407,63 @@ export class CellImpl<T extends FabricValue>
     hash: string;
   };
 
-  #synced: boolean;
+  /**
+   * How many documents the storage manager had dropped when this cell's
+   * document was loaded, or `undefined` when it has not been.
+   */
+  #loadedAtDrops: number | undefined;
   #cfcLabelView?: CfcLabelView;
+
+  /**
+   * Keeps this cell's document loaded for as long as this cell can read it
+   * (`IStorageManager.holdDocument()`), once the cell has loaded it.
+   */
+  #documentHold: object | undefined;
+
+  /**
+   * Whether this cell's document is loaded: it was, and the storage manager
+   * has not dropped it since.
+   */
+  get #synced(): boolean {
+    if (this.#loadedAtDrops === undefined) return false;
+    this.#holdDocument();
+    const drops = this.#droppedDocuments();
+    if (this.#loadedAtDrops === drops) return true;
+    const { space, id, scope } = this.#link;
+    if (
+      this.#runtime.storageManager.open(space).replica
+        .hasLocalDocumentCoverage?.(
+          id,
+          scope,
+          this.#tx?.tx?.scopeKeyIdentity,
+        ) !==
+        true
+    ) {
+      return false;
+    }
+    this.#loadedAtDrops = drops;
+    return true;
+  }
+
+  set #synced(loaded: boolean) {
+    this.#loadedAtDrops = loaded ? this.#droppedDocuments() : undefined;
+    if (loaded) this.#holdDocument();
+  }
+
+  /** Takes this cell's document hold, once the cell's link is complete. */
+  #holdDocument(): void {
+    if (this.#documentHold !== undefined || !this.#hasFullLink()) return;
+    const { space, id, scope } = this.#link;
+    this.#documentHold = this.#runtime.storageManager.holdDocument?.(
+      { space, id, scope },
+      this.#tx?.tx?.scopeKeyIdentity,
+    ) ?? NO_DOCUMENT_HOLD;
+  }
+
+  /** How many documents the storage manager has dropped. */
+  #droppedDocuments(): number {
+    return this.#runtime.storageManager.droppedDocuments?.() ?? 0;
+  }
 
   /**
    * Constructs a cell bound to `runtime` and, when given, to `tx`. Pattern code
@@ -1426,7 +1484,8 @@ export class CellImpl<T extends FabricValue>
     }
     this.#runtime = runtime;
     this.#tx = requireTransaction(tx);
-    this.#synced = synced;
+    // The hold is taken on the first read, once the link is complete.
+    this.#loadedAtDrops = synced ? this.#droppedDocuments() : undefined;
     this.#cfcLabelView = _cfcLabelView;
     this.#frame = getTopFrame();
 

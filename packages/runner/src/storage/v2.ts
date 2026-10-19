@@ -184,6 +184,7 @@ import {
   State,
   StorageNotification,
   StorageTransactionRejected,
+  StoredDocumentAddress,
   StoreReadThrough,
   toReplicaLoadFailureError,
   UnexaminedAbsence,
@@ -699,6 +700,12 @@ type DocumentRecord = {
   confirmed: ConfirmedVersion;
   pending: PendingVersion[];
   materialized?: PendingMaterializationCache;
+
+  /**
+   * How many release passes had begun when the document was last read
+   * (`SpaceReplica.releaseUnread()`).
+   */
+  readInPass?: number;
 };
 
 type PendingPatchLogContext = {
@@ -1594,7 +1601,7 @@ export class StorageManager implements IStorageManager {
 
   /** The crossing loads kicked, by target and selector (see
    * `#loadCrossings`): one kick per manager, in flight or landed. */
-  readonly #crossingKicks = new Set<string>();
+  readonly #crossingKicks = new Map<string, Set<string>>();
 
   /** The crossing loads in flight, by their pending-load key: the address
    * each names (IStorageManager.pendingCrossingLoadAddresses) and how many
@@ -1621,6 +1628,29 @@ export class StorageManager implements IStorageManager {
    * convergence loop on every read.
    */
   #docPullKicks = new Set<string>();
+
+  /**
+   * The token `holdDocument()` handed out for each document, by the
+   * document's pull-kick key, held weakly: a document whose token has been
+   * collected is held by nothing. Each release pass forgets the collected
+   * ones.
+   */
+  readonly #documentHolds = new Map<string, WeakRef<object>>();
+
+  /** See `addDocumentReader()`. */
+  readonly #documentReaders = new Set<
+    (address: StoredDocumentAddress) => boolean
+  >();
+
+  /** See `droppedDocuments()`. */
+  #droppedDocuments = 0;
+
+  /** The release pass last begun; each begins once the one before ends. */
+  #releasePass: Promise<void> = Promise.resolve();
+
+  readonly #documentsDroppedObservers = new Set<
+    (space: MemorySpace, addresses: readonly LocalDocAddress[]) => void
+  >();
 
   /**
    * Immutable documents whose linked targets this manager has already pulled, keyed by a
@@ -2293,6 +2323,26 @@ export class StorageManager implements IStorageManager {
         refuseForeignScopedReads: this.#refusesForeignScopedReadsIn(space),
         storeReadThrough: () => this.#storeReadThroughs.get(space),
         loadCrossings: (crossings) => this.#loadCrossings(crossings),
+        isRead: (address) => {
+          if (
+            this.#documentHolds.get(
+              this.#documentKey(
+                space,
+                address.id,
+                address.scope,
+                address.scopeKey,
+              ),
+            )?.deref() !== undefined
+          ) {
+            return true;
+          }
+          for (const reads of this.#documentReaders) {
+            if (reads({ space, ...address })) return true;
+          }
+          return false;
+        },
+        onDocumentsDropped: (addresses) =>
+          this.#forgetDocuments(space, addresses),
         routeState,
         createSession: this.#sessionFactory.supportsAclBootstrap === true
           ? (routeGeneration, routeSignal) =>
@@ -2868,7 +2918,7 @@ export class StorageManager implements IStorageManager {
       return false;
     }
     const instance = this.#foreignInstanceKey(scope, identity);
-    const key = `${space}\0${this.#pullKickKey(id, scope, instance)}`;
+    const key = this.#documentKey(space, id, scope, instance);
     if (this.#docPullKicks.has(key)) {
       return false;
     }
@@ -2885,6 +2935,93 @@ export class StorageManager implements IStorageManager {
     }) === undefined;
   }
 
+  /** @inheritDoc */
+  holdDocument(
+    address: StoredDocumentAddress,
+    identity?: ScopeKeyIdentity,
+  ): object {
+    const key = this.#documentKey(
+      address.space,
+      address.id,
+      address.scope,
+      address.scopeKey ?? this.#foreignInstanceKey(address.scope, identity),
+    );
+    let hold = this.#documentHolds.get(key)?.deref();
+    if (hold === undefined) {
+      hold = {};
+      this.#documentHolds.set(key, new WeakRef(hold));
+    }
+    return hold;
+  }
+
+  /** @inheritDoc */
+  addDocumentReader(
+    reads: (address: StoredDocumentAddress) => boolean,
+  ): Cancel {
+    this.#documentReaders.add(reads);
+    return () => this.#documentReaders.delete(reads);
+  }
+
+  /** @inheritDoc */
+  releaseUnreadDocuments(): Promise<void> {
+    this.#releasePass = this.#releasePass.catch(() => {}).then(async () => {
+      for (const [key, hold] of this.#documentHolds) {
+        if (hold.deref() === undefined) this.#documentHolds.delete(key);
+      }
+      await Promise.all(
+        [...this.#providers.values()].map((provider) =>
+          provider.replica.releaseUnread()
+        ),
+      );
+    });
+    return this.#releasePass;
+  }
+
+  /** @inheritDoc */
+  droppedDocuments(): number {
+    return this.#droppedDocuments;
+  }
+
+  /** @inheritDoc */
+  subscribeDocumentsDropped(
+    observer: (
+      space: MemorySpace,
+      addresses: readonly LocalDocAddress[],
+    ) => void,
+  ): Cancel {
+    this.#documentsDroppedObservers.add(observer);
+    return () => this.#documentsDroppedObservers.delete(observer);
+  }
+
+  /**
+   * Forgets that the documents a replica of `space` dropped were ever loaded,
+   * so that the next read of one loads it again: their link-target and
+   * crossing kicks, and every immutable document's linked-target pull, are
+   * taken again.
+   */
+  #forgetDocuments(
+    space: MemorySpace,
+    addresses: readonly LocalDocAddress[],
+  ): void {
+    this.#droppedDocuments += addresses.length;
+    for (const address of addresses) {
+      this.#docPullKicks.delete(
+        this.#documentKey(space, address.id, address.scope, address.scopeKey),
+      );
+      this.#crossingKicks.delete(
+        `${space}\0${normalizeCellScope(address.scope)}\0${address.id}`,
+      );
+    }
+    this.#dataURISyncs.clear();
+    for (const observer of [...this.#documentsDroppedObservers]) {
+      try {
+        observer(space, addresses);
+      } catch (error) {
+        console.error("documents-dropped subscriber threw:", error);
+      }
+    }
+  }
+
   retractDocPullKick(
     space: MemorySpace,
     id: URI,
@@ -2892,9 +3029,12 @@ export class StorageManager implements IStorageManager {
     identity?: ScopeKeyIdentity,
   ): void {
     this.#docPullKicks.delete(
-      `${space}\0${
-        this.#pullKickKey(id, scope, this.#foreignInstanceKey(scope, identity))
-      }`,
+      this.#documentKey(
+        space,
+        id,
+        scope,
+        this.#foreignInstanceKey(scope, identity),
+      ),
     );
   }
 
@@ -2904,8 +3044,13 @@ export class StorageManager implements IStorageManager {
    * manager's own identity — partition-unchanged at cardinality 1
    * (key-vocabulary.md §2) — or the explicit foreign instance a served
    * per-instance read names (server-execution v2 stage A). */
-  #pullKickKey(id: URI, scope?: CellScope, instance?: ScopeKey): string {
-    return `${
+  #documentKey(
+    space: MemorySpace,
+    id: URI,
+    scope?: CellScope,
+    instance?: ScopeKey,
+  ): string {
+    return `${space}\0${
       instance ?? resolveScopeKey(scope, this.scopeKeyIdentity())
     }\0${id}`;
   }
@@ -3264,11 +3409,17 @@ export class StorageManager implements IStorageManager {
       if (scope !== "space" && this.#refusesForeignScopedReadsIn(space)) {
         continue;
       }
-      const key = `${space}\0${scope}\0${id}\0${
-        JSON.stringify(crossing.path)
-      }\0${crossing.schema === undefined ? "" : hashStringOf(crossing.schema)}`;
-      if (this.#crossingKicks.has(key)) continue;
-      this.#crossingKicks.add(key);
+      const target = `${space}\0${scope}\0${id}`;
+      const selector = `${JSON.stringify(crossing.path)}\0${
+        crossing.schema === undefined ? "" : hashStringOf(crossing.schema)
+      }`;
+      let kicked = this.#crossingKicks.get(target);
+      if (kicked?.has(selector)) continue;
+      if (kicked === undefined) {
+        kicked = new Set();
+        this.#crossingKicks.set(target, kicked);
+      }
+      kicked.add(selector);
       const address = { space, scope, id };
       const releaseLoad = this.#registerPendingLoad(address, {
         prefetch: true,
@@ -3299,7 +3450,9 @@ export class StorageManager implements IStorageManager {
           loadFailure = error;
           this.#logSyncLoadFailure(space, id, error, heldProvider);
         } finally {
-          if (loadFailure !== undefined) this.#crossingKicks.delete(key);
+          if (loadFailure !== undefined) {
+            this.#crossingKicks.get(target)?.delete(selector);
+          }
           releaseLoad(loadFailure);
           entry.count--;
           if (entry.count === 0) this.#pendingCrossingLoads.delete(ledgerKey);
@@ -3876,11 +4029,50 @@ type ProviderOptions = {
    * caller to await. Absent: a frame's crossings are not acted on.
    */
   loadCrossings?: (crossings: readonly SyncCrossing[]) => void;
+
+  /**
+   * Whether something in the runtime reads the document at `address`.
+   * Absent: nothing does, beyond the replica's own sinks and pending writes.
+   */
+  isRead?: (address: LocalDocAddress) => boolean;
+
+  /** Called with the documents a frame removed and the replica dropped. */
+  onDocumentsDropped?: (addresses: readonly LocalDocAddress[]) => void;
 };
 
 type SpaceReplicaOptions = Omit<ProviderOptions, "createSession"> & {
   routeGeneration: number;
   createSession: () => Promise<OpenedSpaceSession>;
+
+  /**
+   * Called, as `releaseUnread()` decides, with the roots whose watches it
+   * removes.
+   */
+  onWatchesReleased?: (roots: readonly WatchAddress[]) => void;
+
+  /**
+   * Watches `address` on its own, with a selector that follows no links, as a
+   * read the replica's owner records: a release pass watches each document it
+   * holds this way before removing the watches that covered it.
+   */
+  watchDocument: (
+    address: LocalDocAddress,
+  ) => Promise<Result<Unit, Error>>;
+};
+
+/**
+ * The watches a replica holds on its session for the documents rooted at one
+ * address, by watch id, and the release pass in which that address was last
+ * pulled.
+ */
+type RootWatches = {
+  address: WatchAddress;
+
+  /** The address's doc key (`docKey()`). */
+  key: string;
+
+  watches: Map<string, SchemaPathSelector>;
+  pulledInPass: number;
 };
 
 type ProviderSyncRequest = {
@@ -3975,6 +4167,22 @@ class Provider
       routeGeneration,
       createSession: () =>
         this.options.createSession(routeGeneration, routeSignal),
+      // Recorded like any other read, so a replacement replica watches it.
+      watchDocument: (address) =>
+        this.sync(
+          address.id,
+          { path: [], schema: false },
+          address.scope,
+          address.scopeKey,
+        ),
+      // A released root is not read again on a replacement replica.
+      onWatchesReleased: (roots) => {
+        for (const root of roots) {
+          this.#syncRequests.delete(
+            docKey(root.id, root.scopeKey ?? normalizeCellScope(root.scope)),
+          );
+        }
+      },
     });
   }
 
@@ -4752,6 +4960,22 @@ export class SpaceReplica
   );
   #watchedIds = new Set<string>();
 
+  /** The watches this replica added to its session, by the doc key of the
+   * root they share. */
+  readonly #rootWatches = new Map<string, RootWatches>();
+
+  /** How many release passes (`releaseUnread()`) have begun. */
+  #releasePasses = 0;
+
+  readonly #isRead: (address: LocalDocAddress) => boolean;
+  readonly #onDocumentsDropped:
+    | ((addresses: readonly LocalDocAddress[]) => void)
+    | undefined;
+  readonly #onWatchesReleased:
+    | ((roots: readonly WatchAddress[]) => void)
+    | undefined;
+  readonly #watchDocument: SpaceReplicaOptions["watchDocument"];
+
   /** The store read-through this replica serves misses from (see
    * ProviderOptions.storeReadThrough). */
   readonly #storeReadThrough: () => StoreReadThrough | undefined;
@@ -5038,6 +5262,10 @@ export class SpaceReplica
     this.#refuseForeignScopedReads = options.refuseForeignScopedReads === true;
     this.#storeReadThrough = options.storeReadThrough ?? (() => undefined);
     this.#loadCrossings = options.loadCrossings;
+    this.#isRead = options.isRead ?? (() => false);
+    this.#onDocumentsDropped = options.onDocumentsDropped;
+    this.#onWatchesReleased = options.onWatchesReleased;
+    this.#watchDocument = options.watchDocument;
     // Eager queue init (LT9; verdict blocker, 2026-08-12): a dead
     // predecessor replica's intents in the manager-shared store must
     // discharge WITHOUT waiting for a fresh fire. The constructor's
@@ -5791,12 +6019,7 @@ export class SpaceReplica
         view.close();
         throw new Error("memory replica closed");
       }
-      this.#watchView = view;
-      for (const precedingSync of precedingSyncs) {
-        this.#applySessionSync(precedingSync, "integrate");
-      }
-      this.#applySessionSync(sync, "integrate");
-      this.#consumeWatchView(view);
+      this.#integrateWatchMutation(view, precedingSyncs, sync);
     } catch (error) {
       callbacks.delete(callback);
       if (callbacks.size === 0) this.#operationSinks.delete(watchId);
@@ -5845,12 +6068,7 @@ export class SpaceReplica
         view.close();
         return;
       }
-      this.#watchView = view;
-      for (const precedingSync of precedingSyncs) {
-        this.#applySessionSync(precedingSync, "integrate");
-      }
-      this.#applySessionSync(sync, "integrate");
-      this.#consumeWatchView(view);
+      this.#integrateWatchMutation(view, precedingSyncs, sync);
     } catch (error) {
       if (!this.#closed) {
         console.warn("failed to remove operation watch", error);
@@ -6119,6 +6337,7 @@ export class SpaceReplica
     if (!record) {
       return undefined;
     }
+    record.readInPass = this.#releasePasses;
     const hasSpeculative = record.pending.some((entry) =>
       this.#speculativeLocalSeqs.has(entry.localSeq)
     );
@@ -6724,6 +6943,9 @@ export class SpaceReplica
     }
 
     const normalizedEntries = normalizeSyncEntries(entries);
+    for (const [address] of normalizedEntries) {
+      this.#rootWatchesOf(address).pulledInPass = this.#releasePasses;
+    }
     // Phase 5's delegated-scoped-read fail-closed refusal, ENTRY-scoped
     // (the F3 fix; protocol.md §2's grant-scoped read design): decided
     // HERE, per caller, before the entries join the coalesced
@@ -6860,6 +7082,10 @@ export class SpaceReplica
         selector,
         fetchPromise,
       );
+      this.#rootWatchesOf(address).watches.set(
+        watchIdForEntry(address, selector, ""),
+        selector,
+      );
     }
     this.#syncPromises.add(combinedPromise);
     try {
@@ -6890,9 +7116,169 @@ export class SpaceReplica
             baseAddress,
             selector,
           );
+          this.#rootWatches.get(this.#docKeyOf(address))?.watches.delete(
+            watchIdForEntry(address, selector, ""),
+          );
         }
       }
     }
+  }
+
+  /** The watches rooted at `address`, recorded as pulled in no pass yet. */
+  #rootWatchesOf(address: WatchAddress): RootWatches {
+    const key = this.#docKeyOf(address);
+    let root = this.#rootWatches.get(key);
+    if (root === undefined) {
+      root = { address, key, watches: new Map(), pulledInPass: -1 };
+      this.#rootWatches.set(key, root);
+    }
+    return root;
+  }
+
+  /**
+   * Whether the replica keeps the document at `address`: a local write to it
+   * is pending, a sink is registered on it, or something in the runtime
+   * reads it.
+   */
+  #holds(address: LocalDocAddress, key = this.#docKeyOf(address)): boolean {
+    return (this.#docs.get(key)?.pending.length ?? 0) > 0 ||
+      this.#sinks.has(key) || this.#isRead(address);
+  }
+
+  /**
+   * Removes from the session the watches rooted at each document the replica
+   * does not hold (`#holds()`) and has neither read nor pulled since the
+   * previous pass began, and resolves to those roots once the session has
+   * answered. A document the replica holds that no watch of its own covers is
+   * first watched on its own, with a selector that follows no links, so that
+   * no removal can take it from the session. The documents the answer says
+   * the session no longer covers are emptied as any removal empties them, and
+   * those with no pending local write are then dropped, so that a later read
+   * of one loads it again. A root read or pulled since the previous pass is
+   * kept for the next one, so a document loaded for a read not yet made, or
+   * read into a value that follows its links later, stays loaded through the
+   * pass that follows. A session whose server cannot remove a watch by id
+   * (`watchRemoveV1`) keeps every watch.
+   */
+  async releaseUnread(): Promise<WatchAddress[]> {
+    const pass = this.#releasePasses++;
+    if (this.#closed || this.#sessionClient === undefined) return [];
+    const releasable = (root: RootWatches) =>
+      root.pulledInPass < pass &&
+      (this.#docs.get(root.key)?.readInPass ?? -1) < pass &&
+      !this.#holds(root.address, root.key);
+    if (![...this.#rootWatches.values()].some(releasable)) return [];
+    let session: MemoryV2Client.SpaceSession;
+    try {
+      const { client } = await this.#activeSessionHandle();
+      if (client.serverFlags?.watchRemoveV1 !== true) return [];
+      const unwatched: LocalDocAddress[] = [];
+      for (const [key, delivered] of this.#delivered) {
+        if ((this.#rootWatches.get(key)?.watches.size ?? 0) > 0) continue;
+        const address = {
+          id: delivered.id,
+          scope: delivered.scope,
+          ...(delivered.scopeKey !== undefined
+            ? { scopeKey: delivered.scopeKey }
+            : {}),
+        };
+        if (this.#holds(address, key)) unwatched.push(address);
+      }
+      const failure = (await Promise.all(
+        unwatched.map((address) => this.#watchDocument(address)),
+      )).find((result) => result.error !== undefined);
+      if (failure !== undefined) throw failure.error;
+      ({ session } = await this.#activeSessionHandle());
+    } catch (error) {
+      // A session that cannot be reached, or a held document that cannot be
+      // watched on its own, keeps every watch for a later pass.
+      if (!this.#closed) {
+        logger.warn("release-watches-deferred", () => [
+          "keeping the watches of documents nothing reads for a later pass:",
+          error,
+        ]);
+      }
+      return [];
+    }
+    // From here to the removal request nothing awaits, so a pull that finds
+    // a released root untracked asks for its watch after the removal.
+    const released: RootWatches[] = [];
+    for (const root of this.#rootWatches.values()) {
+      if (!releasable(root)) continue;
+      released.push(root);
+      this.#rootWatches.delete(root.key);
+      const baseAddress = {
+        id: root.address.id,
+        type: DOCUMENT_MIME,
+        scope: normalizeCellScope(root.address.scope),
+        ...(root.address.scopeKey !== undefined
+          ? { scopeKey: root.address.scopeKey }
+          : {}),
+      };
+      for (const [watchId, selector] of root.watches) {
+        this.#watchSelectorTracker.delete(baseAddress, selector);
+        this.#refusedPulls.delete(watchId);
+      }
+    }
+    const watchIds = released.flatMap((root) => [...root.watches.keys()]);
+    if (watchIds.length === 0) return [];
+    const roots = released.map((root) => root.address);
+    this.#onWatchesReleased?.(roots);
+    try {
+      const { view, precedingSyncs, sync } = await session.watchRemoveSync(
+        watchIds,
+      );
+      if (this.#closed) {
+        view.close();
+        return roots;
+      }
+      this.#integrateWatchMutation(view, precedingSyncs, sync);
+      // The frame left each document it removed absent; one that nothing
+      // writes either goes.
+      const dropped: LocalDocAddress[] = [];
+      for (const remove of sync.removes) {
+        const address = {
+          id: remove.id as URI,
+          scope: remove.scope,
+          ...(remove.scopeKey !== undefined
+            ? { scopeKey: remove.scopeKey }
+            : {}),
+        };
+        const key = this.#docKeyOf(address);
+        if ((this.#docs.get(key)?.pending.length ?? 0) > 0) continue;
+        this.#docs.delete(key);
+        if (address.id.startsWith("cid:")) {
+          this.#kickedCfcSchemaPulls.delete(address.id.slice("cid:".length));
+        }
+        dropped.push(address);
+      }
+      if (dropped.length > 0) this.#onDocumentsDropped?.(dropped);
+    } catch (error) {
+      if (!this.#closed) {
+        logger.warn("release-watches-failed", () => [
+          "failed to remove the watches of documents nothing reads:",
+          error,
+        ]);
+      }
+    }
+    return roots;
+  }
+
+  /**
+   * Integrates the answer to a watch mutation: the frames that arrived ahead
+   * of it, then its own, then the view's later frames as they come.
+   */
+  #integrateWatchMutation(
+    view: MemoryV2Client.WatchView,
+    precedingSyncs: readonly SessionSync[],
+    sync: SessionSync,
+  ): void {
+    this.#watchView = view;
+    for (const precedingSync of precedingSyncs) {
+      this.#applySessionSync(precedingSync, "integrate");
+    }
+    this.#applySessionSync(sync, "integrate");
+    this.#consumeWatchView(view);
   }
 
   async commitNative(
@@ -7374,6 +7760,7 @@ export class SpaceReplica
     }
     this.#docs.clear();
     this.#watchedIds.clear();
+    this.#rootWatches.clear();
     this.#delivered.clear();
     this.#completeThroughSeq = 0;
     this.#completeThroughLost = false;
@@ -10808,6 +11195,7 @@ export class SpaceReplica
     if (!record) {
       return undefined;
     }
+    record.readInPass = this.#releasePasses;
     return {
       record,
       version: materializedVersionThroughPending(record, {
