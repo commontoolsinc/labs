@@ -1,4 +1,8 @@
-import type { InSpaceGrants, InSpaceOptions } from "@commonfabric/api";
+import type {
+  FabricExecValue,
+  InSpaceGrants,
+  InSpaceOptions,
+} from "@commonfabric/api";
 import {
   debugStr,
   deepFreeze,
@@ -1489,10 +1493,10 @@ export function freezePartialCauses(pattern: Pattern): void {
   }
   // TODO(danfuzz): Walk with `data-model`'s value visitor once that is ready
   // for use outside its package.
-  visitValue(pattern.result as FactoryInput<unknown>, freezeAliasCause);
+  visitValue(pattern.result, freezeAliasCause);
   for (const node of pattern.nodes) {
-    visitValue(node.inputs as FactoryInput<unknown>, freezeAliasCause);
-    visitValue(node.outputs as FactoryInput<unknown>, freezeAliasCause);
+    visitValue(node.inputs, freezeAliasCause);
+    visitValue(node.outputs, freezeAliasCause);
   }
 }
 
@@ -1502,7 +1506,7 @@ export function freezePartialCauses(pattern: Pattern): void {
  * that the walk descends no further into it. An embedded pattern is not
  * descended either: the causes it holds are its own, frozen when it was built.
  */
-function freezeAliasCause(value: unknown): null | undefined {
+function freezeAliasCause(value: FabricExecValue): null | undefined {
   if (isAliasBinding(value)) {
     const { partialCause } = value.$alias;
     if (partialCause !== undefined) deepFreeze(partialCause);
