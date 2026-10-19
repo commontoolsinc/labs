@@ -45,7 +45,9 @@ export const iframePresentationContext = createContext<
  * @prop {object} resourceKinds - Explicit kinds for opaque context resources.
  *   A name marked `presence` grants the guest the presence room of that
  *   context cell's field, where it publishes and hears ephemeral status such
- *   as pointers, and grants none of the cell's data.
+ *   as pointers, and grants none of the cell's data. A name given a kind is a
+ *   resource even where the context lists no such field, which is how a
+ *   record bound inline names its streams.
  *
  * @event {CustomEvent} load - The iframe was successfully loaded
  * @event {CustomEvent} fix - Dispatched when user clicks "Fix" on an error modal

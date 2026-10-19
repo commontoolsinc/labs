@@ -386,8 +386,8 @@ export class CommonIframeSandboxElement extends LitElement {
    * rather than in the setters folds a batch of changes into one load:
    * assigning several of them asks for one document, carrying every new
    * value, rather than reloading the old document under the new bridge on
-   * the way. Presentation updates
-   * travel separately and keep the current document and capability session.
+   * the way. Presentation updates travel separately and keep the current
+   * document and capability session.
    */
   protected override updated(changed: PropertyValues) {
     super.updated(changed);
