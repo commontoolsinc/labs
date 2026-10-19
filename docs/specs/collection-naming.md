@@ -52,9 +52,9 @@ reached by identity alone needs nothing from this document. What follows applies
 only when a collection wants its members addressable *through it*, under a name
 a person can hold — and a collection may want that for some members and not
 others. A name can arrive after the member it names: a collection that starts
-naming members it already holds, or that allocates on first sight, holds
-unnamed members until then, and each of them still exists, links, and opens by
-its identity.
+naming members it already holds, or that allocates on first sight, holds unnamed
+members until then, and each of them still exists, links, and opens by its
+identity.
 
 ## What a collection declares
 
@@ -102,10 +102,10 @@ collection's declaration, which is one declaration for the whole collection, so
 a name held to a weaker promise than the rest would make the stronger promise
 unusable for all of them. Names that need different rules belong to a different
 collection, which the same item can hold beside it — a board that numbers its
-members and also lets people give a few of them words holds two namespaces,
-each with a policy of its own. Several names for one member, and names that
-address something computed, fit within one policy, because the list above
-offers each as an answer for the whole collection.
+members and also lets people give a few of them words holds two namespaces, each
+with a policy of its own. Several names for one member, and names that address
+something computed, fit within one policy, because the list above offers each as
+an answer for the whole collection.
 
 Two of them touch the contract above and are worth stating explicitly. A
 collection that permits several names for one member still returns exactly one
