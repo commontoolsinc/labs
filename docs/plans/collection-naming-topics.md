@@ -439,14 +439,16 @@ Scope: `packages/navigation` (the member in a view and its URL),
 ### S4 — `#42` in text
 
 Scope: `packages/ui` cf-code-editor mention completion and pill; the exemplar
-(mentionable rows and the item output both carry the member's name as
-`shortName`, which is the one property the editor reads at both ends of a
-mention).
+(the item output carries the member's name as `shortName`, and each
+mentionable row carries a copy of it under the same property; the row's copy
+is what the editor reads at both ends of a mention).
 
 1. Typing `#42` in the exemplar item's body offers the member named 42;
    picking it inserts a reference-form mention.
-2. A mention pill whose destination publishes a short name shows it beside
-   the label; existing mentions gain it once the destination does.
+2. A mention pill whose destination a universe row stands for shows that
+   row's short name beside the label; existing mentions gain it once the
+   universe lists the destination under one. A destination no row stands for
+   shows none, whatever it publishes.
 3. Autocomplete matches the number as well as the title.
 4. A pasted `#42` stays plain text; the editor's documentation says so and
    why.
