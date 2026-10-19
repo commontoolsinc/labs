@@ -1,13 +1,9 @@
 import type { JSONValue } from "@commonfabric/api";
-import { isDeepFrozen } from "@commonfabric/data-model";
+import { debugStr, isDeepFrozen } from "@commonfabric/data-model";
 import { LRUCache } from "@commonfabric/utils/cache";
-import { isPlainObject } from "@commonfabric/utils/types";
 
-import { isReactive } from "./builder/types.ts";
-import { type AnyCell, isCell } from "./cell.ts";
+import type { AnyCell } from "./cell.ts";
 import { createRef, type EntityId } from "./create-ref.ts";
-import { encodableFormOf } from "./encodable-form.ts";
-import { isCellResultForDereferencing } from "./query-result-proxy.ts";
 
 /**
  * How many ids an instance keeps unless told otherwise. A piece asks for the id of each cell it
@@ -26,12 +22,9 @@ const ID_LIMIT = 65_536;
  * more per action whose scheduler summary lists it.
  *
  * A partial cause that is a string, a number, a boolean or `null` is told
- * apart by value. A deep-frozen object is told apart by identity: such an
- * object names the same id for as long as it lives. Any other object or
- * array made of JSON values is told apart by its content, read when it is
- * asked about, so a cause that changes names the id of what it holds at the
- * time. An id is hashed on every call for a partial cause holding anything
- * else, a cell or a function among them.
+ * apart by value, and one that is an object by identity. An object cause must
+ * be deep-frozen, as the builder leaves every cause it assigns, and so names
+ * the same id for as long as it lives.
  */
 export class DerivedInternalCellIds {
   #ids: LRUCache<string, EntityId>;
@@ -71,6 +64,8 @@ export class DerivedInternalCellIds {
    * Returns the id of the derived internal cell `partialCause` names on
    * `resultCell`. The id carries no entity kind: the caller applies one when
    * it writes the id as a URI.
+   *
+   * @throws Error if `partialCause` is an object that is not deep-frozen.
    */
   idFor(resultCell: AnyCell<unknown>, partialCause: JSONValue): EntityId {
     const resultId = resultCell.getAsNormalizedFullLink().id;
@@ -105,7 +100,8 @@ export class DerivedInternalCellIds {
   /**
    * The key component standing for `partialCause`, or `undefined` for a
    * value this instance keeps no id for. Each kind of value has a tag of its
-   * own, so `1`, `"1"` and `true` share no key.
+   * own, so `1`, `"1"` and `true` share no key. Throws for an object that is
+   * not deep-frozen.
    */
   #causeKey(partialCause: JSONValue): string | undefined {
     switch (typeof partialCause) {
@@ -118,8 +114,9 @@ export class DerivedInternalCellIds {
       case "object": {
         if (partialCause === null) return "l";
         if (!isDeepFrozen(partialCause)) {
-          const content = jsonContentKey(partialCause, new Set());
-          return content === undefined ? undefined : `c${content}`;
+          throw new Error(
+            debugStr`Partial cause is not deep-frozen: $quote${partialCause}`,
+          );
         }
         let number = this.#causeNumbers.get(partialCause);
         if (number === undefined) {
@@ -132,90 +129,4 @@ export class DerivedInternalCellIds {
         return undefined;
     }
   }
-}
-
-/**
- * The sentinel `encodableFormOf()` returns for a value carrying no encodable
- * form, which is every plain JSON value.
- */
-const NO_ENCODABLE_FORM = Symbol("noEncodableForm");
-
-/**
- * Helper for `DerivedInternalCellIds`, which returns a key standing for the
- * content of `value`, a partial cause or part of one, or `undefined` where
- * `value` holds anything but JSON data. Two causes get one key only where
- * `createRef()` derives one id from them, so the key follows what that
- * derivation reads: a string, a number (with `-0` and `NaN` kept apart from
- * what `JSON.stringify()` makes of them), a boolean, `null`, a hole or an
- * `undefined` in an array, the items of a plain array in order, and the
- * entries of a plain object by key, so that two objects equal but for key
- * order share a key as they share a hash. An object reached a second time
- * within one cause derives as `null`, so `seen` holds the objects reached so
- * far and a repeat is keyed as `null` is; the entries are read in the order
- * the derivation reads them, which is what decides which occurrence is the
- * repeat, and sorted by key only once read. A value other than JSON data is
- * refused rather than keyed: a cell, a reactive, a query result, a function,
- * a class instance, a value carrying an encodable form, or a record holding
- * a `/` key, which is how a link or an entity reference is written.
- */
-function jsonContentKey(
-  value: unknown,
-  seen: Set<object>,
-): string | undefined {
-  switch (typeof value) {
-    case "string":
-      return JSON.stringify(value);
-    case "number":
-      return Object.is(value, -0) ? "-0" : String(value);
-    case "boolean":
-      return value ? "t" : "f";
-    case "undefined":
-      return "u";
-    case "object": {
-      if (value === null) return "l";
-      if (seen.has(value)) return "l";
-      if (standsForAnotherValue(value)) return undefined;
-      seen.add(value);
-      if (Array.isArray(value)) {
-        const items: string[] = [];
-        for (let index = 0; index < value.length; index++) {
-          if (!(index in value)) {
-            items.push("h");
-            continue;
-          }
-          const item = jsonContentKey(value[index], seen);
-          if (item === undefined) return undefined;
-          items.push(item);
-        }
-        return `[${items.join(",")}]`;
-      }
-      if (!isPlainObject(value) || Object.hasOwn(value, "/")) {
-        return undefined;
-      }
-      const entries: [string, string][] = [];
-      for (const [key, member] of Object.entries(value)) {
-        const content = jsonContentKey(member, seen);
-        if (content === undefined) return undefined;
-        entries.push([JSON.stringify(key), content]);
-      }
-      entries.sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
-      return `{${
-        entries.map(([key, content]) => `${key}:${content}`).join(",")
-      }}`;
-    }
-    default:
-      return undefined;
-  }
-}
-
-/**
- * Helper for {@link jsonContentKey}, which indicates whether `createRef()`
- * derives `value` from something other than its own entries: a value
- * carrying an encodable form, a reactive, a query result, or a cell. Stated
- * without a type guard, so that the caller's value keeps its type on the
- * other branch.
- */
-function standsForAnotherValue(value: object): boolean {
-  return encodableFormOf(value, NO_ENCODABLE_FORM) !== NO_ENCODABLE_FORM ||
-    isReactive(value) || isCellResultForDereferencing(value) || isCell(value);
 }
