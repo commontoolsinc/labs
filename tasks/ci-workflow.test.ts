@@ -3,6 +3,7 @@ import { dirname, relative } from "@std/path";
 import { parse as parseYaml } from "@std/yaml";
 import { getBinary } from "@astral/astral";
 import { COVERAGE_ARTIFACT } from "@commonfabric/test-support/records";
+import { BuildConfig } from "./build-binaries.ts";
 import { commandWords, withoutComments } from "./ci-workflow.ts";
 import { phaseOf } from "./ci-step-phases.ts";
 import {
@@ -170,15 +171,17 @@ Deno.test("cache-only binary builders install their entrypoint graphs", async ()
   const toolshedDockerfile = await Deno.readTextFile(
     new URL("../Dockerfile.toolshed", import.meta.url),
   );
+  const root = new URL("../", import.meta.url).pathname;
+  const config = new BuildConfig({ root, toolshedFlags: [] });
+  const expectedEntrypoints = [
+    config.toolshedEntryPath(),
+    config.cliEntryPath(),
+  ].map((entrypoint) => relative(root, entrypoint));
+  const listedEntrypoints = installAction.match(
+    /binary_entrypoints=\(\n(?<paths>(?: +\S+\n)+) +\)/,
+  )?.groups?.paths.trim().split(/\s+/);
 
-  for (
-    const entrypoint of [
-      "packages/toolshed/index.ts",
-      "packages/cli/mod.ts",
-    ]
-  ) {
-    assertStringIncludes(installAction, entrypoint);
-  }
+  assertEquals(listedEntrypoints, expectedEntrypoints);
   assertStringIncludes(
     installAction,
     'deno install --entrypoint --cached-only "${frozen_arg[@]}"',
@@ -189,7 +192,7 @@ Deno.test("cache-only binary builders install their entrypoint graphs", async ()
   );
   assertStringIncludes(
     toolshedDockerfile,
-    "deno install --entrypoint --frozen packages/toolshed/index.ts",
+    `deno install --entrypoint --frozen ${expectedEntrypoints[0]}`,
   );
   assertStringIncludes(
     toolshedDockerfile,
