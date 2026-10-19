@@ -11,10 +11,13 @@
  * measured again when a read has more to spend on it.
  */
 
+import type { FabricValue } from "@commonfabric/data-model";
+import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { EntityDocument } from "@commonfabric/memory/v2";
 import { approximateJsonSize } from "@commonfabric/utils/approximate-json-size";
+import { isInstance } from "@commonfabric/utils/types";
 
 /** One space's share of the documents a storage manager holds. */
 export type SpaceDocumentSizes = {
@@ -71,41 +74,55 @@ export type MeasurableSpace = {
 };
 
 /**
- * The size of a Fabric primitive that keeps its payload where a walk cannot
- * see it: a `FabricBytes` counts its bytes. Every other instance is walked
- * through its own enumerable properties, which for the remaining primitives
- * is nothing, and their payloads are a few dozen bytes at most.
+ * The size of a Fabric instance, which keeps its payload where a walk cannot
+ * see it: a `FabricBytes` counts its bytes, and any other instance the
+ * approximate size of its realm encoding, the form it crosses a realm in,
+ * which shares the instance's strings and allocates a wrapper around them.
+ * A plain object is left to the walk. An instance the codec refuses counts
+ * as the empty object it walks as.
  */
 function fabricInstanceSize(instance: object): number | undefined {
-  return instance instanceof FabricBytes ? instance.length : undefined;
+  if (instance instanceof FabricBytes) return instance.length;
+  if (!isInstance(instance)) return undefined;
+  try {
+    return approximateJsonSize(realmFromFabricValue(instance as FabricValue), {
+      instanceSize: fabricInstanceSize,
+    }).bytes;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
  * Measures every space's documents within `budget` nodes, shared so that no
  * space goes unmeasured in a read: each space is first given an equal share,
- * which admits at least one document, and what the shares leave unspent
- * then goes, in order, to the spaces still holding unmeasured documents. So
- * every space's `approxBytes` rests on a sample of its own from the first
- * read, and the estimate converges across reads as `DocumentSizeEstimate`
- * says.
+ * the division's remainder going one node each to the first spaces so the
+ * shares add up to the budget, and what the shares leave unspent then goes,
+ * in order, to the spaces still holding documents not measured whole, the
+ * truncated ones among them. A share admits at least one document while the
+ * budget covers every space, so each space's `approxBytes` then rests on a
+ * sample of its own from the first read, and the estimate converges across
+ * reads as `DocumentSizeEstimate` says.
  */
 export function measureDocumentSizes(
   spaces: readonly MeasurableSpace[],
   budget: number,
 ): SpaceDocumentSizes[] {
   if (spaces.length === 0) return [];
-  const share = Math.ceil(budget / spaces.length);
+  const share = Math.floor(budget / spaces.length);
+  const remainder = budget - share * spaces.length;
   let unspent = 0;
-  const measured = spaces.map((space) => {
-    const own: MeasureBudget = { remaining: share };
+  const measured = spaces.map((space, index) => {
+    const own: MeasureBudget = {
+      remaining: share + (index < remainder ? 1 : 0),
+    };
     const sizes = space.getDocumentSizes(own);
     unspent += Math.max(0, own.remaining);
     return sizes;
   });
   const pooled: MeasureBudget = { remaining: unspent };
   return measured.map((sizes, index) =>
-    pooled.remaining > 0 &&
-      sizes.measuredDocuments + sizes.truncatedDocuments < sizes.documents
+    pooled.remaining > 0 && sizes.measuredDocuments < sizes.documents
       ? spaces[index].getDocumentSizes(pooled)
       : sizes
   );

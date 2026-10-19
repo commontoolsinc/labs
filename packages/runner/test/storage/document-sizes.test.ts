@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { EntityDocument } from "@commonfabric/memory/v2";
 import { approximateJsonSize } from "@commonfabric/utils/approximate-json-size";
@@ -58,6 +59,58 @@ describe("document-sizes", () => {
       expect(sizes.map((entry) => entry.measuredDocuments)).toEqual([5, 5]);
     });
 
+    it("gives the division's remainder to the first spaces, so the shares add up to the budget", () => {
+      const spaces = [
+        spaceOf("a", 100, 1),
+        spaceOf("b", 100, 1),
+        spaceOf("c", 100, 1),
+      ];
+
+      measureDocumentSizes(spaces, 100);
+
+      expect(spaces.map((space) => space.budgets[0])).toEqual([34, 33, 33]);
+    });
+
+    it("hands the pooled budget to a space whose documents were only truncated, so they complete", () => {
+      // Two real estimates behind the spaces: the second space's one document
+      // takes 62 nodes, more than its 50-node share, and completes from the
+      // pooled budget on the read after the one that cut it short.
+      const small = new DocumentSizeEstimate();
+      const large = new DocumentSizeEstimate();
+      const whole: EntityDocument = {
+        value: Array.from({ length: 60 }, () => 0),
+      };
+      const spaces: MeasurableSpace[] = [
+        {
+          getDocumentSizes: (budget) => ({
+            space: "small" as SpaceDocumentSizes["space"],
+            watched: 0,
+            ...small.measure([{ value: 1 }], budget),
+          }),
+        },
+        {
+          getDocumentSizes: (budget) => ({
+            space: "large" as SpaceDocumentSizes["space"],
+            watched: 0,
+            ...large.measure([whole], budget),
+          }),
+        },
+      ];
+
+      const first = measureDocumentSizes(spaces, 100);
+      const second = measureDocumentSizes(spaces, 100);
+
+      expect(first[1]).toMatchObject({
+        measuredDocuments: 0,
+        truncatedDocuments: 1,
+      });
+      expect(second[1]).toMatchObject({
+        measuredDocuments: 1,
+        truncatedDocuments: 0,
+        approxBytes: approximateJsonSize(whole).bytes,
+      });
+    });
+
     it("hands what the shares leave unspent to the spaces still unmeasured, in order", () => {
       const small = spaceOf("small", 1, 10);
       const large = spaceOf("large", 100, 10);
@@ -105,6 +158,25 @@ describe("DocumentSizeEstimate", () => {
         const estimate = new DocumentSizeEstimate();
         const value: EntityDocument = {
           value: { payload: new FabricBytes(new Uint8Array(1_000_000)) },
+        };
+
+        const measured = estimate.measure([value], { remaining: 1_000 });
+
+        expect(measured.measuredDocuments).toBe(1);
+        expect(measured.approxBytes).toBeGreaterThanOrEqual(1_000_000);
+      });
+
+      it("counts a stored instance by the size of its realm encoding", () => {
+        const estimate = new DocumentSizeEstimate();
+        const value: EntityDocument = {
+          value: {
+            failure: new FabricError({
+              type: "Error",
+              message: "x".repeat(1_000_000),
+              stack: undefined,
+              cause: undefined,
+            }),
+          },
         };
 
         const measured = estimate.measure([value], { remaining: 1_000 });

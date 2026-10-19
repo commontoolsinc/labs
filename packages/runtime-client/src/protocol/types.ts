@@ -3868,7 +3868,10 @@ export type LoggerCountsResponse = {
    * documents, the compiled code caches, the worker's own subscription and
    * mount tables, and the traffic of the memory connections and the worker's
    * ports. The counts are each a collection's own; the sizes are estimates
-   * that say so where they are declared.
+   * that say so where they are declared. `storage` is `null`, not zeros, for
+   * a storage manager that reports no sizes, and its per-space view names
+   * the largest spaces up to a cap with the rest added together under
+   * `bySpaceOmitted`, as `StorageSizes` says.
    */
   sizes: RuntimeSizes & { worker: WorkerSizes; ipc: WorkerIpcSizes | null };
 };

@@ -1,5 +1,6 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
@@ -279,6 +280,25 @@ describe("runtime-sizes", () => {
       expect(storage.approxBytes).toBeGreaterThanOrEqual(1_000_000);
     });
 
+    it("counts a stored instance's private payload in its space's approximate size", async () => {
+      const runtime = createRuntime();
+      const tx = runtime.edit();
+      runtime.getCell(space, "sized-error", { type: "object" }, tx).set({
+        failure: new FabricError({
+          type: "Error",
+          message: "x".repeat(1_000_000),
+          stack: undefined,
+          cause: undefined,
+        }),
+      });
+      await tx.commit().settled;
+      await storageManager!.synced();
+
+      const storage = runtime.getSizes().storage!;
+      expect(storage.measuredDocuments).toBe(storage.documents);
+      expect(storage.approxBytes).toBeGreaterThanOrEqual(1_000_000);
+    });
+
     it("counts the snapshots read out of a space's documents under that space, and the rest under `(none)`", () => {
       // The table spans every store in the process, so each key is read as
       // a difference: what this runtime adds to whatever other stores hold.
@@ -310,6 +330,21 @@ describe("runtime-sizes", () => {
       const after = runtime.getSizes().runtime.immutableSnapshotsBySpace;
       expect((after[space] ?? 0) - (before[space] ?? 0)).toBe(0);
       expect((after["(none)"] ?? 0) - (before["(none)"] ?? 0)).toBe(2);
+    });
+
+    it("counts an element read out of an inline document under `(none)`", () => {
+      const runtime = createRuntime();
+      const before = runtime.getSizes().runtime.immutableSnapshotsBySpace;
+      const inline = runtime.getCell(space, "inline-origin", { type: "object" })
+        .getAsNormalizedFullLink();
+      immutableCellsFor(runtime).createElement({ n: 5 }, {
+        ...inline,
+        id: "data:application/json,%7B%22n%22%3A5%7D" as URI,
+      });
+
+      const after = runtime.getSizes().runtime.immutableSnapshotsBySpace;
+      expect((after[space] ?? 0) - (before[space] ?? 0)).toBe(0);
+      expect((after["(none)"] ?? 0) - (before["(none)"] ?? 0)).toBe(1);
     });
 
     it("counts a sink's node while it is live and not after it is cancelled", async () => {
