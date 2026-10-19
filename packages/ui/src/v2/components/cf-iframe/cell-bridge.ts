@@ -539,9 +539,13 @@ export async function resolveCellContextBridge(
       await source.pull();
     }
     const cell = await source.resolveAsCell();
+    // An absent name resolves to the context's own path for it, which for a
+    // context that is itself a link is a path of the record it links to.
+    const reached = cellRefToIdentityKey(cell.ref());
     if (
       !listed.has(name) &&
-      cellRefToIdentityKey(cell.ref()) === cellRefToIdentityKey(source.ref())
+      (reached === cellRefToIdentityKey(source.ref()) ||
+        reached === cellRefToIdentityKey(root.key(name).ref()))
     ) {
       return undefined;
     }

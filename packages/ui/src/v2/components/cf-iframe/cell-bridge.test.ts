@@ -572,6 +572,61 @@ describe("cf-iframe cell bridge", () => {
     expect(bridge.resources.order.kind).toBe("stream");
   });
 
+  it("grants nothing for a kind whose name a context bound as a link does not hold", async () => {
+    // The bound context links to the record that holds the fields, so a name
+    // the record lacks resolves to the record's own path for it.
+    const record: CellRef = {
+      ...ref,
+      id: "of:record" as CellRef["id"],
+      schema: { type: "object", properties: {} },
+    };
+    const glaze: CellRef = {
+      ...ref,
+      id: "of:glaze" as CellRef["id"],
+      schema: { type: "string" },
+    };
+    const runtime = runtimeStub({
+      [$conn]: () => ({
+        request: (request: { type: RequestType; cell: CellRef }) => {
+          if (
+            request.type === RequestType.CellGet ||
+            request.type === RequestType.CellPull
+          ) {
+            return Promise.resolve({ value: {} });
+          }
+          if (request.type === RequestType.CellFields) {
+            return Promise.resolve({ fields: { glaze } });
+          }
+          if (request.type === RequestType.CellResolveAsCell) {
+            const [name] = request.cell.path;
+            return Promise.resolve({
+              cell: name === undefined
+                ? record
+                : name === "glaze"
+                ? glaze
+                : { ...record, path: [name], schema: {} },
+            });
+          }
+          return Promise.resolve({});
+        },
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+        peersOf: () => [],
+        signal: { aborted: false },
+      }),
+    });
+    const context = new CellHandle<Record<string, unknown>>(runtime, {
+      ...ref,
+      schema: true,
+    });
+
+    const bridge = await resolveCellContextBridge(context, {
+      frosting: "cell",
+    });
+
+    expect(Object.keys(bridge.resources)).toEqual(["glaze"]);
+  });
+
   it("holds lazy scoped SQLite demand through backend readiness", async () => {
     const subscriptions: CellRef[] = [];
     const idle = Promise.withResolvers<void>();
