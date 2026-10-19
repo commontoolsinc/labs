@@ -13,7 +13,7 @@ import type { Cell } from "../src/cell.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import {
   instancePartialCause,
-  stopNamingInstancesForTesting,
+  stopNamingInstancesForTestingOnly,
 } from "../src/builder/instance-name.ts";
 import { getDerivedInternalCellLink } from "../src/link-utils.ts";
 import { type MetaField, rawMetaWriteAuthorization } from "../src/meta-seam.ts";
@@ -633,7 +633,7 @@ describe("instance-carry-over", () => {
           },
         ],
       };
-      const restoreNaming = stopNamingInstancesForTesting();
+      const restoreNaming = stopNamingInstancesForTestingOnly();
       try {
         const deployed = await compile(program);
         const tx = rt.edit();

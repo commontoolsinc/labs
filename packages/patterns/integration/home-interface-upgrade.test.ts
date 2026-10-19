@@ -10,6 +10,7 @@ import { fromFileUrl, join } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 
 import { createSession, Identity } from "@commonfabric/identity";
+import { deepFreeze } from "@commonfabric/data-model";
 import {
   FabricDurationNsec,
   FabricEpochNsec,
@@ -24,6 +25,7 @@ import {
   getDerivedInternalCellLink,
   getPatternIdentityRef,
   getPatternSource,
+  type JSONValue,
   parseLink,
   Runtime,
   sendEvent,
@@ -32,7 +34,10 @@ import {
   markRendererTrustedEvent,
   reviewedActionProvenance,
 } from "@commonfabric/runner/cfc";
-import { instancePartialCauseForTestingOnly } from "@commonfabric/runner/for-testing-only";
+import {
+  instancePartialCauseForTestingOnly,
+  stopNamingInstancesForTestingOnly,
+} from "@commonfabric/runner/for-testing-only";
 import { PatternsRoute } from "@commonfabric/runner/patterns-route.deno";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
@@ -122,6 +127,7 @@ describe("Home interface upgrade", () => {
         createSession({ identity: owner, spaceDid: owner.did() }),
         runtime,
       );
+      let restoreNaming = () => {};
       try {
         const candidate = await resolveLocalProgram(
           (resolver) => runtime.harness.resolve(resolver),
@@ -139,6 +145,13 @@ describe("Home interface upgrade", () => {
         // interface change. Retaining the entry path keeps each production
         // dependency's identity intact.
         entry!.contents = oldHome;
+        // A cold case's deployed Home is set up as a runtime without instance
+        // names set it up, so its `const`-bound children sit at positional
+        // spots until the runtime that opens it carries them over to their
+        // names. The other cases update Home in the runtime that set it up,
+        // which never mixes the two.
+        const positional = mode === "automatic-cold";
+        if (positional) restoreNaming = stopNamingInstancesForTestingOnly();
         let home: Cell<unknown>;
         if (mode === "explicit") {
           const compiled = await runtime.patternManager.compilePattern(
@@ -327,7 +340,14 @@ describe("Home interface upgrade", () => {
             const { space, id, path } = stored.getAsNormalizedFullLink();
             return { address: { space, id, path }, value: stored.getRaw() };
           }));
-        const ownedFields = async (reader: Runtime, root: Cell<unknown>) => {
+        // The answering child sits at its positional spot in a positional
+        // deployed Home, and at its instance name once it has been carried
+        // over.
+        const ownedFields = async (
+          reader: Runtime,
+          root: Cell<unknown>,
+          answeringCause: JSONValue,
+        ) => {
           const values = await Promise.all(
             ["favorites", "journal", "spaces"].map(async (field) => {
               const stored = root.key(field).resolveAsCell();
@@ -370,9 +390,7 @@ describe("Home interface upgrade", () => {
             });
             const spot = reader.getCellFromLink(
               getDerivedInternalCellLink(root, {
-                partialCause: instancePartialCauseForTestingOnly(
-                  "privateInboxAnswering",
-                ),
+                partialCause: answeringCause,
               }),
             );
             await spot.sync();
@@ -448,7 +466,13 @@ describe("Home interface upgrade", () => {
             };
           });
         };
-        const ownedBefore = await ownedFields(runtime, home);
+        const ownedBefore = await ownedFields(
+          runtime,
+          home,
+          positional
+            ? deepFreeze({ $generated: 4 })
+            : instancePartialCauseForTestingOnly("privateInboxAnswering"),
+        );
         const flatBefore = await flatBindings(home);
         for (const field of ownedBefore.slice(0, 3)) {
           expect(field.value).toHaveLength(1);
@@ -488,6 +512,7 @@ describe("Home interface upgrade", () => {
         // schema refuses. The field comparisons below cover the manager and
         // Home's own state, not each child's, so the update must drop none.
         const droppedBefore = droppedSlots();
+        restoreNaming();
         const identity = getPatternIdentityRef(home)?.identity;
         const rootLink = home.getAsNormalizedFullLink();
         if (mode === "explicit") {
@@ -535,7 +560,13 @@ describe("Home interface upgrade", () => {
           expect(after.slice(0, 2)).toEqual(before.slice(0, 2));
           expect(await noticeRecords(rolled)).toEqual(noticesBefore);
         }
-        expect(await ownedFields(runtime, rolled)).toEqual(ownedBefore);
+        expect(
+          await ownedFields(
+            runtime,
+            rolled,
+            instancePartialCauseForTestingOnly("privateInboxAnswering"),
+          ),
+        ).toEqual(ownedBefore);
         expect(await rolled.key("sharedSpaceCatalog").pull()).toEqual(
           ownedBefore[3].value,
         );
@@ -580,7 +611,13 @@ describe("Home interface upgrade", () => {
             expect(reopenedFields[2].address).not.toEqual(before[2].address);
           }
           expect(await noticeRecords(reopened)).toEqual(noticesBefore);
-          expect(await ownedFields(peer, reopened)).toEqual(ownedBefore);
+          expect(
+            await ownedFields(
+              peer,
+              reopened,
+              instancePartialCauseForTestingOnly("privateInboxAnswering"),
+            ),
+          ).toEqual(ownedBefore);
           expect(await reopened.key("sharedSpaceCatalog").pull()).toEqual(
             ownedBefore[3].value,
           );
@@ -592,6 +629,7 @@ describe("Home interface upgrade", () => {
           await peerStorage.close();
         }
       } finally {
+        restoreNaming();
         await controller.dispose();
         await runtime.dispose();
         await storage.close();
