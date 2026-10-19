@@ -242,10 +242,9 @@ export function injectCfHelpers(
 // `.ts` module keeps angle-bracket assertions and generic arrows as
 // TypeScript instead of mis-parsing them as JSX, which would swallow the
 // statements after them and hide their bindings from the scans below. An
-// absent or unrecognized name parses as TSX, the historical default. Parent
-// pointers are set because a rewrite may print a node it reuses from this
-// parse, and the printer reads a literal's original text only through its
-// parent.
+// absent or unrecognized name parses as TSX. Parent pointers are set because a
+// rewrite may print a node it reuses from this parse, and the printer reads a
+// literal's original text only through its parent.
 function parseAuthoredSource(
   source: string,
   fileName?: string,
