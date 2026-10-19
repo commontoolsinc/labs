@@ -27,6 +27,9 @@ label {
   <label>iterations <input name="iterations" value="2000" size="8" /></label>
   <label>payload bytes <input name="payloadBytes" value="102400" size="8" /></label>
   <label>pressure MB after loop <input name="pressureMegabytes" value="0" size="8" /></label>
+  <label>slow body chunks <input name="slowChunks" value="4" size="8" /></label>
+  <label>slow body gap ms <input name="slowDelayMs" value="5" size="8" /></label>
+  <label>slow body close delay ms <input name="slowCloseDelayMs" value="0" size="8" /></label>
   <button type="submit">run</button>
 </form>
 <div id="log"></div>
@@ -73,7 +76,9 @@ async function run(event) {
     pressureMegabytes: Number(data.get("pressureMegabytes")),
     echoUrl,
     bytesUrl: `${location.origin}/bytes?count=${data.get("payloadBytes")}`,
-    slowUrl: `${location.origin}/slow?chunks=4&delayMs=5`,
+    slowUrl: `${location.origin}/slow?chunks=${data.get("slowChunks")}` +
+      `&delayMs=${data.get("slowDelayMs")}` +
+      `&closeDelayMs=${data.get("slowCloseDelayMs")}`,
   };
   const thread = data.get("thread");
   append(`start ${JSON.stringify({ ...request, thread })}`);

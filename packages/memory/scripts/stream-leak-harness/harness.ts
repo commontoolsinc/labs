@@ -27,7 +27,11 @@ export type HarnessRequest = {
   echoUrl: string;
   /** URL returning `payloadBytes` of body for the `fetch-*` modes. */
   bytesUrl: string;
-  /** URL streaming a few delayed chunks, the shape of a streamed LLM reply. */
+  /**
+   * URL streaming delayed chunks, the shape of a streamed LLM reply; the page
+   * sets the chunk count, the gap between chunks, and the gap between the
+   * last chunk and the end of the body.
+   */
   slowUrl: string;
 };
 
@@ -62,6 +66,9 @@ export const HARNESS_MODES = [
   "fetch-body-for-await",
   "fetch-gzip-body-pipe-collect",
   "fetch-slow-body-collect",
+  "fetch-slow-decoder-collect",
+  "fetch-slow-xhr-progress",
+  "fetch-slow-body-then-text",
   "fetch-slow-text",
   "response-body-drop",
   "response-empty-body-collect",
@@ -297,6 +304,25 @@ async function selectStep(
       return only(async () => {
         await collectReadable((await fetch(request.slowUrl)).body!);
       });
+    case "fetch-slow-decoder-collect":
+      return only(async () => {
+        await collectText(
+          (await fetch(request.slowUrl)).body!.pipeThrough(
+            new TextDecoderStream(),
+          ),
+        );
+      });
+    case "fetch-slow-xhr-progress":
+      return only(async () => {
+        await loadWithProgressEvents(request.slowUrl);
+      });
+    case "fetch-slow-body-then-text":
+      return only(async () => {
+        const response = await fetch(request.slowUrl);
+        // The getter alone: in WebKit it is what creates the body's stream.
+        void response.body;
+        await response.text();
+      });
     case "fetch-slow-text":
       return only(async () => {
         await (await fetch(request.slowUrl)).text();
@@ -424,6 +450,35 @@ async function collectReadable(
     offset += chunk.byteLength;
   }
   return result;
+}
+
+/** Reads a stream of strings to its end, the way a decoded reply is read. */
+async function collectText(readable: ReadableStream<string>): Promise<string> {
+  const reader = readable.getReader();
+  let text = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) return text;
+    text += value;
+  }
+}
+
+/**
+ * Loads `url` through `XMLHttpRequest`, taking the text received so far at
+ * each progress event: partial delivery without a `ReadableStream`.
+ */
+function loadWithProgressEvents(url: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    let delivered = "";
+    request.open("GET", url);
+    request.onprogress = () => {
+      delivered += request.responseText.slice(delivered.length);
+    };
+    request.onload = () => resolve(request.responseText);
+    request.onerror = () => reject(new Error(`XMLHttpRequest failed: ${url}`));
+    request.send();
+  });
 }
 
 /** The worker global, when this module runs as a dedicated worker. */
