@@ -17,7 +17,7 @@ import { parseDocument } from "./view-helpers.ts";
  * default branch. */
 const FEATURE_CHECKOUT: Readonly<Record<string, string | null>> = {
   "rev-parse --absolute-git-dir": "/work/.git\n",
-  "symbolic-ref --quiet --short HEAD": "feature\n",
+  "symbolic-ref --quiet HEAD": "refs/heads/feature\n",
   "symbolic-ref --quiet refs/remotes/origin/HEAD": "refs/remotes/origin/main\n",
 };
 
@@ -162,13 +162,16 @@ function deferred<T = void>() {
  * runs. `run(steps)` reads each string step as a keystroke and awaits each
  * function step before the next read. `frame(test)` resolves at the first
  * write that passes `test`, which is how a step waits for the push to show
- * something.
+ * something. `handlers` holds the process signal handlers the pager adds, and
+ * `exits` the codes it exits with.
  */
 function pagerHarness(pushIo: (signal: AbortSignal) => PushIo) {
   const writes: string[] = [];
   const watchers: Array<{ test: (text: string) => boolean; done: () => void }> =
     [];
   const signals: AbortSignal[] = [];
+  const handlers = new Map<Deno.Signal, () => void>();
+  const exits: number[] = [];
   const frame = (test: (text: string) => boolean) => {
     const { promise, resolve } = deferred();
     watchers.push({ test, done: resolve });
@@ -204,9 +207,10 @@ function pagerHarness(pushIo: (signal: AbortSignal) => PushIo) {
       },
       consoleSize: () => ({ columns: 80, rows: 12 }),
       env: () => undefined,
-      addSignalListener: () => {},
+      addSignalListener: (signal, handler) => handlers.set(signal, handler),
       removeSignalListener: () => {},
       exit: (code) => {
+        exits.push(code);
         throw new Error(`exit ${code}`);
       },
       setTimer: (handler) => {
@@ -239,7 +243,7 @@ function pagerHarness(pushIo: (signal: AbortSignal) => PushIo) {
       deps,
     );
   };
-  return { run, frame, writes, signals };
+  return { run, frame, writes, signals, handlers, exits };
 }
 
 describe("view-push", () => {
@@ -322,7 +326,7 @@ describe("view-push", () => {
 
     it("runs nothing on a detached checkout", async () => {
       const { io, ran } = fakeIo({
-        answers: { "symbolic-ref --quiet --short HEAD": null },
+        answers: { "symbolic-ref --quiet HEAD": null },
       });
 
       expect(await pushBranch(io)).toBe(
@@ -334,7 +338,7 @@ describe("view-push", () => {
     it("runs nothing on the branch origin names as its default", async () => {
       const { io, ran } = fakeIo({
         answers: {
-          "symbolic-ref --quiet --short HEAD": "trunk\n",
+          "symbolic-ref --quiet HEAD": "refs/heads/trunk\n",
           "symbolic-ref --quiet refs/remotes/origin/HEAD":
             "refs/remotes/origin/trunk\n",
         },
@@ -394,6 +398,16 @@ describe("view-push", () => {
       ).toBeNull();
     });
 
+    it("returns null for an address the server sent after the line following its offer", () => {
+      expect(
+        offeredPullRequestUrl(
+          "remote: Create a pull request by visiting:\n" +
+            "remote:\n" +
+            "remote: See https://example.test/docs\n",
+        ),
+      ).toBeNull();
+    });
+
     it("returns null for an offer that is not from the server", () => {
       expect(
         offeredPullRequestUrl(
@@ -417,6 +431,8 @@ describe("view-push", () => {
           `#!/bin/sh\nprintf '%s' "$1" > '${opened}'\n`,
         );
         Deno.chmodSync(opener, 0o755);
+        // A tag sharing the branch's name qualifies its short name.
+        git(work, env, "tag", "feature");
         const written: string[] = [];
 
         const summary = await pushBranch(
@@ -435,8 +451,11 @@ describe("view-push", () => {
         expect(await Deno.readTextFile(opened)).toBe(
           "https://example.test/pull/new/feature",
         );
-        expect(git(origin, env, "rev-parse", "feature")).toBe(
+        expect(git(origin, env, "rev-parse", "refs/heads/feature")).toBe(
           git(work, env, "rev-parse", "HEAD"),
+        );
+        expect(git(origin, env, "for-each-ref", "--format=%(refname)")).toBe(
+          "refs/heads/feature\nrefs/heads/main",
         );
         expect(written.join("")).toContain(
           "remote: Create a pull request for 'feature' by visiting:",
@@ -633,6 +652,33 @@ describe("view-push", () => {
       ).toEqual(["line 4", "line 5", "line 6", "line 7", "line 8"]);
     });
 
+    it("wraps a line wider than the dialog, keeping all of it", () => {
+      const session = editableSession();
+      session.beginBranchPush(() => {});
+      const url = "https://github.com/commonfabric/labs/pull/new/" +
+        "a-branch-whose-name-runs-on-and-on";
+
+      session.finishBranchPush(`Pushed feature to origin and opened ${url}`);
+
+      const body = session.view().dialog!.body;
+      expect(body.every((line) => line.length <= 74)).toBe(true);
+      expect(body.join("")).toBe(
+        `Pushed feature to origin and opened ${url}`,
+      );
+    });
+
+    it("aborts a running push on an interrupt, keeping the dialog up", () => {
+      const session = editableSession();
+      let aborted = 0;
+      session.beginBranchPush(() => aborted++);
+
+      expect(session.requestQuitFromSignal()).toBe(true);
+
+      expect(aborted).toBe(1);
+      expect(session.view().dialog?.title).toBe("Push");
+      expect(session.quit).toBe(false);
+    });
+
     it("offers Abort, which stops the push and leaves the dialog up", () => {
       const session = editableSession();
       let aborted = 0;
@@ -745,6 +791,32 @@ describe("view-push", () => {
       expect(harness.signals[0].aborted).toBe(true);
       expect(harness.writes).toHaveLength(writesAtClose);
       expect(harness.writes.at(-1)).toContain("\x1b[?1049l");
+    });
+
+    it("stops a running push when a signal ends the viewer", async () => {
+      const harness = pagerHarness((signal) => ({
+        ...fakeIo().io,
+        run: () =>
+          new Promise((resolve) =>
+            signal.addEventListener(
+              "abort",
+              () => resolve({ success: false, output: "" }),
+            )
+          ),
+      }));
+      const running = harness.frame((text) => text.includes(" Abort "));
+
+      await harness.run([
+        "P",
+        () => running,
+        () => {
+          expect(() => harness.handlers.get("SIGTERM")!()).toThrow("exit 143");
+          return Promise.resolve();
+        },
+      ]);
+
+      expect(harness.exits).toEqual([143]);
+      expect(harness.signals[0].aborted).toBe(true);
     });
 
     it("reports a push whose operations cannot be set up", async () => {

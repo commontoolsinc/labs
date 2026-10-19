@@ -1403,7 +1403,8 @@ export interface DialogBox {
 }
 
 /** Geometry of the centered dialog box, sized to its content (title, body and
- * button row) and clamped to leave two cells for the drop shadow. */
+ * button row), or as wide as the screen for program output, and clamped to
+ * leave two cells for the drop shadow. */
 export function dialogBox(view: ViewState, dialog: DialogState): DialogBox {
   const titleW = cpLen(dialog.title) + 4; // the padding spaces and some fill
   const bodyW = dialog.body.reduce((m, l) => Math.max(m, cpLen(l)), 0);

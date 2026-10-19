@@ -64,8 +64,12 @@ export async function pushBranch(
     return `Not pushing: git is paging output for ${paged}, but the viewer ` +
       `is running in ${gitDir}.`;
   }
-  const branch = io.query(["symbolic-ref", "--quiet", "--short", "HEAD"])
-    ?.trim();
+  // The full name, since a short one is qualified, as `heads/foo`, when a
+  // tag shares it.
+  const head = io.query(["symbolic-ref", "--quiet", "HEAD"])?.trim();
+  const branch = head?.startsWith("refs/heads/")
+    ? head.slice("refs/heads/".length)
+    : undefined;
   if (!branch) {
     return "This checkout is not on a branch. Check out or create a branch " +
       "first.";
@@ -105,15 +109,17 @@ export async function pushBranch(
  * The address of the page a server offered for creating a pull request (or a
  * merge request) in the output of `git push`, or null when it offered none.
  * Servers send such offers on lines prefixed `remote:`, with the address on
- * the line making the offer or on one after it.
+ * the line making the offer or on the next such line.
  */
 export function offeredPullRequestUrl(output: string): string | null {
-  let offered = false;
+  let linesLeft = 0;
   for (const line of output.split(/\r\n|\r|\n/)) {
     const message = /^remote:(.*)$/.exec(line)?.[1];
     if (message === undefined) continue;
-    offered ||= /create (a )?(pull|merge) request/i.test(message);
-    const url = offered ? /https?:\/\/\S+/.exec(message) : null;
+    if (/create (a )?(pull|merge) request/i.test(message)) linesLeft = 2;
+    if (linesLeft === 0) continue;
+    linesLeft--;
+    const url = /https?:\/\/\S+/.exec(message);
     if (url) return url[0];
   }
   return null;

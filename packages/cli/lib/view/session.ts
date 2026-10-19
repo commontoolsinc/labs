@@ -1193,8 +1193,20 @@ export class Session {
     const output = this.#pushSummary === ""
       ? lines
       : [...lines, "", this.#pushSummary];
+    // A line wider than the box wraps, so that an address at its end stays
+    // whole.
+    const columns = Math.max(1, this.width - 6);
+    const wrapped = output.flatMap((line) => {
+      const chars = [...line];
+      if (chars.length <= columns) return [line];
+      const rowsOfLine: string[] = [];
+      for (let at = 0; at < chars.length; at += columns) {
+        rowsOfLine.push(chars.slice(at, at + columns).join(""));
+      }
+      return rowsOfLine;
+    });
     const rows = Math.max(1, this.height - 7);
-    const body = output.slice(-rows);
+    const body = wrapped.slice(-rows);
     while (body.length < rows) body.push("");
     return {
       title: "Push",
@@ -3816,12 +3828,18 @@ export class Session {
   }
 
   /**
-   * An interrupt (SIGINT) arrived. With unsaved edits and no prompt already up,
-   * raise the save prompt and return true so the driver keeps running and lets
-   * the user answer it. Otherwise return false: nothing to save, or a second
-   * interrupt during the prompt, so the driver should terminate.
+   * An interrupt (SIGINT) arrived. During a push, abort the push and return
+   * true so the driver keeps running and shows how it ended. With unsaved edits
+   * and no prompt already up, raise the save prompt and return true so the
+   * driver keeps running and lets the user answer it. Otherwise return false:
+   * nothing to save, or a second interrupt during the prompt, so the driver
+   * should terminate.
    */
   requestQuitFromSignal(): boolean {
+    if (this.#mode === "pushPrompt" && this.#abortPush) {
+      this.#abortPush();
+      return true;
+    }
     if (this.#mode === "savePrompt") return false;
     const willPrompt = this.#buffer?.dirty() ?? false;
     this.#requestQuit();

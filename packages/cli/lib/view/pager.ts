@@ -254,10 +254,16 @@ export async function runPager(
     }, REPARSE_DEBOUNCE_MS);
   };
 
+  // A push runs while keys keep arriving, so that its dialog's Abort button
+  // works. Its output, and its end, each draw the dialog again. However the
+  // viewer ends, a push still running stops.
+  let branchPushController: AbortController | undefined;
+
   let cleanedUp = false;
   const cleanup = () => {
     if (cleanedUp) return;
     cleanedUp = true;
+    branchPushController?.abort();
     try {
       tty.setRaw(false);
     } catch { /* ignore */ }
@@ -319,9 +325,6 @@ export async function runPager(
   const buf = new Uint8Array(4096);
   let leftover: Uint8Array = new Uint8Array(0);
 
-  // A push runs while keys keep arriving, so that its dialog's Abort button
-  // works. Its output, and its end, each draw the dialog again.
-  let branchPushController: AbortController | undefined;
   const startBranchPush = async () => {
     session.branchPushRequested = false;
     const controller = new AbortController();
@@ -402,7 +405,6 @@ export async function runPager(
       if (session.needsReparse) scheduleReparse();
     }
   } finally {
-    branchPushController?.abort();
     stopParserListener();
     stopReveal();
     stopExpiry();
