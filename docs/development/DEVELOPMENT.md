@@ -363,7 +363,10 @@ different answer:
   touches a `#` member of a receiver that is not a real instance, so the test
   wants rewriting to build one.
 - **A helper that uses no instance state.** Make it `static #` behind the
-  static getter, or a module-level function the test imports.
+  static getter, or a module-level function the test imports. A test in
+  another package imports such a function through the package's
+  `./for-testing-only` entry, which § Offering test-only code to other packages
+  describes.
 
 ### Comments
 
@@ -548,6 +551,30 @@ For import-map placement and dependency boundaries, follow
   dependencies, external or otherwise.
 - Clean separation of public and private facing interfaces: only export what's
   needed.
+
+### Offering test-only code to other packages
+
+What a package offers only to other packages' tests — examples of its values, a
+fake, an internal step or count its public surface cannot reach dependably —
+goes behind an export-map entry named `./for-testing-only`, pointing at
+`src/for-testing-only.ts` or at a `src/for-testing-only/` directory's
+`index.ts`. `packages/data-model` is the worked example. This is the
+package-level counterpart of a class's `accessForTestingOnly` getter
+(§ Classes).
+
+- No barrel re-exports it and no other entry reaches it, so the package's
+  ordinary use loads none of it.
+- Each value it exports carries a `ForTestingOnly` suffix, or
+  `_FOR_TESTING_ONLY` for an upper-case constant, so the name says what it is
+  wherever it is used. A type keeps its own name.
+- An internal stays out of every barrel and is re-exported here under a
+  suffixed name, whose doc comment says why a test of the public surface cannot
+  reach it.
+- Only tests and benchmarks import it, as `tasks/test-files.ts` defines them.
+  No gate checks this; review does.
+
+Such code belongs beside what it depends on. In `packages/test-support` it
+would make that package import the package it serves.
 
 ### Avoid Ambiguous Types
 
