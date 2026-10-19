@@ -137,6 +137,8 @@ export class CFResizablePanelGroup extends BaseElement {
   private _startPosition = 0;
   private _startSizes: number[] = [];
   private _observer: MutationObserver | null = null;
+  /** The axis the panels' sizes were last written along. */
+  #sizedDimension: "width" | "height" | undefined;
 
   override connectedCallback() {
     super.connectedCallback();
@@ -179,14 +181,12 @@ export class CFResizablePanelGroup extends BaseElement {
 
   override updated(changed: PropertyValues<this>): void {
     super.updated(changed);
-    // A direction assigned after the panels are in place moves their sizes
-    // to the other axis and turns the handles' grips with it.
-    const previous = changed.get("direction");
-    if (previous === undefined || previous === this.direction) return;
-    const stale = this.direction === "horizontal" ? "height" : "width";
-    for (const { element } of this._panels.values()) {
-      element.style[stale] = "";
-    }
+    if (!changed.has("direction")) return;
+    // The direction can arrive after the panels are in place, before the
+    // first render or after it: the panels' sizes move to its axis and the
+    // handles' grips turn with it. A drag measures along one axis from where
+    // it started, so a drag in progress ends.
+    if (this._activeHandle) this.#cancelResize();
     for (const handle of this._handles) {
       handle.setAttribute("data-orientation", this.direction);
     }
@@ -355,6 +355,15 @@ export class CFResizablePanelGroup extends BaseElement {
     this.classList.remove("resizing");
   }
 
+  /** Ends a drag in progress, whichever pointer started it. */
+  #cancelResize(): void {
+    document.removeEventListener("mousemove", this.handleMouseMove);
+    document.removeEventListener("mouseup", this.handleMouseUp);
+    document.removeEventListener("touchmove", this.handleTouchMove);
+    document.removeEventListener("touchend", this.handleTouchEnd);
+    this.endResize();
+  }
+
   private handleAdjust = (e: CustomEvent<{ delta: number }>): void => {
     const handle = e.target as HTMLElement;
     const handleIndex = this._handles.indexOf(handle);
@@ -407,9 +416,15 @@ export class CFResizablePanelGroup extends BaseElement {
   private applyPanelSizes(): void {
     const panels = Array.from(this._panels.values());
     const dimension = this.direction === "horizontal" ? "width" : "height";
+    // Only a size this group wrote is cleared, and only when the axis moves.
+    const stale = this.#sizedDimension === dimension
+      ? undefined
+      : this.#sizedDimension;
 
     panels.forEach((panel) => {
+      if (stale) panel.element.style[stale] = "";
       panel.element.style[dimension] = `${panel.currentSize}%`;
     });
+    this.#sizedDimension = dimension;
   }
 }

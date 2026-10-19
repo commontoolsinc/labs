@@ -20,11 +20,13 @@ interface Mounted extends Disposable {
   handle: CFResizableHandle;
 }
 
-/** Two panels and a handle, built the way the renderer builds them: the
- * direction is assigned as a property and the group is attached last. */
-async function mounted(direction?: PanelGroupDirection): Promise<Mounted> {
+/** Two panels and a handle in a 400px square group, not yet attached. The
+ * direction is assigned as a property, as the renderer assigns it. */
+function built(direction?: PanelGroupDirection): Mounted {
   const group = new CFResizablePanelGroup();
   if (direction) group.direction = direction;
+  group.style.width = "400px";
+  group.style.height = "400px";
   const first = new CFResizablePanel();
   first.setAttribute("default-size", "36");
   first.setAttribute("min-size", "20");
@@ -33,8 +35,6 @@ async function mounted(direction?: PanelGroupDirection): Promise<Mounted> {
   second.setAttribute("default-size", "64");
   second.setAttribute("min-size", "30");
   group.append(first, handle, second);
-  document.body.append(group);
-  await group.updateComplete;
   return {
     group,
     first,
@@ -42,6 +42,14 @@ async function mounted(direction?: PanelGroupDirection): Promise<Mounted> {
     handle,
     [Symbol.dispose]: () => group.remove(),
   };
+}
+
+/** The group from `built`, attached last and rendered. */
+async function mounted(direction?: PanelGroupDirection): Promise<Mounted> {
+  const page = built(direction);
+  document.body.append(page.group);
+  await page.group.updateComplete;
+  return page;
 }
 
 Deno.test("a vertical group's handle resizes with Up and Down, not Left and Right", async () => {
@@ -85,4 +93,30 @@ Deno.test("a direction changed after the panels are in place carries to the hand
   page.handle.focus();
   await pressKey("ArrowDown");
   expect(page.first.style.height).toBe("37%");
+});
+
+Deno.test("a direction assigned after the group is attached, before its first render, carries to the handle and the panels", async () => {
+  using page = built();
+  document.body.append(page.group);
+  page.group.direction = "vertical";
+  await page.group.updateComplete;
+  expect(page.handle.dataset.orientation).toBe("vertical");
+  expect(page.first.style.height).toBe("36%");
+  expect(page.first.style.width).toBe("");
+});
+
+Deno.test("a direction change during a drag ends the drag, and a stationary pointer leaves the split alone", async () => {
+  using page = await mounted("horizontal");
+  page.handle.dispatchEvent(
+    new MouseEvent("mousedown", { bubbles: true, clientX: 100, clientY: 160 }),
+  );
+
+  page.group.direction = "vertical";
+  await page.group.updateComplete;
+  expect(page.group.classList.contains("resizing")).toBe(false);
+  document.dispatchEvent(
+    new MouseEvent("mousemove", { clientX: 100, clientY: 160 }),
+  );
+  expect(page.first.style.height).toBe("36%");
+  expect(page.second.style.height).toBe("64%");
 });
