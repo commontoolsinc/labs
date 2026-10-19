@@ -72,6 +72,11 @@ example:
   test that needs a `#` member reaches it through an `accessForTestingOnly`
   getter, never through a cast on the instance; § Classes says how that getter
   is shaped and what it cannot cover.
+- **Test-only exports.** Code a package offers only to other packages' tests
+  goes behind its `./for-testing-only` export-map entry, in no barrel, with
+  every value export's name ending in `ForTestingOnly`. Nothing checks that only
+  tests import it. `DEVELOPMENT.md`, § Offering test-only code to other
+  packages, holds the rest.
 - **Import grouping and collation.** Every specifier naming the same package
   sits in one contiguous run. Nothing sorts imports here.
 - **Word choice.** American spelling, and one word per concept — this reaches

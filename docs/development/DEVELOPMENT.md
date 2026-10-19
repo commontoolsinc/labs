@@ -363,7 +363,10 @@ different answer:
   touches a `#` member of a receiver that is not a real instance, so the test
   wants rewriting to build one.
 - **A helper that uses no instance state.** Make it `static #` behind the
-  static getter, or a module-level function the test imports.
+  static getter, or a module-level function the test imports. A test in
+  another package imports such a function through the package's
+  `./for-testing-only` entry, which § Offering test-only code to other packages
+  describes.
 
 ### Comments
 
@@ -548,6 +551,59 @@ For import-map placement and dependency boundaries, follow
   dependencies, external or otherwise.
 - Clean separation of public and private facing interfaces: only export what's
   needed.
+
+### Offering test-only code to other packages
+
+Sometimes another package's tests need something only this package can supply:
+examples of its values, a fake of one of its services, or an internal step or
+count that a test of the public surface cannot reach dependably. That code goes
+behind an export-map entry named `./for-testing-only`, and nowhere else on the
+package's surface.
+
+```jsonc
+"exports": {
+  ".": "./src/index.ts",
+  "./for-testing-only": "./src/for-testing-only.ts"
+}
+```
+
+`packages/data-model` is the worked example: `deno.jsonc`, and
+`src/for-testing-only.ts`.
+
+- The entry points at `src/for-testing-only.ts`, or at the `index.ts` of a
+  `src/for-testing-only/` directory once one file is not enough. A package has
+  at most one such entry.
+- No barrel re-exports it, and nothing the package's other entries reach
+  imports it. Loading the package for its ordinary use then constructs none of
+  it, which matters once it builds tables at load time, as `data-model`'s does.
+- Every value it exports ends its name in `ForTestingOnly`, or
+  `_FOR_TESTING_ONLY` for an upper-case constant:
+  `float64BytesOfForTestingOnly`, `FABRIC_PRIMITIVE_EXAMPLES_FOR_TESTING_ONLY`.
+  An import names the entry once at the top of a file; the suffix goes with the
+  name to every place it is used. A type it re-exports keeps its own name,
+  since a type is erased and carries nothing into a running program.
+- An internal it offers is re-exported under its suffixed name, and the
+  internal itself stays out of every barrel. The internal's doc comment says
+  that `for-testing-only.ts` offers it, and the re-export's doc comment says why
+  a test of the public surface cannot reach it.
+- The module's header says what kinds of thing it offers, and any contract the
+  offerings keep that a test may rest on.
+- Only tests and benchmarks import it: a file named `*.test.ts` or
+  `*.bench.ts` (or the `.tsx` of either), and any file under a `test/`,
+  `integration/`, or `bench/` directory. That is the population
+  `tasks/test-files.ts` defines, which the
+  `cf-source/no-access-for-testing-only` lint rule also uses. No gate checks
+  who imports this entry, so review holds this one.
+
+It is the package-level counterpart of a class's `accessForTestingOnly` getter
+(§ Classes). The getter hands a test a class's `#` members; this entry hands
+another package's tests what the package keeps at module level.
+`packages/test-support` is a different thing: it holds testing machinery that
+belongs to no one package. Code that builds a package's values or exposes its
+internals imports that package, so placed in `test-support` it would make
+`test-support` depend on the package it serves, and a package whose code
+imports `test-support` would then form a cycle with it. It belongs beside what
+it depends on, in the package's own `for-testing-only` entry.
 
 ### Avoid Ambiguous Types
 
