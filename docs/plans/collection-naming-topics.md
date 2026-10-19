@@ -228,8 +228,8 @@ ruled. A later reversal is a decision recorded here, not a discovery.
    serialize through one retry of `editWithRetry`.
 5. **A member's display name stays its title.** The number renders as a badge
    beside it, never in place of it, and every reader reaches it through the
-   member's own `shortName`: an index row, a mention universe row, and a
-   mention's pill all read that one property.
+   member's own `shortName`: an index row reads that property, a mention
+   universe row copies it, and a mention's pill reads the universe row's copy.
 6. **"In text" means the editor.** Typing `#42` completes to a reference-form
    mention that shows the number. Pasted text is left alone. The `#` sigil is
    provisional: the spec leaves tags versus citations open.
