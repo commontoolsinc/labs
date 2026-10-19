@@ -252,6 +252,23 @@ describe("held start lifetimes", () => {
     expect(running(piece)).toBe(false);
   });
 
+  it("leaves a held child that its parent named while the start settled", async () => {
+    const { parent, child, rerun } = await parentWithChild(
+      "parent launched while the hold settles",
+    );
+    runtime.runner.stop(parent);
+    const holder = {};
+    const opening = runtime.start(child, { holder });
+    rerun();
+    await expect(opening).resolves.toBe(true);
+    await runtime.idle();
+    expect(running(parent)).toBe(true);
+
+    runtime.releaseHold(child, holder);
+    expect(running(child)).toBe(true);
+    runtime.runner.stop(parent);
+  });
+
   it("discards held lifetimes on an explicit stop", async () => {
     const piece = await storedPiece("stopped while held");
     const holder = {};

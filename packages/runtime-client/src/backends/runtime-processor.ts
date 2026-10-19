@@ -3312,21 +3312,22 @@ export class RuntimeProcessor {
         );
         return { piece: createPieceRef(cell) };
       }
-      const cell = await cc.getPieceCell(
-        landing,
-        this.#pieceOpenFor(request.runIt, client),
+      const cell = await this.#releasingIfDeparted(
+        client,
+        cc.getPieceCell(landing, this.#pieceOpenFor(request.runIt, client)),
       );
-      this.#releaseIfDeparted(cell, request.runIt, client);
       return { piece: createPieceRef(cell) };
     }
 
-    const cell = await cc.getPieceCell(
-      request.pieceId,
-      this.#pieceOpenFor(request.runIt, client),
-      undefined,
-      request.scope,
+    const cell = await this.#releasingIfDeparted(
+      client,
+      cc.getPieceCell(
+        request.pieceId,
+        this.#pieceOpenFor(request.runIt, client),
+        undefined,
+        request.scope,
+      ),
     );
-    this.#releaseIfDeparted(cell, request.runIt, client);
 
     return {
       piece: createPieceRef(cell),
@@ -3418,10 +3419,10 @@ export class RuntimeProcessor {
     client: WorkerClient = ownerClient,
   ): Promise<BooleanResponse> {
     const cc = this.#getSpaceCtx(request.space);
-    await cc.startPiece(request.pieceId, request.scope, { holder: client });
-    if (this.#detachedClients.has(client)) {
-      await cc.releasePiece(request.pieceId, client, request.scope);
-    }
+    await this.#releasingIfDeparted(
+      client,
+      cc.startPiece(request.pieceId, request.scope, { holder: client }),
+    );
     // A missing piece throws in `startPiece()`, so `true` here means the
     // piece started.
     // TODO(danfuzz): Report whether it was already running, once
@@ -3465,16 +3466,21 @@ export class RuntimeProcessor {
   }
 
   /**
-   * Gives up the hold a start took for `client` when the client left while the
-   * start was in flight: `disposeClient()` came too early to see it.
+   * `opening`, after which every hold `client` has is given up if the client
+   * left while it was in flight: `disposeClient()` came too early to see a
+   * hold the open took. Given up whether the open succeeded or not, since a
+   * start can take its hold before a later step of the open fails.
    */
-  #releaseIfDeparted(
-    cell: Cell<unknown>,
-    runIt: boolean | undefined,
+  async #releasingIfDeparted<T>(
     client: WorkerClient,
-  ): void {
-    if (runIt && this.#detachedClients.has(client)) {
-      this.#runtime.releaseHold(cell, client);
+    opening: Promise<T>,
+  ): Promise<T> {
+    try {
+      return await opening;
+    } finally {
+      if (this.#detachedClients.has(client)) {
+        this.#runtime.releaseAllHolds(client);
+      }
     }
   }
 

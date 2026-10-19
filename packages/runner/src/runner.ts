@@ -558,6 +558,9 @@ type StartAttempt = {
   // holder a caller named.
   permanent?: boolean;
   holders?: Set<object>;
+  // Whether a launch named the result while this attempt was resolving, which
+  // makes the registration it installed that launch's too.
+  disowned?: boolean;
   // The exact registration THIS attempt's `#startCore()` created, when it
   // created one. A walk can also report success for a registration it did
   // NOT create (doStart's already-started returns, including the
@@ -5041,7 +5044,8 @@ export class Runner {
     if (attempt.holders === undefined) return;
     // Only a registration this start installed is the holders' to end. A
     // result that was already running belongs to whatever started it.
-    const installed = attempt.installedRegistration !== undefined &&
+    const installed = !attempt.disowned &&
+        attempt.installedRegistration !== undefined &&
         this.#cancels.get(target) === attempt.installedRegistration
       ? attempt.installedRegistration
       : undefined;
@@ -5118,6 +5122,10 @@ export class Runner {
   #disownHeldRegistration(key: `${MemorySpace}/${ScopeKey}/${URI}`): void {
     const held = this.#heldLifetimes.get(key);
     if (held !== undefined) held.registration = undefined;
+    // …and a held start still resolving claims no registration to end.
+    for (const attempt of this.#activeStartAttemptsByDoc.get(key) ?? []) {
+      attempt.disowned = true;
+    }
   }
 
   /**
@@ -8554,6 +8562,7 @@ export class Runner {
           // a context under someone else's authority; the recovery's purpose
           // is met and its claim dissolves. Settling the token touches no
           // live registration (its stale install no longer matches).
+          this.#disownHeldRegistration(key);
           ownership.cancel();
           return;
         }
@@ -8661,6 +8670,7 @@ export class Runner {
               // let a parent cancel tear down a run whose lifecycle the parent
               // does not own. Yield exactly as `#startWithTx()` yields on an
               // owned key: settle the token without touching the registration.
+              this.#disownHeldRegistration(target!);
               ownership.cancel();
               return true;
             }
