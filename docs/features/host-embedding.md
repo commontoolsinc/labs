@@ -550,7 +550,9 @@ be a record. The send waits for the run of the stream's handler: it resolves
 once that run, and so its gated write, has committed, and rejects with the
 reason when the runtime refuses the event, when that run's gated write is
 refused, or when the run throws or its event is dropped or refused admission.
-Under server execution the run is the served one, and its outcome is the
+A run that finishes without an error resolves it, whether or not it wrote
+anything; a handler that turns an event down throws, with a reason a person can
+read, which fails its run and rejects the send. Under server execution the run is the served one, and its outcome is the
 consequence the serving loop recorded for the event. `sendStrict()` waits the
 same way when given `{ awaitHandling: true }`, and otherwise confirms only that
 the runtime took the event.

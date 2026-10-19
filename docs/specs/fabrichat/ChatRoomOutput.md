@@ -313,8 +313,10 @@ These rules hold for every stream:
   [`clients.md`](clients.md#writing-the-reviewed-gesture-requirement)), and the
   record it writes is labeled `authored-by` the principal who sent it.
 - `sendMessage`, `editMessage`, and `sendReaction` record the sender's profile,
-  and refuse an event that arrives before it resolves. The
-  other streams don't depend on a profile.
+  and `deleteMessage` and `deleteReaction` read it to tell the sender's own
+  message or reaction. Each refuses an event that arrives before it resolves.
+  `obliterateMessage` reads it only to tell whether a message is the sender's
+  own.
 - Writing in a room is joining it. When `sendMessage` appends a message,
   `sendReaction` adds a reaction, or `setTitle` sets the title, in a room in a
   space of its own, the room
@@ -333,22 +335,27 @@ These rules hold for every stream:
   says only whether the room is one a manager can take the sender into, and
   only the join's own event, which writes nothing in the room's space, reads
   whether the sender has a manager: such a manager is still told of the join.
-- A message act the room drops writes nothing and says nothing: the room's
-  rendering offers only acts the viewer can take, so an event outside the
-  rules is a client's own mistake, and the client sees it by the absence of
-  its effect from `messages`. An add's outcome is recorded in `addRequests`,
-  and a retitle's in `titleRequests`, each `refused` with a reason and a code.
-  A client checks an event against the stream's rules before sending it (see
+- A message act the room refuses writes nothing, and its run fails with a
+  reason a person can read. A send that awaits its handling, as a reviewed act
+  does, is rejected with that reason, and under server execution it is the
+  event's error consequence (see [events](../server-side-execution/events.md)).
+  The room's rendering offers only acts the viewer can take, so a refusal is
+  how a client learns that an event it sent broke the stream's rules, a
+  payload of the wrong shape included. An act that would change nothing, such
+  as adding a reaction that is already there, is no refusal: it succeeds and
+  writes nothing. An add's outcome is recorded in `addRequests`, and a
+  retitle's in `titleRequests`, each `refused` with a reason and a code. A
+  client checks an event against the stream's rules before sending it (see
   [`clients.md`](clients.md#writing-the-reviewed-gesture-requirement)).
-- A dropped event is spent: it is not retried.
+- A refused event is spent: it is not retried.
 
 | Stream | Reviewed surface | Effect |
 | --- | --- | --- |
-| [`sendMessage`](#sendmessagerequestid-string-version-chatmessageversion-replyto-chatreply) | `ChatSendSurface` | appends a message from the sender, once |
-| [`editMessage`](#editmessagerequestid-string-message-cellchatmessage-version-chatmessageversion) | `ChatEditSurface` | records a new version of the sender's message, once |
-| [`deleteMessage`](#deletemessagerequestid-string-message-cellchatmessage) | `ChatDeleteSurface` | records the sender's message as deleted |
-| [`obliterateMessage`](#obliteratemessagerequestid-string-message-cellchatmessage) | `ChatObliterateSurface` | removes a message and its history, leaving a tombstone |
-| [`sendReaction`](#sendreactionrequestid-string-message-cellchatmessage-emoji-string) | `ChatReactSurface` | adds the sender's reaction, if it isn't there |
+| [`sendMessage`](#sendmessagebody-string-replyto-chatreply) | `ChatSendSurface` | appends a message from the sender, once |
+| [`editMessage`](#editmessagemessage-cellchatmessage-body-string) | `ChatEditSurface` | records a new version of the sender's message, once |
+| [`deleteMessage`](#deletemessagemessage-cellchatmessage) | `ChatDeleteSurface` | records the sender's message as deleted |
+| [`obliterateMessage`](#obliteratemessagemessage-cellchatmessage) | `ChatObliterateSurface` | removes a message and its history, leaving a tombstone |
+| [`sendReaction`](#sendreactionmessage-cellchatmessage-emoji-string) | `ChatReactSurface` | adds the sender's reaction, if it isn't there |
 | [`deleteReaction`](#deletereactionmessage-cellchatmessage-reaction-cellchatreaction) | `ChatReactSurface` | removes the sender's reaction, the one named |
 
 ### `sendMessage(body: string, replyTo?: ChatReply)`
@@ -367,7 +374,7 @@ Sends a message from the sender.
 - **Effect:** appends a [`ChatMessage`](ChatMessage.md) to the room's messages,
   with the sender's profile as `authorProfile`, `body` as `body`, the handler
   clock as `sentAt` (see [times](ChatMessage.md#times)), and no reactions.
-- **Dropped:** a `body` that isn't a non-empty string, a sender whose profile
+- **Refused:** a `body` that isn't a non-empty string, a sender whose profile
   hasn't resolved, or a `replyTo` whose `message` is outside the room's space.
   Otherwise the room takes `replyTo` as sent: a client sends a reply only to a
   message of the room that is not deleted, with a `shownIn` its target allows
@@ -390,7 +397,7 @@ Records new text for one of the sender's messages.
 - **Effect:** makes `body` the message's text, and the handler clock its
   `editedAt`. The text it replaces is gone. `authorProfile`, `sentAt`,
   `replyTo`, and the reactions don't change.
-- **Dropped:** a `message` outside the room's space, sent by someone else, or
+- **Refused:** a `message` outside the room's space, sent by someone else, or
   deleted, or a `body` that isn't a non-empty string.
 
 ### `deleteMessage(message: Cell<ChatMessage>)`
@@ -415,8 +422,8 @@ Records one of the sender's messages as deleted.
 
   Either way, no reaction outlives the deletion, and the message stays among the
   room's messages, so replies to it and threads rooted at it keep their links.
-- **Dropped:** a `message` outside the room's space, sent by someone else, or
-  already deleted.
+- **Refused:** a `message` outside the room's space, or sent by someone else.
+  Deleting a message that is already deleted changes nothing.
 
 ### `obliterateMessage(message: Cell<ChatMessage>)`
 
@@ -445,7 +452,7 @@ room, it is also how either person removes their own words completely.
   `{ deleted: true }`, its `editedAt` the handler clock, and its
   `authorProfile` and `reactions` are removed. `sentAt` and `replyTo` stay.
   The tombstone is labeled `authored-by` the sender, whoever obliterated it.
-- **Dropped:** a `message` outside the room's space; and, unless the room is a
+- **Refused:** a `message` outside the room's space; and, unless the room is a
   direct room and the message is the sender's own, a sender who isn't an
   OWNER, or any sender where the room's `ownersMayObliterate` doesn't hold.
   Obliterating a message that is already obliterated changes nothing.
@@ -468,7 +475,7 @@ Adds the sender's reaction to a message.
   the handler clock as its `sentAt`. If they already have one, nothing
   changes, and it keeps its `sentAt`. No one else's reaction changes, and
   neither does the message itself.
-- **Dropped:** a `message` outside the room's space, or deleted, or an `emoji`
+- **Refused:** a `message` outside the room's space, or deleted, or an `emoji`
   that isn't a single emoji.
 
 Adding a reaction that's already there changes nothing, and so does removing
@@ -486,10 +493,10 @@ Removes the sender's reaction from a message.
 
 - **Admitted:** as a trusted gesture on `ChatReactSurface`.
 - **Effect:** removes `reaction` from `message`'s reactions. One that is no
-  longer there removes nothing. No one else's reaction changes, and neither
-  does the message itself.
-- **Dropped:** a `message` outside the room's space, or deleted, a `reaction`
-  that reads as no reaction, or one that isn't the sender's.
+  longer there, or reads as no reaction, removes nothing. No one else's
+  reaction changes, and neither does the message itself.
+- **Refused:** a `message` outside the room's space, or deleted, an event that
+  names no `reaction`, or a `reaction` that isn't the sender's.
 
 A client never toggles: it sends whichever of the two the person asked for, so a
 repeated or delayed event can't undo what the person meant.

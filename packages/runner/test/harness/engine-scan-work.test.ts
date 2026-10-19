@@ -2,23 +2,40 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { spy } from "@std/testing/mock";
 import { Identity } from "@commonfabric/identity";
+import type { Source } from "@commonfabric/js-compiler";
 
 import * as compiler from "../../src/harness/compiler-stack.ts";
 import { ensureCompilerStack } from "../../src/harness/deferred-compiler-stack.ts";
 import type { Engine } from "../../src/harness/engine.ts";
 import type { RuntimeProgram } from "../../src/harness/types.ts";
 import { Runtime } from "../../src/runtime.ts";
+import {
+  DATA_FILE_SPECIFIER,
+  type SourcePackageIdentity,
+} from "../../src/sandbox/module-record-compiler.ts";
 import { StorageManager } from "../../src/storage/cache.deno.ts";
 
 // This file's isolated runtime installs the counting loader; the engine's
 // identity tests use the real compiler stack in their own files. All three
 // scans the stack offers are counted, so a step that parses a module through
-// any of them shows up here. So is every parse the runner makes through the
-// stack's `typescript`, which is how record assembly reads a compiled body.
+// any of them shows up here. So is each resolution of a program, which parses
+// every module it reaches on its own, and every parse the runner makes through
+// the stack's `typescript`, which is how record assembly reads a compiled body.
 const scans = spy(compiler.scanModuleDeclarations);
 const importScans = spy(compiler.collectImportSpecifiers);
 const dataFileScans = spy(compiler.collectDataFileNames);
+const resolves = spy(compiler.TypeScriptCompiler.prototype.resolveProgram);
 const parses = spy(compiler.ts.createSourceFile);
+
+/** The stack's compiler, with each program resolution recorded in `resolves`. */
+class CountingCompiler extends compiler.TypeScriptCompiler {
+  override resolveProgram(
+    ...args: Parameters<compiler.TypeScriptCompiler["resolveProgram"]>
+  ): ReturnType<compiler.TypeScriptCompiler["resolveProgram"]> {
+    return resolves.call(this, ...args);
+  }
+}
+
 await ensureCompilerStack(() =>
   Promise.resolve({
     ...compiler,
@@ -31,6 +48,7 @@ await ensureCompilerStack(() =>
     scanModuleDeclarations: scans,
     collectImportSpecifiers: importScans,
     collectDataFileNames: dataFileScans,
+    TypeScriptCompiler: CountingCompiler,
   })
 );
 
@@ -54,6 +72,23 @@ const PROGRAM: RuntimeProgram = {
   dataFiles: ["/words.txt"],
 };
 
+const FRAME = [
+  'import { dataFile } from "commonfabric";',
+  'export const html = () => dataFile("./frame.html");',
+].join("\n");
+const FRAME_DATA = "<p>frame</p>\n";
+
+/** A program whose data file is read by a module the entry imports. */
+const CHILD_READER: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [
+    { name: "/main.tsx", contents: 'export { html } from "./frame.ts";\n' },
+    { name: "/frame.ts", contents: FRAME },
+    { name: "/frame.html", contents: FRAME_DATA },
+  ],
+  dataFiles: ["/frame.html"],
+};
+
 /** Runs `work` and returns the source text of every module it scanned. */
 async function scannedDuring(work: () => Promise<unknown>): Promise<string[]> {
   const starts = [scans, importScans, dataFileScans].map((s) => s.calls.length);
@@ -71,6 +106,32 @@ async function parsedDuring(work: () => Promise<unknown>): Promise<string[]> {
   const start = parses.calls.length;
   await work();
   return parses.calls.slice(start).map((call) => call.args[1]);
+}
+
+/**
+ * What a cold load reads back from a compiled program's stored documents: each
+ * module's authored source, and the source-package edges each module owns.
+ */
+function storedClosureOf(
+  compiled: Awaited<ReturnType<Engine["compileToRecordGraph"]>>,
+): { files: Source[]; sourcePackages: SourcePackageIdentity[] } {
+  const filenameOf = new Map(
+    compiled.modules.map((module) => [module.identity, module.filename]),
+  );
+  const sourcePackages = compiled.modules.map((module) => ({
+    ownerPath: module.filename,
+    rootPaths: [],
+    dataPaths: module.imports
+      .filter((edge) => edge.specifier.startsWith(DATA_FILE_SPECIFIER))
+      .map((edge) => filenameOf.get(edge.targetIdentity)!),
+  })).filter((owner) => owner.dataPaths.length > 0);
+  return {
+    files: compiled.modules.map((module) => ({
+      name: module.filename,
+      contents: module.source,
+    })),
+    sourcePackages,
+  };
 }
 
 describe("engine", () => {
@@ -114,6 +175,7 @@ describe("engine", () => {
       expect(scanned).not.toContain(DATA);
     }
   });
+
   it("parses no compiled body on a cache hit whose artifacts list their imports", async () => {
     const first = await engine.compileToRecordGraph(PROGRAM);
     const code = first.modules.filter((module) => !module.isData);
@@ -153,5 +215,30 @@ describe("engine", () => {
         exports: record.exports,
       });
     }
+  });
+
+  it("resolves a stored closure once when a child module owns a data file", async () => {
+    const compiled = await engine.compileToRecordGraph(CHILD_READER);
+    const { files, sourcePackages } = storedClosureOf(compiled);
+    expect(sourcePackages.map((owner) => owner.ownerPath)).toEqual([
+      "/frame.ts",
+    ]);
+
+    const start = resolves.calls.length;
+    let entryIdentity = "";
+    const scanned = await scannedDuring(async () => {
+      ({ entryIdentity } = await engine.compileResolvedToRecordGraph(
+        files,
+        CHILD_READER.main,
+        { sourcePackages },
+      ));
+    });
+
+    expect(entryIdentity).toBe(compiled.entryIdentity);
+    // The entry's own imports reach the reader, so resolution starts from the
+    // entry alone.
+    expect(resolves.calls.length - start).toBe(1);
+    expect(scanned.filter((text) => text === FRAME)).toHaveLength(1);
+    expect(scanned).not.toContain(FRAME_DATA);
   });
 });

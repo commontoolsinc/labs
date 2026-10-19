@@ -7,6 +7,7 @@
  * here, leaves every figure where it was.
  */
 
+import type { ModuleDelegationSizes } from "./module-delegations.ts";
 import type { SchedulerSizes } from "./scheduler/types.ts";
 import type { StorageSizes } from "./storage/diagnostics.ts";
 
@@ -47,6 +48,12 @@ export type RuntimeOwnSizes = {
 
   /** CFC policy manifests resolved and held. */
   policyManifests: number;
+
+  /**
+   * The writer-authority delegations learned from loaded module closures,
+   * and how often their transitive snapshot has been built.
+   */
+  moduleDelegations: ModuleDelegationSizes;
 };
 
 /** What `Runtime.getSizes()` reports. */
