@@ -452,6 +452,15 @@ export interface CompileSourcesOptions {
   precompiledBuilderSourceSites?: Map<string, BuilderSourceSitesV1>;
 
   /**
+   * Runtime import specifiers per source name, for precompiled bodies whose
+   * `require()` calls were already listed by the same scan this adapter runs.
+   * A source with an entry takes its record's imports from it, and its body is
+   * not parsed for them. An entry for a source with no precompiled body is
+   * ignored.
+   */
+  precompiledImportSpecs?: ReadonlyMap<string, readonly string[]>;
+
+  /**
    * Whole-program path prefix (`/<id>`, no trailing slash) to strip from each
    * module's path *for content-addressed identity only*. The compile path
    * resolves a program whose files are prefixed with `/<computeId>/...` (a
@@ -933,9 +942,14 @@ export function compileSourcesToRecords(
     // become record edges — unlike `collectImportSpecifiers`, which includes
     // them for module *identity*.
     compiledBodies.set(specifier, compiled);
-    // Copy the readonly extractor result into a mutable array the record owns
-    // (VirtualModuleRecord.imports is `string[]`); this is the cold compile path.
-    const importSpecs = [...extractRuntimeImports(compiled)];
+    const listedImports = precompiled === undefined
+      ? undefined
+      : options.precompiledImportSpecs?.get(source.name);
+    // Copy the readonly list into a mutable array the record owns
+    // (VirtualModuleRecord.imports is `string[]`).
+    const importSpecs = [
+      ...(listedImports ?? extractRuntimeImports(compiled)),
+    ];
     const resolutions: Record<string, string> = {};
     // The specifiers whose runtime namespace declares `dataFile`, and so the
     // only ones this module reads a data file through.

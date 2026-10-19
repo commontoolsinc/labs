@@ -146,7 +146,10 @@ It:
 4. Wraps each emitted body in a module record keyed `cf:module/<identity>`
    ([`compileSourcesToRecords`][c7]) and security-classifies it
    ([`verifyCompiledModuleBody`][c8], called from the Engine) before it can be
-   loaded or cached.
+   loaded or cached. A record imports exactly the modules its body's
+   `require()` calls name. A compile scans the body for them; a cache hit takes
+   the list from the cached artifact when it carries one, as a compiled
+   document and a byte-cache entry do, and does not parse the body for it.
 
 5. Validates the assembled graph's shape and wiring
    ([`verifyModuleGraph`][c8]). Both verifications belong to the compile path:
