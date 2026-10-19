@@ -1,4 +1,4 @@
-import { css, html } from "lit";
+import { css, html, type PropertyValues } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 
 /**
@@ -175,6 +175,22 @@ export class CFResizablePanelGroup extends BaseElement {
         <slot></slot>
       </div>
     `;
+  }
+
+  override updated(changed: PropertyValues<this>): void {
+    super.updated(changed);
+    // A direction assigned after the panels are in place moves their sizes
+    // to the other axis and turns the handles' grips with it.
+    const previous = changed.get("direction");
+    if (previous === undefined || previous === this.direction) return;
+    const stale = this.direction === "horizontal" ? "height" : "width";
+    for (const { element } of this._panels.values()) {
+      element.style[stale] = "";
+    }
+    for (const handle of this._handles) {
+      handle.setAttribute("data-orientation", this.direction);
+    }
+    this.applyPanelSizes();
   }
 
   private updatePanels(): void {
