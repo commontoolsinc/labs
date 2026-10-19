@@ -67,13 +67,13 @@ have been validated. The coordinator must verify the successful workflow
 identity, run attempt, artifact digest, selected SHA, and receipt freshness
 before advancing the Estuary channel in infra.
 
-Successful `alex-daily` deployment and verification-only runs wake infra's
+Production deployment and verification-only completions wake infra's
 `rapids.yml` on `main` with `channel=estuary` while the authorization window is
-open. `.github/workflows/notify-rapids.yml` selects the successful production
-workflow by its path, main branch, repository, dispatch event, and source branch
-in the run title. It uses the existing infra-only App token. The wake-up is a
-reconciliation request; the coordinator still validates the receipt before
-publishing.
+open. `.github/workflows/notify-rapids.yml` selects the production workflow by
+its path, main branch, repository, and dispatch event. It uses the existing
+infra-only App token. Every completion is a reconciliation hint, including a
+failed or cancelled run; the coordinator still validates the selected source,
+successful run, and receipt before publishing.
 
 ## Coordinated Rapids releases
 

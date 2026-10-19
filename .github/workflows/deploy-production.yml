@@ -120,6 +120,7 @@ jobs:
           fi
 
       - name: 🦕 Setup Deno
+        if: ${{ !inputs.verify_only }}
         uses: ./.github/actions/deno-setup
         with:
           cache: false

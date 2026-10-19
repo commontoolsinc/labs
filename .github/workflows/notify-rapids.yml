@@ -19,9 +19,7 @@ jobs:
        (github.event.workflow_run.path == '.github/workflows/rapids-release.yml' &&
         github.event.workflow_run.event == 'workflow_dispatch') ||
        (github.event.workflow_run.path == '.github/workflows/deploy-production.yml' &&
-         github.event.workflow_run.event == 'workflow_dispatch' &&
-         github.event.workflow_run.conclusion == 'success' &&
-         contains(github.event.workflow_run.display_title, ' from alex-daily (verify=')))
+         github.event.workflow_run.event == 'workflow_dispatch'))
     runs-on: ubuntu-latest
     steps:
       - name: 📋 Check notification configuration

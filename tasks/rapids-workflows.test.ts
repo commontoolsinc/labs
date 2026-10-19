@@ -124,6 +124,11 @@ describe("rapids-workflows", () => {
     );
     expect(deploy.steps[deploy.steps.indexOf(deployment) - 1]).toEqual(window);
     expect(deployment.if).toBe("${{ !inputs.verify_only }}");
+    const deno = oneStep(
+      deploy.steps,
+      (step) => step.uses === "./.github/actions/deno-setup",
+    );
+    expect(deno.if).toBe("${{ !inputs.verify_only }}");
     for (
       const [NOW, allowed] of [
         ["2026-10-19T22:15:15Z", false],
@@ -615,37 +620,41 @@ describe("rapids-workflows", () => {
     }
   });
 
-  it("wakes only Estuary for successful alex-daily production runs inside the authorization window", async () => {
+  it("wakes Estuary for production workflow completions inside the authorization window", async () => {
     const job = (await workflow("notify-rapids.yml")).jobs["notify-infra"];
-    const accepts = new Function("github", "contains", `return (${job.if});`);
+    const accepts = new Function("github", `return (${job.if});`);
     const run = {
       path: ".github/workflows/deploy-production.yml",
       event: "workflow_dispatch",
       conclusion: "success",
       head_branch: "main",
       head_repository: { full_name: "commonfabric/labs" },
-      display_title: `Estuary ${infraSha} from alex-daily (verify=false)`,
+      display_title: "Manual Production Deployment",
     };
     const allowed = (changes: Partial<typeof run> = {}) =>
       accepts({
         repository: "commonfabric/labs",
         event: { workflow_run: { ...run, ...changes } },
-      }, (value: string, search: string) => value.includes(search));
+      });
     expect(allowed()).toBe(true);
     expect(
       allowed({
         display_title: `Estuary ${infraSha} from alex-daily (verify=true)`,
       }),
     ).toBe(true);
+    for (const conclusion of ["success", "failure", "cancelled", "skipped"]) {
+      expect(allowed({ conclusion })).toBe(true);
+    }
+    expect(
+      allowed({
+        display_title: `Estuary ${infraSha} from main (verify=false)`,
+      }),
+    ).toBe(true);
     for (
       const changes of [
-        { conclusion: "failure" },
-        { conclusion: "cancelled" },
-        { conclusion: "skipped" },
         { head_branch: "alex-daily" },
         { event: "pull_request" },
         { head_repository: { full_name: "contributor/labs" } },
-        { display_title: `Estuary ${infraSha} from main (verify=false)` },
         { path: ".github/workflows/other.yml" },
       ]
     ) expect(allowed(changes)).toBe(false);
