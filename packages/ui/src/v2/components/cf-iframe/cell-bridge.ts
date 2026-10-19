@@ -16,6 +16,7 @@ import type { FabricValue } from "@commonfabric/data-model";
 import {
   CellHandle,
   CellReadRefusedError,
+  cellRefToIdentityKey,
   type ClientCellValue,
   isCellHandle,
 } from "@commonfabric/runtime-client";
@@ -510,6 +511,8 @@ export function createCellContextBridge(context: object): FabricBridge {
  * or by `resourceKinds`. The last is what names a stream: the worker lists a
  * record's fields as cells, and a stream is not one, so a record bound inline
  * with no schema of its own names its streams only through the kinds given.
+ * A name `resourceKinds` alone gives is a resource only where the context
+ * holds a link under it, so a name the context does not hold grants nothing.
  */
 export async function resolveCellContextBridge(
   context: CellHandle<Record<string, unknown>>,
@@ -520,12 +523,12 @@ export async function resolveCellContextBridge(
   const contextNames = await fieldNames(context);
   const root = await context.resolveAsCell();
   const properties = schemaProperties(root.ref().schema);
-  const names = new Set([
+  const listed = new Set([
     ...Object.keys(properties),
     ...contextNames,
     ...await fieldNames(root),
-    ...Object.keys(resourceKinds),
   ]);
+  const names = new Set([...listed, ...Object.keys(resourceKinds)]);
   const entries = await Promise.all([...names].map(async (name) => {
     const source = context.key(name);
     const kindHint = Object.hasOwn(resourceKinds, name)
@@ -536,6 +539,12 @@ export async function resolveCellContextBridge(
       await source.pull();
     }
     const cell = await source.resolveAsCell();
+    if (
+      !listed.has(name) &&
+      cellRefToIdentityKey(cell.ref()) === cellRefToIdentityKey(source.ref())
+    ) {
+      return undefined;
+    }
     const resolvedSchema = cell.ref().schema;
     const runSqliteOperation: SqliteOperationRunner | undefined =
       declaredKind === "sqlite"
@@ -558,5 +567,7 @@ export async function resolveCellContextBridge(
       ),
     ] as const;
   }));
-  return createFabricBridge(Object.fromEntries(entries));
+  return createFabricBridge(
+    Object.fromEntries(entries.filter((entry) => entry !== undefined)),
+  );
 }

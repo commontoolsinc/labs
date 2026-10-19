@@ -538,10 +538,12 @@ describe("cf-iframe cell bridge", () => {
           }
           if (request.type === RequestType.CellResolveAsCell) {
             const name = request.cell.path.at(-1);
+            // A name the record does not hold stays where it was asked,
+            // with the schema the worker reads it under.
             return Promise.resolve({
               cell: request.cell.path.length === slot.path.length
                 ? request.cell
-                : targets[name as string],
+                : targets[name as string] ?? { ...request.cell, schema: {} },
             });
           }
           return Promise.resolve({});
@@ -556,8 +558,10 @@ describe("cf-iframe cell bridge", () => {
 
     const bridge = await resolveCellContextBridge(context, {
       order: "stream",
+      frosting: "cell",
     });
 
+    // `frosting` names nothing the record holds, so it grants nothing.
     expect(Object.keys(bridge.resources).sort()).toEqual(["glaze", "order"]);
     expect(bridge.resources.glaze.kind).toBe("cell");
     expect(bridge.resources.glaze.cell!.identity).toMatchObject({
