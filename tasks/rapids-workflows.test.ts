@@ -546,7 +546,11 @@ describe("rapids-workflows", () => {
     expect(notify.permissions).toEqual({});
     expect(notify.on).toEqual({
       workflow_run: {
-        workflows: ["CI", "Deploy Rapids release"],
+        workflows: [
+          "CI",
+          "Deploy Rapids release",
+          "Manual Production Deployment",
+        ],
         types: ["completed"],
         branches: ["main"],
       },
@@ -609,6 +613,83 @@ describe("rapids-workflows", () => {
       expect(job.steps.some((step) => step.uses?.includes("checkout@")))
         .toBe(false);
     }
+  });
+
+  it("wakes only Estuary for successful alex-daily production runs inside the authorization window", async () => {
+    const job = (await workflow("notify-rapids.yml")).jobs["notify-infra"];
+    const accepts = new Function("github", "contains", `return (${job.if});`);
+    const run = {
+      path: ".github/workflows/deploy-production.yml",
+      event: "workflow_dispatch",
+      conclusion: "success",
+      head_branch: "main",
+      head_repository: { full_name: "commonfabric/labs" },
+      display_title: `Estuary ${infraSha} from alex-daily (verify=false)`,
+    };
+    const allowed = (changes: Partial<typeof run> = {}) =>
+      accepts({
+        repository: "commonfabric/labs",
+        event: { workflow_run: { ...run, ...changes } },
+      }, (value: string, search: string) => value.includes(search));
+    expect(allowed()).toBe(true);
+    expect(
+      allowed({
+        display_title: `Estuary ${infraSha} from alex-daily (verify=true)`,
+      }),
+    ).toBe(true);
+    for (
+      const changes of [
+        { conclusion: "failure" },
+        { conclusion: "cancelled" },
+        { conclusion: "skipped" },
+        { head_branch: "alex-daily" },
+        { event: "pull_request" },
+        { head_repository: { full_name: "contributor/labs" } },
+        { display_title: `Estuary ${infraSha} from main (verify=false)` },
+        { path: ".github/workflows/other.yml" },
+      ]
+    ) expect(allowed(changes)).toBe(false);
+    const send = oneStep(
+      job.steps,
+      (step) => step.run?.includes("gh api") ?? false,
+    );
+    for (
+      const [NOW, enabled] of [
+        ["2026-10-19T22:15:15Z", false],
+        ["2026-10-19T22:15:16Z", true],
+        ["2026-10-22T22:15:15Z", true],
+        ["2026-10-22T22:15:16Z", false],
+      ] as const
+    ) {
+      const result = await runStep(send, { WORKFLOW_PATH: run.path, NOW }, {
+        gh: 'printf "%s\\n" "$@" > "$CALLS"',
+        date: 'printf "%s\\n" "$NOW"',
+      });
+      expect(result.code).toBe(0);
+      expect(result.calls.split("\n")).toEqual(
+        enabled
+          ? [
+            "api",
+            "--method",
+            "POST",
+            "repos/commonfabric/infra/actions/workflows/rapids.yml/dispatches",
+            "-f",
+            "ref=main",
+            "-f",
+            "inputs[channel]=estuary",
+          ]
+          : [""],
+      );
+    }
+    expect(
+      (await runStep(send, {
+        WORKFLOW_PATH: run.path,
+        NOW: "2026-10-20T00:00:00Z",
+      }, {
+        gh: "exit 42",
+        date: 'printf "%s\\n" "$NOW"',
+      })).code,
+    ).toBe(42);
   });
 
   it("sends paired producer hints for CI and an empty-input reconciliation for deployment", async () => {
