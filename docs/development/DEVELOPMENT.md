@@ -1080,7 +1080,15 @@ that has to stay, such as one in a test that shows the overflow, sits under a
 - Run all tests using `deno task test` (NOT `deno test`). It is not a
   substitute for `deno task check`: every package's tests run under
   `--no-check`.
-- To run a single test file use `deno test --no-check path/to/test.ts`.
+- To run one test, `cd` into its package and run
+  `deno task test --filter "test name"`.
+  [Running one test by name](TESTING.md#running-one-test-by-name) describes
+  which name the pattern has to match. A bare
+  `deno test --no-check path/to/test.ts` drops the `--preload` and
+  permissions that the package's `deno-test` task passes. In
+  `packages/runner`, for example, the preload installs the global fake
+  `clock`, and without it a test that calls `clock.settle()` fails with
+  `ReferenceError: clock is not defined`.
 - To test a specific package, `cd` into the package directory and run
   `deno task test`.
 
