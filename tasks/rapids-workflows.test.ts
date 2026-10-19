@@ -101,6 +101,71 @@ const infraSha = "1234567890abcdef1234567890abcdef12345678";
 const readerToken = "${{ steps.reader.outputs.token }}";
 
 describe("rapids-workflows", () => {
+  it("publishes alex-daily pushes only inside the authorized window without releasing staging", async () => {
+    const ci = await workflow("deno.yml");
+    expect(ci.on.push).toEqual({ branches: ["main", "alex-daily"] });
+    for (
+      const id of [
+        "build-toolshed",
+        "build-cf",
+        "attest-binaries",
+        "deploy-shell-staging",
+      ]
+    ) {
+      const accepts = new Function("github", `return (${ci.jobs[id].if});`);
+      for (
+        const event_name of [
+          "push",
+          "pull_request",
+          "workflow_dispatch",
+          "schedule",
+        ]
+      ) {
+        for (const branch of ["main", "alex-daily", "rw_demo", "feature"]) {
+          expect(accepts({ event_name, ref: `refs/heads/${branch}` })).toBe(
+            event_name === "push" && (branch === "main" ||
+              (branch === "alex-daily" && id !== "deploy-shell-staging")),
+          );
+        }
+      }
+    }
+    for (
+      const id of ["plan", "build-toolshed", "build-cf", "attest-binaries"]
+    ) {
+      const steps = ci.jobs[id].steps;
+      const guard = oneStep(
+        steps,
+        (step) => step.run?.includes("2026-10-22T22:15:16Z") ?? false,
+      );
+      expect(guard.if).toBe(
+        "github.event_name == 'push' && github.ref == 'refs/heads/alex-daily'",
+      );
+      if (id === "attest-binaries") {
+        const publish = oneStep(
+          steps,
+          (step) => step.run?.includes("gsutil cp") ?? false,
+        );
+        expect(steps.indexOf(guard)).toBe(steps.indexOf(publish) - 1);
+      } else {
+        expect(steps[0]).toBe(guard);
+      }
+      for (
+        const [NOW, allowed] of [
+          ["2026-10-19T22:15:15Z", false],
+          ["2026-10-19T22:15:16Z", true],
+          ["2026-10-22T22:15:15Z", true],
+          ["2026-10-22T22:15:16Z", false],
+          ["2026-10-23T00:00:00Z", false],
+        ] as const
+      ) {
+        const result = await runStep(guard, { NOW }, {
+          date: 'printf "%s\\n" "$NOW"',
+        });
+        expect(result.code === 0).toBe(allowed);
+      }
+    }
+  });
+
   it("publishes Labs binaries from CI without independently deploying a server", async () => {
     const ci = await workflow("deno.yml");
     expect(ci.jobs["attest-binaries"]).toBeDefined();
@@ -396,6 +461,7 @@ describe("rapids-workflows", () => {
       for (
         const changes of [
           { head_branch: "feature" },
+          { head_branch: "alex-daily" },
           { head_repository: { full_name: "contributor/labs" } },
           { event: "pull_request" },
           { path: ".github/workflows/test-order-tomorrow.yml" },
