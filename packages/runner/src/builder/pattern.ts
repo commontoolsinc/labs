@@ -8,7 +8,11 @@ import {
 } from "@commonfabric/data-model";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isInertPlainObject } from "@commonfabric/utils/objects";
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+import {
+  isObjectNotArray,
+  isObjectOrArray,
+  isPlainObject,
+} from "@commonfabric/utils/types";
 import {
   ARRAY_SUBSCHEMA_KEYS,
   RECORD_SUBSCHEMA_KEYS,
@@ -22,7 +26,7 @@ import {
   SPACE_KIND_MAX_LENGTH,
 } from "@commonfabric/memory/v2/space-kind";
 
-import { type AliasBinding } from "../alias-binding.ts";
+import { type AliasBinding, isAliasBinding } from "../alias-binding.ts";
 import {
   exportCell,
   isCell,
@@ -703,12 +707,7 @@ function factoryFromPattern<T, R>(
       resultSchema,
       KeepAsCell.OnlyStream,
     ),
-    // Deep-frozen once built, partial causes included: the runtime keeps the
-    // id a partial cause names by the cause's identity only where it is
-    // deep-frozen.
-    ...(derivedInternalCells.length > 0
-      ? { derivedInternalCells: deepFreeze(derivedInternalCells) }
-      : {}),
+    ...(derivedInternalCells.length > 0 ? { derivedInternalCells } : {}),
     result,
     nodes: serializedNodes,
     // Important that this refers to patternFactory, as .program will be set on
@@ -717,6 +716,7 @@ function factoryFromPattern<T, R>(
     // What `JSON.stringify(SomePattern)` returns, which pattern source uses.
     toJSON: () => patternToEncodableForm(patternFactory),
   };
+  freezePartialCauses(pattern);
 
   const makePatternFactory = (
     defaultScope?: CellScope,
@@ -1478,3 +1478,46 @@ export function getTopFrame(): Frame | undefined {
 
 /** The full type of the `pattern` function including all overloads. */
 export type PatternBuilder = typeof pattern;
+
+/**
+ * Deep-freezes every partial cause `pattern` holds: its manifest of derived
+ * internal cells, and the `partialCause` of each `$alias` binding in its
+ * nodes and its result. The runtime keeps the id a partial cause names by the
+ * cause's identity, and refuses a cause that is an object but not deep-frozen.
+ * The builder calls this on every pattern it builds; a pattern written by hand
+ * reaches it through `patternLiteralForTestingOnly()`.
+ */
+export function freezePartialCauses(pattern: Pattern): void {
+  if (pattern.derivedInternalCells !== undefined) {
+    deepFreeze(pattern.derivedInternalCells);
+  }
+  const seen = new Set<object>();
+  freezeAliasCauses(pattern.result, seen);
+  for (const node of pattern.nodes) {
+    freezeAliasCauses(node.inputs, seen);
+    freezeAliasCauses(node.outputs, seen);
+  }
+}
+
+/**
+ * Helper for {@link freezePartialCauses}, which deep-freezes the partial cause
+ * of every `$alias` binding within `value`. Bindings sit in plain records and
+ * arrays, so the walk descends only those: a module or a cell reached in a
+ * node's inputs holds no binding of this pattern's.
+ */
+function freezeAliasCauses(value: unknown, seen: Set<object>): void {
+  if (value === null || typeof value !== "object" || seen.has(value)) return;
+  seen.add(value);
+  if (isAliasBinding(value)) {
+    const { partialCause } = value.$alias as { partialCause?: unknown };
+    if (partialCause !== undefined) deepFreeze(partialCause);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) freezeAliasCauses(item, seen);
+  } else if (isPlainObject(value)) {
+    for (const member of Object.values(value)) {
+      freezeAliasCauses(member, seen);
+    }
+  }
+}
