@@ -6684,8 +6684,9 @@ export class Server {
    * Helper for watchSet(), watchAdd() and watchRemove(), which stages and
    * installs one watch union. A `replace` delivers against the request's
    * holdings, or in full; an `add` merges the request's watches into the
-   * session's; both an `add` and a `remove` deliver against what the session
-   * was delivered and keep the session's operation cursors.
+   * session's and keeps the session's operation cursors; a `remove` keeps the
+   * cursors of the watches that remain. Both an `add` and a `remove` deliver
+   * against what the session was delivered.
    */
   async #watchSet(
     message: WatchSetRequest,

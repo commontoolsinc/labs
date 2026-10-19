@@ -302,7 +302,7 @@ export function createFrameLog(write: (line: string) => void): FrameLog {
     ) {
       summary.watches = summarizeWatches(record.watches);
     } else if (record.type === "session.watch.remove") {
-      summary.watchIds = Array.isArray(record.watchIds)
+      summary.removedWatches = Array.isArray(record.watchIds)
         ? record.watchIds.length
         : undefined;
     } else if (record.type === "graph.query") {

@@ -351,6 +351,25 @@ describe("document-release", () => {
     }
   });
 
+  it("offers the watches of a removal that failed to a later pass", async () => {
+    await write("counter", 1);
+    const id = idOf("counter");
+    await load(id);
+    const watchRemove = server.watchRemove.bind(server);
+    server.watchRemove = (message) =>
+      Promise.resolve({
+        type: "response",
+        requestId: message.requestId,
+        error: { name: "Error", message: "removal refused" },
+      });
+    await releaseTwice();
+    expect(loaded(id)).toBe(true);
+
+    server.watchRemove = watchRemove;
+    await readerStorage.releaseUnreadDocuments();
+    expect(loaded(id)).toBe(false);
+  });
+
   it("keeps every watch on a server that cannot remove one by id", async () => {
     const flags = server.memoryProtocolFlags.bind(server);
     server.memoryProtocolFlags = () => ({ ...flags(), watchRemoveV1: false });

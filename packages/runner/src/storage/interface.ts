@@ -692,17 +692,22 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   ): Cancel;
 
   /**
-   * Removes the watches rooted at documents nothing reads (see
-   * `addDocumentReader()`) and that were not loaded since the previous call
-   * began, and drops the documents those watches alone kept loaded. A later
-   * read of a dropped document loads it again. Resolves once every space's
+   * Removes the watches rooted at documents nothing keeps, and drops the
+   * documents those watches alone kept loaded. A document is kept while a
+   * reader (`addDocumentReader()`) reads it, while its hold token
+   * (`holdDocument()`) is reachable, while a sink on the replica names it,
+   * or while a local write to it is pending; a root loaded or read since
+   * the previous call began keeps its watch through this one. A later read
+   * of a dropped document loads it again. A space whose server does not
+   * advertise `watchRemoveV1` keeps every watch. Resolves once every space's
    * session has answered.
    */
   releaseUnreadDocuments?(): Promise<void>;
 
   /**
    * How many documents this manager has dropped. A cell loaded before the
-   * count last moved loads its document again on its next read.
+   * count last moved checks on its next read whether its replica still holds
+   * its document, and loads it again only if it does not.
    */
   droppedDocuments?(): number;
 
