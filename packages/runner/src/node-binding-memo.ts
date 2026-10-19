@@ -7,20 +7,29 @@ import type { URI } from "./sigil-types.ts";
 import { addressKey, type NormalizedFullLink } from "./link-types.ts";
 import { schemaRegistryEpoch } from "./schema-registry.ts";
 
+/**
+ * A member of a {@link NodeBindingSubject} that names a pattern or a node: an
+ * object, keyed by identity; a string, the content identity of a pattern,
+ * under which every object of that identity is one pattern; or a number, the
+ * position of a node among the nodes of a pattern so named, at which every
+ * object of that identity holds the same node.
+ */
+export type NodeBindingSubjectMember = object | string | number;
+
 /** What a node binding is computed from, which is what the memo keys on. */
 export type NodeBindingSubject = {
-  /** The node bound, by identity. */
-  node: object;
+  /** The node bound. */
+  node: NodeBindingSubjectMember;
 
-  /** The pattern holding the node, by identity. */
-  pattern: object;
+  /** The pattern holding the node. */
+  pattern: NodeBindingSubjectMember;
 
   /**
-   * Any further object the binding is computed from, by identity: the
-   * pattern a pattern node's module resolved to, which a registry may
-   * replace under an unchanged node.
+   * Any further pattern the binding is computed from: the pattern a pattern
+   * node's module resolved to, which a registry may replace under an
+   * unchanged node.
    */
-  implementation?: object;
+  implementation?: NodeBindingSubjectMember;
 
   /** The link of the result cell the node is bound on. */
   resultLink: NormalizedFullLink;
@@ -40,17 +49,16 @@ export type NodeBindingSubject = {
  * part of a binding that reads nothing through a transaction: the node's
  * inputs and outputs bound to the piece's argument and result documents, and
  * what derives from those alone. Such a binding is a function of its
- * {@link NodeBindingSubject}, so the one a resume pre-sync computes is the
- * one the node's instantiation needs. The pre-sync asks with
- * {@link bindingFor}, which holds the binding, and the instantiation with
- * {@link takeBindingFor}, which stops holding it: a running node keeps its
- * own bindings, so the memo holds one only between the two.
+ * {@link NodeBindingSubject}, so the one computed by whichever plan of the
+ * node comes first — a resume pre-sync's, a name-sync's, the node's
+ * instantiation's — is the one every later plan needs, and
+ * {@link bindingFor} holds it for them all.
  *
- * A node and a pattern are keyed by identity, a link by the members a binding
- * reads from it: its address and its schema, the schema by content. A bound
- * link carries its schema as a reference into the schema registry, which
- * resolves only in the registry epoch that minted it, so every entry is
- * dropped when the epoch changes.
+ * A node and a pattern are keyed as their {@link NodeBindingSubjectMember}
+ * says, a link by the members a binding reads from it: its address and its
+ * schema, the schema by content. A bound link carries its schema as a
+ * reference into the schema registry, which resolves only in the registry
+ * epoch that minted it, so every entry is dropped when the epoch changes.
  *
  * The memo holds at most `capacity` entries, and at most `maxWeight` of key
  * length plus whatever `weigh` reports for a binding, dropping the least
@@ -98,26 +106,14 @@ export class NodeBindingMemo<Binding> {
     return binding;
   }
 
-  /**
-   * Returns the binding for `subject` and holds none for it afterwards: the
-   * one held, which is dropped, or the result of `bind`.
-   */
-  takeBindingFor(subject: NodeBindingSubject, bind: () => Binding): Binding {
-    const key = this.#currentKey(subject);
-    const held = this.#entries.get(key);
-    if (held === undefined) return bind();
-    this.#entries.delete(key);
-    return held;
-  }
-
   /** Drops every binding held. */
   clear(): void {
     this.#entries.clear();
   }
 
   /**
-   * Helper for the two lookups, which returns the key `subject`'s binding is
-   * held under after dropping every entry of an earlier registry epoch.
+   * Helper for {@link bindingFor}, which returns the key `subject`'s binding
+   * is held under after dropping every entry of an earlier registry epoch.
    */
   #currentKey(subject: NodeBindingSubject): string {
     const epoch = schemaRegistryEpoch();
@@ -134,11 +130,11 @@ export class NodeBindingMemo<Binding> {
    */
   #key(subject: NodeBindingSubject): string {
     return JSON.stringify([
-      this.#subjectId(subject.node),
-      this.#subjectId(subject.pattern),
+      this.#memberKey(subject.node),
+      this.#memberKey(subject.pattern),
       subject.implementation === undefined
         ? null
-        : this.#subjectId(subject.implementation),
+        : this.#memberKey(subject.implementation),
       subject.variant,
       linkMembers(subject.resultLink),
       subject.argumentLink === undefined
@@ -147,14 +143,20 @@ export class NodeBindingMemo<Binding> {
     ]);
   }
 
-  /** The number standing for `subject` in a key, minted on first use. */
-  #subjectId(subject: object): number {
-    let id = this.#subjectIds.get(subject);
+  /**
+   * What stands for `member` in a key: an object by the number minted for
+   * it on first use, a content identity and a position as they are, each
+   * under a mark of its kind so that no two kinds share a key.
+   */
+  #memberKey(member: NodeBindingSubjectMember): string {
+    if (typeof member === "string") return `identity:${member}`;
+    if (typeof member === "number") return `position:${member}`;
+    let id = this.#subjectIds.get(member);
     if (id === undefined) {
       id = this.#nextSubjectId++;
-      this.#subjectIds.set(subject, id);
+      this.#subjectIds.set(member, id);
     }
-    return id;
+    return `object:${id}`;
   }
 }
 

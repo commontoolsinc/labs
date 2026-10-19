@@ -5,6 +5,7 @@ import type {
   AnyStream,
   CELL_LIKE,
   CellLike,
+  FabricBytes,
   JSXElement,
   RenderNode,
 } from "commonfabric";
@@ -3004,6 +3005,7 @@ interface CFFieldElement extends CFHTMLElement {}
 // Display components
 interface CFTextElement extends CFHTMLElement {}
 interface CFAvatarElement extends CFHTMLElement {}
+interface CFAvatarInputElement extends CFHTMLElement {}
 interface CFProfileBadgeElement extends CFHTMLElement {}
 interface CFShareSnapshotElement extends CFHTMLElement {}
 interface CFCustodySealElement extends CFHTMLElement {}
@@ -4299,11 +4301,20 @@ interface CFBadgeAttributes<T> extends CFHTMLAttributes<T> {
 }
 
 interface CFAvatarAttributes<T> extends CFHTMLAttributes<T> {
+  /** The bytes of a raster image, such as a profile's picture. */
+  "bytes"?: FabricBytes | CellLike<FabricBytes | undefined>;
   "src"?: string | CellLike<string>;
   "name"?: string | CellLike<string>;
   "alt"?: string | CellLike<string>;
   "size"?: "xs" | "sm" | "md" | "lg" | "xl" | CellLike<string>;
   "shape"?: "circle" | "square" | CellLike<"circle" | "square">;
+}
+
+interface CFAvatarInputAttributes<T> extends CFHTMLAttributes<T> {
+  "disabled"?: boolean | CellLike<boolean>;
+  /** Fired with the picked image, scaled down to avatar size. */
+  "oncf-change"?: EventHandler<{ bytes: FabricBytes }>;
+  "oncf-error"?: EventHandler<{ message: string }>;
 }
 
 interface CFProfileBadgeAttributes<T> extends CFHTMLAttributes<T> {
@@ -4589,7 +4600,12 @@ interface CFMapAttributes<T> extends CFHTMLAttributes<T> {
   "oncf-click"?: (event: CustomEvent<{ lat: number; lng: number }>) => void;
   "oncf-bounds-change"?: (
     event: CustomEvent<
-      { bounds: CFMapBounds; center: CFMapLatLng; zoom: number }
+      {
+        bounds: CFMapBounds;
+        center: CFMapLatLng;
+        zoom: number;
+        userInitiated: boolean;
+      }
     >,
   ) => void;
   "oncf-marker-click"?: (
@@ -5419,6 +5435,10 @@ declare global {
       "cf-avatar": CFDOM.DetailedHTMLProps<
         CFAvatarAttributes<CFAvatarElement>,
         CFAvatarElement
+      >;
+      "cf-avatar-input": CFDOM.DetailedHTMLProps<
+        CFAvatarInputAttributes<CFAvatarInputElement>,
+        CFAvatarInputElement
       >;
       "cf-profile-badge": CFDOM.DetailedHTMLProps<
         CFProfileBadgeAttributes<CFProfileBadgeElement>,

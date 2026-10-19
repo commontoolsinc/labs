@@ -40,6 +40,13 @@ export type SpaceStorageDiagnostic = {
   repairCount: number;
   parkedAcceptLocalSeqs: number[];
   parkedAcceptCount: number;
+
+  /**
+   * This space's share of the manager's sizes, which add every open space
+   * together. Its commit and read counts are the ones above, under the names
+   * the sizes give them.
+   */
+  sizes: SpaceStorageSizes;
 };
 
 /** Bounded current work, without cell values, credentials, or retained history. */
@@ -51,6 +58,85 @@ export type StorageDiagnostics = {
   spaces: SpaceStorageDiagnostic[];
   spacesOmitted: number;
 };
+
+/** Sizes of one space replica's live structures, each a collection's own count. */
+export type SpaceStorageSizes = {
+  /** Documents the replica holds. */
+  documents: number;
+
+  /** Documents with at least one sink. */
+  subscribedDocuments: number;
+
+  /** Sinks across every document. */
+  subscriptions: number;
+
+  /** Documents watched on the session. */
+  watchedDocuments: number;
+
+  /** Operation fields with at least one sink. */
+  operationSinks: number;
+
+  /** Commits issued and not yet settled. */
+  inFlightCommits: number;
+
+  /** Commits whose outcome is still pending, by sequence. */
+  unsettledCommits: number;
+
+  /** Rejected commits whose optimistic layer is still being dropped. */
+  repairingCommits: number;
+
+  /** Accepted commits held back from application. */
+  parkedAccepts: number;
+
+  /** Sync tasks in flight. */
+  syncTasks: number;
+
+  /** Reads in flight. */
+  pendingReads: number;
+};
+
+/** Sizes across every open space, plus the manager's own. */
+export type StorageSizes = SpaceStorageSizes & {
+  /** Spaces open. */
+  spaces: number;
+
+  /** Commits registered with the durability barrier. */
+  pendingCommits: number;
+
+  /** Document loads in flight. */
+  pendingLoads: number;
+
+  /** Crossing loads in flight. */
+  pendingCrossingLoads: number;
+
+  /** Cross-space promises in flight. */
+  pendingCrossSpace: number;
+};
+
+/** Adds every replica's sizes together, field by field. */
+export function sumSpaceStorageSizes(
+  sizes: Iterable<SpaceStorageSizes>,
+): SpaceStorageSizes {
+  const total: SpaceStorageSizes = {
+    documents: 0,
+    subscribedDocuments: 0,
+    subscriptions: 0,
+    watchedDocuments: 0,
+    operationSinks: 0,
+    inFlightCommits: 0,
+    unsettledCommits: 0,
+    repairingCommits: 0,
+    parkedAccepts: 0,
+    syncTasks: 0,
+    pendingReads: 0,
+  };
+  for (const size of sizes) {
+    for (const key of Object.keys(total) as (keyof SpaceStorageSizes)[]) {
+      total[key] += size[key];
+    }
+  }
+  return total;
+}
 
 /** Maximum entries in each diagnostic list. Counts include omitted entries. */
 export const STORAGE_DIAGNOSTICS_LIMIT = 64;

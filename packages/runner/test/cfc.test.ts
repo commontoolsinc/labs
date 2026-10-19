@@ -1285,6 +1285,97 @@ describe("hoistCfcSchemaDefs()", () => {
     });
   });
 
+  it("names a later fragment's definition by the held one that means the same schema", () => {
+    const { fragments, definitions } = hoistCfcSchemaDefs([
+      {
+        $ref: "#/$defs/List",
+        $defs: {
+          List: {
+            type: "object",
+            properties: { next: { $ref: "#/$defs/List" } },
+          },
+        },
+      },
+      {
+        properties: { a: { $ref: "#/$defs/Chain" } },
+        $defs: {
+          Chain: {
+            type: "object",
+            properties: { next: { $ref: "#/$defs/Chain" } },
+          },
+        },
+      },
+    ]);
+
+    expect(fragments).toEqual([
+      { $ref: "#/$defs/List" },
+      { properties: { a: { $ref: "#/$defs/List" } } },
+    ]);
+    expect(definitions).toEqual({
+      List: { type: "object", properties: { next: { $ref: "#/$defs/List" } } },
+    });
+  });
+
+  it("names a renamed-apart definition by the held one that means the same schema", () => {
+    const { fragments, definitions } = hoistCfcSchemaDefs([
+      { $ref: "#/$defs/Leaf", $defs: { Leaf: { type: "string" } } },
+      {
+        properties: {
+          a: { $ref: "#/$defs/Leaf" },
+          b: { $ref: "#/$defs/Text" },
+        },
+        $defs: { Leaf: { type: "number" }, Text: { type: "string" } },
+      },
+    ]);
+
+    expect(fragments).toEqual([
+      { $ref: "#/$defs/Leaf" },
+      {
+        properties: {
+          a: { $ref: "#/$defs/__cfc_hoisted_0_Leaf" },
+          b: { $ref: "#/$defs/Leaf" },
+        },
+      },
+    ]);
+    expect(definitions).toEqual({
+      Leaf: { type: "string" },
+      __cfc_hoisted_0_Leaf: { type: "number" },
+    });
+  });
+
+  it("keeps apart recursive definitions that differ below their first level", () => {
+    // Both fragments write `Self` alike; what it reaches through `Value`
+    // differs.
+    const list = {
+      type: "object",
+      properties: {
+        next: { $ref: "#/$defs/Self" },
+        value: { $ref: "#/$defs/Value" },
+      },
+    } as const;
+    const { fragments, definitions } = hoistCfcSchemaDefs([
+      {
+        $ref: "#/$defs/Self",
+        $defs: { Self: list, Value: { type: "string" } },
+      },
+      {
+        $ref: "#/$defs/Self",
+        $defs: { Self: list, Value: { type: "number" } },
+      },
+    ]);
+
+    expect(fragments).toEqual([
+      { $ref: "#/$defs/Self" },
+      { $ref: "#/$defs/__cfc_hoisted_0_Self" },
+    ]);
+    expect(Object.keys(definitions!).toSorted()).toEqual([
+      "Self",
+      "Value",
+      "__cfc_hoisted_0_Self",
+      "__cfc_hoisted_1_Value",
+    ]);
+  });
+
   it("returns no map when no fragment carries one", () => {
     const fragments: JSONSchema[] = [{ type: "string" }, true];
     expect(hoistCfcSchemaDefs(fragments)).toEqual({

@@ -194,7 +194,8 @@ room's members by principal or by profile itself.
   request sent again after that starts afresh: an `openDirect` still finds the
   existing room, but a `createGroup` creates another.
 - **`outgoingNotices`** holds each notice this user's requests have produced,
-  until a client reports it delivered.
+  until a client reports it delivered or the room's roster lists a profile
+  attesting its recipient, who then needs no telling.
 - **`people`** holds the people this user shares a room with: for each
   principal, the profiles attesting it, read from the roster of each room in
   `rooms` (see [`ChatRoomOutput`](ChatRoomOutput.md#facts)) and keyed by each
@@ -524,7 +525,8 @@ the entry. It never creates a second room.
 A notice has to reach a principal who may share no space with this user. Until a
 pattern can deliver one itself (see [first
 contact](FabriChatManager.md#first-contact)), the manager lists notices in
-`outgoingNotices` and a client delivers them. A notice says which room, and who
+`outgoingNotices` and a client delivers them. The list leaves out a notice whose
+recipient the room's roster already lists. A notice says which room, and who
 sent it: this user. A client MUST deliver only that, and MUST NOT deliver any of
 the room's contents. It then sends `delivered` with the notice's `id`.
 

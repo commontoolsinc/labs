@@ -24,6 +24,7 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 import { settleAbandonedRequest } from "./abandoned-request.ts";
 import {
   enrollRuntimeOwnedStore,
+  ownedStoreLinks,
   recordRuntimeOwnedStore,
 } from "./runtime-owned-store.ts";
 import { resultRowKeys, SQLITE_ROW_SALT } from "./sqlite/row-identity.ts";
@@ -213,6 +214,11 @@ export function sqliteRunActingPrincipal(
   return runtime.trustSnapshotProvider()?.actingPrincipal;
 }
 
+/** The cause {@link makeResultCell} mints a `label` builtin's result under. */
+function resultCellCause(label: string, cause: unknown): unknown {
+  return { [label]: { result: cause } };
+}
+
 /** Allocate a result cell linked to the parent cell, at `scope` (the
  *  author-declared scope of the SqliteDb / its query result). The base entity
  *  id is scope-independent; `scope` only re-addresses which scoped instance the
@@ -227,7 +233,7 @@ function makeResultCell<T>(
 ): Cell<T> {
   const base = runtime.getCell<T>(
     parentCell.space,
-    { [label]: { result: cause } },
+    resultCellCause(label, cause),
     undefined,
     tx,
   );
@@ -879,7 +885,12 @@ export function sqliteDatabase(
       });
     }
   };
-  return { action };
+  return {
+    action,
+    storeWrites: ownedStoreLinks(runtime, parentCell, [
+      resultCellCause("sqliteDatabase", cause),
+    ]),
+  };
 }
 
 type QueryState = {
@@ -1997,5 +2008,10 @@ export function sqliteQuery(
       },
     );
   };
-  return { action };
+  return {
+    action,
+    storeWrites: ownedStoreLinks(runtime, parentCell, [
+      resultCellCause("sqliteQuery", cause),
+    ]),
+  };
 }

@@ -502,6 +502,15 @@ light computation (`resolveEntryIdentity` in the runner). The worker
 independently checks the result by compiling the downloaded closure and
 comparing its compiler-produced entry identity.
 
+Where the deployment states when it released what it serves
+(`TOOLSHED_RELEASED_AT`), the response carries that time beside the identity, in
+a `CF-Released-At` header holding an RFC 3339 date-time, exposed to cross-origin
+readers. It is one value for everything the deployment serves, and it is what
+orders two identities of one file: a content hash says only that two sources
+differ, never which is the later release. It is the time of the deploy rather
+than of a commit or a build, so deploying an earlier commit again, to roll a bad
+release back, is the latest release the deployment has made.
+
 Attached source roots travel as repeated `sourceRoot` query parameters naming
 full `/api/patterns/` pathnames, retaining any percent-encoding. The route accepts
 up to 32 distinct roots, validates their paths, and caches by the entry and sorted
@@ -534,8 +543,10 @@ as `patternIdentity`, verified by a parity test against the real
 
 Both the `?identity` representation and every source-module representation use
 strong checksum `ETag`s with `Cache-Control: public, no-cache`. The identity
-itself is the `?identity` validator; a source module's validator is the SHA-256
-of its exact response bytes. Clients therefore retain unchanged bytes but must
+itself, with the release time where there is one, is the `?identity` validator,
+so revalidating after a redeploy of unchanged source gets a `200` carrying its
+new time rather than a `304`; a source module's validator is the SHA-256 of its
+exact response bytes. Clients therefore retain unchanged bytes but must
 conditionally revalidate them before every update attempt.
 
 **Runtime side (when the piece is opened).** Resolve the piece without starting
@@ -565,14 +576,34 @@ then start it:
 3. If `currentId` equals the running `patternIdentity.identity`, probe that
    exact stored artifact. A successful load is done. A missing or unloadable
    artifact continues to compile from source rather than taking the fast path,
-   which is what puts the artifact back.
-4. Revalidate `{host}{url}` and every module in its complete authored import
+   which is what puts the artifact back. Either way, an answer stating a later
+   release time than the running source's moves that time forward: the
+   reconciliation record confirms the running source at it.
+4. The running source's release time is the later of the one the revision that
+   adopted it records and the one the reconciliation record confirms for it.
+   If `currentId` differs and the running source has a release time, an answer
+   stating an earlier time or none is an earlier release than the piece runs.
+   The piece keeps its source, and the attempt records that it follows its
+   origin, naming the source it runs rather than the earlier one offered, so
+   that hosts offering the two releases in turn leave the record as it is.
+   Two answers stating the same time are not ordered, and an answer to a piece
+   whose source records no time is not either. A running artifact that will
+   not load has nothing to start and continues regardless, so the earlier
+   release is a rescue, unless the piece's history records its move from the
+   offered source to the running one. A runtime older than the release a piece
+   moved to cannot load it either, and in that case is behind it rather than
+   holding a dead pattern: the piece keeps its source, as against any earlier
+   release, so a stale runtime and a current one sharing the piece do not move
+   it between the two. A release time that is not one leaves the piece's
+   source as it is, like a failed identity request.
+5. Revalidate `{host}{url}` and every module in its complete authored import
    closure with the same `no-cache` fetch policy, then compile with the export
    symbol the piece already runs. Apply only when the compiler supplies an
    entry ref whose identity exactly equals `currentId`; never synthesize a ref
    or fall back around `?identity`. A fetch, compile, evaluation,
    missing-entry-ref, or identity-mismatch failure leaves the piece unchanged.
-5. Synchronize the piece's stored argument, then write the transition. The
+6. Synchronize the piece's stored argument, then write the transition, whose
+   revision records the release time the answer stated, if any. The
    captured identity and source must still match on every attempt, and so must
    that argument, so a concurrent edit, detach, repoint, or replacement wins.
    A piece that is not running has the candidate staged over its document in
@@ -580,10 +611,10 @@ then start it:
    re-instantiated by the watcher already installed on it. Staging the candidate
    is also what refuses one the piece's stored data cannot satisfy: the setup
    rejects it, the transaction fails, and the piece stays as it was.
-6. Start the piece. A piece compiled moments ago from the source it was created
+7. Start the piece. A piece compiled moments ago from the source it was created
    with is started directly: following that origin again would only fetch what
    it was just built from. A surface the runtime is instantiating for the first
-   time reaches this loop with no piece to follow yet, so steps 2 and 4 resolve
+   time reaches this loop with no piece to follow yet, so steps 2 and 5 resolve
    its supplied ref outright, and the run that brings the piece into being
    records that ref with its creation revision.
 
@@ -601,7 +632,18 @@ normally hashes to a different entry identity and the pattern pointer is not
 written. The same rule covers an identity-algorithm incompatibility between an
 older worker and a newer toolshed: disagreement prevents the update. No
 `/api/meta` request, git-SHA comparison, pattern response build header, or
-worker-to-shell version-skew signal is part of the authorization path.
+worker-to-shell version-skew signal is part of the authorization path. The
+release time is not part of it either: it decides whether a candidate is a later
+release than the running one, never whether the content is what the host
+advertised.
+
+What fails closed within one attempt does not settle anything across attempts.
+Instances serving two releases at once — a deployment partway through
+restarting them, two deployments reaching the same memory — answer one piece's
+successive attempts differently, each consistently, and each answer differs from
+what the last attempt adopted. Ordered by identity alone, the piece would move
+on every attempt. The release time is what keeps it on the later release:
+step 4 refuses the earlier one.
 
 Authored identity deliberately does not fingerprint bare runtime imports or the
 runtime's implementation. Local compilation and evaluation are a capability

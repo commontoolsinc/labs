@@ -1,8 +1,9 @@
 /**
  * Reports what the newest selection manifest would have a pull request
- * run: what share of the corpus's test time fits five lanes, and how much
- * time that is against the whole corpus. The lanes' budget is fixed, so the
- * share falls as the corpus grows.
+ * run: what share of the corpus's test time the lanes of a change touching
+ * nothing would run, and how much time that is against the whole corpus.
+ * What such a change runs is fixed by its discretionary target, so the share
+ * falls as the corpus grows.
  *
  * It goes amber on either of two counts. The manifest has gone stale, and
  * selection quality decays with it. Or the corpus holds a test that costs

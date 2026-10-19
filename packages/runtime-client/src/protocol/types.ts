@@ -21,7 +21,7 @@ import type {
   PresenceFacets,
   PresenceRecord,
 } from "@commonfabric/memory/v2";
-import type { MetaField } from "@commonfabric/runner";
+import type { MetaField, RuntimeSizes } from "@commonfabric/runner";
 import type {
   CfcConfClause,
   CfcTrustConfigInput,
@@ -2488,6 +2488,34 @@ export type CDFPoint = {
 };
 
 /**
+ * One of the slowest measurements of a timed operation. Mirrors the shape
+ * `@commonfabric/utils/logger` uses.
+ */
+export type SlowTiming = {
+  /**
+   * How long it took, in milliseconds.
+   */
+  elapsed: number;
+
+  /**
+   * When it ended, on the worker's `performance.now()` clock.
+   */
+  at: number;
+
+  /**
+   * When it ended, in milliseconds since the epoch.
+   */
+  epochMs: number;
+
+  /**
+   * What the worker named this one measurement with, when it named it: the
+   * label its caller chose, such as the cell a resume loaded or the action a
+   * run executed.
+   */
+  detail?: string;
+};
+
+/**
  * What one timed operation's samples add up to. Two distributions are kept:
  * `cdf` over every sample since the worker started, and `cdfSinceBaseline`
  * over those since the last baseline reset, which is `null` until one has
@@ -2538,6 +2566,11 @@ export type TimingStats = {
    * When that measurement was taken.
    */
   lastTimestamp: number;
+
+  /**
+   * The slowest measurements, longest first, at most five of them.
+   */
+  slowest: SlowTiming[];
 
   /**
    * The distribution over every sample since the worker started.
@@ -3781,8 +3814,10 @@ export type GraphSnapshotResponse = {
 
 /**
  * Everything the logger diagnostics read returns: counts, per-logger
- * metadata, timings, and active flags, gathered in one round trip because a
- * client comparing them wants them from the same moment.
+ * metadata, timings, active flags, the runtime's CFC counters, the pattern
+ * manager's compile-cache counters, and the sizes of the runtime's live
+ * structures, gathered in one round trip because a client comparing them
+ * wants them from the same moment.
  */
 export type LoggerCountsResponse = {
   /**
@@ -3817,6 +3852,44 @@ export type LoggerCountsResponse = {
    * no index signature does not satisfy, and every counter there is a number.
    */
   cfc: Record<string, number>;
+
+  /**
+   * The pattern manager's compile-cache counters: `hits`, `misses` and
+   * `byIdentityHits`, as `PatternManager.getCompileCacheStats()` reports
+   * them. A capture reading them beside the `compile-cache` timing rows can
+   * tell a worker that recompiled once from one that never hits.
+   */
+  compileCache: Record<string, number>;
+
+  /**
+   * How large the runtime's live structures are at this moment: the
+   * scheduler's tables, storage's documents and subscriptions, the compiled
+   * code caches, and the worker's own subscription and mount tables. Each is
+   * a collection's own count, so a collection that keeps growing shows up
+   * here, while growth in what its entries hold does not.
+   */
+  sizes: RuntimeSizes & { worker: WorkerSizes };
+};
+
+/** Sizes of the tables the worker keeps on its clients' behalf. */
+export type WorkerSizes = {
+  /** Cell subscriptions, one per client per cell. */
+  cellSubscriptions: number;
+
+  /** Operation subscriptions. */
+  operationSubscriptions: number;
+
+  /** Operation sessions open. */
+  operationSessions: number;
+
+  /** Presence room memberships. */
+  presenceMemberships: number;
+
+  /** VDOM mounts. */
+  vdomMounts: number;
+
+  /** Spaces with a pieces controller. */
+  spaces: number;
 };
 
 /** The worker's pattern coverage, where this worker collects any. */

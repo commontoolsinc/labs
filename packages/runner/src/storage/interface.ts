@@ -96,7 +96,9 @@ import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import type {
   PendingCommitContext,
   SpaceStorageDiagnostic,
+  SpaceStorageSizes,
   StorageDiagnostics,
+  StorageSizes,
 } from "./diagnostics.ts";
 
 export type {
@@ -143,11 +145,20 @@ export class ReplicaLoadFailureError extends Error {
     readonly failure: ReplicaLoadFailure,
     cause: unknown,
   ) {
-    super(
-      cause instanceof Error ? cause.message : String(cause),
-      { cause },
-    );
+    super(loadFailureMessage(cause), { cause });
   }
+}
+
+/**
+ * Returns the message a load failure's cause carries. A pull reports its
+ * failure as a plain result object rather than an `Error`, so the message is
+ * read off any object that has one; a cause without one is stringified.
+ */
+function loadFailureMessage(cause: unknown): string {
+  return typeof cause === "object" && cause !== null && "message" in cause &&
+      typeof cause.message === "string"
+    ? cause.message
+    : String(cause);
 }
 
 export const toReplicaLoadFailureError = (
@@ -554,6 +565,9 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
 
   /** Snapshot pending work without waiting for durability or starting I/O. */
   getDiagnostics?(): StorageDiagnostics;
+
+  /** The sizes of the structures held across every open space. */
+  getSizes?(): StorageSizes;
 
   /**
    * Whether any registered commit is still unconfirmed. Every write flows
@@ -1413,6 +1427,16 @@ export interface IStorageTransaction {
    * over, and reverts the write to any other.
    */
   derivedWrites?: boolean;
+
+  /**
+   * The first user- or session-scoped instance, as `<space>/<scope>/<id>`,
+   * that this transaction read through a link while the instance was missing
+   * and another derivation registered in the same runtime writes the
+   * document. Set by link resolution on a serving runtime only, where such an
+   * instance is one the serving loop has not produced yet, and read by the
+   * reactive action's commit, which a run that read one does not make.
+   */
+  unproducedScopedInstance?: string;
 
   /**
    * The scope INSTANCE identity this transaction's scoped reads and writes
@@ -3219,6 +3243,9 @@ export interface ISpaceReplica extends ISpace {
   /** Existing session progress without starting I/O or awaiting commits. */
   getDiagnostics?(): SpaceStorageDiagnostic;
 
+  /** The sizes of the structures this replica holds. */
+  getSizes?(): SpaceStorageSizes;
+
   /**
    * Return a state for the requested entry or returns `undefined` if replica
    * does not have it. The state carries `since`, the commit sequence the
@@ -3345,7 +3372,9 @@ export interface ISpaceReplica extends ISpace {
    * is watched and delivered, no local write to it is pending, and its value
    * is neither a refused write folded locally nor an own write promoted past
    * what a push has covered. An absent document a push delivered is
-   * confirmed.
+   * confirmed, and so is a content-addressed document in space scope holding
+   * the content its id names that the replica's own accepted commit stored,
+   * whether or not a frame delivered it.
    */
   isConfirmedDocument?(
     id: URI,

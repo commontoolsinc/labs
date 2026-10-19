@@ -270,8 +270,10 @@ export function deepFreeze<T>(value: T): T {
       }
     } else {
       const o = value as Record<string, unknown>;
-      for (const key of Object.keys(o)) {
-        freeze(o[key]);
+      // `for...in` reads the keys off the object's own enumeration cache,
+      // where `Object.keys()` would copy them into an array per object.
+      for (const key in o) {
+        if (Object.hasOwn(o, key)) freeze(o[key]);
       }
     }
 

@@ -26,7 +26,7 @@ export interface ViewItem {
   /** The message's identity, unique in the room. */
   key: string;
 
-  /** The message's `sentAt`, unique in the room. */
+  /** The message's `sentAt`, which another message can share. */
   sentAt: bigint;
 
   /** The message this one replies to, and where it is shown. */

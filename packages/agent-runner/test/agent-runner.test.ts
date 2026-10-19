@@ -1662,7 +1662,7 @@ describe("agent runner", () => {
           }),
         },
       });
-      await startRunner(execute, { tools: ["describe_handle"] });
+      await startRunner(execute, { tools: ["describe_handle", "web_fetch"] });
       return () => seen;
     };
 
@@ -1826,7 +1826,7 @@ describe("agent runner", () => {
       expect(seen().prompt).toBe("- recommend a book");
     });
 
-    it("allows `submit_result` alongside an explicit request tool list", async () => {
+    it("adds the tools that read the request's inputs to an explicit request tool list", async () => {
       const seen = await startHarnessRunner(async ({ resultPath }) => {
         await Deno.writeTextFile(
           resultPath,
@@ -1834,7 +1834,7 @@ describe("agent runner", () => {
         );
         return loopResult("run-explicit-tools");
       });
-      const result = await submit({ tools: ["describe_handle"] });
+      const result = await submit({ tools: ["web_fetch"] });
 
       const record = await waitForCellValue<AgentRunRecord>(
         patternSide,
@@ -1843,7 +1843,12 @@ describe("agent runner", () => {
       );
 
       expect(record.state).toBe("completed");
-      expect(seen().allowedTools).toEqual(["describe_handle", "submit_result"]);
+      expect(seen().allowedTools).toEqual([
+        "web_fetch",
+        "describe_handle",
+        "read_value",
+        "submit_result",
+      ]);
     });
 
     it("uses the runner's allowlist when the request omits `tools`", async () => {
@@ -1857,10 +1862,14 @@ describe("agent runner", () => {
       const result = await submit();
 
       await waitForState(result, "completed");
-      expect(seen().allowedTools).toEqual(["describe_handle", "submit_result"]);
+      expect(seen().allowedTools).toEqual([
+        "describe_handle",
+        "read_value",
+        "submit_result",
+      ]);
     });
 
-    it("allows only `submit_result` for an explicitly empty tool list", async () => {
+    it("keeps the tools that read the request's inputs for an explicitly empty tool list", async () => {
       const seen = await startHarnessRunner(async ({ resultPath }) => {
         await Deno.writeTextFile(
           resultPath,
@@ -1871,7 +1880,11 @@ describe("agent runner", () => {
       const result = await submit({ tools: [] });
 
       await waitForState(result, "completed");
-      expect(seen().allowedTools).toEqual(["submit_result"]);
+      expect(seen().allowedTools).toEqual([
+        "describe_handle",
+        "read_value",
+        "submit_result",
+      ]);
     });
 
     it("accepts a handle token at an `asCell` position and writes a link there", async () => {

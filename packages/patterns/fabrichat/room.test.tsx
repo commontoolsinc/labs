@@ -1,7 +1,9 @@
 /**
  * A FabriChat group room of its own, as several viewers sharing it: what a
  * send stores, how edits, deletions, and obliterations change a message, and
- * how replies divide into the conversation and its threads.
+ * how replies divide into the conversation and its threads. An act the room
+ * refuses fails its run with a reason, and the test requires exactly those,
+ * each by its reason.
  */
 import {
   type AddIntegrity,
@@ -13,7 +15,7 @@ import {
   UI,
   Writable,
 } from "commonfabric";
-import { findNodeByProp, propValue } from "../test/vnode-helpers.ts";
+import { findNodeByProp, propsOf, propValue } from "../test/vnode-helpers.ts";
 import { FabriChatMessageRow } from "./message-row.tsx";
 import {
   type ComposerState,
@@ -96,6 +98,13 @@ const mainTexts = (latest: readonly MessageCell[]): string =>
 const composerDisabled = (root: unknown): unknown =>
   propValue(findNodeByProp(root, "inputId", "fabrichat-message"), "disabled");
 
+// The default of the composer whose field is `inputId`, for its `disabled`:
+// what it renders before the value has computed.
+const composerDisabledDefault = (root: unknown, inputId: string): unknown =>
+  (propsOf(findNodeByProp(root, "inputId", inputId))?.disabled as
+    | { schema?: { default?: unknown } }
+    | undefined)?.schema?.default;
+
 export default pattern(() => {
   const messages = Writable.of<MessagesValue>([] as MessagesValue);
   const aliceProfile = Writable.of<TestProfile>({ name: "Alice" });
@@ -156,6 +165,15 @@ export default pattern(() => {
       },
       { assertion: assert(() => composerDisabled(pending[UI]) === true) },
       { assertion: assert(() => composerDisabled(alice[UI]) === false) },
+      // The conversation's composer and a thread's start out disabled, before
+      // whether the viewer may send has computed.
+      {
+        assertion: assert(() =>
+          composerDisabledDefault(alice[UI], "fabrichat-message") === true &&
+          composerDisabledDefault(alice[UI], "fabrichat-thread-message") ===
+            true
+        ),
+      },
       {
         assertion: assert(() =>
           alice.canSend === true && pending.canSend === false
@@ -313,6 +331,15 @@ export default pattern(() => {
           stored(messages)[0]?.body === "Hello, everyone"
         ),
       },
+    ],
+    expectRuntimeErrors: [
+      // The blank send, and the send from a viewer whose profile hasn't
+      // resolved.
+      "This send has no text in `body`.",
+      "Your profile hasn't loaded yet.",
+      // Bob's edit of Alice's message, and the edit of a deleted one.
+      "Only its author can edit a message.",
+      "That message was deleted.",
     ],
   };
 });

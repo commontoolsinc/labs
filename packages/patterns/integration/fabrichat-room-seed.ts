@@ -14,7 +14,8 @@
  *
  * The members' identities derive from `--passphrase`, and the fixture names
  * the passphrase, so the starter can sign in with it. Progress goes to stderr;
- * the fixture goes to `--out` as JSON.
+ * the fixture goes to `--out` as JSON. An act the room refuses fails the seed
+ * with the refusal's reason, and the process exits non-zero.
  */
 
 import { parseArgs } from "@std/cli/parse-args";
@@ -52,7 +53,7 @@ function count(name: string): number {
 const output = required("out");
 const startedAt = performance.now();
 
-const fixture = await seedFabrichatRoom({
+const seeding = seedFabrichatRoom({
   apiUrl: new URL(required("api-url")),
   passphrase: required("passphrase"),
   memberCount: count("members"),
@@ -72,5 +73,18 @@ const fixture = await seedFabrichatRoom({
     );
   },
 });
+
+// Once the members' runtimes have locked the realm down, a rejection escaping
+// the top level is reported as `SES_UNHANDLED_REJECTION` and the process still
+// exits with status 0, so a failure sets the status here, where it is caught.
+let fixture: Awaited<typeof seeding>;
+try {
+  fixture = await seeding;
+} catch (error) {
+  console.error(
+    `Seeding failed: ${error instanceof Error ? error.message : error}`,
+  );
+  Deno.exit(1);
+}
 
 await Deno.writeTextFile(output, JSON.stringify(fixture));

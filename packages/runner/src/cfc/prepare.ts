@@ -57,6 +57,7 @@ import { encodePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { areLinksSame } from "../link-equality.ts";
+import { literalMemberMatches } from "../schema-literal-match.ts";
 import {
   droppedStoredClaim,
   type ForeignPositions,
@@ -143,8 +144,15 @@ import {
   isOrClause,
   normalizeClause,
 } from "./clause.ts";
-import { ConsumedLabelIndex } from "./consumed-label-index.ts";
+import {
+  ConsumedLabelIndex,
+  type ConsumedLabelSelection,
+} from "./consumed-label-index.ts";
 import { collectDeclaredMonotonicityViolations } from "./declared-monotonicity.ts";
+import {
+  CfcEnvelopeStabilityError,
+  envelopeStabilityReason,
+} from "./envelope-stability-reason.ts";
 import {
   admitsRulesOfKind,
   type CfcGrantConsumptionContext,
@@ -215,6 +223,7 @@ import {
   withoutUndefinedMembers,
 } from "./schema-merge.ts";
 import {
+  canonicalizeCfcSchemaDocument,
   cfcSchemaResolvedRoot,
   hoistCfcSchemaDefs,
   resolveCfcSchemaRefRoot,
@@ -254,7 +263,9 @@ const INTERNAL_VERIFIER_META = stableInternalVerifierRead;
 // the link is triggered again when the member lands. The rest of what a floor
 // weighed, stored labels and the values along a linked path, is read this way
 // again where the floor's refusal is a verdict (`holdFloorEvidence`), since
-// nothing else would run the writer again. The reads are commit-time
+// nothing else would run the writer again. A stored envelope whose claim a
+// candidate changed or weakened is read this way again too, where that
+// refusal is a verdict (`storedClaimVerdict`). The reads are commit-time
 // preconditions either way: `ignoreReadForScheduling` gates reactivity
 // alone.
 const FLOOR_EVIDENCE_META = {
@@ -4124,6 +4135,29 @@ const probedSlotPath = (path: readonly string[]): readonly string[] => {
     : path;
 };
 
+/**
+ * The entries a read of `shape` consumes, as the selection an index shares
+ * across transactions: one predicate per shape, under the shape's name.
+ */
+const consumedByShape = (
+  shape: ReadObservationShape,
+): ConsumedLabelSelection => {
+  let selection = consumedByShapeSelections.get(shape);
+  if (selection === undefined) {
+    selection = {
+      key: shape,
+      keeps: (entry) => readConsumesEntry(shape, entry),
+    };
+    consumedByShapeSelections.set(shape, selection);
+  }
+  return selection;
+};
+
+const consumedByShapeSelections = new Map<
+  ReadObservationShape,
+  ConsumedLabelSelection
+>();
+
 const forEachFlowObservation = (
   tx: IExtendedStorageTransaction,
   consume: (
@@ -4781,19 +4815,13 @@ const deriveFlowJoinImpl = (
       ): ConsumedLabelIndex | undefined => {
         let index = document.indexes.get(shape);
         if (index === undefined && document.metadata !== undefined) {
-          index = new ConsumedLabelIndex(
-            document.metadata.labelMap.entries.filter((entry) =>
-              readConsumesEntry(shape, entry)
-            ),
-            {
-              onQuery: (wildcard) =>
-                tx.noteCfcPreparationWork?.(
-                  wildcard
-                    ? "overlapWildcardQueries"
-                    : "overlapConcreteQueries",
-                ),
-            },
-          );
+          index = new ConsumedLabelIndex(document.metadata.labelMap.entries, {
+            onQuery: (wildcard) =>
+              tx.noteCfcPreparationWork?.(
+                wildcard ? "overlapWildcardQueries" : "overlapConcreteQueries",
+              ),
+            select: consumedByShape(shape),
+          });
           document.indexes.set(shape, index);
         }
         return index;
@@ -6468,12 +6496,15 @@ const schemaTypeMatchesValue = (
         return Array.isArray(value);
       case "boolean":
         return typeof value === "boolean";
+      // A `bigint` is an integer, and `integer` is a subtype of `number`, as
+      // resolveSchemaForValue() reads both.
       case "integer":
-        return typeof value === "number" && Number.isInteger(value);
+        return (typeof value === "number" && Number.isInteger(value)) ||
+          typeof value === "bigint";
       case "null":
         return value === null;
       case "number":
-        return typeof value === "number";
+        return typeof value === "number" || typeof value === "bigint";
       case "object":
         return isObjectNotArray(value);
       case "string":
@@ -6556,13 +6587,16 @@ const policySchemaMatchesValue = (
     );
   }
   if (
-    schema.const !== undefined && !fabricAwareEqual(schema.const, value)
+    schema.const !== undefined &&
+    !literalMemberMatches(schema.const, value, fabricAwareEqual)
   ) {
     return false;
   }
   if (
     Array.isArray(schema.enum) &&
-    !schema.enum.some((candidate) => fabricAwareEqual(candidate, value))
+    !schema.enum.some((candidate) =>
+      literalMemberMatches(candidate, value, fabricAwareEqual)
+    )
   ) {
     return false;
   }
@@ -10214,8 +10248,49 @@ const mergeStoredCfcEnvelope = (
   options: MergeCfcSchemaEnvelopeOptions,
 ): JSONSchema =>
   storedEnvelopeUnchangedByCandidate(stored, candidate)
-    ? stored
+    // An envelope stored before merges left documents in canonical form
+    // is rewritten in that form by the first authorized write that leaves
+    // its labels unchanged: the canonical document hashes differently, so
+    // the idempotence check below does not skip the write. One already in
+    // canonical form hashes the same and is kept as it is.
+    ? canonicalizeCfcSchemaDocument(stored)
     : mergeCfcSchemaEnvelopes(stored, candidate, options);
+
+/**
+ * The reason the persist loop records when a candidate changes or weakens an
+ * `ifc` claim a document's stored envelope fixes (`CfcEnvelopeStabilityError`),
+ * marked as that class of refusal and tagged a verdict where the document
+ * whose envelope it was compared against is one this transaction holds.
+ *
+ * The merge runs only over an envelope `loadStoredCfcEnvelope` loaded whole:
+ * the metadata read from the document, and every schema document it names,
+ * content-verified. The refusal turns on that envelope, the candidate this
+ * transaction states, the writers and release modules it records, and, where a
+ * release relaxes the merge beneath a link, the values that same document
+ * holds. None of it waits on a document the replica may not have pulled, so an
+ * immediate re-run states the same candidate against the same envelope and is
+ * refused the same way.
+ *
+ * The envelope was read invisibly to reactivity. Its `["cfc"]` member is read
+ * again here visibly, so a writer this verdict refuses runs again when the
+ * stored envelope changes, as a fresh trigger rather than a retry. A member
+ * that does not read back belongs to a document the transaction does not hold,
+ * and the reason stays untagged.
+ */
+const storedClaimVerdict = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+  message: string,
+): string =>
+  tx.read({ ...target, type: "application/json", path: ["cfc"] }, {
+      meta: FLOOR_EVIDENCE_META,
+    }).ok === undefined
+    ? message
+    : verdictReason(envelopeStabilityReason(message));
 
 /**
  * Would a write under `candidate` commit over this stored envelope?
@@ -12009,6 +12084,8 @@ export function* prepareBoundaryCommitSteps(
         reasons.push(
           error instanceof CfcSchemaMigrationError
             ? `${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: ${error.message}`
+            : error instanceof CfcEnvelopeStabilityError
+            ? storedClaimVerdict(tx, { space, id, scope }, error.message)
             : error instanceof Error
             ? error.message
             : `schema merge failed for ${id}`,
