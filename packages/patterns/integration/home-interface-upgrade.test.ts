@@ -10,7 +10,6 @@ import { fromFileUrl, join } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 
 import { createSession, Identity } from "@commonfabric/identity";
-import { deepFreeze } from "@commonfabric/data-model";
 import {
   FabricDurationNsec,
   FabricEpochNsec,
@@ -33,6 +32,7 @@ import {
   markRendererTrustedEvent,
   reviewedActionProvenance,
 } from "@commonfabric/runner/cfc";
+import { instancePartialCauseForTestingOnly } from "@commonfabric/runner/for-testing-only";
 import { PatternsRoute } from "@commonfabric/runner/patterns-route.deno";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
@@ -370,7 +370,9 @@ describe("Home interface upgrade", () => {
             });
             const spot = reader.getCellFromLink(
               getDerivedInternalCellLink(root, {
-                partialCause: deepFreeze({ $generated: 4 }),
+                partialCause: instancePartialCauseForTestingOnly(
+                  "privateInboxAnswering",
+                ),
               }),
             );
             await spot.sync();
