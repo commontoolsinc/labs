@@ -1499,9 +1499,8 @@ export function freezePartialCauses(pattern: Pattern): void {
 /**
  * Helper for {@link freezePartialCauses}, the `visitValue()` callback, which
  * deep-freezes the partial cause of an `$alias` binding and returns `null` so
- * that the walk descends no further into it. An embedded pattern or a module
- * is not descended either: the causes it holds are its own, frozen when it was
- * built.
+ * that the walk descends no further into it. An embedded pattern is not
+ * descended either: the causes it holds are its own, frozen when it was built.
  */
 function freezeAliasCause(value: unknown): null | undefined {
   if (isAliasBinding(value)) {
@@ -1509,5 +1508,5 @@ function freezeAliasCause(value: unknown): null | undefined {
     if (partialCause !== undefined) deepFreeze(partialCause);
     return null;
   }
-  return isPattern(value) || isModule(value) ? null : undefined;
+  return isPattern(value) ? null : undefined;
 }

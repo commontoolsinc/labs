@@ -67,6 +67,24 @@ describe("for-testing-only", () => {
       ]);
     });
 
+    it("deep-freezes the partial cause of an `$alias` binding inside a record with a string `type`", () => {
+      // A record holding a string `type`, an inline schema or an author's own
+      // data, is no module, and the walk descends it like any other record.
+
+      const pattern = literal();
+      const node = pattern.nodes[0] as any;
+      node.inputs.typed = {
+        type: "vote",
+        count: { $alias: { partialCause: { $generated: 1 }, path: [] } },
+      };
+
+      patternLiteralForTestingOnly(pattern);
+
+      expect(isDeepFrozen(node.inputs.typed.count.$alias.partialCause)).toBe(
+        true,
+      );
+    });
+
     it("leaves the rest of the literal unfrozen", () => {
       const pattern = patternLiteralForTestingOnly(literal());
       const node = pattern.nodes[0] as any;
