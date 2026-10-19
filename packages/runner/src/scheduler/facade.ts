@@ -3201,7 +3201,7 @@ export class Scheduler {
   }
 
   #resetConvergenceHoldPasses(): void {
-    for (const record of this.#nodes.nodes()) {
+    for (const record of this.#nodes.getBackedOffNodes()) {
       record.gate.convergenceHoldPasses = 0;
     }
   }
@@ -4077,7 +4077,9 @@ export class Scheduler {
 
   #clearBackoffForCleanNodes(): void {
     let clearedDeadline = false;
-    for (const record of this.#nodes.nodes()) {
+    // Clearing a node drops it from the set being walked; a `Set` iterator
+    // tolerates deletion of the current entry.
+    for (const record of this.#nodes.getBackedOffNodes()) {
       if (record.status === "clean") {
         clearedDeadline = this.#clearNodeBackoff(record) || clearedDeadline;
       }

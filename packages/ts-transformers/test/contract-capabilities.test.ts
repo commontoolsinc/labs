@@ -1008,7 +1008,7 @@ type Ev = { c: Writable<number>; s: PerUser<Writable<number>> };`,
           "type Ev = { c: Writable<number>; x: [Writable<number>, string] };",
           {
             type: "array",
-            items: { anyOf: [{ type: "string" }, opaqueNumber] },
+            items: { anyOf: [opaqueNumber, { type: "string" }] },
           },
         ],
         [

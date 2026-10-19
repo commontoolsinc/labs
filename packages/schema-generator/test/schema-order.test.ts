@@ -49,6 +49,30 @@ function interfaceSchema(name: string) {
   };
 }
 
+/**
+ * The schema of the variable statement `index` declares, read from a node
+ * built from the checker's type alone, as the generator reads a node a
+ * transform built for an inferred type it could not resolve: through `any`.
+ */
+function synthesizedNodeSchema(index: number) {
+  return (
+    generator: SchemaGenerator,
+    checker: ts.TypeChecker,
+    sourceFile: ts.SourceFile,
+  ) => {
+    const statement = sourceFile.statements[index] as ts.VariableStatement;
+    const type = checker.getTypeAtLocation(
+      statement.declarationList.declarations[0]!,
+    );
+    const node = checker.typeToTypeNode(
+      type,
+      undefined,
+      ts.NodeBuilderFlags.NoTruncation,
+    )!;
+    return generator.generateSchema(checker.getAnyType(), checker, node);
+  };
+}
+
 /** The schema of the class `name` declared in `sourceFile`. */
 function classSchema(name: string) {
   return (
@@ -329,6 +353,260 @@ describe("schema-order", () => {
 
       expect(checkedFirst).toEqual(lazy);
       expect(lazy).toEqual({ enum: ["direct", "group"] });
+    });
+    it("emits a copy of a written union node read without its type in the order it is written", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          'export const early = "a";',
+          'export type Kind = "b" | "a";',
+        ].join("\n"),
+        (generator, checker, sourceFile) => {
+          const written = (sourceFile.statements[1] as ts.TypeAliasDeclaration)
+            .type as ts.UnionTypeNode;
+          // A transform that copies a written node keeps the node it copied
+          // as the copy's original, and the copy has no place in the file.
+          const copy = ts.setOriginalNode(
+            ts.factory.createUnionTypeNode([...written.types]),
+            written,
+          );
+          return generator.generateSchema(checker.getAnyType(), checker, copy);
+        },
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+      expect(JSON.stringify(lazy)).toMatch(/"b".*"a"/);
+    });
+
+    it("emits a synthesized union node read without its type in value order", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          'export const early = "group";',
+          'export const kind = Math.random() > 0.5 ? "direct" as const : "group" as const;',
+        ].join("\n"),
+        synthesizedNodeSchema(1),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+      expect(JSON.stringify(lazy)).toMatch(/direct.*group/);
+    });
+
+    it("emits a synthesized union node's object members in one order without their type", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          "export const early: typeof right | undefined = undefined;",
+          "declare const left: { a: string };",
+          "declare const right: { b: number };",
+          "export const pick = Math.random() > 0.5 ? left : right;",
+        ].join("\n"),
+        synthesizedNodeSchema(3),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+      expect(lazy).toEqual({
+        anyOf: [
+          {
+            type: "object",
+            properties: { a: { type: "string" } },
+            required: ["a"],
+          },
+          {
+            type: "object",
+            properties: { b: { type: "number" } },
+            required: ["b"],
+          },
+        ],
+      });
+    });
+    it("emits an inferred union of two instantiations of one generic in one order", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          "export interface Box<T> { v: T; }",
+          "export const early: Box<number> | undefined = undefined;",
+          "declare const a: Box<string>;",
+          "declare const b: Box<number>;",
+          "export const pick = Math.random() > 0.5 ? a : b;",
+          "export interface Wrap { p: typeof pick; }",
+        ].join("\n"),
+        interfaceSchema("Wrap"),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+    });
+
+    it("emits an inferred union of two deeply nested instantiations in one order", async () => {
+      const deep = (inner: string) =>
+        `Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<${inner}>>>>>>>>>>`;
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          "export interface Box<T> { v: T; }",
+          `export const early: ${deep("number")} | undefined = undefined;`,
+          `declare const a: ${deep("string")};`,
+          `declare const b: ${deep("number")};`,
+          "export const pick = Math.random() > 0.5 ? a : b;",
+          "export interface Wrap { p: typeof pick; }",
+        ].join("\n"),
+        interfaceSchema("Wrap"),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+    });
+
+    it("emits an inferred union of two instantiations of a generic function's return type in one order", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          "function make<T>(v: T) { return { v }; }",
+          "export const early = make(1);",
+          "declare const a: ReturnType<typeof make<string>>;",
+          "declare const b: ReturnType<typeof make<number>>;",
+          "export const pick = Math.random() > 0.5 ? a : b;",
+          "export interface Wrap { p: typeof pick; }",
+        ].join("\n"),
+        interfaceSchema("Wrap"),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+      expect(lazy).toMatchObject({
+        properties: {
+          p: {
+            anyOf: [
+              { properties: { v: { type: "number" } } },
+              { properties: { v: { type: "string" } } },
+            ],
+          },
+        },
+      });
+    });
+
+    it("emits an inferred union of two intersections in one order", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          "export interface A { a: string; }",
+          "export interface B { b: string; }",
+          "export interface C { c: string; }",
+          "export const early: (A & C) | undefined = undefined;",
+          "declare const left: A & B;",
+          "declare const right: A & C;",
+          "export const pick = Math.random() > 0.5 ? left : right;",
+          "export interface Wrap { p: typeof pick; }",
+        ].join("\n"),
+        interfaceSchema("Wrap"),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+    });
+  });
+
+  describe("a tuple's items", () => {
+    it("emits two instantiations of one generic in the order the tuple lists them", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          "export const early: Box<number> | undefined = undefined;",
+          "export interface Box<T> { v: T; }",
+          "export interface Wrap { t: [Box<string>, Box<number>]; }",
+        ].join("\n"),
+        interfaceSchema("Wrap"),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+      expect(lazy).toMatchObject({
+        properties: {
+          t: {
+            items: {
+              anyOf: [
+                { properties: { v: { type: "string" } } },
+                { properties: { v: { type: "number" } } },
+              ],
+            },
+          },
+        },
+      });
+    });
+
+    it("emits an intrinsic element where the tuple lists it", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          "export const early: string | undefined = undefined;",
+          "export interface Box<T> { v: T; }",
+          "export interface Wrap { t: [Box<string>, string]; }",
+        ].join("\n"),
+        interfaceSchema("Wrap"),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+      expect(lazy).toMatchObject({
+        properties: {
+          t: {
+            items: {
+              anyOf: [
+                { properties: { v: { type: "string" } } },
+                { type: "string" },
+              ],
+            },
+          },
+        },
+      });
+    });
+
+    it("emits two tuples in the order the tuple lists them", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          "export const early: [number] | undefined = undefined;",
+          "export interface Wrap { t: [[string], [number]]; }",
+        ].join("\n"),
+        interfaceSchema("Wrap"),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+      expect(lazy).toMatchObject({
+        properties: {
+          t: {
+            items: {
+              anyOf: [
+                { items: { type: "string" } },
+                { items: { type: "number" } },
+              ],
+            },
+          },
+        },
+      });
+    });
+  });
+
+  describe("a recursion that instantiates its declaration without end", () => {
+    it("cuts a recursive tuple alias at one depth whatever else the program instantiates", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          "export type Tup<T> = [T, Tup<T[]>?];",
+          "export interface Wrap<T> { n: Tup<T>; deep: Tup<T[][][][][]>; }",
+        ].join("\n"),
+        interfaceSchema("Wrap"),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+    });
+
+    it("cuts a recursion whose arguments repeat a type at one depth whatever else the program instantiates", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          "export interface Dup<T> { next: Dup<[T, T]>; }",
+          "export interface Wrap<T> { n: Dup<T>; }",
+        ].join("\n"),
+        interfaceSchema("Wrap"),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+    });
+
+    it("cuts a two-branch recursive tuple alias at one depth whatever else the program instantiates", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          "export type Tup<T> = [T, Tup<T[]>?, Tup<[T]>?];",
+          "export interface Wrap<T> { n: Tup<T>; d1: Tup<T[][][]>; d2: Tup<[[[T]]]>; }",
+        ].join("\n"),
+        interfaceSchema("Wrap"),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
     });
   });
 

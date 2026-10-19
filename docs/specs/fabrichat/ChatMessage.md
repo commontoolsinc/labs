@@ -137,9 +137,9 @@ MUST NOT make up ids from content, time, or position.
 ## Deleted messages
 
 A deleted message, whether deleted by its sender or obliterated, accepts nothing
-further except obliteration. The room drops an `editMessage`, a
-`deleteMessage`, a `sendReaction`, or a `deleteReaction` on it, and a client
-sends no reply to it. Replies it already had, and a thread rooted at it, keep
+further except obliteration. The room refuses an `editMessage`, a
+`sendReaction`, or a `deleteReaction` on it, a `deleteMessage` on it changes
+nothing, and a client sends no reply to it. Replies it already had, and a thread rooted at it, keep
 their links.
 
 There is no undeletion. A message keeps no history: an edit replaces its text,

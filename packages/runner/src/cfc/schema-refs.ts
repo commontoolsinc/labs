@@ -402,27 +402,50 @@ const summarizeCfcSchemaRefs = (schema: JSONSchema): SchemaRefSummary => {
   const cached = schemaRefSummaryCache.get(schema);
   if (cached !== undefined) return cached;
 
-  const all = new Set<string>();
-  const localDefinitions = new Set<string>();
+  // Most fragments hold no ref, so a set is made only once there is a ref to
+  // hold, and a fragment whose one child holds all of them shares the child's.
+  let all: ReadonlySet<string> = EMPTY_REFS;
+  let localDefinitions: ReadonlySet<string> = EMPTY_REFS;
+  let ownsAll = false;
+  let ownsLocal = false;
+  const addAll = (refs: ReadonlySet<string>): void => {
+    if (refs.size === 0) return;
+    if (all === EMPTY_REFS) {
+      all = refs;
+    } else {
+      if (!ownsAll) {
+        all = new Set(all);
+        ownsAll = true;
+      }
+      addRefs(all as Set<string>, refs);
+    }
+  };
+  const addLocal = (names: ReadonlySet<string>): void => {
+    if (names.size === 0) return;
+    if (localDefinitions === EMPTY_REFS) {
+      localDefinitions = names;
+    } else {
+      if (!ownsLocal) {
+        localDefinitions = new Set(localDefinitions);
+        ownsLocal = true;
+      }
+      addRefs(localDefinitions as Set<string>, names);
+    }
+  };
   if (schema.$ref !== undefined) {
-    all.add(schema.$ref);
+    addAll(new Set([schema.$ref]));
     const name = localDefinitionName(schema.$ref);
-    if (name !== undefined) localDefinitions.add(name);
+    if (name !== undefined) addLocal(new Set([name]));
   }
   // A child's own `$defs` opens no scope (see `cfcSchemaResolvedRoot()`), so
   // the names its refs resolve against are this fragment's document's too.
   forEachSubschema(schema, (child) => {
     const childSummary = summarizeCfcSchemaRefs(child);
-    addRefs(all, childSummary.all);
-    addRefs(localDefinitions, childSummary.localDefinitions);
+    addAll(childSummary.all);
+    addLocal(childSummary.localDefinitions);
   }, ALL_SUBSCHEMAS);
 
-  const summary: SchemaRefSummary = {
-    all: all.size === 0 ? EMPTY_REFS : all,
-    localDefinitions: localDefinitions.size === 0
-      ? EMPTY_REFS
-      : localDefinitions,
-  };
+  const summary: SchemaRefSummary = { all, localDefinitions };
   if (isDeepFrozen(schema)) schemaRefSummaryCache.set(schema, summary);
   return summary;
 };

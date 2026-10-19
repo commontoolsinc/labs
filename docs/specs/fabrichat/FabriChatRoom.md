@@ -114,9 +114,11 @@ delivery" and §4). So two sends of the same text are two messages.
 An act on a message, and a reply, takes the message by its cell and reads it
 alone. A handler checks what the element's write policy does not — whose
 message or reaction it is, the obliteration rights, and that a message acted
-on or replied to lives in the room's space — and drops anything else without
-a word: the room's rendering offers only acts the viewer can take, so no
-event outside the rules comes from it. The acts on a message are bound to a
+on or replied to lives in the room's space — and refuses anything else: the
+run fails with a reason a person can read, and writes nothing. The room's
+rendering offers only acts the viewer can take, so a refusal reaches a client
+whose own event broke the rules. An act that would change nothing, such as a
+reaction added twice, succeeds and writes nothing. The acts on a message are bound to a
 handle on one of the room's records, and the sends to the room's messages,
 either of which names the room's space and is read for nothing else for
 this. A message's write policy names its handlers, not a room, so the space

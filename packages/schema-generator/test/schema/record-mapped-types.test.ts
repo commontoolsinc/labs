@@ -314,18 +314,18 @@ describe("Schema: Record and mapped types", () => {
       expect(dataSchema.anyOf).toBeDefined();
       expect(dataSchema.anyOf).toHaveLength(2);
 
-      // First option: { foo: number }
+      // The distributed union is the checker's, which no node writes, so
+      // its members are listed in canonical order: by the `Record` key
+      // each instantiates, `"bar"` before `"foo"`.
       expect(dataSchema.anyOf[0]).toEqual({
-        type: "object",
-        properties: { foo: { type: "number" } },
-        required: ["foo"],
-      });
-
-      // Second option: { bar: number }
-      expect(dataSchema.anyOf[1]).toEqual({
         type: "object",
         properties: { bar: { type: "number" } },
         required: ["bar"],
+      });
+      expect(dataSchema.anyOf[1]).toEqual({
+        type: "object",
+        properties: { foo: { type: "number" } },
+        required: ["foo"],
       });
 
       // Should not create MaybeRecord or Record in $defs

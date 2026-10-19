@@ -244,6 +244,7 @@ export {
   type PieceOriginKind as PieceOriginClassification,
 } from "./piece-origin-kind.ts";
 export {
+  isEarlierRelease,
   type ReconcileOutcome,
   SourceReconciler,
 } from "./source-reconciler.ts";
@@ -260,14 +261,17 @@ export {
   inSpaceRootCause,
   isStoredArgumentSchemaRefusal,
   keepLaterConfirmation,
+  knownPieceReleasedAt,
   mergeSchemaDefaults,
   patternIdentityKey,
   type PatternSetupCommitReceipt,
   PatternSetupPostCommitError,
+  PIECE_RELEASE_OVERTAKEN,
   PIECE_SOURCE_MOVED,
   type PieceReconciliation,
   type PieceReconciliationOutcome,
   type PieceReconciliationReason,
+  pieceSourceMovedPast,
   type PieceSourceRevision,
   type PieceSourceRevisionOperation,
   type PieceSourceSnapshot,
