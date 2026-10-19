@@ -1011,7 +1011,18 @@ describe("private inbox across runtimes", () => {
 
     const { pointerWrites, ownerReads, ownerAgainReads } = await racing();
 
-    expect(pointerWrites.length).toBe(1);
+    expect(
+      pointerWrites.length,
+      `commits writing the pointer: ${
+        JSON.stringify(pointerWrites.map((commit) => ({
+          seq: commit.seq,
+          class: commit.class,
+          holder: commit.holder,
+          sessionId: commit.sessionId,
+          writes: commit.writes,
+        })))
+      }`,
+    ).toBe(1);
     const loom = await owner.link(["loomInbox", "piece"]);
     const other = await owner.link(["otherInbox", "piece"]);
     expect([loom.id, other.id]).toContain(ownerReads.id);
