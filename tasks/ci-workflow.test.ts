@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { dirname, relative } from "@std/path";
+import { dirname, fromFileUrl, relative } from "@std/path";
 import { parse as parseYaml } from "@std/yaml";
 import { getBinary } from "@astral/astral";
 import { COVERAGE_ARTIFACT } from "@commonfabric/test-support/records";
@@ -171,15 +171,21 @@ Deno.test("cache-only binary builders install their entrypoint graphs", async ()
   const toolshedDockerfile = await Deno.readTextFile(
     new URL("../Dockerfile.toolshed", import.meta.url),
   );
-  const root = new URL("../", import.meta.url).pathname;
+  const root = fromFileUrl(new URL("../", import.meta.url));
   const config = new BuildConfig({ root, toolshedFlags: [] });
   const expectedEntrypoints = [
     config.toolshedEntryPath(),
     config.cliEntryPath(),
-  ].map((entrypoint) => relative(root, entrypoint));
+  ].map((entrypoint) => relative(root, entrypoint).replaceAll("\\", "/"));
   const listedEntrypoints = installAction.match(
     /binary_entrypoints=\(\n(?<paths>(?: +\S+\n)+) +\)/,
   )?.groups?.paths.trim().split(/\s+/);
+  const dockerEntrypoints = toolshedDockerfile.match(
+    /deno install --entrypoint --frozen (?<entrypoints>\S+(?: +\S+)*)/,
+  )?.groups?.entrypoints.split(/ +/);
+  const dockerBuilds = toolshedDockerfile.match(
+    /deno task build-binaries (?<binaries>\S+(?: +\S+)*)/,
+  )?.groups?.binaries.split(/ +/);
 
   assertEquals(listedEntrypoints, expectedEntrypoints);
   assertStringIncludes(
@@ -190,14 +196,8 @@ Deno.test("cache-only binary builders install their entrypoint graphs", async ()
     installAction,
     'deno install --entrypoint "${frozen_arg[@]}"',
   );
-  assertStringIncludes(
-    toolshedDockerfile,
-    `deno install --entrypoint --frozen ${expectedEntrypoints[0]}`,
-  );
-  assertStringIncludes(
-    toolshedDockerfile,
-    "deno task build-binaries toolshed",
-  );
+  assertEquals(dockerEntrypoints, [expectedEntrypoints[0]]);
+  assertEquals(dockerBuilds, ["toolshed"]);
 });
 
 Deno.test("CI browser tests use the runner's installed Chrome", async () => {
