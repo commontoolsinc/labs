@@ -158,6 +158,28 @@ describe("sync crossings", () => {
     expect(replaced.crossings).toEqual([farLeaf]);
   });
 
+  it("tells a crossing again once a removal left no watch following it", async () => {
+    await reader.watchAddSync([
+      followingWatch("of:crossing-top"),
+      followingWatch("of:local-top"),
+    ]);
+
+    // Another watch still follows it: told once, not again.
+    await reader.watchAddSync([followingWatch("of:crossing-other")]);
+    await reader.watchRemoveSync(["of:crossing-top"]);
+    const { sync: stillFollowed } = await reader.watchAddSync([
+      followingWatch("of:crossing-top"),
+    ]);
+    expect(stillFollowed.crossings).toBeUndefined();
+
+    // No watch follows it any more: the next one to is told of it.
+    await reader.watchRemoveSync(["of:crossing-top", "of:crossing-other"]);
+    const { sync: followedAgain } = await reader.watchAddSync([
+      followingWatch("of:crossing-top"),
+    ]);
+    expect(followedAgain.crossings).toEqual([farLeaf]);
+  });
+
   it("delivers a document a same-space link named once it is written, retiring the miss", async () => {
     // The same walk that reports a crossing records a same-space dead-end as
     // a miss attributed to the referrer; the document's arrival retires it

@@ -165,6 +165,7 @@ const flags = new Set([
   "applyOp",
   "syncSchemaTableV2",
   "syncCrossingsV1",
+  "watchRemoveV1",
   "messageCompressionV1",
   "sqliteCommitRowLabelEval",
   "sqliteQueryReader",
