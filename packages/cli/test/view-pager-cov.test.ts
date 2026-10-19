@@ -162,6 +162,9 @@ function makeFake(opts: FakeOpts = {}) {
       parserListeners.add(listener);
       return () => parserListeners.delete(listener);
     },
+    pushIo: () => {
+      throw new Error("these tests push nothing");
+    },
   };
   return {
     deps,
@@ -531,6 +534,9 @@ Deno.test("realPagerDeps: the wrappers reach the real primitives", () => {
   const cancel = d.setTimer(() => {}, 0);
   cancel();
   d.onGrammarLoad(() => {})();
+  // Setting up a push reads the environment and runs nothing that changes a
+  // repository.
+  d.pushIo(() => {}, new AbortController().signal);
   // Opening the controlling terminal either succeeds (close it) or throws when
   // the test has none; both reach the wrapper.
   try {
