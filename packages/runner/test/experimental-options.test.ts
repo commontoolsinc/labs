@@ -66,6 +66,7 @@ describe("ExperimentalOptions", () => {
         lazyMaterialization: false,
         readerSchemaPrecedence: false,
         serverExecution: false,
+        localSessionDocuments: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -91,6 +92,7 @@ describe("ExperimentalOptions", () => {
         lazyMaterialization: true,
         readerSchemaPrecedence: true,
         serverExecution: false,
+        localSessionDocuments: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -114,6 +116,7 @@ describe("ExperimentalOptions", () => {
         lazyMaterialization: true,
         readerSchemaPrecedence: true,
         serverExecution: false,
+        localSessionDocuments: false,
       });
       await runtime.dispose();
       await sm.close();

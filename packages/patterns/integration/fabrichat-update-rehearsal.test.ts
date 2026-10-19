@@ -12,9 +12,15 @@
  * gesture, so every record carries the deployed modules as its writers: a
  * profile, a direct room, a group room, the manager's request outcomes, its
  * direct room and its queued notices, and in the group room messages, an edit,
- * a thread reply, a reaction, the sender's per-request outcomes and an add
- * whose offer the manager answers. The one record written directly is a
- * request still being worked on, which no handler leaves behind on purpose.
+ * a thread reply, a reaction, a refused reaction and an add whose offer the
+ * manager answers. The one record written directly is a request still being
+ * worked on, which no handler leaves behind on purpose.
+ *
+ * The group room's view is read as a renderer reads it, before and after the
+ * release, so that its message rows exist as the nested pieces a browser
+ * leaves behind: a release sets each one up again with the argument the room
+ * carries, and a stored argument the new schema refuses fails every row's
+ * start on every later open.
  *
  * It then serves the tree's source and opens Home and each room as a person
  * would. That open is how a deployed FabriChat piece takes a release: Home
@@ -24,18 +30,22 @@
  * modules' write authority to their successors (`docs/specs/module-loading.md`,
  * "Module update delegation"), which is what lets the updated handlers write
  * the seeded records. The test checks that each piece adopted the tree's
- * source, that nothing logged a refused transition or a dropped stored slot,
- * that every stored slot and per-user outcome reads as it did, that the
- * updated room can edit and react to a seeded message, and that starting a
- * direct chat with the same person again finds the room the manager holds.
+ * source, that nothing logged a refused transition, a dropped stored slot or a
+ * failed start of a nested piece, that every stored slot and per-user outcome
+ * reads as it did, that the updated room can edit and react to a seeded
+ * message, and that starting a direct chat with the same person again finds
+ * the room the manager holds.
  *
  * The copy is only a rehearsal while it matches what is deployed, which is
  * `main`. `deno task refresh-fabrichat-rehearsal` replaces it with
  * `origin/main`'s FabriChat and records the commit in `SOURCE.txt`; a branch
  * changing FabriChat runs it after each merge of `main`, so that its own
- * rehearsal starts from `main`. Where the copy and the tree match, as on
- * `main` itself, the opens find nothing to adopt, and the test still holds the
- * seeded data to reading back and taking writes.
+ * rehearsal starts from `main`. A branch that breaks the room's stored shape
+ * on purpose, which `tasks/pattern-compat-accepted-breaks.ts` records,
+ * refreshes the copy from its own tree instead, since the data the deployed
+ * release stored is left behind rather than carried over. Where the copy and
+ * the tree match, as on `main` itself, the opens find nothing to adopt, and
+ * the test still holds the seeded data to reading back and taking writes.
  */
 
 import { expect } from "@std/expect";
@@ -43,13 +53,13 @@ import { fromFileUrl, join } from "@std/path";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 
 import { createSession, Identity } from "@commonfabric/identity";
-import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 import {
   type Cell,
   getPatternIdentityRef,
   getPatternSource,
+  isCell,
   Runtime,
 } from "@commonfabric/runner";
 import {
@@ -57,6 +67,7 @@ import {
   reviewedActionProvenance,
 } from "@commonfabric/runner/cfc";
 import { PatternsRoute } from "@commonfabric/runner/patterns-route.deno";
+import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import {
   EmulatedStorageManager,
   newLoopbackServer,
@@ -80,7 +91,8 @@ const FROZEN = fromFileUrl(
 /**
  * The log lines that say an update refused or lost stored data, by the logger
  * that writes them: a source transition its commit refused, a swap whose setup
- * failed, and a stored slot setup dropped.
+ * failed, a stored slot setup dropped, and a nested piece whose start the
+ * updated room's setup of it failed.
  */
 const UPDATE_FAILURES = [
   ["runner.source-reconcile", "reconcile-failed"],
@@ -88,6 +100,7 @@ const UPDATE_FAILURES = [
   ["runner", "pattern-swap-setup-error"],
   ["runner", "pattern-swap-setup-withdrawn"],
   ["runner", "setup-stored-slot-dropped"],
+  ["runner", "piece-start-commit-failed"],
 ] as const;
 
 /** How many of each of `UPDATE_FAILURES` have been logged in this process. */
@@ -184,6 +197,32 @@ const storedSlots = async (
   }));
 };
 
+/**
+ * Reads what a renderer reads of `piece`'s view: the view, through
+ * `rendererVDOMSchema`, and every cell it binds, each once. The nested pieces
+ * the view maps a list to, a room's message rows among them, are set up by
+ * that read, as a browser showing the room sets them up.
+ */
+const render = async (piece: Cell<unknown>): Promise<void> => {
+  const read = new Set<string>();
+  const visit = async (value: unknown): Promise<void> => {
+    if (isCell(value)) {
+      const { space, id, scope, path } = value.getAsNormalizedFullLink();
+      const address = JSON.stringify([space, id, scope, path]);
+      if (read.has(address)) return;
+      read.add(address);
+      await value.pull();
+      return visit(value.get());
+    }
+    if (Array.isArray(value)) {
+      for (const member of value) await visit(member);
+    } else if (value !== null && typeof value === "object") {
+      for (const member of Object.values(value)) await visit(member);
+    }
+  };
+  await visit(piece.key("$UI").asSchema(rendererVDOMSchema));
+};
+
 /** The slots of `after` that `before` holds too, in `after`'s order. */
 const kept = (
   after: readonly StoredSlot[],
@@ -246,12 +285,6 @@ describe("FabriChat update rehearsal", () => {
     return piece;
   };
 
-  /** A message version the room's window accepts: sent now. */
-  const version = (body: string) => ({
-    body,
-    sentAt: new FabricEpochNsec(BigInt(Date.now()) * 1_000_000n),
-  });
-
   /** The group room's newest messages, as cells. */
   const latest = () =>
     room.key("messages").key("latest").key("messages")
@@ -262,11 +295,10 @@ describe("FabriChat update rehearsal", () => {
     manager: await storedSlots(runtime, manager.key("requests")),
     rooms: await Promise.all(
       [directRoom, room].map((each) =>
-        storedSlots(runtime, each.key("recentActivity"))
+        storedSlots(runtime, each.getArgumentCell<unknown>()!)
       ),
     ),
     // Kept per user, outside the room's argument.
-    messageRequests: await room.key("messageRequests").pull(),
     addRequests: await room.key("addRequests").pull(),
     bodies: await Promise.all(
       (await latest()).map((message) => message.key("body").pull()),
@@ -369,7 +401,7 @@ describe("FabriChat update rehearsal", () => {
       directRoom,
       "sendMessage",
       trusted(
-        { requestId: "direct hello", version: version("Hello, you") },
+        { body: "Hello, you" },
         "ChatSendSurface",
         "ChatSend",
       ),
@@ -378,7 +410,7 @@ describe("FabriChat update rehearsal", () => {
       room,
       "sendMessage",
       trusted(
-        { requestId: "first", version: version("First") },
+        { body: "First" },
         "ChatSendSurface",
         "ChatSend",
       ),
@@ -387,7 +419,7 @@ describe("FabriChat update rehearsal", () => {
       room,
       "sendMessage",
       trusted(
-        { requestId: "second", version: version("Second") },
+        { body: "Second" },
         "ChatSendSurface",
         "ChatSend",
       ),
@@ -397,11 +429,7 @@ describe("FabriChat update rehearsal", () => {
       room,
       "editMessage",
       trusted(
-        {
-          requestId: "edit",
-          message: second,
-          version: version("Second, edited"),
-        },
+        { message: second, body: "Second, edited" },
         "ChatEditSurface",
         "ChatEdit",
       ),
@@ -411,8 +439,7 @@ describe("FabriChat update rehearsal", () => {
       "sendMessage",
       trusted(
         {
-          requestId: "thread reply",
-          version: version("In the thread"),
+          body: "In the thread",
           replyTo: { message: first, shownIn: "thread" },
         },
         "ChatSendSurface",
@@ -423,17 +450,17 @@ describe("FabriChat update rehearsal", () => {
       room,
       "sendReaction",
       trusted(
-        { requestId: "react", message: first, emoji: "👍" },
+        { message: first, emoji: "👍" },
         "ChatReactSurface",
         "ChatReact",
       ),
     );
-    // An act the room refuses, whose outcome it records for its sender.
+    // An act the room drops: a reaction that is not a single emoji.
     await send(
       room,
       "sendReaction",
       trusted(
-        { requestId: "refused react", message: first, emoji: "two words" },
+        { message: first, emoji: "two words" },
         "ChatReactSurface",
         "ChatReact",
       ),
@@ -447,6 +474,10 @@ describe("FabriChat update rehearsal", () => {
         "ChatAddMember",
       ),
     );
+    await runtime.idle();
+    // The rows a browser showing the room would have set up, the thread's
+    // root among them.
+    await render(room);
     await runtime.idle();
 
     before = await snapshot();
@@ -465,11 +496,6 @@ describe("FabriChat update rehearsal", () => {
     // member's, and the added member's, whom no profile can be offered to.
     expect(managerSlot("outgoingNotices")).toHaveLength(3);
     expect(before.bodies).toEqual(["First", "Second, edited"]);
-    expect(before.messageRequests).toMatchObject({
-      edit: { status: "done" },
-      react: { status: "done" },
-      "refused react": { status: "refused" },
-    });
     expect(before.addRequests).toMatchObject({ add: { status: "done" } });
     for (const slots of before.rooms) {
       expect(slots.map((slot) => slot.name)).toContain("messages");
@@ -487,6 +513,10 @@ describe("FabriChat update rehearsal", () => {
     // its origin to the source the route now serves, and waits for the
     // running piece to swap to it.
     for (const piece of [home, ...rooms]) await controller.openPiece(piece);
+    await runtime.idle();
+    // The rows again, as the browser that opened the room shows them: each
+    // is set up over the argument the updated room carries.
+    await render(room);
     await runtime.idle();
 
     failuresAfter = updateFailureCounts();
@@ -540,7 +570,6 @@ describe("FabriChat update rehearsal", () => {
         `Room ${index}'s stored slots changed`,
       ).toEqual(before.rooms[index])
     );
-    expect(after.messageRequests).toEqual(before.messageRequests);
     expect(after.addRequests).toEqual(before.addRequests);
     expect(after.bodies).toEqual(before.bodies);
   });
@@ -554,20 +583,19 @@ describe("FabriChat update rehearsal", () => {
       room,
       "editMessage",
       trusted(
-        {
-          requestId: "edit after",
-          message: second,
-          version: version("Second, edited after"),
-        },
+        { message: second, body: "Second, edited after" },
         "ChatEditSurface",
         "ChatEdit",
       ),
     );
+    const firstReaction = first.key("reactions").asSchema<Cell<unknown>[]>(
+      asCells,
+    ).key(0);
     await send(
       room,
       "deleteReaction",
       trusted(
-        { requestId: "unreact after", message: first, emoji: "👍" },
+        { message: first, reaction: firstReaction },
         "ChatReactSurface",
         "ChatUnreact",
       ),
@@ -576,19 +604,11 @@ describe("FabriChat update rehearsal", () => {
       room,
       "sendReaction",
       trusted(
-        { requestId: "react after", message: first, emoji: "🎉" },
+        { message: first, emoji: "🎉" },
         "ChatReactSurface",
         "ChatReact",
       ),
     );
-    expect(
-      await room.key("messageRequests").pull(),
-      "A write to a seeded message after the update was refused",
-    ).toMatchObject({
-      "edit after": { status: "done" },
-      "unreact after": { status: "done" },
-      "react after": { status: "done" },
-    });
     expect(await second.key("body").pull()).toBe("Second, edited after");
     const emoji = await first.key("reactions").asSchema<{ emoji: string }[]>({
       type: "array",

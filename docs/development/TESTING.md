@@ -40,6 +40,14 @@ cd packages/runner
 deno task test --filter "test name"
 ```
 
+`deno test --filter` compares the pattern with the names of top-level tests
+only. In a file written with `describe()` and `it()`, the top-level test is the
+`describe()`, and each `it()` inside it runs as a step of that test. So the
+pattern has to match the `describe()` name, and the whole block runs. A pattern
+that matches only an `it()` description matches nothing. The run then reports
+`0 passed | 0 failed`, with every test filtered out, and exits successfully, so
+check the passed count.
+
 The flag is passed to the `deno test` that the package's own task invokes, so
 the preload, the permissions, and the file globs that package's tests need are
 all still applied. The same holds for the packages that run their tests through
@@ -230,7 +238,8 @@ commit's own run. When another workflow calls the CI workflow, it skips
 `Status`, which holds the coverage and topology checks. It also skips the build,
 attestation and deploy jobs. The records relay follows the workflow, and its
 records carry the seed they ran under, so [test selection](test-selection.md)
-keeps them apart from the commit's own runs.
+keeps them apart from the commit's own runs. Test selection reads them as runs
+on the default branch, since they ran its own head.
 
 The order a run takes depends on the set of test files as well as the seed:
 `deno test --shuffle` and the runners this repository owns permute the whole

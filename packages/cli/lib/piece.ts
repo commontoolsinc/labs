@@ -2110,7 +2110,8 @@ async function resolveSlugSourceCell(
  * starting it, which under the flag runs the graph as speculation while
  * the serving loop serves the derived values — and reports that outcome in
  * the receipt's `refresh`, since the commit is durable whatever the refresh
- * did.
+ * did. A start whose own setup commit fails leaves the piece stopped, so
+ * that is a failed refresh too.
  */
 async function updateOnServer(
   config: PieceConfig,
@@ -2137,7 +2138,7 @@ async function updateOnServer(
   let refresh: PatternUpdateReceipt["refresh"];
   try {
     const cell = await pieces.getPieceCell(receipt.pieceId, false);
-    await pieces.startPiece(cell);
+    await pieces.startPiece(cell, undefined, { awaitSetupCommit: true });
     refresh = { status: "completed" };
   } catch (error) {
     refresh = {
@@ -2154,6 +2155,22 @@ async function updateOnServer(
     detachedOrigin: receipt.detachedOrigin,
     refresh,
   };
+}
+
+/** What a {@link followPieceSource} call may run over, and what it accepts. */
+export interface FollowPieceSourceOptions
+  extends Pick<SetPiecePatternOptions, "dangerouslyAllowIncompatibleSchema"> {
+  /**
+   * The pattern the piece must still run for the follow to land, refused as
+   * `PieceSourceChangedError` otherwise.
+   */
+  expectedPattern?: { identity: string; symbol: string };
+
+  /**
+   * The revision the piece's source log must still end at, `null` for a log
+   * that must still be empty, refused the same way.
+   */
+  expectedRevision?: string | null;
 }
 
 /** A follow receipt includes the incompatibility this invocation accepted. */
@@ -2176,13 +2193,13 @@ export type FollowPieceSourceResult =
  *
  * @throws Error when the deployment serves piece lifecycle verbs (the served
  * update takes no origin), when the piece cannot be resolved, or when the
- * origin cannot be read or does not compile.
+ * origin cannot be read or does not compile; `PieceSourceChangedError` when
+ * the piece is off a pin `options` names.
  */
 export async function followPieceSource(
   config: PieceConfig,
   origin: string,
-  options: Pick<SetPiecePatternOptions, "dangerouslyAllowIncompatibleSchema"> =
-    {},
+  options: FollowPieceSourceOptions = {},
   deps: PieceOperationDependencies = {},
 ): Promise<FollowPieceSourceResult> {
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
@@ -2207,7 +2224,15 @@ export async function followPieceSource(
     resolvedConfig.pieceScope,
   );
   const action = { kind: "repoint" as const, url: origin };
-  let result: FollowPieceSourceResult = await piece.changeSource(action);
+  const pins = {
+    ...(options.expectedPattern === undefined
+      ? {}
+      : { expectedPattern: options.expectedPattern }),
+    ...(options.expectedRevision === undefined
+      ? {}
+      : { expectedRevision: options.expectedRevision }),
+  };
+  let result: FollowPieceSourceResult = await piece.changeSource(action, pins);
   if (
     result.status === "incompatible" &&
     options.dangerouslyAllowIncompatibleSchema
@@ -2216,6 +2241,7 @@ export async function followPieceSource(
     // state or retained input may require a new review by the caller.
     const acceptedIncompatibility = result.message;
     result = await piece.changeSource(action, {
+      ...pins,
       confirmedChange: result.prepared,
     });
     if (result.status === "applied") {

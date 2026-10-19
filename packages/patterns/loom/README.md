@@ -4,8 +4,19 @@
 `schemas.tsx` defines its public contract and re-exports the participant
 roster's types from `participants.tsx`, which also holds the roster's one
 writer, `addParticipant`. The shared inputs are `title`, `panels`,
-`presentation`, `participants`, `chatRoom`, and `meeting`; `hiddenPanels` and
-`privatePanels` belong to one user, and `viewerState` to one session.
+`presentation`, `participants`, `chatRoom`, `meeting`, and `style`;
+`hiddenPanels` and `privatePanels` belong to one user, and `viewerState` to one
+session.
+
+`style` is a `PerSpace` value: null, or `{id, mode}` where `id` is a portable
+catalog identifier and `mode` is `native`, `light`, or `dark`.
+`setStyle({style})` validates and replaces the pair in one write; null clears it
+for every participant. Invalid initial selections are exposed as null; invalid
+confirmation events are refused without changing the stored choice. The
+identifier uses `[a-z][a-z0-9-]{0,63}`. Viewers interpret catalog identifiers
+and fall back locally when a style is unknown. Hover previews remain ephemeral
+viewer state and send no action. Space WRITE or OWNER authority admits changes;
+READ viewers observe them.
 
 A panel is a `piece`, `document`, or HTTP(S) `url`. Piece and document targets
 are native cell references. Their complete space, scope, document, and path
@@ -219,14 +230,13 @@ shown. `participants.tsx` holds the roster and `addParticipant({profile})`, the
 only writer its write contract admits; a write from any other action, or from
 another pattern holding the roster cell, is refused. Adding is a mergeable set
 add, so concurrent additions all land and a listed profile is not added twice.
-The roster links only a profile whose label the runtime holds, the first entry
-included: a bare document names no principal, and adding one is refused. Any
-participant may add any profile, so the stored list is a set of claims: a
-consumer that needs the actual participants keeps only profiles whose principal
-currently holds access to the Loom's space, which hides an entry for anyone else
-and drops a removed member without deleting their entry. The root does not
-render the list: it holds claims, and only a consumer that can read the access
-list can say which are participants.
+Any participant may add any document, a bare one that names no principal
+included, so the stored list is a set of claims: a consumer that needs the
+actual participants keeps only profiles whose principal currently holds access
+to the Loom's space, which hides an entry for anyone else and drops a removed
+member without deleting their entry. The root does not render the list: it holds
+claims, and only a consumer that can read the access list can say which are
+participants.
 
 `chatRoom` links the Loom's chat room, so every member finds it in the Loom's
 shared state. It is a link to a room piece in the Loom's own space, typed as
@@ -265,22 +275,52 @@ occurrence key: the lowercase 64-character hexadecimal SHA-256 of its organizer,
 iCalUID, and UTC original start time, computed by CFS. The root validates the
 key's format and stores it without recomputing it.
 
-`bindMeeting({key, reply?})` binds an empty association once. A same-key replay
-confirms the association, and a different key leaves it unchanged. The handler
-reads the association inside its transaction, so competing binds retry against
-the first committed key. If supplied, the per-event reply cell receives
-`{status: "bound", key}`, `{status: "already-bound", key}`, or
-`{status: "conflict", key}`, where a conflict names the stored key. An invalid
-request key receives `{status: "invalid-key"}`. Unrecognized stored state,
-including extra fields without a key or a malformed stored key, receives
-`{status: "invalid-state"}` and stays intact. Extra metadata alongside a valid
-key stays intact on replay or conflict. A request whose `reply` is the
-association cell itself changes nothing and receives no response, since any
-response written there would replace the association. A reply cell that lies
-within the association, such as one of its fields, or contains it is not
-detected, and the response written there changes the association; a caller
-passes a reply cell of its own. A caller omitting `reply` confirms success by
-observing the matching `meeting.key` in the root's output.
+The optional `meeting.portableIdentity` carries `scheme: "ical-uid-slot"`,
+`item_key`, and `occurrence_key`. The keys are complete lowercase hexadecimal
+SHA-256 digests computed by the caller from the opaque iCalendar UID and typed
+original slot. The root validates their scheme and format and stores these three
+fields without recomputing them. The caller retains the provider evidence and
+verifies which occurrence those keys identify. Any space member with WRITE may
+supply this evidence, so the stored identity is a claim. Readers must
+corroborate its relationship to the calendar occurrence before adopting a room
+or accepting a lookup alias.
+
+`bindMeeting({key, portableIdentity?, reply?})` binds an empty association once,
+including the portable evidence when supplied. A same-key replay can add
+portable evidence to a binding that has none; otherwise it confirms the
+association. The legacy key remains immutable. A different key or different
+supported portable keys leave the association unchanged and return a conflict.
+The handler reads the association inside its transaction, so competing binds
+retry against the first committed key. If supplied, the per-event reply cell
+receives `{status: "bound", key}`, `{status: "already-bound", key}`, or
+`{status: "conflict", key}`, where a conflict names the stored key. When the
+reply key equals the request key, the conflict is between portable keys;
+otherwise the legacy keys differ. An invalid request key receives
+`{status: "invalid-key"}`. Malformed portable request evidence, including an
+explicit `null`, receives `{status: "invalid-key"}` without binding the key.
+Unrecognized stored state, including extra fields without a key or a malformed
+stored key, receives `{status: "invalid-state"}` and stays intact. Extra
+metadata alongside a valid key stays intact on replay, enrichment, or conflict,
+including unknown fields inside an existing portable identity. A valid same-key
+request for portable evidence receives `{status: "invalid-state"}` for malformed
+or unsupported stored portable evidence and leaves it intact. A legacy replay
+omitting portable evidence still confirms the legacy key and preserves that
+stored metadata.
+
+A request whose `reply` is the association cell itself changes nothing and
+receives no response, since any response written there would replace the
+association. A reply cell that lies within the association, such as one of its
+fields, or contains it is not detected, and the response written there changes
+the association; a caller passes a reply cell of its own. A caller omitting
+`reply` confirms success by observing the matching `meeting.key` in the root's
+output.
+
+A caller using portable evidence must also observe the matching
+`meeting.portableIdentity` through the root's output. A legacy `bound` or
+`already-bound` reply alone does not establish support: a root running older
+source may ignore the optional request field. Portable evidence supplies an
+association for room lookup; binding does not allocate a room or deduplicate
+simultaneous creators.
 
 The association is meaningful shared state, independent of panels, chat, and
 each viewer's overlay. Source updates preserve it through its `PerSpace` input.
@@ -290,9 +330,11 @@ owner-authorized workflow. A root without `bindMeeting` is unsupported for that
 workflow: a caller must not infer support from an absent key, replace the root,
 or overwrite its contents to adopt it.
 
-Run and attach all thirteen tests when deploying or updating source:
+Run and attach all fifteen tests when deploying or updating source:
 
 ```sh
+deno task cf test packages/patterns/loom/style.test.tsx
+deno task cf test packages/patterns/loom/style-refusals.test.tsx
 deno task cf test packages/patterns/loom/main.test.tsx
 deno task cf test packages/patterns/loom/presentation-refusals.test.tsx
 deno task cf test packages/patterns/loom/multi-user.test.tsx
@@ -309,6 +351,8 @@ deno task cf test packages/patterns/loom/meeting.test.tsx
 
 deno task cf piece new packages/patterns/loom/main.tsx \
   --root packages/patterns \
+  --test packages/patterns/loom/style.test.tsx \
+  --test packages/patterns/loom/style-refusals.test.tsx \
   --test packages/patterns/loom/main.test.tsx \
   --test packages/patterns/loom/presentation-refusals.test.tsx \
   --test packages/patterns/loom/multi-user.test.tsx \

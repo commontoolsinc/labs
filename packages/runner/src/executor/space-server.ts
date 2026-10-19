@@ -663,6 +663,18 @@ type RanLifecycleVerb = QueuedLifecycleVerb & {
   directCommitSeqs: ReadonlyArray<number>;
 };
 
+/** Where a durable stream entry sits, by the identity no compaction moves. */
+type StreamEntryAddress = {
+  /** The stream's sidecar document. */
+  readonly sidecarId: string;
+
+  /** The entry's event. */
+  readonly eventId: string;
+
+  /** The entry's arrival position, `0` for a seq-less entry. */
+  readonly seq: number;
+};
+
 /**
  * One space's serving loop. The SpaceServer IS the seal destination — a
  * stable dispatcher over rotating wave accumulators, so an action tx
@@ -1175,7 +1187,9 @@ export class SpaceServer implements TransactionSealDestination {
    * resolves within a few input-driven cycles, while a permanently
    * unstartable piece would otherwise re-drain forever (no notice, no
    * park). Cleared on activation (a fresh runtime re-tries from
-   * scratch) and on any non-deferred outcome. */
+   * scratch) and on any non-deferred outcome. A deferral reached while an
+   * earlier arrival in the space is still pending is not counted: the
+   * creation the race waits on may be that arrival's own consequence. */
   readonly #eventDeferrals = new Map<string, number>();
 
   /** Lease-local mirrors of durable OW54 processing checkpoints. A mirror is
@@ -3479,6 +3493,22 @@ export class SpaceServer implements TransactionSealDestination {
     );
   }
 
+  /**
+   * Whether the store holds any of the first `count` of `addresses`' entries
+   * without its consequence.
+   */
+  #anyStreamEntryPending(
+    addresses: readonly StreamEntryAddress[],
+    count: number,
+  ): boolean {
+    for (let i = 0; i < count; i++) {
+      const { sidecarId, eventId, seq } = addresses[i];
+      const stored = this.#storedStreamEntry(sidecarId, eventId, seq);
+      if (stored !== undefined && stored.consequenced !== true) return true;
+    }
+    return false;
+  }
+
   #stageDeliveryCheckpoint(
     runtime: Runtime,
     entry: StreamEventEntry,
@@ -4030,6 +4060,11 @@ export class SpaceServer implements TransactionSealDestination {
       { stored: StreamEventsDocValue["entries"] } | "sync-failed"
     >();
     let visibilityFlushed = false;
+    // The entries this pass has queued or found in flight, in arrival order:
+    // what a later entry's deferral is held behind while any is still pending.
+    // Only ever appended to, so the prefix ahead of an entry is fixed by its
+    // length when the entry is queued.
+    const ahead: StreamEntryAddress[] = [];
     for (const { doc, entry } of ordered) {
       let sidecar = sidecars.get(doc.id);
       if (sidecar === undefined) {
@@ -4161,6 +4196,11 @@ export class SpaceServer implements TransactionSealDestination {
           index,
           seq: entry.seq ?? 0,
         };
+        const streamEntryAddress: StreamEntryAddress = {
+          sidecarId: doc.id,
+          eventId: entry.eventId,
+          seq: entry.seq ?? 0,
+        };
         // Only a NUMERIC-seq consequenced twin skips this entry
         // (round-2 thread T12): a seq-less consequenced entry (the
         // stage-G interim shape, legacy stores only — admission stamps
@@ -4194,6 +4234,11 @@ export class SpaceServer implements TransactionSealDestination {
         const durableCheckpoint = this.#deliveryCheckpoints.get(
           entry.eventId,
         ) ?? entry.deliveryDeferral;
+        // Whether this entry is a head retried after a commit-preparation
+        // failure, which is the last entry its pass queues (below), and
+        // whether an input wake is what retried it.
+        let retriedAfterCommitPreparation = false;
+        let retryWokenByInput = false;
         if (
           this.#deliveryCheckpointWriteBlocked.has(entry.eventId) ||
           this.#attentionSealWriteBlocked.has(entry.eventId)
@@ -4292,6 +4337,9 @@ export class SpaceServer implements TransactionSealDestination {
           } else if (cleanRetry) {
             this.#deliveryCleanAttempts.add(entry.eventId);
           }
+          retriedAfterCommitPreparation =
+            checkpoint.phase === "commit-preparation";
+          retryWokenByInput = inputRetry;
         }
         // The in-flight guard (stage C tuning; #5969's (β), drain-own
         // copies only): an entry whose earlier drain copy is still
@@ -4305,6 +4353,15 @@ export class SpaceServer implements TransactionSealDestination {
         if (this.#drainInFlight.has(entry.eventId)) {
           this.#options.stats.events.drainInFlightSkips += 1;
           this.#options.onDrainInFlightSkip?.(entry.eventId);
+          if (retriedAfterCommitPreparation) {
+            // An earlier retry of this head is still in flight, so it holds
+            // the events behind it as a retry queued here would (below), and
+            // the input wake this pass took is owed to the attempt after it.
+            if (retryWokenByInput) this.#deliveryInputWakes.add(entry.eventId);
+            this.#loadParkDeferredInPass = true;
+            break;
+          }
+          ahead.push(streamEntryAddress);
           continue;
         }
         const link: NormalizedFullLink = {
@@ -4360,6 +4417,7 @@ export class SpaceServer implements TransactionSealDestination {
           this.#drainInFlight.set(entry.eventId, "queued");
           const eventId = entry.eventId;
           const tenure = runtime;
+          const aheadCount = ahead.length;
           runtime.scheduler.queueEvent(
             link,
             entry.payload,
@@ -4473,8 +4531,21 @@ export class SpaceServer implements TransactionSealDestination {
                       this.#options.stats.events.handlerNotRunDeferrals += 1;
                       this.#options.onEventDeferred?.();
                     }
+                    // events.md §5: an entry is judged against the state
+                    // its earlier arrivals leave, and one of those may be
+                    // what creates its piece. While any is still pending,
+                    // this deferral is the run racing it and spends none of
+                    // the budget; the earliest pending entry always does.
+                    const arrivalHeld = this.#anyStreamEntryPending(
+                      ahead,
+                      aheadCount,
+                    );
+                    if (arrivalHeld) {
+                      this.#options.stats.events.arrivalHeldDeferrals += 1;
+                    }
                     const deferrals =
-                      (this.#eventDeferrals.get(entry.eventId) ?? 0) + 1;
+                      (this.#eventDeferrals.get(entry.eventId) ?? 0) +
+                      (arrivalHeld ? 0 : 1);
                     this.#eventDeferrals.set(entry.eventId, deferrals);
                     if (deferrals < EVENT_DEFERRAL_DROP_THRESHOLD) {
                       if (
@@ -4497,10 +4568,15 @@ export class SpaceServer implements TransactionSealDestination {
                       // re-drain waits for input or the backstop tick
                       // (the cold-view creation race — OW19's
                       // conflation caution), NEVER a synchronous spin.
-                      // The copy left no mark: release the guard so the
-                      // rescan can queue it again.
+                      // A held entry arms no backstop: what it waits on
+                      // is the earlier entry, whose committed consequence
+                      // re-arms the scan at its wave outcome while this
+                      // one is still pending, and whose own deferral arms
+                      // the backstop it shares. The copy left no mark:
+                      // release the guard so the rescan can queue it
+                      // again.
                       this.#drainInFlight.delete(eventId);
-                      this.#armDeferredRescan();
+                      if (!arrivalHeld) this.#armDeferredRescan();
                       return;
                     }
                     // The race window is long past — events.md §5's
@@ -4550,7 +4626,14 @@ export class SpaceServer implements TransactionSealDestination {
             },
           );
           queued += 1;
+          ahead.push(streamEntryAddress);
           this.#preQueueDeferralStreaks.delete(`queue\0${entry.eventId}`);
+          // A retried head runs alone in its pass. Queued beside it, a later
+          // arrival is swept behind a head that fails again
+          // (`deferLaterSameSpaceServedEvents`) and waits for the backstop
+          // rescan; left in the drain, it is queued by the pass the head's
+          // outcome arms (events.md §2's arrival order).
+          if (retriedAfterCommitPreparation) break;
         } catch (drainError) {
           // Nothing was queued: release the guard (a throw between the
           // add and the queue must not strand the entry until park).
@@ -6614,10 +6697,11 @@ export class SpaceServer implements TransactionSealDestination {
         Engine.selectPendingStreamEventDocs(this.#options.engine).length > 0)
     ) {
       // Re-arm sources: a REQUEUED event (its entry stayed pending); a
-      // drained event whose seal failed transiently; and a wave that
+      // drained event whose seal failed transiently; a wave that
       // COMMITTED same-space emitted entries (LT1's budget-exhausted
       // fallback — the entry is durable input, the next wave processes
-      // it).
+      // it); and an entry held behind an earlier arrival this wave
+      // consequenced, which armed no backstop of its own (events.md §5).
       this.#eventScanOwed = true;
     }
     // Stage G, post-commit: hand the wave's sealed effects to the

@@ -47,6 +47,7 @@ import {
   typeParameterOfType,
   unwrapTypeParentheses,
 } from "./typescript/type-node.ts";
+import { unionNodeMembersInOrder } from "./typescript/source-order.ts";
 import { resolveWriterBinding } from "./typescript/writer-binding.ts";
 import {
   cutsExpansion,
@@ -1358,11 +1359,6 @@ export class SchemaGenerator {
       ...(options?.rootWriterSupplied && typeNode &&
         { rootWriterSuppliedAt: typeNode }),
       ...(schemaHints && { schemaHints }),
-      // A root whose cells no use reaches reads them opaque, as a member does
-      // (`formatChildType()`); a print read in place carries its hints on the
-      // print.
-      ...(schemaHints?.get((hintsNode ?? typeNode)!)?.cellsOpaque &&
-        { cellsOpaque: true }),
     };
     context = this.#withGenericBindings(type, context);
     // A print read as the annotation that spells it keeps the print's own
@@ -1458,12 +1454,6 @@ export class SchemaGenerator {
       context.schemaHints?.get(typeNode)?.definesDocument
     ) {
       context = { ...context, definesDocument: true, documentWithinView: true };
-    }
-    if (
-      typeNode && !context.cellsOpaque &&
-      context.schemaHints?.get(typeNode)?.cellsOpaque
-    ) {
-      context = { ...context, cellsOpaque: true };
     }
     // A bound type parameter reads as its argument: its node where it has one,
     // under the bindings of the place it is written, and its type where it
@@ -2270,14 +2260,11 @@ export class SchemaGenerator {
    * of its cycle identity (`#formatType()`), or `""`: a reading that defines a
    * document inside a schema that views others
    * (`GenerationContext.documentWithinView`), since the view's reading of the
-   * same type leaves out a writer it cannot read; and a reading whose cells
-   * are opaque (`GenerationContext.cellsOpaque`). Neither variant's reading is
-   * the other's, so one met inside the other is no cycle of it.
+   * same type leaves out a writer it cannot read. Neither reading is the
+   * other's, so one met inside the other is no cycle of it.
    */
   #readingVariant(context: GenerationContext): string {
-    return `${context.documentWithinView ? ":document" : ""}${
-      context.cellsOpaque ? ":opaque" : ""
-    }`;
+    return context.documentWithinView ? ":document" : "";
   }
 
   /**
@@ -3506,7 +3493,8 @@ export class SchemaGenerator {
       // The one member that is neither `null` nor `undefined` is read at the
       // union's instantiation less those; any other member has none.
       const { instantiatedAs, ...unplaced } = context;
-      const valued = typeNode.types.filter((member) => {
+      const members = unionNodeMembersInOrder(typeNode);
+      const valued = members.filter((member) => {
         const kind = unwrapTypeParentheses(member);
         return kind.kind !== ts.SyntaxKind.UndefinedKeyword &&
           !(ts.isLiteralTypeNode(kind) &&
@@ -3515,7 +3503,7 @@ export class SchemaGenerator {
       const soleInstantiated = valued.length === 1 && instantiatedAs
         ? soleNonNullishMember(instantiatedAs)
         : undefined;
-      const memberSchemas = typeNode.types.map((member) =>
+      const memberSchemas = members.map((member) =>
         this.#analyzeTypeNodeStructure(
           member,
           checker,

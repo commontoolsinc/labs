@@ -4,8 +4,9 @@
  * does. An OWNER obliterates someone else's message only where the setting
  * holds, and deletes no one else's message either way. Alice and Bob run here
  * as this lane's one principal, which holds OWNER in the room's space, so what
- * tells them apart is their profiles alone. `members.test.tsx` and
- * `direct.test.tsx` cover each kind's default.
+ * tells them apart is their profiles alone. Each act the room refuses fails
+ * its run with a reason, and the test requires exactly those, each by its
+ * reason. `members.test.tsx` and `direct.test.tsx` cover each kind's default.
  */
 import {
   type AddIntegrity,
@@ -17,15 +18,7 @@ import {
   VIEWS,
   Writable,
 } from "commonfabric";
-import {
-  type ActivityCounters,
-  type MessageRecord,
-  type MessagesValue,
-  type ReactionList,
-  type RequestMemo,
-  type SentActivity,
-  type UsedTime,
-} from "./room-records.tsx";
+import { type MessageRecord, type MessagesValue } from "./room-records.tsx";
 import { FabriChatMessageRow } from "./message-row.tsx";
 import { type ChatMessageRights, FabriChatRoomCore } from "./room.tsx";
 import {
@@ -36,7 +29,6 @@ import {
   CHAT_SEND_ACTION,
   CHAT_SEND_SURFACE,
   type ChatProfile,
-  type MessageActOutcome,
 } from "./schemas.tsx";
 
 type RoomArg = Parameters<typeof FabriChatRoomCore>[0];
@@ -71,19 +63,6 @@ const bodies = (messages: Cell<MessagesValue>): string =>
       : "<deleted>"
   ).join(" | ");
 
-/** The outcome `outcomes` records under `id`, as `status/code`. */
-const outcomeOf = (
-  outcomes: Record<string, MessageActOutcome> | undefined,
-  id: string,
-): string => {
-  const outcome = outcomes?.[id];
-  return outcome === undefined
-    ? "none"
-    : outcome.status === "refused"
-    ? `refused/${outcome.code}`
-    : outcome.status;
-};
-
 // The view's rights for the message at `index` of `messages`.
 const rightsAt = (
   rights: readonly ChatMessageRights[],
@@ -108,11 +87,6 @@ export default pattern(() => {
     about: { kind: "group" as const, title: "Team" },
     ownersMayObliterate: false,
     messages: groupMessages,
-    reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
-    requests: Writable.of<RequestMemo[]>([]),
-    usedTimes: Writable.of<UsedTime[]>([]),
-    activity: Writable.of<SentActivity[]>([]),
-    counters: Writable.of<ActivityCounters[]>([]),
   };
   const aliceInGroup = FabriChatRoomCore(
     { myProfile: aliceProfile, ...groupRecords } as RoomArg,
@@ -127,11 +101,6 @@ export default pattern(() => {
     about: { kind: "direct" as const },
     ownersMayObliterate: true,
     messages: directMessages,
-    reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
-    requests: Writable.of<RequestMemo[]>([]),
-    usedTimes: Writable.of<UsedTime[]>([]),
-    activity: Writable.of<SentActivity[]>([]),
-    counters: Writable.of<ActivityCounters[]>([]),
   };
   const aliceInDirect = FabriChatRoomCore(
     { myProfile: aliceProfile, ...directRecords } as RoomArg,
@@ -152,11 +121,6 @@ export default pattern(() => {
     cannotWrite: false,
     isOwner: true,
     messages: groupMessages,
-    reactionLists: groupRecords.reactionLists,
-    requests: groupRecords.requests,
-    usedTimes: groupRecords.usedTimes,
-    activity: groupRecords.activity,
-    counters: groupRecords.counters,
   } as RowArg);
 
   return {
@@ -194,7 +158,6 @@ export default pattern(() => {
       {
         action: bobInGroup.deleteMessage,
         event: {
-          requestId: "d-hers",
           message: messageOf(groupMessages.key(0)),
         },
         trustedUi: deleteGesture,
@@ -202,24 +165,17 @@ export default pattern(() => {
       {
         action: bobInGroup.obliterateMessage,
         event: {
-          requestId: "o-hers",
           message: messageOf(groupMessages.key(0)),
         },
         trustedUi: obliterateGesture,
       },
       {
         action: bobInGroup.obliterateMessage,
-        event: { requestId: "o-his", message: messageOf(groupMessages.key(1)) },
+        event: { message: messageOf(groupMessages.key(1)) },
         trustedUi: obliterateGesture,
       },
       {
         assertion: assert(() =>
-          outcomeOf(bobInGroup.messageRequests, "d-hers") ===
-            "refused/not-allowed" &&
-          outcomeOf(bobInGroup.messageRequests, "o-hers") ===
-            "refused/not-allowed" &&
-          outcomeOf(bobInGroup.messageRequests, "o-his") ===
-            "refused/not-allowed" &&
           bodies(groupMessages) === "Alice in the group | Bob in the group"
         ),
       },
@@ -246,31 +202,22 @@ export default pattern(() => {
       {
         action: bobInDirect.deleteMessage,
         event: {
-          requestId: "d-hers",
           message: messageOf(directMessages.key(0)),
         },
         trustedUi: deleteGesture,
       },
       {
-        assertion: assert(() =>
-          outcomeOf(bobInDirect.messageRequests, "d-hers") ===
-            "refused/not-allowed" &&
-          bodies(directMessages) === "Alice in private"
-        ),
+        assertion: assert(() => bodies(directMessages) === "Alice in private"),
       },
       {
         action: bobInDirect.obliterateMessage,
         event: {
-          requestId: "o-hers",
           message: messageOf(directMessages.key(0)),
         },
         trustedUi: obliterateGesture,
       },
       {
-        assertion: assert(() =>
-          outcomeOf(bobInDirect.messageRequests, "o-hers") === "done" &&
-          bodies(directMessages) === "<obliterated>"
-        ),
+        assertion: assert(() => bodies(directMessages) === "<obliterated>"),
       },
 
       // An act bound to no policy lets no OWNER obliterate, though the room's
@@ -285,6 +232,17 @@ export default pattern(() => {
           bodies(groupMessages) === "Alice in the group | Bob in the group"
         ),
       },
+    ],
+    expectRuntimeErrors: [
+      // In the group room, Bob's deletion and obliteration of Alice's message,
+      // and his obliteration of his own.
+      "Only its author can delete a message.",
+      "Messages in this chat can't be removed.",
+      "Messages in this chat can't be removed.",
+      // In the direct room, his deletion of hers.
+      "Only its author can delete a message.",
+      // The obliteration bound to no policy.
+      "Messages in this chat can't be removed.",
     ],
   };
 });

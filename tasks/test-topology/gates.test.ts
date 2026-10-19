@@ -1,5 +1,6 @@
 import { expect } from "@std/expect";
 import { parse as parseJsonc } from "@std/jsonc";
+import { dirname, fromFileUrl } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 import { DOC_DEMOS } from "../check-verb-session-sync.ts";
 import { namedBenchmarkFiles } from "../check-bench-workflow.ts";
@@ -29,7 +30,7 @@ const TREE_SHARE_DIVISOR = 8;
 /** The most gates one file may reach. */
 const GATES_PER_FILE = 4;
 
-const root = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
+const root = dirname(dirname(dirname(fromFileUrl(import.meta.url))));
 
 const suites = await loadGateSuites(root);
 const byId = (id: string): Suite => suites.find((s) => s.id === id)!;
@@ -166,13 +167,13 @@ describe("the repository's gate suites", () => {
   });
 
   it("holds a gate to little of the tree, and a file to few gates", async () => {
-    // The two bounds that keep this feature a fraction of what a lane
-    // runs. A declaration wide enough to break either places its gate in
-    // every lane on the strength of what it says rather than of what it
-    // has caught, which is the decision the score exists to make. Every
-    // entry is held to naming something as well, so one whose directory
-    // the tree no longer has fails here rather than going quiet behind a
-    // sibling entry that still matches.
+    // The two bounds that keep this feature a fraction of what a lane runs. A
+    // declaration wide enough to break either places its gate in every lane on
+    // the strength of what it says rather than of its new real test failures,
+    // which is the decision the score exists to make. Every entry is held to
+    // naming something as well, so one whose directory the tree no longer has
+    // fails here rather than going quiet behind a sibling entry that still
+    // matches.
     const listed = await new Deno.Command("git", {
       args: ["-C", root, "ls-files", "-z"],
     }).output();

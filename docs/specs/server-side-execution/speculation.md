@@ -196,6 +196,19 @@ currency. The existing overlay and retirement rules below still apply.
      takes main's interim-undefined-then-heal. No shipped pattern
      routes link chains through user-scoped docs (the #6179 review's
      population audit).
+     A serving runtime's commit reads one such row differently (a
+     corollary that narrows the ruling above and awaits the owner's
+     ruling): an absent user- or session-scoped instance of a document
+     that another derivation registered in the same serving runtime
+     declares as a write — its output, or a store a builtin keeps
+     (scheduler-v2 README §4.3) — is one the serving loop owes and has
+     not produced yet, so it is transit for that runtime, not knowledge.
+     The read still reads `undefined`, but the served run that read it
+     commits nothing (serving-loop.md §3d) and runs again once the
+     instance is produced. A writer that never produces a principal's
+     instance therefore holds back its served readers' commits for that
+     instance indefinitely; the client's own echo of it persists (§4's
+     arrival gate).
   2. **A lift that THROWS the error takes the same disposition.** The
      refusal propagates out of the lift body (the body did not catch
      it) and produces an undefined result through the ordinary result
@@ -281,7 +294,16 @@ On each pushed `derived` commit with `derivedThrough = W` and
    refused) has already arrived at this client — the local dispatch
    ran late (a load-parked head event, a busy worker) — is jobless on
    the same grounds and is NOT registered: its writes are dropped
-   before any layer is sealed. A
+   before any layer is sealed. They are dropped before the run's
+   commit is prepared, too: the commit asks the overlay whether it
+   would drop the run (`discards`) and skips the CFC boundary pass for
+   a run it would, since writes that reach no layer cross no boundary.
+   A late run can have read state no commit sees — a cascade child
+   running after its ancestor's echo in another space has retired, and
+   before the served write to that space lands, reads that space
+   without the documents the echo held — and the pass would refuse
+   what it read there, a refusal counted and reported for writes that
+   go nowhere. A
    non-idempotent handler's late echo is divergent by construction (it
    re-toggles the already-served state), and its floor sits at the
    served commit's seq, above every W reachable until the next authored
@@ -674,6 +696,12 @@ pins the export, the scoping, the verify-durable consistency, the
 content-addressed exemption, and the durable-read mark on both a
 direct transaction and a piece start.
 
+The echo a blind write lands over is the speculation of an event whose
+authoritative consequence commits later, and that consequence does not
+land over the write in turn: serving-loop.md §3d supersedes every
+consequence write that a later write of the event's firing session
+overwrote.
+
 ### The durable-read mark, and the piece start that needs it
 
 An authored transaction whose writes must reach the wire can read the
@@ -684,9 +712,19 @@ transaction consumed and what it names stay the same set — the
 verify-durable and name-durable pairing again, one shape wider. A
 document still short of its authoritative value re-derives reactively
 once that value lands, which is the recovery path §6's refusal
-message names. Two callers carry the mark. One is the direct SQLite
-capability's exec, an authored write with no reactive run around it.
-The other is the runner's piece start.
+message names. The direct SQLite capability's exec carries the mark,
+an authored write with no reactive run around it, and so does the
+runner's piece start.
+
+A host read that must not report this runtime's preview carries it
+too, on a read-only transaction: `readConfirmed()` and `readDurable()`
+(`confirmed-read.ts`). Such a reader learns when to read again from a
+subscription, which sees the ordinary view, and a standing layer hides
+two changes to the durable view from it: a write arriving beneath the
+layer, and the layer's retirement over an equal value. The replica's
+`whenSpeculationSettled()` resolves once the layers standing over a
+document have settled, and `readDurable()` hands it back for what it
+read, so the reader reads again then as well.
 
 A piece start mints its own transaction, instantiates the pattern's
 nodes into it, and commits it fire-and-forget as sanctioned

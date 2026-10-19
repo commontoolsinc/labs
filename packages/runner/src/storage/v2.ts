@@ -35,6 +35,7 @@ import {
   type ClientCommit,
   type CommitClass,
   type CommitPrecondition,
+  commitPreconditionValueHash,
   DEFAULT_BRANCH,
   type DocumentPath,
   type EntityDocument,
@@ -98,8 +99,19 @@ import {
   diagnosticPrefix,
   type PendingCommitContext,
   type SpaceStorageDiagnostic,
+  type SpaceStorageSizes,
+  STORAGE_DIAGNOSTICS_LIMIT,
   type StorageDiagnostics,
+  type StorageSizes,
+  sumSpaceStorageSizes,
 } from "./diagnostics.ts";
+import {
+  DOCUMENT_SIZE_NODE_BUDGET,
+  DocumentSizeEstimate,
+  type MeasureBudget,
+  measureDocumentSizes,
+  type SpaceDocumentSizes,
+} from "./document-sizes.ts";
 import type { Cell } from "../cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import {
@@ -226,7 +238,8 @@ export type CfcSchemaDocumentSyncer = (
 ) => Promise<Error | undefined>;
 
 // A cell's CFC write-policy label lives at ["cfc"]. A mergeable write reads it as
-// part of the write; that read is dropped from its conflict set.
+// part of the write; that read is dropped from its conflict set unless the
+// transaction also writes the envelope (`#commitReadActivities`).
 const isCfcLabelPath = (path: readonly string[]): boolean =>
   path.length === 1 && path[0] === "cfc";
 
@@ -900,6 +913,18 @@ const isCoveredPendingVersion = (
 ): boolean =>
   confirmed.localWavePromotion === undefined &&
   pending.acceptedSeq !== undefined && pending.acceptedSeq <= confirmed.seq;
+
+/**
+ * Whether `record`'s confirmed value is a content-addressed document whose
+ * content hashes to `hash`, the id it sits under.
+ */
+const holdsContentAddressedValue = (
+  record: DocumentRecord | undefined,
+  hash: string,
+): boolean => {
+  const doc = record?.confirmed.value;
+  return isObjectNotArray(doc) && taggedHashStringOf(doc.value) === hash;
+};
 
 /** Folds pending and locally accepted wave contributions in sealing order. */
 const materializePendingVersions = (
@@ -1617,6 +1642,7 @@ export class StorageManager implements IStorageManager {
 
   /** What `setSharedMemoryConnection()` last declared. */
   #sharedMemoryConnection = false;
+  #localSessionDocuments: boolean | undefined;
   #eventAppendQueueStore?: EventAppendQueueStore;
   #eventAppendPacing?: EventAppendPacing | false;
 
@@ -2045,6 +2071,17 @@ export class StorageManager implements IStorageManager {
     };
   }
 
+  /** @inheritDoc */
+  setLocalSessionDocuments(enabled: boolean): void {
+    if (
+      this.#localSessionDocuments !== undefined &&
+      this.#localSessionDocuments !== enabled
+    ) {
+      throw new Error("Session document policy is already configured");
+    }
+    this.#localSessionDocuments = enabled;
+  }
+
   /** See `IStorageManager.setSharedMemoryConnection`. */
   setSharedMemoryConnection(enabled: boolean): void {
     if (enabled !== this.#sharedMemoryConnection && this.#providers.size > 0) {
@@ -2224,6 +2261,7 @@ export class StorageManager implements IStorageManager {
         settings: this.#settings,
         subscription: this.#subscription,
         scopeKeyIdentity: () => this.scopeKeyIdentity(),
+        localSessionDocuments: () => this.#localSessionDocuments === true,
         // Phase 5's producer-side foreign-scoped-read refusal: only a
         // serving manager sets a home space, and only its FOREIGN
         // providers refuse (see Options.servingHomeSpace).
@@ -2690,6 +2728,65 @@ export class StorageManager implements IStorageManager {
     };
   }
 
+  /**
+   * @inheritDoc
+   *
+   * The per-space entries are built in one pass over the open spaces, with
+   * the document measurement of `measureDocumentSizes()` sharing one
+   * {@link DOCUMENT_SIZE_NODE_BUDGET} among all of them, so a read is
+   * bounded however many documents the spaces hold.
+   */
+  getSizes(): StorageSizes {
+    const bySpace = measureDocumentSizes(
+      [...this.#providers.values()].map((provider) => provider.replica),
+      DOCUMENT_SIZE_NODE_BUDGET,
+    ).sort((a, b) =>
+      b.approxBytes - a.approxBytes || b.documents - a.documents
+    );
+    const bySpaceOmitted = {
+      spaces: 0,
+      documents: 0,
+      watched: 0,
+      measuredDocuments: 0,
+      truncatedDocuments: 0,
+      approxBytes: 0,
+    };
+    let measuredDocuments = 0;
+    let truncatedDocuments = 0;
+    let approxBytes = 0;
+    for (const [index, entry] of bySpace.entries()) {
+      measuredDocuments += entry.measuredDocuments;
+      truncatedDocuments += entry.truncatedDocuments;
+      approxBytes += entry.approxBytes;
+      if (index < STORAGE_DIAGNOSTICS_LIMIT) continue;
+      bySpaceOmitted.spaces++;
+      bySpaceOmitted.documents += entry.documents;
+      bySpaceOmitted.watched += entry.watched;
+      bySpaceOmitted.measuredDocuments += entry.measuredDocuments;
+      bySpaceOmitted.truncatedDocuments += entry.truncatedDocuments;
+      bySpaceOmitted.approxBytes += entry.approxBytes;
+    }
+    bySpace.length = Math.min(bySpace.length, STORAGE_DIAGNOSTICS_LIMIT);
+    return {
+      ...sumSpaceStorageSizes(
+        [...this.#providers.values()].map((provider) =>
+          provider.replica.getSizes()
+        ),
+      ),
+      spaces: this.#providers.size,
+      pendingCommits: this.#pendingCommits.size,
+      pendingLoads: this.#pendingLoads.size,
+      pendingCrossingLoads: this.#pendingCrossingLoads.size,
+      pendingCrossSpace: this.#crossSpacePromises.size,
+      bySpace,
+      bySpaceOmitted,
+      measuredDocuments,
+      truncatedDocuments,
+      approxBytes,
+      wire: this.#sessionFactory.getSizes?.() ?? null,
+    };
+  }
+
   hasPendingCommits(): boolean {
     return this.#pendingCommits.size > 0;
   }
@@ -2886,12 +2983,20 @@ export class StorageManager implements IStorageManager {
    * server's own words: for an ACL denial that includes the principal and
    * space (`Principal <did> lacks READ on space <did>`), which is exactly
    * what a caller staring at an unexplained `undefined` needs.
+   *
+   * `heldProvider` is the provider this manager held for the space when the
+   * load started, or undefined when it held none. A failure that reaches a
+   * provider whose teardown has begun is not logged: tearing it down closes
+   * its client, which rejects every request in flight, so the failure says
+   * nothing about the read. The load's waiters still receive it.
    */
   #logSyncLoadFailure(
     space: MemorySpace,
     id: URI,
     failure: unknown,
+    heldProvider: Provider | undefined,
   ): void {
+    if (heldProvider?.destroyed) return;
     // Pull errors arrive as plain result objects (IConnectionError et al.),
     // not Error instances — read the fields structurally.
     const named = failure as { name?: unknown; message?: unknown } | undefined;
@@ -3016,6 +3121,7 @@ export class StorageManager implements IStorageManager {
     }
 
     const provider = this.open(space);
+    const heldProvider = this.#providers.get(space);
     // The runner's explicit-instance read (server-execution v2 stage A):
     // a served per-instance run's load of a scoped doc NAMES that
     // principal's instance — the load registers, travels, and lands per
@@ -3064,7 +3170,7 @@ export class StorageManager implements IStorageManager {
       // into the same silent undefined. Surface the failure; the pending-load
       // ledger below still carries it to scheduler waiters.
       if (loadFailure !== undefined) {
-        this.#logSyncLoadFailure(space, id, loadFailure);
+        this.#logSyncLoadFailure(space, id, loadFailure, heldProvider);
       }
       return cell;
     } catch (error) {
@@ -3134,19 +3240,22 @@ export class StorageManager implements IStorageManager {
       this.#pendingCrossingLoads.set(ledgerKey, entry);
       const load = (async () => {
         let loadFailure: unknown;
+        let heldProvider: Provider | undefined;
         try {
-          const result = await this.open(space).sync(
+          const provider = this.open(space);
+          heldProvider = this.#providers.get(space);
+          const result = await provider.sync(
             id,
             { path: crossing.path, schema: crossing.schema ?? false },
             crossing.scope,
           );
           loadFailure = result.error;
           if (loadFailure !== undefined) {
-            this.#logSyncLoadFailure(space, id, loadFailure);
+            this.#logSyncLoadFailure(space, id, loadFailure, heldProvider);
           }
         } catch (error) {
           loadFailure = error;
-          this.#logSyncLoadFailure(space, id, error);
+          this.#logSyncLoadFailure(space, id, error, heldProvider);
         } finally {
           if (loadFailure !== undefined) this.#crossingKicks.delete(key);
           releaseLoad(loadFailure);
@@ -3179,6 +3288,7 @@ export class StorageManager implements IStorageManager {
     const scope = normalizeCellScope(address.scope);
     const instance = this.#foreignInstanceKey(scope, identity);
     const provider = this.open(address.space);
+    const heldProvider = this.#providers.get(address.space);
     const releaseLoad = this.#registerPendingLoad({
       space: address.space,
       scope,
@@ -3195,7 +3305,12 @@ export class StorageManager implements IStorageManager {
       );
       loadFailure = result.error;
       if (loadFailure !== undefined) {
-        this.#logSyncLoadFailure(address.space, address.id, loadFailure);
+        this.#logSyncLoadFailure(
+          address.space,
+          address.id,
+          loadFailure,
+          heldProvider,
+        );
         this.retractDocPullKick(address.space, address.id, scope, identity);
       }
     } catch (error) {
@@ -3268,11 +3383,18 @@ export class StorageManager implements IStorageManager {
       throw error;
     };
 
+    // `start` opened the space's provider before it returned.
+    const heldProvider = this.#providers.get(address.space);
     return work.then((result) => {
       // Same silent-collapse hazard as syncCell: a link-target pull that
       // resolves while carrying an error reads as an absent target.
       if (result.error !== undefined) {
-        this.#logSyncLoadFailure(address.space, address.id, result.error);
+        this.#logSyncLoadFailure(
+          address.space,
+          address.id,
+          result.error,
+          heldProvider,
+        );
       }
       releaseLoad(result.error);
       return result;
@@ -3394,6 +3516,13 @@ export class StorageManager implements IStorageManager {
    * `identity` names that principal's instance of each scoped target
    * (server-execution v2 stage A), as `syncCell` does for a stored
    * document.
+   *
+   * A schema that is not deep-frozen is interned, and so frozen in place,
+   * before the walk reads it. The memo's key holds the schema's hash, and
+   * the schema of each child is derived from its parent's, so a mutable
+   * schema costs a hash at every record the walk descends, where an interned
+   * one is hashed once and its derivations come from the derivation cache,
+   * interned themselves.
    */
   #collectLinkedCellSyncs(
     value: unknown,
@@ -3409,6 +3538,9 @@ export class StorageManager implements IStorageManager {
     }
     if (typeof value !== "object") {
       return;
+    }
+    if (isObjectOrArray(schema) && !isDeepFrozen(schema)) {
+      schema = internSchema(schema);
     }
     const context = JSON.stringify([
       base.id,
@@ -3640,6 +3772,8 @@ type OpenedSpaceSession = {
 };
 
 type ProviderOptions = {
+  /** Whether session documents live only in the owning runtime. */
+  localSessionDocuments?: () => boolean;
   as: Signer;
   space: MemorySpace;
   settings: IRemoteStorageProviderSettings;
@@ -3781,6 +3915,11 @@ class Provider
     readonly options: ProviderOptions,
   ) {
     this.replica = this.#createReplica();
+  }
+
+  /** Whether `destroy()` or `destroyNow()` has begun tearing this down. */
+  get destroyed(): boolean {
+    return this.#destroyed;
   }
 
   #createReplica(): SpaceReplica {
@@ -4126,6 +4265,7 @@ class Provider
     this.options.routeState.generation++;
     this.#routeAbort = new AbortController();
     const replacement = this.#createReplica();
+    previous.transferLocalSessionStateTo(replacement);
     this.replica = replacement;
     for (const subscription of this.#operationSubscriptions) {
       subscription.cancel?.();
@@ -4474,6 +4614,10 @@ export class SpaceReplica
   #aclChangedSinceMount = false;
 
   readonly #docs = new Map<string, DocumentRecord>();
+
+  /** The sizes read's running measurement of `#docs`; it reads nothing else. */
+  readonly #documentSizes = new DocumentSizeEstimate();
+
   readonly #syncTasks = new Map<string, SyncTask>();
   readonly #commitPromises = new Set<Promise<unknown>>();
 
@@ -4509,6 +4653,14 @@ export class SpaceReplica
   >();
 
   /**
+   * Local-only commit verdicts for origin preconditions. An entry starts
+   * false and becomes true on acceptance; callers await its outcome before
+   * checking it. Kept for this replica's lifetime because no server commit
+   * row can validate a later reference to a local origin.
+   */
+  readonly #localSessionCommitAccepted = new Map<number, boolean>();
+
+  /**
    * Server verdict promises superseded by a local rejection. Kept _out_ of
    * `#commitPromises` so `synced()` never blocks on a verdict the server may
    * withhold indefinitely; `close()`/`closeNow()` drain the set after client
@@ -4530,6 +4682,9 @@ export class SpaceReplica
     string,
     Set<(document: EntityDocument | undefined) => void>
   >();
+
+  /** How many callbacks `#sinks` holds across every document. */
+  #sinkCount = 0;
   readonly #operationSinks = new Map<
     string,
     Set<(snapshot: OperationFieldSnapshot) => void>
@@ -4555,6 +4710,7 @@ export class SpaceReplica
   /** The store read-through this replica serves misses from (see
    * ProviderOptions.storeReadThrough). */
   readonly #storeReadThrough: () => StoreReadThrough | undefined;
+  readonly #localSessionDocuments: () => boolean;
 
   /** See ProviderOptions.loadCrossings. */
   readonly #loadCrossings:
@@ -4728,15 +4884,15 @@ export class SpaceReplica
   static readonly #MAX_RETAINED_ACK_SEQS = 4096;
 
   /**
-   * `localSeq`s of live _speculative_ sealed commits (`speculation.md` §1/§6):
-   * overlay entries exist only in this process — the client never pushes them —
-   * so a _pushed_ commit whose read basis names one can _never_ have that
-   * dependency resolve server-side. `#commitOperations()` refuses such an
-   * export loudly; membership ends when the speculative commit settles
-   * (retirement/withdrawal drops its pending layers first, so no stack names a
-   * seq after it leaves this set).
+   * `localSeq`s of live _speculative_ sealed commits (`speculation.md` §1/§6),
+   * each with the promise its settlement resolves: overlay entries exist only
+   * in this process — the client never pushes them — so a _pushed_ commit whose
+   * read basis names one can _never_ have that dependency resolve server-side.
+   * `#commitOperations()` refuses such an export loudly; membership ends when
+   * the speculative commit settles (retirement/withdrawal drops its pending
+   * layers first, so no stack names a seq after it leaves this map).
    */
-  readonly #speculativeLocalSeqs = new Set<number>();
+  readonly #speculativeLocalSeqs = new Map<number, Promise<void>>();
 
   /**
    * The overlay destination's retirement _wake_ for origin accepts
@@ -4819,6 +4975,8 @@ export class SpaceReplica
 
   constructor(options: SpaceReplicaOptions) {
     this.#space = options.space;
+    this.#localSessionDocuments = options.localSessionDocuments ??
+      (() => false);
     this.#subscription = options.subscription;
     this.#onAccessChange = options.onAccessChange;
     this.#onSessionReplaced = options.onSessionReplaced;
@@ -4934,6 +5092,41 @@ export class SpaceReplica
       repairCount: this.#rejectedPendingLayers.size,
       parkedAcceptLocalSeqs: diagnosticPrefix(this.#parkedAccepts.keys()),
       parkedAcceptCount: this.#parkedAccepts.size,
+      sizes: this.getSizes(),
+    };
+  }
+
+  /** @inheritDoc */
+  getSizes(): SpaceStorageSizes {
+    return {
+      documents: this.#docs.size,
+      subscribedDocuments: this.#sinks.size,
+      subscriptions: this.#sinkCount,
+      watchedDocuments: this.#watchedIds.size,
+      operationSinks: this.#operationSinks.size,
+      inFlightCommits: this.#commitPromises.size,
+      unsettledCommits: this.#commitOutcomeBySeq.size,
+      repairingCommits: this.#rejectedPendingLayers.size,
+      parkedAccepts: this.#parkedAccepts.size,
+      syncTasks: this.#syncTasks.size,
+      pendingReads: this.#syncPromises.size,
+    };
+  }
+
+  /**
+   * This replica's documents and their approximate size, measured from the
+   * confirmed value of each within `budget`, which the measurement draws
+   * down; `DocumentSizeEstimate` says how the estimate is built across
+   * reads. Reading it starts no I/O and changes no document.
+   */
+  getDocumentSizes(budget: MeasureBudget): SpaceDocumentSizes {
+    const values = function* (docs: Iterable<DocumentRecord>) {
+      for (const record of docs) yield record.confirmed.value;
+    };
+    return {
+      space: this.#space,
+      watched: this.#watchedIds.size,
+      ...this.#documentSizes.measure(values(this.#docs.values()), budget),
     };
   }
 
@@ -5121,11 +5314,12 @@ export class SpaceReplica
       subscribers = new Set();
       this.#sinks.set(key, subscribers);
     }
+    if (!subscribers.has(callback)) this.#sinkCount += 1;
     subscribers.add(callback);
     void this.sync(uri);
     return () => {
       const current = this.#sinks.get(key);
-      current?.delete(callback);
+      if (current?.delete(callback)) this.#sinkCount -= 1;
       if (current && current.size === 0) {
         this.#sinks.delete(key);
       }
@@ -5832,6 +6026,7 @@ export class SpaceReplica
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
   ): boolean {
+    if (this.#isLocalSessionDocument({ scope }, identity)) return true;
     const key = this.#docKeyOf({ id, scope }, identity);
     const record = this.#docs.get(key);
     return this.#delivered.has(key) ||
@@ -5925,15 +6120,24 @@ export class SpaceReplica
   ): boolean {
     const key = this.#docKeyOf({ id, scope }, identity);
     const delivered = this.#delivered.get(key);
-    if (delivered === undefined) return false;
     const record = this.#docs.get(key);
-    if (record === undefined) return true;
+    if (record === undefined) return delivered !== undefined;
     const { confirmed } = record;
     if (
       record.pending.length > 0 || confirmed.localFold === true ||
       confirmed.localWavePromotion !== undefined
     ) {
       return false;
+    }
+    if (delivered === undefined) {
+      // A schema document this replica's own commit stored may never arrive
+      // in a frame: the server ships it with a document that refers to it,
+      // and does not send a replica its own change to a document it holds.
+      // Content under a `cid:` id cannot change, so holding that content
+      // confirmed is confirmation. In space scope only: a session-scoped
+      // write is promoted here without any server accepting it.
+      return id.startsWith("cid:") && normalizeCellScope(scope) === "space" &&
+        holdsContentAddressedValue(record, id.slice("cid:".length));
     }
     // Past its delivered seq, the confirmed state is an own accepted write
     // promoted locally, which a push through that seq has since covered.
@@ -5979,6 +6183,23 @@ export class SpaceReplica
         ...new Set(record.pending.map((entry) => entry.localSeq)),
       ],
     };
+  }
+
+  /** @inheritDoc */
+  whenSpeculationSettled(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): Promise<void> | undefined {
+    const record = this.#docs.get(this.#docKeyOf({ id, scope }, identity));
+    const standing = new Set<Promise<void>>();
+    for (const entry of record?.pending ?? []) {
+      const settled = this.#speculativeLocalSeqs.get(entry.localSeq);
+      if (settled !== undefined) standing.add(settled);
+    }
+    return standing.size === 0
+      ? undefined
+      : Promise.all(standing).then(() => {});
   }
 
   /** ISpaceReplica.ackedSeqOf (server-execution v2 Phase 2,
@@ -6401,6 +6622,9 @@ export class SpaceReplica
   async pull(
     entries: [WatchAddress, SchemaPathSelector | undefined][],
   ): Promise<Result<Unit, PullError>> {
+    entries = entries.filter(([address]) =>
+      !this.#isLocalSessionDocument(address)
+    );
     if (entries.length === 0) {
       return { ok: {} };
     }
@@ -6777,6 +7001,15 @@ export class SpaceReplica
       )
       : undefined;
 
+    // A speculative layer is registered before it is applied, so that a
+    // durable read made from a notification below already reads past it.
+    const speculationSettled = options?.speculative === true
+      ? Promise.withResolvers<void>()
+      : undefined;
+    if (speculationSettled !== undefined) {
+      this.#speculativeLocalSeqs.set(localSeq, speculationSettled.promise);
+    }
+
     for (const operation of operations) {
       this.#applyPending(operation, localSeq, commit.reads, identity);
     }
@@ -6804,7 +7037,7 @@ export class SpaceReplica
       verdict,
       identity,
     );
-    if (options?.speculative !== true) {
+    if (speculationSettled === undefined) {
       // Durable sealed commits (the wave's) join the synced() barrier
       // and the ordered-push outcome map as any commit does. A CLIENT
       // SPECULATION entry joins NEITHER (speculation.md §1: the overlay
@@ -6824,15 +7057,15 @@ export class SpaceReplica
         this.#commitPromises.delete(settled);
       });
     } else {
-      // Track the speculative seq for the export refusal (speculation.md
-      // §6, RULED 2026-08-13): while any pending stack carries this
-      // layer, a pushed commit's read basis naming it is refused in
-      // commitOperations. Settlement (retirement or withdrawal) drops
-      // the pending layers before `settled` resolves, so removal here
-      // never races a stack that still names the seq.
-      this.#speculativeLocalSeqs.add(localSeq);
-      settled.catch(() => {}).finally(() => {
+      // The speculative seq stays tracked for the export refusal
+      // (speculation.md §6, RULED 2026-08-13): while any pending stack
+      // carries this layer, a pushed commit's read basis naming it is
+      // refused in commitOperations. Settlement (retirement or
+      // withdrawal) drops the pending layers before `settled` resolves,
+      // so removal here never races a stack that still names the seq.
+      settled.then(() => {}, () => {}).finally(() => {
         this.#speculativeLocalSeqs.delete(localSeq);
+        speculationSettled.resolve();
       });
     }
     return { localSeq, commit, settled };
@@ -7047,6 +7280,25 @@ export class SpaceReplica
     } finally {
       this.#settleInFlightCommit(localSeq);
     }
+  }
+
+  /** Carries confirmed local session state into a fresh route replica. */
+  transferLocalSessionStateTo(replacement: SpaceReplica): void {
+    if (!this.#localSessionDocuments()) return;
+    const prefix = `${this.instanceKey("session")}\0`;
+    for (const [key, record] of this.#docs) {
+      if (!key.startsWith(prefix)) continue;
+      replacement.#docs.set(key, {
+        confirmed: record.confirmed,
+        pending: [],
+      });
+    }
+    // Pending origins remain rejected in the replacement: the route reset
+    // cancels their writes. Sequence numbers cannot be reused by new commits.
+    for (const [seq, accepted] of this.#localSessionCommitAccepted) {
+      replacement.#localSessionCommitAccepted.set(seq, accepted);
+    }
+    replacement.#nextLocalSeq = this.#nextLocalSeq;
   }
 
   reset(): void {
@@ -7382,6 +7634,16 @@ export class SpaceReplica
     }
   }
 
+  /** Returns whether an address is held only in this replica. */
+  #isLocalSessionDocument(
+    address: { scope?: CellScope; scopeKey?: ScopeKey },
+    identity?: ScopeKeyIdentity,
+  ): boolean {
+    return this.#localSessionDocuments() && address.scope === "session" &&
+      this.instanceKey("session", identity, address.scopeKey) ===
+        this.instanceKey("session");
+  }
+
   async #commitOperations(
     operations: NativeCommitOperation[],
     source?: IStorageTransaction,
@@ -7390,6 +7652,36 @@ export class SpaceReplica
     commitOptions?: NativeCommitOptions,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const activePreconditions = activeCommitPreconditions(preconditions);
+    for (const pin of activePreconditions) {
+      if (
+        pin.kind === "origin-committed" || !this.#isLocalSessionDocument(pin)
+      ) continue;
+      const record = this.#docs.get(
+        this.#docKeyOf({ id: pin.id as URI, scope: pin.scope }),
+      );
+      const document = this.#visibleDocument(pin.id as URI, pin.scope);
+      const failed = pin.kind === "entity-absent"
+        ? (record?.confirmed.seq ?? 0) > 0 || (record?.pending.length ?? 0) > 0
+        : (document && Object.hasOwn(document, "value")
+          ? commitPreconditionValueHash(document.value!)
+          : null) !== pin.valueHash;
+      if (failed) {
+        const rejection: StorageTransactionRejected =
+          pin.kind === "entity-absent"
+            ? {
+              name: "PreconditionFailedError",
+              message: "Local session document already exists",
+              precondition: "receipt-exists",
+            }
+            : this.#makeLocalRejection({
+              localSeq: this.#nextLocalSeq,
+              reads: { confirmed: [], pending: [] },
+              operations: [],
+            }, "Local session value changed");
+        if (source !== undefined) notifyCommitRejected(source, rejection);
+        return { error: rejection };
+      }
+    }
     if (
       operations.length === 0 && sqliteOps.length === 0 &&
       activePreconditions.length === 0
@@ -7407,7 +7699,7 @@ export class SpaceReplica
         localSeq,
         reads: this.#readsOverLocalFolds(
           operations,
-          this.#buildReads(source, localSeq),
+          this.#buildReads(source, localSeq, undefined, activePreconditions),
         ),
         // Cell ops first, folded SQLite ops last (applied in array order by the
         // engine; sqlite ops are not entity revisions and carry no id/scope).
@@ -7668,6 +7960,33 @@ export class SpaceReplica
       commit,
       source,
     );
+    const remoteOperations = commit.operations.filter((operation) =>
+      !("id" in operation && this.#isLocalSessionDocument(operation))
+    );
+    const remotePreconditions = commit.preconditions?.filter((pin) =>
+      pin.kind === "origin-committed"
+        ? !this.#localSessionCommitAccepted.has(pin.originLocalSeq)
+        : !this.#isLocalSessionDocument(pin)
+    );
+    const remoteReads = {
+      confirmed: commit.reads.confirmed.filter((read) =>
+        !this.#isLocalSessionDocument(read)
+      ),
+      pending: commit.reads.pending.filter((read) =>
+        !this.#isLocalSessionDocument(read)
+      ),
+    };
+    // A commit settles here only when nothing it touched is shared. One that
+    // read a shared document travels, with no operations when every write
+    // is local, because its session writes are only as good as those reads:
+    // a verdict refusing a read rolls the writes back, and it is what runs a
+    // handler, which no later frame runs again, against fresh state.
+    const localOnly = this.#localSessionDocuments() &&
+      remoteOperations.length === 0 && !remotePreconditions?.length &&
+      remoteReads.confirmed.length === 0 && remoteReads.pending.length === 0;
+    // Record local origins before the first rejection checkpoint: a later
+    // guard must validate their failed verdict without contacting the server.
+    if (localOnly) this.#localSessionCommitAccepted.set(localSeq, false);
     const telemetry = this.#getTelemetry();
     const pushOpId = `push:${this.#space}:${localSeq}`;
     try {
@@ -7709,6 +8028,105 @@ export class SpaceReplica
             sealed,
             { pushed: true },
           );
+        }
+      }
+      // A local session read can depend on a mixed commit awaiting its
+      // verdict or local application. Promote that dependency before its
+      // consumer can replace the confirmed base.
+      if (this.#localSessionDocuments()) {
+        const origins = (commit.preconditions ?? []).flatMap((pin) =>
+          pin.kind === "origin-committed" ? [pin.originLocalSeq] : []
+        );
+        const localOrigins = origins.filter((seq) =>
+          this.#localSessionCommitAccepted.has(seq)
+        );
+        // An origin can itself be waiting for local session dependencies
+        // before it reaches the server. Its guarded write must follow it.
+        const dependencies = new Set<number>(origins);
+        for (const read of commit.reads.pending) {
+          if (!localOnly && !this.#isLocalSessionDocument(read)) continue;
+          for (
+            const seq of Array.isArray(read.localSeq)
+              ? read.localSeq
+              : [read.localSeq]
+          ) dependencies.add(seq);
+        }
+        // A blind write still follows earlier writes to the same local
+        // document. Waiting preserves promotion order without making the
+        // blind write depend on those writes being accepted.
+        for (const operation of operations) {
+          if (!this.#isLocalSessionDocument(operation)) continue;
+          const record = this.#docs.get(this.#docKeyOf(operation));
+          for (const pending of record?.pending ?? []) {
+            if (pending.localSeq < localSeq) dependencies.add(pending.localSeq);
+          }
+        }
+        if (dependencies.size > 0) {
+          await Promise.all(
+            [...dependencies].map(async (seq) => {
+              await this.#commitOutcomeBySeq.get(seq);
+              await this.whenApplied(seq);
+            }),
+          );
+        }
+        if (this.#closed) {
+          const rejection = this.#makeLocalRejection(
+            commit,
+            "memory replica closed before local session commit settled",
+          );
+          notifyRejectionSources(rejection);
+          return await this.#finalizeRejection(
+            localSeq,
+            operations,
+            source,
+            rejection,
+            { pushed: false },
+          );
+        }
+        const failedOrigin = localOrigins.find((seq) =>
+          !this.#localSessionCommitAccepted.get(seq)
+        );
+        if (failedOrigin !== undefined) {
+          const rejection: StorageTransactionRejected = {
+            name: "PreconditionFailedError",
+            message:
+              `Local origin commit not committed: localSeq ${failedOrigin}`,
+            precondition: "origin-committed",
+          };
+          notifyRejectionSources(rejection);
+          return await this.#finalizeRejection(
+            localSeq,
+            operations,
+            source,
+            rejection,
+            { pushed: false },
+          );
+        }
+        const rejection = inFlight && this.#preSendRejection(inFlight);
+        if (rejection) {
+          notifyRejectionSources(rejection);
+          return await this.#finalizeRejection(
+            localSeq,
+            operations,
+            source,
+            rejection,
+            { pushed: false },
+          );
+        }
+        commit = {
+          ...commit,
+          reads: remoteReads,
+          operations: remoteOperations,
+          preconditions: remotePreconditions,
+        };
+        if (localOnly) {
+          this.#confirmPending(localSeq, operations, {
+            seq: localSeq,
+            branch: DEFAULT_BRANCH,
+            revisions: [],
+          }, "authored");
+          this.#localSessionCommitAccepted.set(localSeq, true);
+          return { ok: {} };
         }
       }
       // Strategy 1: a commit whose read set lands on a still-catching-up id.
@@ -8300,6 +8718,28 @@ export class SpaceReplica
         mergeableOpPathsByEntity.set(key, [op.path]);
       }
     }
+    // A document whose CFC envelope this transaction writes beside a
+    // mergeable op. The envelope is a whole-member replace whose entries name
+    // positions in the array the transaction read, and which carries forward
+    // the entries it read there; the op, by contrast, is placed by the store
+    // against the live array. Both the envelope and the array it was placed
+    // against are therefore dependencies of such a commit: a concurrent
+    // change to either moves an element away from the entry that describes
+    // it, or drops another writer's entries. Those documents keep every read
+    // the narrowing below would otherwise drop, so the commit conflicts and
+    // the writer re-derives its envelope against the list the store holds.
+    const envelopeWritersWithMergeableOps = new Set<string>();
+    if (mergeableOpPathsByEntity.size > 0) {
+      for (const write of getTransactionWriteAttempts(source) ?? []) {
+        if (write.space !== this.#space || !isCfcLabelPath(write.path)) {
+          continue;
+        }
+        const key = `${write.id}\0${normalizeCellScope(write.scope)}`;
+        if (mergeableOpPathsByEntity.has(key)) {
+          envelopeWritersWithMergeableOps.add(key);
+        }
+      }
+    }
 
     const commitReads: IReadActivity[] = [];
     for (const read of reads) {
@@ -8316,16 +8756,23 @@ export class SpaceReplica
         // Reference-resolution shape reads stay reactive but do not constrain
         // the commit; recursive reads remain value dependencies.
         (isReadExcludedFromConflict(read.meta) &&
-          read.nonRecursive === true) ||
-        // Runtime verifier reads of the CFC label are point-in-time policy
-        // observations, not consumed values.
-        (isInternalVerifierRead(read.meta) && isCfcLabelPath(read.path))
+          read.nonRecursive === true)
       ) {
         continue;
       }
 
       const scope = normalizeCellScope(read.scope);
-      const opPaths = mergeableOpPathsByEntity.get(`${read.id}\0${scope}`);
+      const key = `${read.id}\0${scope}`;
+      if (envelopeWritersWithMergeableOps.has(key)) {
+        commitReads.push(read);
+        continue;
+      }
+      // Runtime verifier reads of the CFC label are point-in-time policy
+      // observations, not consumed values.
+      if (isInternalVerifierRead(read.meta) && isCfcLabelPath(read.path)) {
+        continue;
+      }
+      const opPaths = mergeableOpPathsByEntity.get(key);
       // A read of an op array's length is a genuine dependency: the handler
       // used the element count that a concurrent mergeable op changes.
       const readsMergeableOpArrayLength = opPaths !== undefined &&
@@ -8444,14 +8891,18 @@ export class SpaceReplica
     // The reading run's identity (a served per-instance seal): each read's
     // pending layers and confirmed seq come from THAT instance's record.
     identity?: ScopeKeyIdentity,
+    preconditions: readonly CommitPrecondition[] = [],
   ): ClientCommit["reads"] {
     const confirmed: ConfirmedCommitRead[] = [];
     const pending: PendingCommitRead[] = [];
-    if (!source) {
+    const localPreconditions = preconditions
+      .filter((pin) => pin.kind !== "origin-committed")
+      .filter((pin) => this.#isLocalSessionDocument(pin, identity));
+    if (!source && localPreconditions.length === 0) {
       return { confirmed, pending };
     }
 
-    const reads = getDirectTransactionReadActivities(source);
+    const reads = source ? getDirectTransactionReadActivities(source) : [];
     if (!reads) {
       throw new Error(
         "Memory v2 commit tracking requires source.getReadActivities(); " +
@@ -8462,7 +8913,9 @@ export class SpaceReplica
     // For a blind UI-input write, handleCellSet threads the cell's PARENT address
     // here; its `ignoreReadForCommit` reads are dropped below and replaced by one
     // nonRecursive read at this parent (emitted after the loop).
-    const structuralTarget = getBlindStructuralTarget(source);
+    const structuralTarget = source
+      ? getBlindStructuralTarget(source)
+      : undefined;
 
     // Pending bases belong to a document instance and the speculative-layer
     // policy. Every path read in this synchronous build shares that same stack.
@@ -8583,7 +9036,14 @@ export class SpaceReplica
       }
     };
 
-    for (const read of this.#commitReadActivities(source, reads)) {
+    // A local value pin consumes the same pending state as a document read,
+    // so rejection of that state also rejects the guarded write.
+    for (const pin of localPreconditions) {
+      pushCommitRead(pin.id as URI, pin.scope, toCommitReadPath([]), false);
+    }
+    for (
+      const read of source ? this.#commitReadActivities(source, reads) : []
+    ) {
       const scope = normalizeCellScope(read.scope);
       pushCommitRead(
         read.id as URI,
@@ -8859,12 +9319,10 @@ export class SpaceReplica
    * (CT-2046 tracks enforcing that broadly).
    */
   isContentAddressedDocPersisted(hash: string): boolean {
-    const record = this.#docs.get(docKey(`cid:${hash}` as URI, "space"));
-    const doc = record?.confirmed.value;
-    if (!isObjectNotArray(doc)) return false;
-    const value = doc.value;
-    // A content-addressed document's value must hash to the id it sits under.
-    return taggedHashStringOf(value) === hash;
+    return holdsContentAddressedValue(
+      this.#docs.get(docKey(`cid:${hash}` as URI, "space")),
+      hash,
+    );
   }
 
   /**
@@ -8893,11 +9351,26 @@ export class SpaceReplica
     sync: SessionSync,
     type: "pull" | "integrate",
   ): void {
+    const pushed = MemoryV2Client.isPushedSync(sync);
     // No read during a frame's integration — the differential checkout's
     // snapshot, the arrived-cfc hydration — starts a store read-through:
     // that would integrate a second frame from inside this one.
     this.#frameApplyDepth += 1;
     try {
+      if (this.#localSessionDocuments()) {
+        sync = {
+          ...sync,
+          upserts: sync.upserts.filter((entry) =>
+            !this.#isLocalSessionDocument(entry)
+          ),
+          removes: sync.removes.filter((entry) =>
+            !this.#isLocalSessionDocument(entry)
+          ),
+          crossings: sync.crossings?.filter((entry) =>
+            !this.#isLocalSessionDocument(entry)
+          ),
+        };
+      }
       this.#applySessionSyncFrame(sync, type);
     } catch (error) {
       this.#completeThroughLost = true;
@@ -8906,7 +9379,7 @@ export class SpaceReplica
       this.#frameApplyDepth -= 1;
       this.#frameTouchedKeys = undefined;
     }
-    if (MemoryV2Client.isPushedSync(sync)) {
+    if (pushed) {
       this.#completeThroughSeq = Math.max(this.#completeThroughSeq, sync.toSeq);
     }
     // The frame's crossings name documents in other spaces: their loads
@@ -10000,10 +10473,17 @@ export class SpaceReplica
       : undefined;
     // Each operation's document, in the wire commit's order: an elision
     // report names operations by that index.
-    const operationKeys = this.#touchedOf(operations, identity).map((
+    const operationKeys = this.#touchedOf(
+      operations.filter((operation) =>
+        !this.#isLocalSessionDocument(operation, identity)
+      ),
+      identity,
+    ).map((
       address,
     ) => this.#docKeyOf(address));
     for (const [key, { id, scope, scopeKey }] of keys.entries()) {
+      const local = this.#isLocalSessionDocument({ scope, scopeKey }, identity);
+      const acceptedSeq = local ? localSeq : applied.seq;
       const record = this.#record(id, scope, undefined, scopeKey);
       const pendingIndexes = record.pending.flatMap((entry, index) =>
         entry.localSeq === localSeq ? [index] : []
@@ -10036,15 +10516,15 @@ export class SpaceReplica
       // copy of it: a transaction loads the confirmed document by identity,
       // and one that writes over a mutable root changes it in place, leaving
       // no difference from what it loaded to commit.
-      const elidedHere = applied.elidedOpIndexes !== undefined &&
+      const elidedHere = !local && applied.elidedOpIndexes !== undefined &&
         operationKeys.every((operationKey, index) =>
           operationKey !== key || applied.elidedOpIndexes!.includes(index)
         );
       const computed = record.pending[lastPendingIndex]!;
       if (elidedHere && computed.read === true) {
-        if (computed.op !== "delete" && record.confirmed.seq < applied.seq) {
+        if (computed.op !== "delete" && record.confirmed.seq < acceptedSeq) {
           record.confirmed = confirmedVersion(
-            applied.seq,
+            acceptedSeq,
             cloneIfNecessary(computed.value) as EntityDocument,
             coverClass,
           );
@@ -10078,12 +10558,12 @@ export class SpaceReplica
       let promoted: ConfirmedVersion | undefined;
       let reusedSuffix: PendingMaterializedPrefix[] | undefined;
 
-      const previousWave = record.confirmed.seq === applied.seq
+      const previousWave = record.confirmed.seq === acceptedSeq
         ? previousConfirmed.localWavePromotion
         : undefined;
       if (
         coverClass === "derived" &&
-        (record.confirmed.seq < applied.seq || previousWave !== undefined)
+        (record.confirmed.seq < acceptedSeq || previousWave !== undefined)
       ) {
         // One wave can accept several local contributions to this document.
         // Their shared seq covers all of them only after each has promoted.
@@ -10100,7 +10580,7 @@ export class SpaceReplica
             scope,
           });
         }
-        promoted = confirmedVersion(applied.seq, value, coverClass);
+        promoted = confirmedVersion(acceptedSeq, value, coverClass);
         const lastApplied = entries.at(-1)!.localSeq;
         const earlierPending = record.pending.some((entry) =>
           entry.localSeq !== localSeq && entry.localSeq < lastApplied
@@ -10108,7 +10588,7 @@ export class SpaceReplica
         promoted.localWavePromotion = earlierPending
           ? { base, entries }
           : { base: value, entries: [] };
-      } else if (record.confirmed.seq < applied.seq) {
+      } else if (record.confirmed.seq < acceptedSeq) {
         if (firstPendingIndex === 0) {
           const prefix = materializedVersionThroughPending(
             record,
@@ -10117,7 +10597,7 @@ export class SpaceReplica
           );
           const cache = ensurePendingMaterializationCache(record);
           promoted = confirmedVersion(
-            applied.seq,
+            acceptedSeq,
             prefix.value,
             coverClass,
           );
@@ -10127,7 +10607,7 @@ export class SpaceReplica
           }
         } else {
           promoted = confirmedVersion(
-            applied.seq,
+            acceptedSeq,
             applyPendingVersion(record.confirmed.value, pending, {
               space: this.#space,
               id,
@@ -10747,9 +11227,10 @@ const toRejectedError = (
     // Scoped descriptors cross current protocol boundaries structurally.
     // Message-only errors retain default-scope recovery for every named read.
     const toConflicts = (details: unknown): IConflictError["conflict"][] => {
-      const { of, scope } = (details ?? {}) as {
+      const { of, scope, seq } = (details ?? {}) as {
         of?: unknown;
         scope?: unknown;
+        seq?: unknown;
       };
       return typeof of === "string"
         ? [{
@@ -10757,6 +11238,7 @@ const toRejectedError = (
           the: DOCUMENT_MIME,
           of: of as Entity,
           ...(isCellScope(scope) ? { scope } : {}),
+          ...(typeof seq === "number" ? { seq } : {}),
         }]
         : [];
     };

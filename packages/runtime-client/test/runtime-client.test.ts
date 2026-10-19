@@ -212,6 +212,7 @@ describe("RuntimeClient", () => {
         timing: {},
         flags: {},
         cfc: { cfcRelevantTx: 4, dereferenceTracesMax: 9 },
+        compileCache: { hits: 1, misses: 2, byIdentityHits: 3 },
       };
       const conn = {
         on: () => {},
@@ -221,9 +222,15 @@ describe("RuntimeClient", () => {
         new (conn: never, options: unknown): RuntimeClient;
       })(conn, undefined);
 
-      expect((await client.getLoggerCounts()).cfc).toEqual({
+      const counts = await client.getLoggerCounts();
+      expect(counts.cfc).toEqual({
         cfcRelevantTx: 4,
         dereferenceTracesMax: 9,
+      });
+      expect(counts.compileCache).toEqual({
+        hits: 1,
+        misses: 2,
+        byIdentityHits: 3,
       });
     });
   });

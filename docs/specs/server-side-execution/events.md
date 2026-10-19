@@ -186,7 +186,10 @@ handler fires
   unless the event carries an acting user.
 - Ordering: per stream, events process in commit-seq order. Across
   streams in one space, wave order (arrival). No global ordering claim
-  beyond the space's commit sequence — same as today.
+  beyond the space's commit sequence — same as today. A consequence
+  takes effect at its event's place in the firing session's order: a
+  write that session committed after the event supersedes the
+  consequence writes it overwrote (serving-loop.md §3d).
 - **Terminal positions.** An error consequence, a T3 dropped notice,
   and a `needs-attention` notice each complete processing at the event's
   arrival position even when the handler produces no domain writes. A
@@ -512,8 +515,13 @@ loop's duty).
   message, `eventWatermark` advances past it, and the unconditional
   dropped-write report still fires. A crash while preparing the commit
   is a distinct `CommitPreparationError`; it is a delivery failure,
-  not a CFC verdict. An explicit handler abort is a handler-error
-  consequence, not an infrastructure retry.
+  not a CFC verdict. So is a CFC refusal that is not wholly a verdict,
+  which keeps the retryable `StorageTransactionAborted` name: prepare
+  could not evaluate an input the transaction did not have, or the
+  prepared state drifted (`packages/runner/src/cfc/verdict-reason.ts`),
+  and a fresh attempt may land the write that sealing an error would
+  end. An explicit handler abort is a handler-error consequence, not an
+  infrastructure retry.
 - **Handler body DID NOT RUN — not a consequence (RULED 2026-08-27;
   mark/effects atomicity, the a04 write-side member).** A served
   dispatch whose handler body never executed — the runner's
@@ -594,7 +602,15 @@ loop's duty).
   active interval without erasing the accumulated time. A served
   `RetryImmediately` used for in-space name resolution is settlement
   and never creates or ages this checkpoint. Only a committed handler
-  consequence or terminal notice clears it.
+  consequence or terminal notice clears it. A commit-preparation
+  failure carries §2's arrival-order barrier as the other deferral arms
+  do: every later same-space arrival already queued behind the failed
+  head defers with it. A head retried after such a failure is the last
+  entry its drain pass queues, and a pass that finds that retry still
+  in flight queues nothing behind it, so the events behind it wait in
+  the drain for the pass its outcome arms rather than for the backstop
+  rescan a swept event waits for. An input wake such a pass takes is
+  kept for the attempt after the one in flight.
 - The failed-state budget is 60 seconds. This terminal-disposition
   budget is an explicit exception to the repository's no-timeout rule:
   it starts only after an observed failure, never cancels an in-flight
@@ -733,6 +749,22 @@ loop's duty).
   which is the honest outcome once the race window is long past. The
   test reads whether the piece has a graph installed, not what its
   start reported.
+
+  A served event's piece can also be one that an EARLIER arrival's
+  handler creates. A handler that instantiates a piece hands the
+  sender's speculative echo the new piece's streams before the server
+  has run that handler, so the sender's next event can target a stream
+  no stored document holds yet. A not-started verdict for that event
+  is then reached against state that §2's arrival order has not
+  produced: the run raced the earlier event, and this predicate does
+  not apply. So a deferral spends the deferral budget only when no
+  entry that arrived earlier in the same space is still pending. Held
+  behind one, the entry keeps the budget it had and arms no backstop:
+  it is re-drained by input, or by the wave that commits the earlier
+  entry's consequence while it is still pending. The earliest pending
+  entry always spends the budget, so an event addressing a piece that
+  nothing creates still hardens into this drop once the events ahead
+  of it have their consequences.
 
   With server execution off, a CLIENT event — one with no served
   carriage, so no durable entry for a later pass to re-drain, and no

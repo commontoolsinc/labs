@@ -14,7 +14,6 @@ import {
   Writable,
 } from "commonfabric";
 import {
-  childNodes,
   clickButton,
   clickInRow,
   findNode,
@@ -25,14 +24,7 @@ import {
   readValue,
   textContent,
 } from "../test/vnode-helpers.ts";
-import {
-  type ActivityCounters,
-  type MessagesValue,
-  type ReactionList,
-  type RequestMemo,
-  type SentActivity,
-  type UsedTime,
-} from "./room-records.tsx";
+import { type MessagesValue } from "./room-records.tsx";
 import { FabriChatRoomCore } from "./room.tsx";
 import {
   CHAT_SEND_ACTION,
@@ -64,33 +56,27 @@ const displayOf = (node: unknown) =>
     (propValue(node, "style") as { display?: unknown } | undefined)?.display,
   );
 
-/**
- * The row showing `text` in the list `id` under `root`: the first node inside
- * the list that carries `hidden` and the text.
- */
+/** Whether `node` is a message row, a `cf-hover-reveal`, showing `text`. */
+const isRowShowing = (text: string) => (node: unknown): boolean => {
+  const value = readValue(node) as { name?: unknown } | undefined;
+  return readValue(value?.name) === "cf-hover-reveal" && hasText(node, text);
+};
+
+/** The row showing `text` in the list `id` under `root`. */
 const rowIn = (root: unknown, id: string, text: string): unknown =>
-  childNodes(findNodeById(root, id))
-    .map((child) =>
-      findNode(
-        child,
-        (node) => propValue(node, "hidden") === true && hasText(node, text),
-      )
-    )
-    .find((row) => row !== undefined);
+  findNode(findNodeById(root, id), isRowShowing(text));
 
 /**
- * How each of `texts`' rows in the list `id` is displayed, in their order;
- * `missing` for a text the list holds no row for.
+ * Which of `texts` have a row in the list `id`, in their order: `row` for a
+ * text the list holds a row for, `missing` for one it doesn't.
  */
-const rowDisplays = (
+const rowsIn = (
   root: unknown,
   id: string,
   texts: readonly string[],
 ): string =>
-  texts.map((text) => {
-    const row = rowIn(root, id, text);
-    return row === undefined ? "missing" : String(displayOf(row));
-  }).join(" ");
+  texts.map((text) => rowIn(root, id, text) === undefined ? "missing" : "row")
+    .join(" ");
 
 /** The link to its thread that the main row showing `text` carries. */
 const threadLink = (root: unknown, text: string): unknown =>
@@ -119,11 +105,6 @@ export default pattern(() => {
   const records = {
     about: { kind: "group" as const },
     messages,
-    reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
-    requests: Writable.of<RequestMemo[]>([]),
-    usedTimes: Writable.of<UsedTime[]>([]),
-    activity: Writable.of<SentActivity[]>([]),
-    counters: Writable.of<ActivityCounters[]>([]),
   };
   const alice = FabriChatRoomCore(
     { myProfile: aliceProfile, ...records } as RoomArg,
@@ -148,15 +129,15 @@ export default pattern(() => {
       // list holds no row, and neither roots one.
       {
         assertion: assert(() =>
-          rowDisplays(alice[UI], MAIN, ["Root", "Other"]) === "block block" &&
-          rowDisplays(alice[UI], THREAD, ["Root", "Other"]) ===
+          rowsIn(alice[UI], MAIN, ["Root", "Other"]) === "row row" &&
+          rowsIn(alice[UI], THREAD, ["Root", "Other"]) ===
             "missing missing" &&
           threadLinkText(alice[UI], "Root") === "none" &&
           threadLinkText(alice[UI], "Other") === "none"
         ),
       },
 
-      // A reply in the open thread stays out of the main conversation, and
+      // A reply in the open thread has no row in the main conversation, and
       // its root counts it. The thread's list holds the thread's rows alone.
       { action: action(() => clickInRow(alice[UI], "Root", "Thread")) },
       {
@@ -166,10 +147,10 @@ export default pattern(() => {
       },
       {
         assertion: assert(() =>
-          rowDisplays(alice[UI], MAIN, ALL.slice(0, 3)) ===
-            "block block none" &&
-          rowDisplays(alice[UI], THREAD, ALL.slice(0, 3)) ===
-            "block missing block" &&
+          rowsIn(alice[UI], MAIN, ALL.slice(0, 3)) ===
+            "row row missing" &&
+          rowsIn(alice[UI], THREAD, ALL.slice(0, 3)) ===
+            "row missing row" &&
           threadLinkText(alice[UI], "Root") === "inline-flex 1 reply" &&
           threadLinkText(alice[UI], "Other") === "none"
         ),
@@ -181,8 +162,7 @@ export default pattern(() => {
       },
       {
         assertion: assert(() =>
-          rowDisplays(alice[UI], THREAD, ALL) ===
-            "block missing block block" &&
+          rowsIn(alice[UI], THREAD, ALL) === "row missing row row" &&
           threadLinkText(alice[UI], "Root") === "inline-flex 2 replies"
         ),
       },
@@ -193,9 +173,8 @@ export default pattern(() => {
       // their main conversation shows the same rows and the same count.
       {
         assertion: assert(() =>
-          rowDisplays(bob[UI], THREAD, ALL) ===
-            "missing missing missing missing" &&
-          rowDisplays(bob[UI], MAIN, ALL) === "block block none none" &&
+          rowsIn(bob[UI], THREAD, ALL) === "missing missing missing missing" &&
+          rowsIn(bob[UI], MAIN, ALL) === "row row missing missing" &&
           threadLinkText(bob[UI], "Root") === "inline-flex 2 replies"
         ),
       },
@@ -205,8 +184,7 @@ export default pattern(() => {
       { action: action(() => clickInRow(alice[UI], "Other", "Thread")) },
       {
         assertion: assert(() =>
-          rowDisplays(alice[UI], THREAD, ALL) ===
-            "missing block missing missing"
+          rowsIn(alice[UI], THREAD, ALL) === "missing row missing missing"
         ),
       },
       { action: action(() => clickButton(alice[UI], "Close")) },
@@ -214,7 +192,7 @@ export default pattern(() => {
       // the room's OWNER, which this lane's user is.
       {
         assertion: assert(() =>
-          rowDisplays(alice[UI], THREAD, ALL) ===
+          rowsIn(alice[UI], THREAD, ALL) ===
             "missing missing missing missing" &&
           controlDisplay(alice[UI], "Root", "Edit") === "inline-flex" &&
           controlDisplay(alice[UI], "Other", "Edit") === "none" &&

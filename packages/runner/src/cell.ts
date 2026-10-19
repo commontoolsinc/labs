@@ -101,8 +101,8 @@ import { checkSqliteWriteCeiling } from "./builtins/sqlite/write-ceiling.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import { ContextualFlowControl, declaredSchemaScope } from "./cfc.ts";
 import {
+  cfcAcquisitionViewForDereferenceTraces,
   type CfcLabelView,
-  cfcLabelViewForDereferenceTraces,
   cloneCfcLabelView,
   mergeCfcLabelViews,
   rebaseCfcLabelView,
@@ -127,7 +127,7 @@ import {
 } from "./cfc/ui-contract.ts";
 import { createRef } from "./create-ref.ts";
 import { runtimeWritePolicyAuthorization } from "./cfc/types.ts";
-import { diffAndUpdate } from "./data-updating.ts";
+import { diffAndAppend, diffAndUpdate } from "./data-updating.ts";
 import {
   findAndInlineDataUriLinks,
   portableSnapshotId,
@@ -2975,12 +2975,25 @@ export class CellImpl<T extends FabricValue>
     // The append's destination snapshot supplies storage positions without
     // exposing content or length to the caller. It joins neither observed
     // labels nor conflict preconditions; explicit handler reads retain both.
-    let currentValue = this.#tx.readValueOrThrow(resolvedLink, {
+    const currentValue = this.#tx.readValueOrThrow(resolvedLink, {
       meta: { ...mergeableOpRead, ...writeDestinationRead },
     });
     const cause = this.#frame?.cause;
 
-    if (!Array.isArray(currentValue)) {
+    if (Array.isArray(currentValue)) {
+      // The anchor id source makes sure each pushed object gets its own doc,
+      // its id drawn from the frame this cell was made in
+      // (`frameAnchorIds()`).
+      diffAndAppend(
+        this.#runtime,
+        this.#tx,
+        resolvedLink,
+        currentValue,
+        values,
+        cause,
+        frameAnchorIds(this.#frame),
+      );
+    } else {
       if (currentValue !== undefined) {
         throw new Error(
           "Cell.push() or Cell.pushAll() requires transaction and array " +
@@ -2999,9 +3012,7 @@ export class CellImpl<T extends FabricValue>
         cause,
       );
       const resolvedSchema = resolveSchema(this.schema);
-      // Annotated rather than inferred: `processDefaultValue()` returns `any`,
-      // and assigning that back to `currentValue` would discard the narrowing
-      // this block exists to establish.
+      // Annotated rather than inferred: `processDefaultValue()` returns `any`.
       const created: FabricValue[] =
         isObjectOrArray(resolvedSchema) && Array.isArray(resolvedSchema.default)
           ? processDefaultValue(
@@ -3011,35 +3022,17 @@ export class CellImpl<T extends FabricValue>
             resolvedSchema.default,
           )
           : [];
-      // From here on `currentValue` is the array just created, not what the
-      // read returned.
-      currentValue = created;
+      // As above, each pushed object gets its own doc.
+      diffAndUpdate(
+        this.#runtime,
+        this.#tx,
+        resolvedLink,
+        [...created, ...values],
+        cause,
+        undefined,
+        frameAnchorIds(this.#frame),
+      );
     }
-
-    // Read-only: a value that came from storage is a `FabricArray`, which is a
-    // `ReadonlyArray`, and though a freshly created one is not, this method
-    // only ever reads what it finds -- the replacement is `combined`, below.
-    const array: readonly unknown[] = currentValue;
-
-    // Append the new values to the array, preserving sparse holes in the original.
-    const combined = new Array(array.length + values.length);
-    array.forEach((v, i) => {
-      combined[i] = v;
-    });
-    for (let i = 0; i < values.length; i++) {
-      combined[array.length + i] = values[i];
-    }
-    // The anchor id source makes sure each pushed object gets its own doc,
-    // its id drawn from the frame this cell was made in (`frameAnchorIds()`).
-    diffAndUpdate(
-      this.#runtime,
-      this.#tx,
-      resolvedLink,
-      combined,
-      cause,
-      undefined,
-      frameAnchorIds(this.#frame),
-    );
 
     // Record the append intent so the commit emits a tail-relative, mergeable
     // operation instead of a position diffed against a possibly-stale base.
@@ -3083,6 +3076,7 @@ export class CellImpl<T extends FabricValue>
       meta: mergeableOpRead,
     });
     const cause = this.#frame?.cause;
+    const stored = Array.isArray(currentValue);
 
     if (!Array.isArray(currentValue)) {
       if (currentValue !== undefined) {
@@ -3161,15 +3155,27 @@ export class CellImpl<T extends FabricValue>
     }
     // The anchor id source makes sure each added object gets its own doc,
     // its id drawn from the frame this cell was made in (`frameAnchorIds()`).
-    diffAndUpdate(
-      this.#runtime,
-      this.#tx,
-      resolvedLink,
-      [...existing, ...toAdd],
-      cause,
-      undefined,
-      frameAnchorIds(this.#frame),
-    );
+    if (stored) {
+      diffAndAppend(
+        this.#runtime,
+        this.#tx,
+        resolvedLink,
+        existing,
+        toAdd,
+        cause,
+        frameAnchorIds(this.#frame),
+      );
+    } else {
+      diffAndUpdate(
+        this.#runtime,
+        this.#tx,
+        resolvedLink,
+        [...existing, ...toAdd],
+        cause,
+        undefined,
+        frameAnchorIds(this.#frame),
+      );
+    }
     this.#tx.recordMergeableOp?.(resolvedLink, {
       op: "add-unique",
       count: toAdd.length,
@@ -3795,7 +3801,10 @@ export class CellImpl<T extends FabricValue>
       "value",
       { markIfcCrossings: true },
     );
-    const dereferenceView = cfcLabelViewForDereferenceTraces(
+    // The handle carries how it was obtained, the restrictions of the slots
+    // the resolution left, and nothing of the document it names: those
+    // labels are read from the document when the handle is followed.
+    const dereferenceView = cfcAcquisitionViewForDereferenceTraces(
       readTx,
       readTx.getCfcState().dereferenceTraces.slice(tracesBefore),
     );
@@ -5119,6 +5128,21 @@ export function deepTraverse(
   }
 }
 
+/**
+ * Returns `link` with its path rewritten to start at a snapshot of the deepest
+ * inline array element it passes through, or `link` itself where it passes
+ * through none. An inline element is an object or array stored in place in an
+ * array rather than linked to, and the snapshot gives the resolved cell an
+ * identity that stays with the element's content.
+ *
+ * The walk reads, without recursing, each container it steps into and each
+ * array element it passes, and nothing else of the document: what it decides
+ * rests on those containers' shapes and those elements' kinds alone. A
+ * recursive read of the whole document would put every other writer of the
+ * document into the transaction's conflict set, among them every append to a
+ * list beside the one the link names. The element a snapshot is taken of is
+ * read whole, since the snapshot's identity depends on all of it.
+ */
 function maybeConvertArrayPathToImmutableLink(
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
@@ -5127,17 +5151,6 @@ function maybeConvertArrayPathToImmutableLink(
     return link;
   }
 
-  let rootValue: FabricValue;
-  try {
-    rootValue = tx.readValueOrThrow({ ...link, path: [] }, {
-      meta: ignoreReadForScheduling,
-    });
-  } catch {
-    return link;
-  }
-
-  let current: FabricValue = rootValue;
-  const prefix: string[] = [];
   let candidate:
     | {
       value: FabricValue;
@@ -5146,32 +5159,30 @@ function maybeConvertArrayPathToImmutableLink(
     }
     | undefined;
 
-  for (let i = 0; i < link.path.length; i++) {
-    if (!isObjectOrArray(current)) {
-      break;
-    }
-
-    const segment = link.path[i];
-    let next: FabricValue;
-
-    if (Array.isArray(current)) {
-      if (!isArrayIndexPropertyName(segment)) {
-        break;
-      }
-      next = (current as unknown as Record<string, FabricValue>)[segment];
-      if (isObjectOrArray(next) && !isCellLink(next)) {
+  const shapeRead = { meta: ignoreReadForScheduling, nonRecursive: true };
+  try {
+    let container = tx.readValueOrThrow({ ...link, path: [] }, shapeRead);
+    for (let i = 0; i < link.path.length; i++) {
+      if (!isObjectOrArray(container)) break;
+      const inArray = Array.isArray(container);
+      if (inArray && !isArrayIndexPropertyName(link.path[i])) break;
+      // A link ending at an object's key passes through no element there,
+      // whatever the key holds.
+      const last = i === link.path.length - 1;
+      if (last && !inArray) break;
+      const slot = link.path.slice(0, i + 1);
+      const next = tx.readValueOrThrow({ ...link, path: slot }, shapeRead);
+      if (inArray && isObjectOrArray(next) && !isCellLink(next)) {
         candidate = {
           value: next,
-          path: [...prefix, segment],
+          path: slot,
           remainingPath: link.path.slice(i + 1),
         };
       }
-    } else {
-      next = (current as Record<string, FabricValue>)[segment];
+      container = next;
     }
-
-    prefix.push(segment);
-    current = next;
+  } catch {
+    return link;
   }
 
   if (candidate === undefined) {

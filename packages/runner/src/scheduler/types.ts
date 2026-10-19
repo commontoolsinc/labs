@@ -177,6 +177,27 @@ export type SettleStatsHistoryEntry = {
   stats: SettleStats;
 };
 
+/** Sizes of the scheduler's live tables, each a collection's own count. */
+export type SchedulerSizes = {
+  /** Registered and active reactive nodes, effects and computations alike. */
+  nodes: number;
+
+  /** Active nodes that are `invalid` or `never-ran`. */
+  invalidNodes: number;
+
+  /** Events queued and not yet run. */
+  eventQueue: number;
+
+  /** Actions marked to run on the next pass. */
+  pendingActions: number;
+
+  /** Background tasks not yet settled. */
+  backgroundTasks: number;
+
+  /** Actions with compute-time statistics held, bounded. */
+  actionStats: number;
+};
+
 export type ActionRunTraceEntry = {
   recordedAt: number;
   actionId: string;

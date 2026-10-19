@@ -22,6 +22,7 @@ declare global {
   var $EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION: string | undefined;
   var $EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS: string | undefined;
   var $EXPERIMENTAL_READER_SCHEMA_PRECEDENCE: string | undefined;
+  var $EXPERIMENTAL_LOCAL_SESSION_DOCUMENTS: string | undefined;
   var $EXPERIMENTAL_SHARED_MEMORY_CONNECTION: string | undefined;
   var $EXPERIMENTAL_LOCAL_FOLD: string | undefined;
 }
@@ -126,6 +127,11 @@ export const EXPERIMENTAL = {
   // value the deployment publishes unless this define pins it
   // ({@link experimentalForDeployment}). The define is the rollback and CI
   // lever, as for the other flags; it is unset in a release build.
+  localSessionDocuments: flagValue(
+    typeof $EXPERIMENTAL_LOCAL_SESSION_DOCUMENTS === "string"
+      ? $EXPERIMENTAL_LOCAL_SESSION_DOCUMENTS
+      : undefined,
+  ),
   sharedMemoryConnection: flagValue(
     typeof $EXPERIMENTAL_SHARED_MEMORY_CONNECTION === "string"
       ? $EXPERIMENTAL_SHARED_MEMORY_CONNECTION

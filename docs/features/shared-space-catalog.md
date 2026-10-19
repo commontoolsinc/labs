@@ -192,8 +192,10 @@ restoration supersedes a prior room tombstone; catalog archive or removal
 supersedes a saved room record. Registration takes a standalone room's title,
 direct room or group, and whenever the manager hears of a listed room, from a
 join or an acceptance, it retitles the entry where the room's title has moved
-on. A room's retitle tells the retitling member's manager at once; another
-member's catalog follows on their manager's next event for that room.
+on, except for the join a room sends with each message or reaction, which
+never changes the title. A room's retitle tells the retitling member's manager
+at once; another member's catalog follows on their manager's next other event
+for that room, such as opening it.
 
 Other saved spaces expose conversations through their roots' explicit
 `chatRoom` declarations. FabriChat keeps choices about those individual rooms

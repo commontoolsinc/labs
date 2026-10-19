@@ -24,7 +24,7 @@ import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectOrArray, isPlainObject } from "@commonfabric/utils/types";
 
 import type { CellScope } from "../builder/types.ts";
 import {
@@ -87,6 +87,7 @@ import {
   type TrustSnapshot,
   type WritePolicyInput,
 } from "../cfc/mod.ts";
+import { withoutEnvelopeStabilityToken } from "../cfc/envelope-stability-reason.ts";
 import { prepareBoundaryCommitSteps } from "../cfc/prepare.ts";
 import { CFC_POLICY_MANIFEST_ID_PREFIX } from "../cfc/policy.ts";
 import {
@@ -122,6 +123,7 @@ import {
   rawMetaWriteAuthorized,
   storedMetaFields,
 } from "../meta-seam.ts";
+import type { ModuleDelegationSnapshot } from "../module-delegations.ts";
 import {
   isReservedSibling,
   RESERVED_SIBLINGS,
@@ -338,6 +340,14 @@ export type CfcInstrumentationHooks = {
     terminal: boolean;
   }): void;
 
+  /**
+   * The commit boundary refused this transaction before it reached storage.
+   * `reasons` are the plain reason texts that refused it; a refusal the
+   * boundary decides on its own — a relevant transaction that never
+   * prepared, a prepared digest that changed — names that one cause.
+   */
+  onCommitRejected?(reasons: readonly string[]): void;
+
   onDigestInvalidation?(reason: string): void;
   onOutboxFlush?(effect: PostCommitSideEffect): void;
   onSinkDedupHit?(key: string): void;
@@ -392,14 +402,33 @@ type ActivitySnapshot = {
  * whose digest may never be computed: a value the hash refuses throws here,
  * where the snapshot is taken. The hash is kept by the frozen object, so a
  * `meta` many reads share costs one lookup per read.
+ *
+ * A plain object with no string-keyed property is frozen and not hashed. The
+ * hash reads no symbol-keyed property, so such an object hashes as the empty
+ * record, which it admits. A `meta` holding only the runtime's read markers is
+ * one, and most reads carry a `meta` of their own, so hashing each would keep
+ * a hash beside every read of every snapshot and admit nothing.
  */
 function sealJournalMembers(members: object): void {
   for (const key in members) {
     const member = (members as Record<string, unknown>)[key];
     const kind = typeof member;
     if (kind === "string" || kind === "number" || kind === "boolean") continue;
-    hashOf(deepFreeze(member) as FabricValue);
+    const frozen = deepFreeze(member);
+    if (isEmptyPlainRecord(frozen)) continue;
+    hashOf(frozen as FabricValue);
   }
+}
+
+/**
+ * Helper for `sealJournalMembers()`: whether `value` is an object whose
+ * prototype is `Object.prototype` and which has no string-keyed property of
+ * its own, enumerable or not. The hash refuses an object without a prototype,
+ * so one of those is not empty in the sense the hash admits.
+ */
+function isEmptyPlainRecord(value: unknown): boolean {
+  return isPlainObject(value, false) &&
+    Object.getOwnPropertyNames(value).length === 0;
 }
 
 // Read-only view of the transaction's CFC state, returned by getCfcState().
@@ -447,20 +476,42 @@ const throwCfcReadOnly = (): never => {
   );
 };
 
+/**
+ * The Map intrinsics the read-only view dispatches through, captured when
+ * this module loads, so a `Map.prototype` member replaced afterwards cannot
+ * answer a view's read with the backing map.
+ */
+const mapIntrinsics = {
+  get: Map.prototype.get,
+  has: Map.prototype.has,
+  keys: Map.prototype.keys,
+  forEach: Map.prototype.forEach,
+  entries: Map.prototype.entries,
+  values: Map.prototype.values,
+  size: Object.getOwnPropertyDescriptor(Map.prototype, "size")!.get!,
+};
+
+const objectToString = Object.prototype.toString;
+
 // Exported for tests: the bypass vectors (descriptor recovery, Map
 // iteration leaks) are pinned by unit-testing the helper directly.
 export const readOnlyCfcView = <T>(value: T): T => {
   if (!isObjectOrArray(value)) return value;
-  if (Object.isFrozen(value)) return value;
+  // A frozen Map is not immutable: freezing fixes its properties and leaves
+  // its entries writable, so a Map is wrapped whether frozen or not.
+  if (!(value instanceof Map) && Object.isFrozen(value)) return value;
   const cached = readOnlyCfcViews.get(value);
   if (cached !== undefined) return cached as T;
   let view: object;
   if (value instanceof Map) {
     // Map methods work on an internal slot, so they must be called on the
-    // real Map, not the proxy. Read results are re-wrapped, and every API
-    // that would surface the backing map or its values raw is intercepted:
-    // forEach's third callback argument is the view, and get / entries /
-    // values / iteration yield wrapped values (cubic round 3 on #4517).
+    // real Map, not the proxy. The view exposes a Map's read surface and
+    // nothing else: each read is re-implemented over the backing map with
+    // its results re-wrapped (forEach's third callback argument is the view,
+    // and get / entries / values / iteration yield wrapped values), and no
+    // other function reaches a caller, since one bound to the backing map
+    // runs against it — inherited `valueOf` returns its receiver, and
+    // `__defineGetter__` installs a getter whose `this` is the receiver.
     // Keys pass raw on purpose — they are the frozen records whose
     // reference identity callers key on.
     const target = value as Map<unknown, unknown>;
@@ -471,37 +522,55 @@ export const readOnlyCfcView = <T>(value: T): T => {
           case "delete":
           case "clear":
             return throwCfcReadOnly;
+          case "size":
+            return mapIntrinsics.size.call(target);
+          case "has":
+            return (key: unknown) => mapIntrinsics.has.call(target, key);
+          case "keys":
+            return () => mapIntrinsics.keys.call(target);
+          case "valueOf":
+            return () => mapView;
+          case "toString":
+          case "toLocaleString":
+            return () => objectToString.call(target);
           case "get":
-            return (key: unknown) => readOnlyCfcView(target.get(key));
+            return (key: unknown) =>
+              readOnlyCfcView(mapIntrinsics.get.call(target, key));
           case "forEach":
             return (
               cb: (v: unknown, k: unknown, m: unknown) => void,
               thisArg?: unknown,
-            ) =>
-              target.forEach((v, k) =>
-                cb.call(thisArg, readOnlyCfcView(v), k, mapView)
+            ) => {
+              mapIntrinsics.forEach.call(
+                target,
+                (v, k) => cb.call(thisArg, readOnlyCfcView(v), k, mapView),
               );
+            };
           case "entries":
           case Symbol.iterator:
             return function* () {
-              for (const [k, v] of target.entries()) {
+              for (const [k, v] of mapIntrinsics.entries.call(target)) {
                 yield [k, readOnlyCfcView(v)];
               }
             };
           case "values":
             return function* () {
-              for (const v of target.values()) yield readOnlyCfcView(v);
+              for (const v of mapIntrinsics.values.call(target)) {
+                yield readOnlyCfcView(v);
+              }
             };
         }
         const member = Reflect.get(target, prop, target);
         return typeof member === "function"
-          ? member.bind(target)
+          ? undefined
           : readOnlyCfcView(member);
       },
       set: throwCfcReadOnly,
       defineProperty: throwCfcReadOnly,
       deleteProperty: throwCfcReadOnly,
       setPrototypeOf: throwCfcReadOnly,
+      // Without this trap `Object.freeze(view)` freezes the backing map.
+      preventExtensions: throwCfcReadOnly,
     });
     view = mapView;
   } else {
@@ -719,6 +788,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    * runtime's.
    */
   #cfcServingIdentityPinned = false;
+
+  /**
+   * Write-once pin for the client identity, set on the first call (the
+   * `Runtime`'s, in `edit()`) whatever its value, so that code holding the
+   * transaction cannot name another principal as the one its scoped writes
+   * are keyed by.
+   */
+  #cfcClientIdentityPinned = false;
 
   #cfcModuleDelegationsPinned = false;
 
@@ -1387,32 +1464,30 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   /**
-   * Sets the module-update delegations, which are runtime-learned trust state.
-   * Snapshotted and pinned once at transaction creation: later module loads
-   * affect future transactions, never an authorization decision already in
-   * flight.
+   * Sets the client runtime's own identity: the principal its storage session
+   * authenticates as. `undefined` on the serving posture. Write-once, like the
+   * serving identity.
    */
-  setCfcModuleDelegations(
-    delegations: ReadonlyMap<
-      MemorySpace,
-      ReadonlyMap<string, readonly string[]>
-    >,
-  ): void {
+  setCfcClientIdentity(identity: string | undefined): void {
+    if (this.#cfcClientIdentityPinned) return;
+    this.#cfcClientIdentityPinned = true;
+    this.#cfcState.clientIdentity = identity;
+  }
+
+  /**
+   * Sets the module-update delegations, which are runtime-learned trust
+   * state, and pins them: the first call, the `Runtime`'s in `edit()`, is
+   * the one that counts, so later module loads affect future transactions,
+   * never an authorization decision already in flight. The snapshot is held
+   * by reference. The `Runtime` publishes a new one for every change and
+   * never mutates a published one, and `getCfcState()` hands it out
+   * read-only, so the reference pins it as a copy would.
+   */
+  setCfcModuleDelegations(delegations: ModuleDelegationSnapshot): void {
     if (this.#cfcModuleDelegationsPinned) return;
     this.#noteCfcActivity();
     this.#cfcModuleDelegationsPinned = true;
-    const snapshot = new Map<
-      MemorySpace,
-      ReadonlyMap<string, readonly string[]>
-    >();
-    for (const [space, spaceDelegations] of delegations) {
-      const spaceSnapshot = new Map<string, readonly string[]>();
-      for (const [identity, predecessors] of spaceDelegations) {
-        spaceSnapshot.set(identity, [...predecessors]);
-      }
-      if (spaceSnapshot.size > 0) snapshot.set(space, spaceSnapshot);
-    }
-    this.#cfcState.moduleDelegations = snapshot;
+    this.#cfcState.moduleDelegations = delegations;
   }
 
   markCfcRelevant(reason?: string): void {
@@ -3120,12 +3195,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    * captured before the commit carries. A second pass finds the transaction
    * prepared and does nothing.
    *
-   * Two states take none of it. A transaction that is no longer open cannot
-   * commit, and everything here reaches storage through it: the flow probe
-   * reads stored metadata, and `prepareCfc` reads and writes the derived
+   * Three states take none of it. A transaction that is no longer open
+   * cannot commit, and everything here reaches storage through it: the flow
+   * probe reads stored metadata, and `prepareCfc` reads and writes the derived
    * label map. A read-only transaction is skipped because `commit()` skips
    * the whole step for one, so both call sites reach the same answer about
-   * it; a transaction that admits no writes has nothing to stamp anyway.
+   * it; a transaction that admits no writes has nothing to stamp anyway. And
+   * a transaction its seal destination discards reaches the enforcement
+   * ladder unprepared, since `commit()` skips the ladder for one too: its
+   * writes reach no store and no reader.
    */
   prepareForCommit(): void {
     if (!this.#needsCfcPreparation()) return;
@@ -3173,12 +3251,41 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
+  /**
+   * Whether this transaction's seal destination drops its writes rather than
+   * sealing them. The preparation a commit makes, `prepareForCommit()` and
+   * its cooperative form, skips the boundary pass for such a transaction, and
+   * the commit skips its enforcement: the writes reach no store and no
+   * reader. Such a run can also have read state no commit would see, as a
+   * speculative run does once its intent's echo has retired and before the
+   * authoritative writes arrive, and the pass would refuse what it read there.
+   * `prepareCfc()` still runs the pass, for a caller that asks for the verdict
+   * and its digest outright.
+   *
+   * The destination answers for the moment it is asked, so `#commit()` asks
+   * again instead of trusting the answer a preparation ahead of it got. A
+   * destination that said `true` then and says `false` now, as the
+   * speculation overlay does once it has pruned the intent from its bounded
+   * memory, gets the pass at commit. One that says `true` now is handed the
+   * transaction with no `await` between its answer and its seal, so nothing
+   * changes between the two. The other way round, a destination that said
+   * `false` at preparation and says `true` now has had the pass run and
+   * report what it refused; the commit does not fail on that verdict, and
+   * hands the destination the transaction, whose writes go nowhere.
+   */
+  #discardedBySealDestination(): boolean {
+    return this.#sealDestination?.discards?.(this) === true;
+  }
+
   /** Settles relevance before choosing how to drive the boundary checks. */
   #needsCfcPreparation(): boolean {
     if (this.tx.status().status !== "ready") {
       return false;
     }
     if (this.isReadOnly()) {
+      return false;
+    }
+    if (this.#discardedBySealDestination()) {
       return false;
     }
     if (this.#cfcState.enforcementMode === "disabled") {
@@ -4073,7 +4180,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (readOnly) {
       this.tx.clearReadOnly?.();
     }
-    if (!readOnly) {
+    const discarded = this.#discardedBySealDestination();
+    if (!readOnly && !discarded) {
       // Before the CFC probes and the prepared-digest recheck: writes added
       // here must precede any prepare, and the dedupe set makes this a
       // no-op for transactions prepareCfc() already covered.
@@ -4099,6 +4207,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         this.#cfcState.prepare.status !== "prepared"
       ) {
         if (this.#commitPreparationCrash !== undefined) {
+          this.#cfcInstrumentation.onCommitRejected?.([
+            `CFC commit preparation crashed: ${this.#commitPreparationCrash}`,
+          ]);
           return this.#rejectCommitBeforeStorage({
             error: {
               name: "CommitPreparationError",
@@ -4120,7 +4231,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         const reasons = this.#cfcState.prepare.status === "invalidated"
           ? this.#cfcState.prepare.reasons
           : [];
-        const detail = reasons.length > 0 ? `: ${plainReason(reasons[0])}` : "";
+        // The message is for a person, so it carries neither the verdict tag
+        // nor the envelope-stability token; `reasons` below keeps the token,
+        // which is where a consumer classifies the refusal.
+        const detail = reasons.length > 0
+          ? `: ${withoutEnvelopeStabilityToken(plainReason(reasons[0]))}`
+          : "";
         const plainReasons = reasons.map(plainReason);
         // Pair each detail to a reason that actually refused. A gate records
         // its detail when it decides, which is also how it records an
@@ -4146,6 +4262,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             }),
           );
         }
+        this.#cfcInstrumentation.onCommitRejected?.(
+          plainReasons.length > 0
+            ? plainReasons
+            : ["relevant transaction was not prepared"],
+        );
         const message =
           `${CFC_ENFORCEMENT_REJECTION_PREFIX}: relevant transaction was not prepared${detail}`;
         // WATCH(cfc-verdict): a refusal is terminal only when EVERY reason is
@@ -4188,6 +4309,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
                 dials: this.#cfcDials(),
               }),
             );
+            this.#cfcInstrumentation.onCommitRejected?.([
+              "prepared digest changed",
+            ]);
             return this.#rejectCommitBeforeStorage({
               error: {
                 name: "StorageTransactionAborted",

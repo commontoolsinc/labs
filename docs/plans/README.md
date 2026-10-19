@@ -28,6 +28,13 @@ a record: archive it to `docs/history/plans/` following the procedure in
 - [Compact CFC label maps](compact-cfc-label-maps.md) proposes shared label
   subtrees, graph-aware policy queries, and a reader-first stored-format migration
   to bound the cost of staged reference diamonds.
+- [Independent reference labels](cfc-independent-reference-labels.md) moves a
+  link write to the specified contract (§8.2, §8.12.8): the slot persists the
+  creating attempt's own label and nothing copied from the target, a label
+  envelope beside a mergeable append describes the committed list, and a
+  specs ruling retires the `LinkReference` atom, after which the runtime
+  stopped minting and reading it. Legacy entries stay as conservative
+  restrictions; no migration runs.
 - [Release gates without an integrity union](cfc-release-gate-integrity.md)
   keeps one consumed value's evidence from releasing another value's clause:
   the write, sink and display gates run value-intrinsic rules at each location
@@ -156,6 +163,12 @@ a record: archive it to `docs/history/plans/` following the procedure in
   the loop on purpose. The
   backoff Topic 911 waits for, and the first of Topic 913's three guardrails.
   Always on, in every runtime.
+- [Durable history of new real test failures and a bounded
+  aggregate](durable-new-real-test-failure-history.md) keeps every new real
+  test failure the test-selection publisher has credited a test with through
+  a bootstrap, a rename, and an outage, and stops the publisher's aggregate
+  growing with the age of the store. It is built, and waits for the checks
+  its first run after landing answers.
 - [Memory `apply-op`](memory-apply-op.md) sequences the editor-neutral
   collaborative-field substrate, the first CodeMirror codec and editor
   integration, and the checkpoints and review gates required before a future

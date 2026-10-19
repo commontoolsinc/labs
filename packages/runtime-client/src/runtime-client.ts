@@ -58,6 +58,7 @@ import {
   EventNeedsAttentionNotification,
   InitializationData,
   type LoggerCountsData,
+  type LoggerCountsResponse,
   type LoggerFlagsData,
   type LoggerMetadata,
   type LoggerTimingData,
@@ -1526,6 +1527,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     timing: LoggerTimingData;
     flags: LoggerFlagsData;
     cfc: Record<string, number>;
+    compileCache: Record<string, number>;
+    sizes: LoggerCountsResponse["sizes"];
   }> {
     const res = await this.#conn.request<RequestType.GetLoggerCounts>({
       type: RequestType.GetLoggerCounts,
@@ -1536,6 +1539,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       timing: res.timing,
       flags: res.flags,
       cfc: res.cfc,
+      compileCache: res.compileCache,
+      sizes: res.sizes,
     };
   }
 

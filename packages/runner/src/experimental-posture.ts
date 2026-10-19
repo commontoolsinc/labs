@@ -63,6 +63,7 @@ export const EXPERIMENTAL_ENV_VARS = {
   // declared arm. Env-reachable so every server-side process can be flipped
   // either way, and an explicit value always wins over the constant.
   serverExecution: "EXPERIMENTAL_SERVER_EXECUTION",
+  localSessionDocuments: "EXPERIMENTAL_LOCAL_SESSION_DOCUMENTS",
   viewScopedReplication: "EXPERIMENTAL_VIEW_SCOPED_REPLICATION",
   webViewScopedReplication: "EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION",
   sharedMemoryConnection: "EXPERIMENTAL_SHARED_MEMORY_CONNECTION",
@@ -158,6 +159,9 @@ export const EXPERIMENTAL_FLAG_AUTHORITY = {
   lazyMaterialization: "server",
   // The whole point of the flag is which side computes what is stored.
   serverExecution: "server",
+  // Local session writes with shared reads require validation-only commits.
+  // The deployment must support those commits before clients enable this.
+  localSessionDocuments: "server",
   // Defaults are published fleet-wide; each session negotiates the mode.
   viewScopedReplication: "server",
   webViewScopedReplication: "server",

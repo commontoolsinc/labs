@@ -23,6 +23,7 @@ import type { CfcMetadata } from "./cfc/types.ts";
 import { ColdLoadNegativeMemo } from "./cold-load-negative-memo.ts";
 import {
   buildSourceDocs,
+  type ClosureLoadTally,
   COMPILED_INTEGRITY_ATOM,
   compiledDocKey,
   deriveModuleDelegations,
@@ -58,6 +59,7 @@ import { RuntimeProgram } from "./harness/types.ts";
 import type { PatternCoverageCollector } from "./pattern-coverage.ts";
 import { snapshotQueryResult } from "./query-result-proxy.ts";
 import type { MemorySpace, Runtime, ServerRunInfo } from "./runtime.ts";
+import type { PatternManagerSizes } from "./runtime-sizes.ts";
 
 import {
   isFabricImportSpecifier,
@@ -350,17 +352,17 @@ function uniqueCacheableImports(
 }
 
 /**
- * The authored filenames an entry document's source-package edges point at, for
- * one edge kind — {@link SOURCE_ROOT_SPECIFIER} for attached source entry
- * points, {@link DATA_FILE_SPECIFIER} for attached data files. An edge whose
- * target is not in the closure contributes nothing.
+ * The authored filenames a document's source-package edges point at, for one
+ * edge kind — {@link SOURCE_ROOT_SPECIFIER} for attached source entry points,
+ * {@link DATA_FILE_SPECIFIER} for attached data files. An edge whose target is
+ * not in the closure contributes nothing.
  */
 function sourcePackagePaths(
-  entry: { imports: readonly { specifier: string; identity: string }[] },
+  owner: { imports: readonly { specifier: string; identity: string }[] },
   docsByIdentity: ReadonlyMap<string, { filename: string }>,
   specifierPrefix: string,
 ): string[] {
-  return entry.imports
+  return owner.imports
     .filter((edge) => edge.specifier.startsWith(specifierPrefix))
     .map((edge) => docsByIdentity.get(edge.identity)?.filename)
     .filter((filename): filename is string => filename !== undefined);
@@ -408,6 +410,19 @@ type ProgramCompilation = {
   /** Spaces whose closures are registered for replication on completion. */
   readonly spaces: Set<MemorySpace>;
 };
+
+/**
+ * What a by-identity load's timing row names: the pattern, and how many
+ * documents its closure read refused, when it refused any.
+ */
+function byIdentityLoadDetail(
+  entryIdentity: string,
+  symbol: string,
+  tally: ClosureLoadTally,
+): string {
+  const name = `${entryIdentity}#${symbol}`;
+  return tally.dropped === 0 ? name : `${name} dropped=${tally.dropped}`;
+}
 
 /**
  * Helper for the program caches, which hashes a detached program in its
@@ -917,6 +932,16 @@ export class PatternManager {
     byIdentityHits: number;
   } {
     return { ...this.#esmCacheStats };
+  }
+
+  /** The sizes of the in-memory compiled-code caches. */
+  getSizes(): PatternManagerSizes {
+    return {
+      compiledPrograms: this.#compiledByContent.size,
+      evaluatedModules: this.#modulesByIdentity.size,
+      indexedModules: this.#addressableByIdentity.size,
+      inProgressCompilations: this.#inProgressCompilations.size,
+    };
   }
 
   /** Resolve once all in-flight compiled-cache write-backs have settled. */
@@ -2027,6 +2052,9 @@ export class PatternManager {
                 ...(doc.policyManifests === undefined
                   ? {}
                   : { policyManifests: doc.policyManifests }),
+                ...(doc.importSpecs === undefined
+                  ? {}
+                  : { importSpecs: doc.importSpecs }),
               });
             }
             if (
@@ -2389,6 +2417,18 @@ export class PatternManager {
   ): Promise<Pattern | undefined> {
     const harness = this.#runtime.harness;
     const patternCoverage = this.#patternCoverageFor();
+    const loadStart = performance.now();
+    const tally: ClosureLoadTally = { entry: "absent", dropped: 0 };
+    // One row per outcome, each naming the pattern and what the closure
+    // read found, so a capture says which pattern missed and why.
+    const record = (outcome: string) =>
+      logger.timeDetailed(
+        () => byIdentityLoadDetail(entryIdentity, symbol, tally),
+        loadStart,
+        "compile-cache",
+        "load-by-identity",
+        outcome,
+      );
     // Select the same cached variant the compile path wrote. A coverage-on
     // runtime resumes from the instrumented closure; reading the ordinary key
     // here would serve uninstrumented bodies for an instrumented run.
@@ -2397,6 +2437,7 @@ export class PatternManager {
       { patternCoverage: patternCoverage !== undefined },
     );
     if (runtimeVersion === undefined) {
+      record("no-version");
       return await this.#tryColdLoadByIdentity(
         entryIdentity,
         symbol,
@@ -2417,6 +2458,7 @@ export class PatternManager {
         entryIdentity,
         cacheOpts,
         readTx,
+        tally,
       );
       logger.time(readStart, "compile-cache", "load-pattern-by-identity");
     } finally {
@@ -2427,6 +2469,15 @@ export class PatternManager {
       (patternCoverage !== undefined &&
         !cacheEntriesIncludePatternCoverage(closure.values()))
     ) {
+      record(
+        closure.has(entryIdentity)
+          ? "coverage-missing"
+          : tally.entry === "refused"
+          ? "closure-refused"
+          : tally.entry === "unverified"
+          ? "entry-unverified"
+          : "entry-absent",
+      );
       this.#persistedCompileCacheClosures.delete(
         compileCachePersistenceSlotKey(space, entryIdentity, cacheOpts),
       );
@@ -2498,8 +2549,10 @@ export class PatternManager {
         compileCacheRecoveryKey(space, entryIdentity),
       );
       this.#esmCacheStats.byIdentityHits++;
+      record("hit");
       return pattern;
     } catch (error) {
+      record("eval-failed");
       logger.warn("load-pattern-by-identity-miss", () => [
         `entry=${entryIdentity}`,
         `symbol=${symbol}`,
@@ -2548,6 +2601,15 @@ export class PatternManager {
     options: { repairCache?: boolean } = {},
   ): Promise<Pattern | undefined> {
     const harness = this.#runtime.harness;
+    const coldStart = performance.now();
+    const record = (outcome: string) =>
+      logger.timeDetailed(
+        () => `${entryIdentity}#${symbol}`,
+        coldStart,
+        "compile-cache",
+        "cold-load",
+        outcome,
+      );
     const readTx = this.#runtime.edit();
     let sourceDocs;
     try {
@@ -2560,20 +2622,27 @@ export class PatternManager {
     } finally {
       readTx.abort?.("load-pattern-by-identity source read complete");
     }
-    if (sourceDocs === undefined) return undefined;
-    const entry = sourceDocs.get(entryIdentity);
-    if (entry === undefined) return undefined;
+    // The verified read answers alike for a source closure that is absent
+    // and one it refused, so the row says only that none was usable.
+    const entry = sourceDocs?.get(entryIdentity);
+    if (sourceDocs === undefined || entry === undefined) {
+      record("source-unavailable");
+      return undefined;
+    }
     const moduleDelegations = moduleDelegationsFromDocs(sourceDocs);
     const sourcePackages = [...sourceDocs.values()].map((doc) => ({
-      entryPath: doc.filename,
+      ownerPath: doc.filename,
       rootPaths: sourcePackagePaths(doc, sourceDocs, SOURCE_ROOT_SPECIFIER),
       dataPaths: sourcePackagePaths(doc, sourceDocs, DATA_FILE_SPECIFIER),
     })).filter((sourcePackage) =>
       sourcePackage.rootPaths.length > 0 || sourcePackage.dataPaths.length > 0
     );
-    const dataFiles = sourcePackages.flatMap((sourcePackage) =>
-      sourcePackage.dataPaths
-    );
+    // Two modules reading one file each own an edge to it.
+    const dataFiles = [
+      ...new Set(
+        sourcePackages.flatMap((sourcePackage) => sourcePackage.dataPaths),
+      ),
+    ];
 
     const sourceFiles: Source[] = [...sourceDocs.values()].map((doc) => ({
       name: doc.filename,
@@ -2581,6 +2650,7 @@ export class PatternManager {
     }));
 
     const patternCoverage = this.#patternCoverageFor();
+    let compileSucceeded = false;
     try {
       const compiled = await harness.compileResolvedToRecordGraph(
         sourceFiles,
@@ -2596,6 +2666,7 @@ export class PatternManager {
           `source closure recompiled to ${compiled.entryIdentity}, expected ${entryIdentity}`,
         );
       }
+      compileSucceeded = true;
       const cachedModules: CachedCompiledModule[] = compiled.modules.map(
         (module) => ({
           identity: module.identity,
@@ -2625,6 +2696,7 @@ export class PatternManager {
         },
       );
       const pattern = this.#patternFromMain(result, symbol, entryIdentity);
+      record("compiled");
       if (cacheOpts === undefined || options.repairCache === false) {
         this.#recordDeferredCacheRepair(
           space,
@@ -2656,6 +2728,7 @@ export class PatternManager {
       }
       return pattern;
     } catch (error) {
+      record(compileSucceeded ? "eval-failed" : "compile-failed");
       logger.warn("load-pattern-by-identity-source-miss", () => [
         `entry=${entryIdentity}`,
         `symbol=${symbol}`,
@@ -3557,11 +3630,15 @@ export class PatternManager {
       sourceDocs,
       SOURCE_ROOT_SPECIFIER,
     ).filter((filename) => filename.startsWith("/"));
-    const dataFiles = sourcePackagePaths(
-      entry,
-      sourceDocs,
-      DATA_FILE_SPECIFIER,
-    ).filter((filename) => filename.startsWith("/"));
+    // A data file's edge leaves from the module that reads it, which need not
+    // be the entry, so every document in the closure may hold one.
+    const dataFiles = [
+      ...new Set(
+        [...sourceDocs.values()].flatMap((doc) =>
+          sourcePackagePaths(doc, sourceDocs, DATA_FILE_SPECIFIER)
+        ),
+      ),
+    ].filter((filename) => filename.startsWith("/")).sort();
     // Return only the AUTHORED files — the faithful replacement for the old
     // meta-cell `program`. The verified source closure also contains
     // runtime-INJECTED helper modules (e.g. `cfc.ts`), which the compiler

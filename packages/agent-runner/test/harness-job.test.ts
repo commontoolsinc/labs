@@ -158,13 +158,8 @@ describe("runHarnessJob()", () => {
             runTranscript: () => Promise.reject(new Error("not a resume")),
             ...(options.classify
               ? {
-                classifyTask: (task: string, taskOptions?: {
-                  signal?: AbortSignal;
-                }) =>
-                  new CfHarnessPromptLoop(loopOptions).classifyTask(
-                    task,
-                    taskOptions,
-                  ),
+                classifyTask: (task: string) =>
+                  new CfHarnessPromptLoop(loopOptions).classifyTask(task),
               }
               : {}),
           };

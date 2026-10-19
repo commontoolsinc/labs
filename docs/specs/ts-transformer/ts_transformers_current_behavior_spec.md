@@ -72,6 +72,15 @@ These string-level steps run in `transformCfDirective()`
 (`src/core/cf-helpers.ts`) before any AST transformer, because symbol binding
 happens before the transformer pipeline runs.
 
+A caller may also pass a rewrite of the authored text (`AuthoredSourceRewrite`),
+which is handed the parse the scan and the guard read and whose result takes
+the authored text's place between the prepended import and the trailer. The
+rewrite runs after the guard and the shim choice, so it must leave the module
+binding the names it bound. The runner splits imports that take a default
+export beside or inside a named-import list this way
+(`normalizeMixedModuleImports`, `packages/runner/src/harness/pretransform.ts`),
+so the pretransform parses each authored module once.
+
 TypeScript's subsequent JSX emit uses `__cfHelpers.h` for elements and
 `__cfHelpers.h.fragment` for fragment tags
 (`packages/js-compiler/typescript/options.ts`). Both resolve through the
@@ -447,90 +456,54 @@ A verb's event parameter (handler/action first parameter) with an AUTHORED
 type — an explicit parameter annotation, or the builder call's own event
 type argument, which the action strategy now carries into the lowered
 `handler` call — is applied in `contract` mode
-(`CapabilitySummaryApplicationMode` in `type-shrinking.ts`). The authored
-TypeNode serves VERBATIM in structure — objects, unions, intersections,
-arrays, and primitives alike, `$defs` identities and prose intact — and
-`overlayContractCapabilities` (`type-shrinking.ts`) rewrites only
-capability-bearing positions: a cell-like wrapper takes the capability the
-body's usage earns (writable where it writes, read-only where it reads,
-comparable where it only compares, OPAQUE where it never touches the
-position). A use at any path reaches every position above it, the event
-itself among them, so an event that is a cell earns the capability of every
-use the body makes. An identity-only comparison of a plain-declared position adds
-the comparable marker the runtime materializes it through. A reference to a
-type alias that takes no type parameters is walked as the node the alias
-names, so a cell declared through an alias takes its capability the way the
-wrapper the alias names does; an alias met again inside its own expansion — a
-recursive event type — stays the reference it is. A named reference whose
-subtree holds no cell-like position passes through untouched; one
-expands only when a capability inside it must change, and a self-referential
-type ends that expansion at the cycle, since a literal cannot spell its own
-recursion: the node past the cycle stays as authored where a use the body makes
-reaches below it, and is read with its cells `opaque` where none does. A recursion
-that instantiates its declaration without end, as `Nest<T[]>` inside
-`Nest<T>` does, never meets its own type again. The schema generator's
-`cutsExpansion()` (`src/typescript/expanding-recursion.ts`) cuts it at
-`MAX_OVERLAY_NESTING`, or once the overlay has spent its budget of readings
-made inside such a recursion, which bounds one that branches: the search for a cell-like position takes the remainder
-past the cut to hold one, and the expansion stops there unless a use the body
-makes reaches below. The remainder is printed from its instantiation and marked
-`SchemaHint.cellsOpaque`, so every cell in it is `opaque`, the capability a
-cell no use reaches earns; a finite chain deeper than the cut reads the same as
-reading it to its end would. A cell the body uses in a way its summary does not
-record one path at a time keeps the capability written for it, past such a cut
-too, since no narrower one can be shown to suffice: one at or below a value that escaped whole
-(`escapedPaths`), a cell's handle passed to a helper with no summary among them,
-and one strictly below a wildcard's prefix (`wildcardPaths`), as a destructuring
-of an array, an object's rest element, or a key that can name any element
-reaches. The prefix's own cell keeps the capability its recorded use earns: a
-`.get()` before `JSON.stringify()` reads it, and a write through such a key
-writes it. Observed
-paths still validate against the authored type via `validateShrinkCoverage`.
+(`CapabilitySummaryApplicationMode` in `type-shrinking.ts`). The authored type
+is not rewritten: schema injection hands the schema generator the authored
+node, inside parentheses of its own that carry the handler body's capability
+summary (`SchemaHint.contractCapabilities`), and the schema is generated from
+it as from any authored type, so the authored structure, `$defs` identities,
+prose, CFC labels, writer policies and scopes all serve as written.
+`SchemaGeneratorTransformer` then narrows the generated schema
+(`narrowEventCapabilities()`, `contract-capabilities.ts`): each cell takes the
+capability the body earns at its data path — writable where it writes,
+read-only where it reads, comparable where it only compares, OPAQUE where it
+never touches the position — and never more than the kind its author wrote,
+so a `WriteonlyCell` the body writes stays `writeonly`. A stream and a SQLite
+handle keep their kind, and a scoped cell keeps its scope.
 
-A reference the alias reading above does not see through — to an interface, or
-to a type alias that takes type parameters — and a node of a kind the walk does
-not read inside, such as a mapped type, a conditional, or a tuple, expand as the
-type they denote, which for a generic declaration is the declaration
-instantiated with the reference's arguments, built one level deep
-(`unfoldDenotedType()`). The search for a cell-like position that decides
-whether to expand reads properties a mapped type makes, which have no
-declaration, and index signatures. An
-object is built from its properties, with their optionality and the type's
-index signatures as the instantiation has them. Each property is written as its
-declaration's annotation where that still denotes the property's type, and is
-printed from its type where an argument replaced what the annotation names, so
-`v: T` in `Box<T>` reads as `string` in `Box<string>`. A union, an array, or a
-cell is built from its parts, each printed from its own type. A tuple, and a
-type that carries a scope, are not unfolded, since only a scope wrapper names
-its scope. Nor is a node whose syntax names a value binding
-(`namesValueBinding()`), as a writer policy's `typeof` does, unless every
-property is written as its own annotation: a writer is named only by that
-syntax, and a part printed from its type would drop it. Such a node is kept as
-written where a use the body makes reaches it (`reachedByUse()`), so a scoped
-cell the body reads keeps the capability written for it, and is otherwise read
-with every cell in it `opaque` (`keptAsWritten()`): a cell kept at the
-capability its author wrote would confer authority no use exercises. That
-reading is the node as written, inside parentheses of its own that carry
-`SchemaHint.cellsOpaque`, so a writer its syntax names stays. A use reaches a node where the summary
-observes one at the node, below it, or above it on a value reached whole (a key
-the body computes, a wildcard's prefix, as a destructuring or a rest element
-records, or a value that leaves the function), and anywhere where the body
-passes the event on whole. The same holds for a cell an
-index signature types, where no use reaches a key the literal does not declare,
-compared as written so that a declared `0` does not declare `1`, and for an
-event the body never reads at all; the schema generator honors that `opaque`
-reading at the root of a schema as well as at a member. An optional member's node is read at the member's type without
-the `undefined` its `?` adds (`memberValueType()`, which leaves a type that also
-holds `null` whole), so `replyTo?: Reply` reads as `Reply` and not as a union
-with `undefined`. A printed node is overlaid on its
-unfolding (`unfoldPrint()`) and never taken apart, since schema generation
-reads a print by the type it was printed from; it goes through the same
-expansion a reference does, after the identity-only comparison that wraps a
-plain position `comparable`, so a recursion through prints is cut where one
-through references is, and a print compared only by identity keeps its
-`comparable` marker. The tests under
-`overlayContractCapabilities()` in `test/type-shrinking.test.ts` hold each
-generic shape to the schema of the same type written out.
+A data path is read from the schema's structure: a property's key, compared as
+written, any key the object does not declare for `additionalProperties`, `*`
+for `items`, which matches any index the body uses, and the same path for each
+member of `anyOf`, `oneOf` and `allOf`. A use at a path reaches every position
+above it, the event itself among them, so an event that is a cell earns the
+capability of every use the body makes. A cell's value is not read: its
+capabilities are its own reads'. A plain position the body only compares by
+identity, using nothing at or below it otherwise, takes the `comparable` marker
+the runtime materializes it through, and such a position whose schema is
+`true`, which admits any value, becomes a `comparable` cell. A position where
+uses meet, as an index signature's is for every key it types, gathers them all,
+so comparing one key and reading or writing below another leaves it as
+written. Uses are kept apart by their whole paths, so a key holding any
+character is never taken for two segments. A cell the body uses in a way its summary does not record
+one path at a time keeps the capability written for it, since no narrower one
+can be shown to suffice: one at or below a value that escaped whole
+(`escapedPaths`), a cell's handle passed to a helper with no summary among
+them, and one strictly below a wildcard's prefix (`wildcardPaths`), as a
+destructuring of an array, an object's rest element, or a key that can name any
+element reaches. Where the body uses a cell in a way the summary cannot verify
+at all (`hasUnverifiedCellUse`), as a mutator called by a name the body
+computes, every cell of the event keeps the capability written for it. The
+prefix's own cell keeps the capability its recorded use earns: a `.get()`
+before `JSON.stringify()` reads it, and a write through such a key writes it.
+
+A definition a `$ref` names is narrowed for the uses at the position that
+refers to it: kept as the reference where narrowing changes nothing, written
+out in place where it does, and, where the narrowing refers to itself, as a
+recursion does, kept as a definition of its own, under the definition's name
+where nothing else refers to that, and as `<name>_narrowed` where a cell's
+value, which is not narrowed, still does. Narrowings are told apart by the
+uses relative to their position, which are finitely many, so a recursion,
+however it instantiates its declaration, needs no cut. Observed paths still
+validate against the authored type via `validateShrinkCoverage`.
 
 A SYNTHETIC event node — JSX handler events among them — has no authored
 structure to serve and keeps the `full` usage shrink, as does a handler with
@@ -2686,7 +2659,7 @@ computation's input schema:
   pruned with the surviving identity paths. Since #4714, a wildcard records the
   unknown access's static prefix and erases identity/comparable paths that
   overlap it in either direction; disjoint paths survive. The summary carries
-  those prefixes as `wildcardPaths`, which the contract overlay reads (§6.3a),
+  those prefixes as `wildcardPaths`, which an event's capability narrowing reads (§6.3a),
   and a caller takes on a helper's at the path it handed the helper, as it
   does the helper's reads, writes, and escapes. A root wildcard still
   suppresses `identityOnly`. This matters because closure captures share one
@@ -3954,9 +3927,12 @@ the transformer (`src/transformers/module-scope-cf-data.ts` imports) and the
 verifier (`packages/runner/src/sandbox/policy.ts` re-exports) consume. On the
 verifier side (`packages/runner/src/sandbox/compiled-bundle-verifier.ts`):
 
-- raw mutable initializers — normalized text starting `{`, `[`, `/`, or `new`
+- raw mutable initializers — normalized text starting `{`, `[`, or `/`, or a
+  first token that is the `new` keyword, `new.target` included
   (`isRawMutableExpression`) — are rejected with "Mutable top-level data must
-  be wrapped in __cf_data() in SES mode";
+  be wrapped in __cf_data() in SES mode". An identifier that merely begins
+  with `new`, such as `newShape`, is not a `new` expression and is classified
+  like any other reference;
 - calls to local functions or untrusted imports are rejected with "Top-level
   call results must be wrapped in __cf_data() in SES mode"
   (`TOP_LEVEL_CALL_RESULT_ERROR`, `policy.ts`); IIFEs are likewise rejected
