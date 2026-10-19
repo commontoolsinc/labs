@@ -115,5 +115,6 @@ until its entry is deleted.
 What a package offers only to other packages' tests goes behind an entry named
 `./for-testing-only`, and no other entry or barrel reaches it.
 `packages/data-model/deno.jsonc` is the example. Nothing checks that only tests
-import it, so the rest of the convention, from naming to who may import it, is
-`docs/development/DEVELOPMENT.md`, § Offering test-only code to other packages.
+and benchmarks import it, so the rest of the convention, from naming to who may
+import it, is `docs/development/DEVELOPMENT.md`, § Offering test-only code to
+other packages.
