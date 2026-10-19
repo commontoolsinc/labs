@@ -161,9 +161,9 @@ import { findFirstContentLineIndex } from "./runtime-contract.ts";
 
 /**
  * Rewrites authored source text, given the parse {@link injectCfHelpers} made
- * of that text. The injection reads the reserved-name check and the shim's
- * name from that parse before the rewrite runs, so a rewrite must leave the
- * module binding the names it bound.
+ * of that text. The injection runs its reserved-name check and chooses the
+ * shim's name over that parse before the rewrite runs, so a rewrite must leave
+ * the module binding the names it bound.
  */
 export type AuthoredSourceRewrite = (
   source: string,
