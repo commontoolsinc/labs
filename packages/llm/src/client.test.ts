@@ -13,6 +13,7 @@ import {
   loadConversationFixture,
   normalizeLLMResponse,
   parseLLMReply,
+  readLLMResponse,
   readLLMStream,
   resetMockMode,
   setMockResponseGate,
@@ -584,6 +585,79 @@ describe("parseLLMReply()", () => {
     const event = JSON.stringify({ type: "error", error: "boom" });
     for (const body of [event + "\n", event]) {
       expect(() => parseLLMReply(body, "trace-1")).toThrow(LLMStreamError);
+    }
+  });
+});
+
+describe("readLLMResponse()", () => {
+  const transcript = [
+    JSON.stringify({ type: "text-delta", textDelta: "hel" }) + "\n",
+    JSON.stringify({ type: "text-delta", textDelta: "lo" }) + "\n",
+    JSON.stringify({ type: "finish" }) + "\n",
+  ];
+  const reply = {
+    role: "assistant",
+    content: [{ type: "text", text: "hello" }],
+    id: "trace-9",
+  };
+
+  /**
+   * A response that counts reads of its `body` getter, which is what creates
+   * the body's `ReadableStream` in WebKit.
+   */
+  function responseCountingBodyReads(
+    body: BodyInit,
+    contentType: string,
+  ): { response: Response; bodyReads: () => number } {
+    let bodyReads = 0;
+    const response = new (class extends Response {
+      override get body(): Response["body"] {
+        bodyReads++;
+        return super.body;
+      }
+    })(body, {
+      headers: { "content-type": contentType, "x-cf-llm-trace-id": "trace-9" },
+    });
+    return { response, bodyReads: () => bodyReads };
+  }
+
+  it("reads a streamed reply whole, never reading `response.body`, when no callback is given", async () => {
+    const { response, bodyReads } = responseCountingBodyReads(
+      streamFromChunks(transcript),
+      "text/event-stream",
+    );
+
+    expect(await readLLMResponse(response)).toEqual(reply);
+    expect(bodyReads()).toBe(0);
+  });
+
+  it("reads a streamed reply through `response.body`, reporting the text so far, when a callback is given", async () => {
+    const { response, bodyReads } = responseCountingBodyReads(
+      streamFromChunks(transcript),
+      "text/event-stream",
+    );
+    const seen: string[] = [];
+
+    expect(await readLLMResponse(response, (text) => seen.push(text))).toEqual(
+      reply,
+    );
+    expect(seen).toEqual(["hel", "hello"]);
+    expect(bodyReads()).toBeGreaterThan(0);
+  });
+
+  it("reads a JSON reply whole, with or without a callback", async () => {
+    for (const callback of [undefined, () => {}]) {
+      const { response, bodyReads } = responseCountingBodyReads(
+        JSON.stringify({ role: "assistant", content: "cached", id: "srv-1" }),
+        "application/json",
+      );
+
+      expect(await readLLMResponse(response, callback)).toEqual({
+        role: "assistant",
+        content: "cached",
+        id: "srv-1",
+      });
+      expect(bodyReads()).toBe(0);
     }
   });
 });

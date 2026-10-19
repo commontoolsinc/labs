@@ -68,6 +68,7 @@ export const HARNESS_MODES = [
   "fetch-slow-body-collect",
   "fetch-slow-decoder-collect",
   "fetch-slow-xhr-progress",
+  "fetch-slow-body-then-text",
   "fetch-slow-text",
   "response-body-drop",
   "response-empty-body-collect",
@@ -314,6 +315,13 @@ async function selectStep(
     case "fetch-slow-xhr-progress":
       return only(async () => {
         await loadWithProgressEvents(request.slowUrl);
+      });
+    case "fetch-slow-body-then-text":
+      return only(async () => {
+        const response = await fetch(request.slowUrl);
+        // The getter alone: in WebKit it is what creates the body's stream.
+        void response.body;
+        await response.text();
       });
     case "fetch-slow-text":
       return only(async () => {

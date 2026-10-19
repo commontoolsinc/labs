@@ -660,26 +660,36 @@ export class LLMClient {
       );
     }
 
+    return await readLLMResponse(response, callback);
+  }
+}
+
+/**
+ * Reads the reply the service sent in `response`: a JSON reply, which is how
+ * a cached answer arrives, whole; a streamed reply through its stream when
+ * `callback` wants the text as it arrives, and otherwise whole as well.
+ */
+export async function readLLMResponse(
+  response: Response,
+  callback?: PartialCallback,
+): Promise<LLMResponse> {
+  const id = response.headers.get("x-cf-llm-trace-id") as string;
+  if (response.headers.get("content-type")?.includes("application/json")) {
+    return normalizeLLMResponse(await response.json(), id);
+  }
+  if (callback) {
     if (!response.body) {
       throw new Error("No response body");
     }
-
-    const id = response.headers.get("x-cf-llm-trace-id") as string;
-
-    // the server might return cached data instead of a stream
-    if (response.headers.get("content-type")?.includes("application/json")) {
-      const data = await response.json();
-      return normalizeLLMResponse(data, id);
-    }
-    if (callback) {
-      return await readLLMStream(response.body, id, callback);
-    }
-    // With nothing waiting on partial text, the body is read whole rather than
-    // through a stream. In WebKit a response body read as a stream whose last
-    // pull is still pending when the load ends stays reachable for the life of
-    // the realm; `text()` reads the body without creating one.
-    return parseLLMReply(await response.text(), id);
+    return await readLLMStream(response.body, id, callback);
   }
+  // With nothing waiting on partial text, the body is read whole, and
+  // `response.body` is never touched. In WebKit that getter creates the
+  // `ReadableStream` a later `text()` then drains, and a body drained through
+  // a stream whose last pull is still pending when the load ends stays
+  // reachable for the life of the realm; `text()` on an untouched body reads
+  // it without a stream.
+  return parseLLMReply(await response.text(), id);
 }
 
 /**
