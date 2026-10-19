@@ -1424,4 +1424,16 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "the room keeps no activity log, so the data face the adapter re-exports no longer carries one",
     record: "docs/history/fabrichat-pushed-messages-break.md",
   },
+  {
+    // The verb list's items left its argument for the pattern's own `state`,
+    // where its `addItem` verb writes them and its guest is granted them to
+    // read, so the argument no longer takes `items` and the result reads them
+    // under `state.items` rather than `items`.
+    pattern: "iframe-verb-list/main.tsx",
+    baselines: ["20261017T164922Z-9DynKREWtc-Nv2Rs"],
+    paths: ["argument.items", "result.items"],
+    reason:
+      "the items moved from the argument into the pattern's own state, which a verb can bind once the pattern holds its guest's frame itself",
+    record: "docs/history/iframe-verb-list-state-items-break.md",
+  },
 ];
