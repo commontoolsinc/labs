@@ -217,6 +217,48 @@ between the two before loads.
   `{ type, parent }` on every call; a memo by result id and type is a small
   follow-up.
 
+## Addendum: freezing at the source
+
+The review of the pull request carrying this record (an agent working for
+its reviewer, on an in-process reproduction of the cold load whose counts
+track the record's: 74,242 mutable-root hashes against 76,966) asked
+whether deep-freezing the values the count found mutable would serve the
+identity caches instead. It found that two of the four sites are mutable
+by accident:
+
+- The builder's partial causes are frozen, since a compiled module's
+  exports are hardened; what reaches `idFor()` are thawed copies made by
+  `withAliasBindings()` in `builder/to-encodable-form.ts`, which rebuilds an
+  embedded pattern graph record by record and re-freezes only its two
+  schemas. The 24,810 mutable-cause calls per load carry 29 distinct
+  objects. Deep-freezing the rebuilt manifest of derived internal cells
+  beside the schemas cuts the mints to 2,035, the same as the content key,
+  and leaves no mutable cause reaching `idFor()` on that load.
+- Every mutable schema the linked-cell sync walk hashed was a fresh `{}`
+  from `getSchemaAtPath()` in `cfc.ts`, which made a new one for every
+  position a `true` schema admits. Returning one interned instance cuts the
+  walk's mutable hashes to zero and spares the 1,182 first hashes the
+  walk's interning of those objects cost.
+
+Watch ids and the write gates are not helped by freezing: the watch
+functions hash records they build themselves, and a write gate's operands
+are close to single-use (4,342 first hashes of frozen operands per load,
+none reused). The reproduction's totals, three alternating runs per arm:
+
+| Arm           | Mutable-root hashes | All hashes | Cold load, median of per-run averages |
+| ------------- | ------------------: | ---------: | ------------------------------------: |
+| base          |              74,242 |     97,571 |                              4,920 ms |
+| freeze alone  |              39,901 |     63,218 |                              4,474 ms |
+| the four cuts |              14,761 |     35,229 |                              4,390 ms |
+| cuts + freeze |              14,761 |     34,047 |                              4,275 ms |
+
+Both freezes landed in the same pull request. The content key and the
+walk's interning stay as the fallback for a cause or a schema that arrives
+mutable by another route: across the runner, piece and pattern-test suites,
+137,434 mutable causes reached `idFor()` before the freeze, every one plain
+JSON, and only the reproduction's load was counted with the freeze in
+place.
+
 ## Rig
 
 The rig, the counter patches and the profiles are in the session's
