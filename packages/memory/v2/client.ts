@@ -3383,8 +3383,8 @@ export class SpaceSession {
    * a permanent connection failure.
    */
   #terminateSession(error: Error): void {
-    // Terminal: nothing on this session works again, and the replica above it
-    // reports the error only when asked. This line is the record of why.
+    // Terminal: nothing on this session works again. Termination observers
+    // hear the error below; this line is the record of why.
     logger.error("session-terminated", () => [
       `session ${JSON.stringify(this.#sessionId)} on ` +
       `${JSON.stringify(this.space)} ended: ${describeError(error)}`,

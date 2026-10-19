@@ -80,7 +80,7 @@ discard a failed connection.
 
 `SpaceSession.subscribeTermination` delivers the error that ends an established
 session immediately, and the runner's replica reports it as access loss when it
-is an authoritative `AuthorizationError`. An `unauthorized` revocation carries
+is a permanent (non-retriable) `AuthorizationError`. An `unauthorized` revocation carries
 that error. A `taken-over` revocation closes with `SessionRevokedError`, which
 is a termination but not access loss. A recoverable challenge race that ends the
 session is likewise not access loss. Normal close and an ordinary disconnect do
