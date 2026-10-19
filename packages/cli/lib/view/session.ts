@@ -120,6 +120,7 @@ type Mode =
   | "savePrompt"
   | "amendPrompt"
   | "revertPrompt"
+  | "pushPrompt"
   | "filePicker"
   | "jumpList";
 
@@ -348,6 +349,10 @@ export class Session {
    * it. */
   pendingPush: { doc: Document; view: ViewState } | null = null;
 
+  /** The last key asked for the checked-out branch to be pushed. The driver
+   * starts the push, calls {@link beginBranchPush}, and clears this. */
+  branchPushRequested = false;
+
   /** The last key set a message that takes itself away again rather than sitting
    * in the bar — Ctrl-L pressed where it is not offered, which changed nothing
    * else. The driver leaves it up for a moment and then calls
@@ -356,6 +361,17 @@ export class Session {
 
   /** How much context each hunk can reveal, cached against the document. */
   #roomCache?: { doc: Document; room: ReadonlyMap<number, HunkRoom> };
+
+  /** The push dialog's output, a line per entry, the last one still being
+   * written. After a carriage return, the next text starts that line over. */
+  #pushLines: string[] = [""];
+  #pushReturned = false;
+
+  /** Stops the push the dialog shows, or null once it has finished. */
+  #abortPush: (() => void) | null = null;
+
+  /** How the push ended, once it has. */
+  #pushSummary = "";
 
   //
   // editing
@@ -1143,6 +1159,7 @@ export class Session {
     if (this.#mode === "savePrompt") dialog = this.#saveDialog();
     else if (this.#mode === "amendPrompt") dialog = this.#amendDialog();
     else if (this.#mode === "revertPrompt") dialog = this.#revertDialog();
+    else if (this.#mode === "pushPrompt") dialog = this.#pushDialog();
     if (!dialog) return null;
     // -1 means no button is focused (a prompt with no default, before Tab).
     const focus = this.#dialogFocus < 0
@@ -1158,6 +1175,37 @@ export class Session {
   #focusDefaultButton(): void {
     const buttons = this.#promptDialog()?.buttons ?? [];
     this.#dialogFocus = buttons.findIndex((b) => b.kind === "default");
+  }
+
+  /** Whether a modal prompt is up. */
+  #prompting(): boolean {
+    return this.#mode === "savePrompt" || this.#mode === "amendPrompt" ||
+      this.#mode === "revertPrompt" || this.#mode === "pushPrompt";
+  }
+
+  /** The push dialog: as much of the end of git's output as fits, then how the
+   * push ended, at the size of the screen so that it holds still as the output
+   * grows. Abort stops the push; Close takes the dialog down once it ends. */
+  #pushDialog(): DialogState {
+    const lines = this.#pushLines.at(-1) === ""
+      ? this.#pushLines.slice(0, -1)
+      : this.#pushLines;
+    const output = this.#pushSummary === ""
+      ? lines
+      : [...lines, "", this.#pushSummary];
+    const rows = Math.max(1, this.height - 7);
+    const body = output.slice(-rows);
+    while (body.length < rows) body.push("");
+    return {
+      title: "Push",
+      body,
+      output: true,
+      buttons: [
+        this.#abortPush
+          ? { label: "Abort", hotkey: "a", kind: "cancel" }
+          : { label: "Close", hotkey: "c", kind: "cancel" },
+      ],
+    };
   }
 
   /** The save-changes confirmation: names what a save writes, lists the files
@@ -1254,10 +1302,7 @@ export class Session {
       return;
     }
     if (this.#handleDialogNavigation(key)) return;
-    if (
-      this.#mode === "savePrompt" || this.#mode === "amendPrompt" ||
-      this.#mode === "revertPrompt"
-    ) {
+    if (this.#prompting()) {
       this.#handleDialogKey(key, beforeButtonAction);
       return;
     }
@@ -1296,9 +1341,7 @@ export class Session {
   #handleDialogNavigation(key: Key): boolean {
     const picker = this.#mode === "filePicker";
     const jump = this.#mode === "jumpList";
-    const prompt = this.#mode === "savePrompt" ||
-      this.#mode === "amendPrompt" ||
-      this.#mode === "revertPrompt";
+    const prompt = this.#prompting();
     const overlay = this.#mode === "normal" && !this.#chord
       ? this.#overlay
       : null;
@@ -1403,10 +1446,7 @@ export class Session {
   #handleWheel(direction: -1 | 1): void {
     this.#message = "";
     const delta = direction * MOUSE_WHEEL_STEP;
-    if (
-      this.#mode === "savePrompt" || this.#mode === "amendPrompt" ||
-      this.#mode === "revertPrompt"
-    ) return;
+    if (this.#prompting()) return;
     if (this.#mode === "filePicker") {
       const last = Math.max(0, this.#pickerEntries.length - 1);
       this.#pickerSel = clamp(this.#pickerSel + delta, 0, last);
@@ -2260,6 +2300,9 @@ export class Session {
         return;
       case "M":
         this.#toggleFileCategory((file) => file.isMarkdown, "Markdown");
+        return;
+      case "P":
+        this.branchPushRequested = true;
         return;
       case "escape": {
         const anchor = this.#wrapLines ? this.#viewportAnchor() : null;
@@ -3352,6 +3395,44 @@ export class Session {
     this.transientMessage = false;
   }
 
+  /** Open the push dialog for a push that has started, which `abort` stops. */
+  beginBranchPush(abort: () => void): void {
+    this.#overlay = null;
+    this.#overlayStack = [];
+    this.#mode = "pushPrompt";
+    this.#pushLines = [""];
+    this.#pushReturned = false;
+    this.#pushSummary = "";
+    this.#abortPush = abort;
+    this.#dialogFocus = -1;
+  }
+
+  /** Add git's output to the push dialog. A carriage return starts the line
+   * over, which is how git redraws a progress report in place. */
+  appendPushOutput(text: string): void {
+    for (const part of text.split(/(\r\n|\n|\r)/)) {
+      if (part === "\r") {
+        this.#pushReturned = true;
+      } else if (part === "\n" || part === "\r\n") {
+        this.#pushLines.push("");
+        this.#pushReturned = false;
+      } else if (part !== "") {
+        const last = this.#pushLines.length - 1;
+        this.#pushLines[last] =
+          (this.#pushReturned ? "" : this.#pushLines[last]) + part;
+        this.#pushReturned = false;
+      }
+    }
+  }
+
+  /** End the push with `summary`, which the dialog shows under the output and
+   * the status line shows once the dialog closes. */
+  finishBranchPush(summary: string): void {
+    this.#abortPush = null;
+    this.#pushSummary = summary;
+    this.#dialogFocus = 0;
+  }
+
   /** Take away a message that was set to go away on its own, once the driver has
    * left it up for its moment. Does nothing to a message that is not one of
    * those, so a later one is never cleared out from under itself. */
@@ -3747,7 +3828,7 @@ export class Session {
     return willPrompt;
   }
 
-  /** Keys while a modal prompt (save / amend / revert) is up. Tab and Shift-Tab
+  /** Keys while a modal prompt (save / amend / revert / push) is up. Tab and Shift-Tab
    * move the focus ring between buttons, wrapping around; Space and Enter
    * activate the focused button; Esc activates the cancel button; a button's
    * shortcut letter activates it directly. Any other key leaves the prompt up. */
@@ -3756,7 +3837,7 @@ export class Session {
     beforeButtonAction?: () => void,
   ): void {
     // Reached only from the prompt modes, each of which builds a dialog with at
-    // least two buttons, so the dialog is present and its row is non-empty.
+    // least one button, so the dialog is present and its row is non-empty.
     const dialog = this.#promptDialog()!;
     const buttons = dialog.buttons;
     const n = buttons.length;
@@ -3813,6 +3894,18 @@ export class Session {
     if (this.#mode === "savePrompt") this.#applySaveButton(button);
     else if (this.#mode === "amendPrompt") this.#applyAmendButton(button);
     else if (this.#mode === "revertPrompt") this.#applyRevertButton(button);
+    else this.#applyPushButton();
+  }
+
+  /** Abort stops the push, which then ends; Close takes the dialog down and
+   * leaves how the push ended in the status line. */
+  #applyPushButton(): void {
+    if (this.#abortPush) {
+      this.#abortPush();
+    } else {
+      this.#mode = "normal";
+      this.#message = this.#pushSummary;
+    }
   }
 
   #applySaveButton(button: DialogButton): void {
@@ -5300,6 +5393,9 @@ export function helpOverlay(hasMultipleCommits: boolean): {
     ["  Z", "close & center the main view on the target"],
     ["  Tab", "toggle info card ⇄ source"],
     ["  t", "look up a definition by name"],
+    ["", ""],
+    ["Branch", ""],
+    ["  P", "push the branch to origin, open the pull request page"],
     ["", ""],
     ["View", ""],
     ["  V", "toggle source / rendered view when the language supports it"],

@@ -388,6 +388,11 @@ export interface DialogState {
   readonly body: readonly string[];
   readonly buttons: readonly DialogButton[];
 
+  /** Whether the body is program output, which starts at the left margin of a
+   * box as wide as the screen, rather than centered text in a box that fits
+   * it. */
+  readonly output?: boolean;
+
   /** Index of the focused button — the one Space and Enter activate, drawn
    * highlighted. When absent, the default button (if any) is highlighted. */
   readonly focus?: number;
@@ -1403,7 +1408,7 @@ export function dialogBox(view: ViewState, dialog: DialogState): DialogBox {
   const titleW = cpLen(dialog.title) + 4; // the padding spaces and some fill
   const bodyW = dialog.body.reduce((m, l) => Math.max(m, cpLen(l)), 0);
   const btnW = buttonsWidth(dialog.buttons);
-  const contentW = Math.max(titleW, bodyW, btnW);
+  const contentW = dialog.output ? view.width : Math.max(titleW, bodyW, btnW);
   // The margin columns each side, then the two borders.
   // Inner rows: a blank under the title, the body, a blank, the buttons, and the
   // buttons' shadow.
@@ -1494,7 +1499,7 @@ function applyDialog(
     for (let c = 0; c < innerW; c++) cells[c] = { ch: " ", style: panelBg };
     const bodyIdx = i - 1; // one blank row sits under the title
     if (bodyIdx >= 0 && bodyIdx < dialog.body.length) {
-      placeCentered(cells, dialog.body[bodyIdx], textStyle);
+      placeText(cells, dialog.body[bodyIdx], textStyle, dialog.output);
     } else if (i === buttonRow) {
       placeButtonFaces(cells, layout, view.color, panelBg, focusIdx, pushedIdx);
     } else if (i === shadowRow && view.color) {
@@ -1508,11 +1513,20 @@ function applyDialog(
   if (view.color) castShadow(rows, view, x, y, boxW, boxH);
 }
 
-/** Write `text` centered in `cells`, one blank margin column inside each edge. */
-function placeCentered(cells: Cell[], text: string, style: Style): void {
+/** Write `text` centered (or at the left) in `cells`, one blank margin column
+ * inside each edge. */
+function placeText(
+  cells: Cell[],
+  text: string,
+  style: Style,
+  leftAligned = false,
+): void {
   const innerW = cells.length;
   const chars = [...showControls(text)];
-  const start = 1 + Math.max(0, Math.floor((innerW - 2 - chars.length) / 2));
+  const start = 1 +
+    (leftAligned
+      ? 0
+      : Math.max(0, Math.floor((innerW - 2 - chars.length) / 2)));
   for (let j = 0; j < chars.length; j++) {
     const col = start + j;
     if (col >= 1 && col <= innerW - 2) cells[col] = { ch: chars[j], style };
