@@ -47,6 +47,7 @@ describe("ExperimentalOptions", () => {
         experimental: {
           modernCellRep: false,
           agentBuiltin: false,
+          localFold: false,
           commitPreconditions: false,
           plainResultReceipts: false,
           computedCellIds: false,
@@ -57,6 +58,7 @@ describe("ExperimentalOptions", () => {
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
         agentBuiltin: false,
+        localFold: false,
         contentAddressedSchemas: true,
         commitPreconditions: false,
         plainResultReceipts: false,
@@ -82,6 +84,7 @@ describe("ExperimentalOptions", () => {
       expect(runtime.experimental).toEqual({
         modernCellRep: true,
         agentBuiltin: true,
+        localFold: false,
         contentAddressedSchemas: true,
         commitPreconditions: true,
         plainResultReceipts: true,
@@ -105,6 +108,7 @@ describe("ExperimentalOptions", () => {
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
         agentBuiltin: true,
+        localFold: false,
         contentAddressedSchemas: true,
         commitPreconditions: true,
         plainResultReceipts: true,

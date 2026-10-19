@@ -11,7 +11,7 @@ import { defer } from "@commonfabric/utils/defer";
 
 import { ACLManager } from "../src/acl-manager.ts";
 import { readConfirmed } from "../src/confirmed-read.ts";
-import { Runtime } from "../src/runtime.ts";
+import { type ExperimentalOptions, Runtime } from "../src/runtime.ts";
 import type { Action } from "../src/scheduler.ts";
 import { MAX_RETRIES_FOR_REACTIVE } from "../src/scheduler/constants.ts";
 import {
@@ -82,11 +82,15 @@ describe("refused derived write", () => {
 
   let factories: Map<Runtime, LoopbackSessionFactory>;
 
-  const open = (identity: Identity): Runtime => {
+  const open = (
+    identity: Identity,
+    experimental?: ExperimentalOptions,
+  ): Runtime => {
     const factory = new LoopbackSessionFactory(server);
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: TestStorageManager.overServer({ as: identity }, factory),
+      experimental,
     });
     runtimes.push(runtime);
     factories.set(runtime, factory);
@@ -112,7 +116,7 @@ describe("refused derived write", () => {
 
   /**
    * Opens `space`, holding `source` and, when given, `stored` as `derived`,
-   * as the owner and as a READ principal,
+   * as the owner and as a READ principal whose runtime takes `experimental`,
    * and subscribes an action in the reader's runtime that writes
    * `derive(source)` to `derived`. The action reads the cell it writes, as a
    * computation reads its own output to leave an unchanged one alone. The
@@ -123,7 +127,10 @@ describe("refused derived write", () => {
   const readerDerives = async <S, D>(
     source: S,
     derive: (s: S) => D,
-    stored?: D,
+    { stored, experimental }: {
+      stored?: D;
+      experimental?: ExperimentalOptions;
+    } = {},
   ) => {
     const owner = await Identity.fromPassphrase("refused write owner");
     const reader = await Identity.fromPassphrase("refused write reader");
@@ -139,7 +146,7 @@ describe("refused derived write", () => {
     });
     await ownerRuntime.storageManager.synced();
 
-    const readerRuntime = open(reader);
+    const readerRuntime = open(reader, experimental);
     const sourceCell = readerRuntime.getCell<S>(space, "source");
     const derived = readerRuntime.getCell<D>(space, "derived");
     await sourceCell.sync();
@@ -192,6 +199,7 @@ describe("refused derived write", () => {
     const { ownerRuntime, space, derived, counts } = await readerDerives(
       2,
       (n: number) => n * 2,
+      { experimental: { localFold: true } },
     );
 
     expect(counts.refusals).toBe(1);
@@ -203,10 +211,28 @@ describe("refused derived write", () => {
     expect(stored.get()).toBeUndefined();
   });
 
+  it("runs again against the same refusal, past the retry budget, when `localFold` is off", async () => {
+    const { ownerRuntime, space, counts } = await readerDerives(
+      2,
+      (n: number) => n * 2,
+      { experimental: { localFold: false } },
+    );
+
+    // Each re-run finds its write reverted, writes it again, and is refused
+    // again, so the reader never settles: `settled` resolved because the run
+    // count passed the retry budget, not because the reader went idle.
+    expect(counts.runs).toBeGreaterThan(MAX_RETRIES_FOR_REACTIVE);
+    expect(counts.refusals).toBeGreaterThan(1);
+    const stored = ownerRuntime.getCell<number>(space, "derived");
+    await stored.sync();
+    expect(stored.get()).toBeUndefined();
+  });
+
   it("reads a kept value as unconfirmed, beside the source it was computed from read as confirmed", async () => {
     const { readerRuntime, space, derived } = await readerDerives(
       2,
       (n: number) => n * 2,
+      { experimental: { localFold: true } },
     );
     const source = readerRuntime.getCell<number>(space, "source");
     await source.sync();
@@ -227,6 +253,7 @@ describe("refused derived write", () => {
       await readerDerives(
         { n: 2 },
         ({ n }: { n: number }) => ({ doubled: n * 2, from: "reader" }),
+        { experimental: { localFold: true } },
       );
     expect(counts.refusals).toBe(1);
 
@@ -255,7 +282,10 @@ describe("refused derived write", () => {
       await readerDerives(
         { n: 2 },
         ({ n }: { n: number }) => ({ doubled: n * 2, from: "reader" }),
-        { doubled: 0, from: "owner" },
+        {
+          stored: { doubled: 0, from: "owner" },
+          experimental: { localFold: true },
+        },
       );
     expect(counts.refusals).toBe(1);
     expect(derived.get()).toEqual({ doubled: 4, from: "reader" });

@@ -1576,6 +1576,9 @@ export class StorageManager implements IStorageManager {
   #spaceAccessObservers = new Set<(space: MemorySpace, error: Error) => void>();
   #spaceAccessChangeObservers = new Set<(space: MemorySpace) => void>();
   #spaceSessionReplacedObservers = new Set<(space: MemorySpace) => void>();
+  #spaceSessionErrorObservers = new Set<
+    (space: MemorySpace, error: Error) => void
+  >();
   #subscription = SubscriptionManager.create();
   #crossSpacePromises = new Set<Promise<void>>();
 
@@ -2313,6 +2316,15 @@ export class StorageManager implements IStorageManager {
             }
           }
         },
+        onSessionError: (error) => {
+          for (const observer of [...this.#spaceSessionErrorObservers]) {
+            try {
+              observer(space, error);
+            } catch (cause) {
+              console.error("space-session-error subscriber threw:", cause);
+            }
+          }
+        },
         onAccessChange: (error) => {
           const alreadyDenied = this.#spaceAccessErrors.has(space);
           if (error === undefined) {
@@ -2698,6 +2710,14 @@ export class StorageManager implements IStorageManager {
   ): Cancel {
     this.#spaceSessionReplacedObservers.add(observer);
     return () => this.#spaceSessionReplacedObservers.delete(observer);
+  }
+
+  /** @inheritDoc */
+  subscribeSpaceSessionError(
+    observer: (space: MemorySpace, error: Error) => void,
+  ): Cancel {
+    this.#spaceSessionErrorObservers.add(observer);
+    return () => this.#spaceSessionErrorObservers.delete(observer);
   }
 
   trackPendingCommit(
@@ -3800,6 +3820,9 @@ type ProviderOptions = {
 
   /** Called when the space's memory session is replaced on reconnect. */
   onSessionReplaced?: () => void;
+
+  /** Called when `sessionError()` starts reporting `error`. */
+  onSessionError?: (error: Error) => void;
 
   /**
    * The owning manager's authenticated session identity
@@ -4963,8 +4986,9 @@ export class SpaceReplica
    */
   #lastAuthorizationError: IAuthorizationError | null = null;
   #onAccessChange?: (error: Error | undefined) => void;
-  #cancelAccessLoss: Cancel | undefined;
+  #cancelTermination: Cancel | undefined;
   #onSessionReplaced?: () => void;
+  #onSessionError?: (error: Error) => void;
 
   readonly #routeState: ProviderRouteState;
   readonly #routeGeneration: number;
@@ -4998,6 +5022,7 @@ export class SpaceReplica
     this.#subscription = options.subscription;
     this.#onAccessChange = options.onAccessChange;
     this.#onSessionReplaced = options.onSessionReplaced;
+    this.#onSessionError = options.onSessionError;
     this.#scopeKeyIdentity = options.scopeKeyIdentity;
     this.#createSession = options.createSession;
     this.#getTelemetry = options.getTelemetry ?? (() => undefined);
@@ -6413,8 +6438,8 @@ export class SpaceReplica
   }
 
   async close(): Promise<void> {
-    this.#cancelAccessLoss?.();
-    this.#cancelAccessLoss = undefined;
+    this.#cancelTermination?.();
+    this.#cancelTermination = undefined;
     this.#localCoverageObservers.clear();
     this.#viewPlanObservers.clear();
     this.#cancelViewCapabilityLost?.();
@@ -6590,8 +6615,8 @@ export class SpaceReplica
   }
 
   closeNow(): void {
-    this.#cancelAccessLoss?.();
-    this.#cancelAccessLoss = undefined;
+    this.#cancelTermination?.();
+    this.#cancelTermination = undefined;
     this.#localCoverageObservers.clear();
     this.#viewPlanObservers.clear();
     this.#cancelViewCapabilityLost?.();
@@ -11102,12 +11127,17 @@ export class SpaceReplica
           this.#sessionSession = resolved.session;
           this.#lastAuthorizationError = null;
           this.#onAccessChange?.(undefined);
-          this.#cancelAccessLoss?.();
-          this.#cancelAccessLoss = resolved.session.subscribeAccessLoss(
+          this.#cancelTermination?.();
+          this.#cancelTermination = resolved.session.subscribeTermination(
             (error) => {
-              if (!this.#closed && this.#sessionSession === resolved.session) {
+              if (this.#closed || this.#sessionSession !== resolved.session) {
+                return;
+              }
+              const reported = this.sessionError() !== undefined;
+              if (MemoryV2Client.isPermanentAuthorizationError(error)) {
                 this.#onAccessChange?.(error);
               }
+              if (reported) this.#onSessionError?.(error);
             },
           );
           // Session replacement resets the marker epoch: markers for the

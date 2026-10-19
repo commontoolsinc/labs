@@ -430,6 +430,17 @@ export interface ExperimentalOptions {
    * flag. Defaults to off.
    */
   sharedMemoryConnection?: boolean | undefined;
+
+  /**
+   * A reactive computation's write that the space refuses for lack of a
+   * grant is kept as a local fold over the document's confirmed value
+   * (`docs/specs/memory-v2/03-commit-model.md` §3.8.3), so that the re-run
+   * reads what it computed and settles. When false, such a write is reverted
+   * like any other rejection, and the computation runs again against the
+   * same refusal until the scheduler's retry budget is spent. Defaults to
+   * off.
+   */
+  localFold?: boolean | undefined;
 }
 
 /**
@@ -1898,6 +1909,7 @@ export class Runtime {
     this.experimental.plainResultReceipts ??= true;
     this.experimental.lazyMaterialization ??= true;
     this.experimental.agentBuiltin ??= true;
+    this.experimental.localFold ??= false;
     this.experimental.localSessionDocuments ??= false;
 
     // Propagate experimental flags to their ambient control points, then read
