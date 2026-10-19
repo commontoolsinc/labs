@@ -717,6 +717,88 @@ shows the numbers topics publish, and after the fix shows none. Before the fix
 reaches the board, a topic created before the index existed is checked for that
 link, and any topic still holding it is rewired to the index.
 
+## Stages
+
+Each stage lands as its own pull request and leaves the editor working. Stages 1
+to 6 need nothing that does not exist. Stage 7 changes deployed Topics and is
+coordinated with the Topics owner. Stage 8 waits on the verb-call surface.
+
+**Open questions block stages 3, 5 and 7**, and are listed after the stages.
+
+1. **The stored citation.** `MentionRef`
+   (`packages/ui/src/v2/core/mention-refs.ts`) and `MentionRefSchema`
+   (`packages/runner/src/component-read-contract.ts`) gain an optional citation — the collection, as a reference, and the member name —
+   beside `destination`, which stays. A topic's reference graph is built from
+   each mention's `destination` (`packages/patterns/topics/topic.tsx`), so a
+   mention keeps the pointer every reader of it uses today and adds the name it
+   was cited by. Nothing writes a citation yet.
+   `packages/ui/src/v2/components/cf-code-editor/docs/mention-refs.md` says
+   what the field means.
+2. **Reading a collection's promise.** One predicate decides whether a
+   collection's declaration permits storing a name: unique across history,
+   permanent, never reused (`NamingPolicy`,
+   `packages/patterns/collection-naming/naming.ts`). It lives in `ui` or a layer
+   below it, since the editor calls it and `patterns` sits above `ui` in the
+   pace layers; the declaration's shape moves with it, or is restated as a
+   schema the predicate reads. This closes the gap
+   [#6986](https://github.com/commonfabric/labs/issues/6986) records.
+3. **The editor knows its collection.** The editor gains a property carrying the
+   collection's namespace map and its declaration, read through
+   `CellHandle.key()` one name at a time. Blocked on the first open question.
+4. **A pill takes its name from the citation.** A mention with a citation shows
+   the cited name, and a read of that one key of the namespace confirms it; a
+   name the namespace does not hold renders the label with an unresolved
+   marker. A mention without a citation keeps today's path until the fifth open
+   question is settled. The silent-unnaming failure is then impossible for
+   every cited mention.
+5. **Authoring writes citations.** A completion picked from the dropdown stores
+   the citation when the declaration permits it. A `#42` typed in full becomes a
+   mention without the dropdown, per the second open question.
+6. **The editor's short-name read
+   ([#7771](https://github.com/commonfabric/labs/issues/7771)).** The editor
+   takes a short name only from a universe row. Built on
+   its own branch now; its deployment carries the check recorded under its
+   ruling above.
+7. **Topics adopts it.** Topics wires its board's namespace and declaration into
+   each topic, and existing topics are brought onto that wiring through the
+   rehearsed procedure in `docs/development/space-clone-rehearsal.md`. A saved
+   topic's body renders its mentions per the third open question.
+8. **Completion asks the collection.** Once a send can return its handling's
+   receipt, the editor sends the typed prefix to a collection verb and offers
+   the candidates it returns — on the order of ten, each with its title — in
+   place of scanning the universe.
+
+### Open questions
+
+1. **How does the editor learn its collection?** A new input on each member,
+   wired to the collection at creation, is the general answer; for Topics it
+   costs a one-time rewire of every deployed topic, the same link-bind the
+   mention index needed. Carrying it through an input members already have —
+   for Topics, the board's cross-reference pivot — needs no rewire and ties the
+   naming surface to an unrelated output. Reading it off the universe's rows
+   loads the universe, which is the document this design exists to stop
+   loading. Recommendation: a new input.
+2. **When does a typed `#42` become a mention?** Today only a dropdown pick
+   makes one, and pasted text never does. The proposal: typing a boundary
+   character after `#` and digits converts the token when one read of the
+   namespace finds the name, so an author need not wait on a candidate list; a
+   paste still converts nothing.
+3. **How does read mode render a mention?** Read mode is
+   `<cf-markdown content={body} />`, which shows `[Label][key]` as written. The
+   options are the editor in a read-only mode, a mention-aware `cf-markdown`, or
+   a rendered reference-definition block. Recommendation: a mention-aware
+   `cf-markdown`, since the editor is heavy to mount for every saved body and a
+   definition block shows addresses rather than names.
+4. **Who reviews the Topics wiring?** Stage 7 changes deployed Topics, which
+   changes only in coordination with Gideon.
+5. **What does a mention written before citations existed show?** It holds a
+   destination and no name, and the namespace maps names to members, not
+   members to names. The options are keeping today's universe path for those
+   mentions alone, or giving them a citation the next time an author edits the
+   document they are in, which is an author's write rather than a reader's.
+   Recommendation: the second, with the universe path kept until a document is
+   edited.
+
 ## What this design does not cover
 
 - **The `[[` backlink surface over a space's own mentionable list.**
