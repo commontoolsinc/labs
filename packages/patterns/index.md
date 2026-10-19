@@ -123,12 +123,12 @@ hold descriptors), `habit-tracker/`, `iframe-cursor-canvas/` (a shared board in
 a sandboxed iframe: shapes are stored, while each viewer's pointer and a shape
 held mid-drag or mid-resize travel through a presence room and are stored
 nowhere), `iframe-verb-list/` (a list in a sandboxed iframe whose guest adds an
-item only by sending the pattern's `addItem` verb, which the generated frame
-takes as a stream), `lobby/`, `lunch-poll/`, `profile-group-chat/`,
-`project-list/`, [`recommend-a-book/`](recommend-a-book/README.md) (personal
-reading shelf and private visitor recommendations), `router/`,
-`scoped-group-chat/`, `scoped-user-directory/`, `scrabble/`, `shared-note/` (a
-shared Markdown document whose live cursors carry each viewer's profile name),
+item only by sending the pattern's `addItem` verb, which writes the pattern's
+own state), `lobby/`, `lunch-poll/`, `profile-group-chat/`, `project-list/`,
+[`recommend-a-book/`](recommend-a-book/README.md) (personal reading shelf and
+private visitor recommendations), `router/`, `scoped-group-chat/`,
+`scoped-user-directory/`, `scrabble/`, `shared-note/` (a shared Markdown
+document whose live cursors carry each viewer's profile name),
 `shared-profile-demo/`, `shared-profile-roster/`, `suggestable/`,
 `weekly-calendar/`, `wordsearch/` (a word search maker: form, puzzle, and a PDF
 of the puzzle and its answer key).
