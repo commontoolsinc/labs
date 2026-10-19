@@ -57,6 +57,7 @@ import { encodePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { areLinksSame } from "../link-equality.ts";
+import { literalMemberMatches } from "../schema-literal-match.ts";
 import {
   droppedStoredClaim,
   type ForeignPositions,
@@ -143,7 +144,10 @@ import {
   isOrClause,
   normalizeClause,
 } from "./clause.ts";
-import { ConsumedLabelIndex } from "./consumed-label-index.ts";
+import {
+  ConsumedLabelIndex,
+  type ConsumedLabelSelection,
+} from "./consumed-label-index.ts";
 import { collectDeclaredMonotonicityViolations } from "./declared-monotonicity.ts";
 import {
   CfcEnvelopeStabilityError,
@@ -4131,6 +4135,29 @@ const probedSlotPath = (path: readonly string[]): readonly string[] => {
     : path;
 };
 
+/**
+ * The entries a read of `shape` consumes, as the selection an index shares
+ * across transactions: one predicate per shape, under the shape's name.
+ */
+const consumedByShape = (
+  shape: ReadObservationShape,
+): ConsumedLabelSelection => {
+  let selection = consumedByShapeSelections.get(shape);
+  if (selection === undefined) {
+    selection = {
+      key: shape,
+      keeps: (entry) => readConsumesEntry(shape, entry),
+    };
+    consumedByShapeSelections.set(shape, selection);
+  }
+  return selection;
+};
+
+const consumedByShapeSelections = new Map<
+  ReadObservationShape,
+  ConsumedLabelSelection
+>();
+
 const forEachFlowObservation = (
   tx: IExtendedStorageTransaction,
   consume: (
@@ -4788,19 +4815,13 @@ const deriveFlowJoinImpl = (
       ): ConsumedLabelIndex | undefined => {
         let index = document.indexes.get(shape);
         if (index === undefined && document.metadata !== undefined) {
-          index = new ConsumedLabelIndex(
-            document.metadata.labelMap.entries.filter((entry) =>
-              readConsumesEntry(shape, entry)
-            ),
-            {
-              onQuery: (wildcard) =>
-                tx.noteCfcPreparationWork?.(
-                  wildcard
-                    ? "overlapWildcardQueries"
-                    : "overlapConcreteQueries",
-                ),
-            },
-          );
+          index = new ConsumedLabelIndex(document.metadata.labelMap.entries, {
+            onQuery: (wildcard) =>
+              tx.noteCfcPreparationWork?.(
+                wildcard ? "overlapWildcardQueries" : "overlapConcreteQueries",
+              ),
+            select: consumedByShape(shape),
+          });
           document.indexes.set(shape, index);
         }
         return index;
@@ -6475,12 +6496,15 @@ const schemaTypeMatchesValue = (
         return Array.isArray(value);
       case "boolean":
         return typeof value === "boolean";
+      // A `bigint` is an integer, and `integer` is a subtype of `number`, as
+      // resolveSchemaForValue() reads both.
       case "integer":
-        return typeof value === "number" && Number.isInteger(value);
+        return (typeof value === "number" && Number.isInteger(value)) ||
+          typeof value === "bigint";
       case "null":
         return value === null;
       case "number":
-        return typeof value === "number";
+        return typeof value === "number" || typeof value === "bigint";
       case "object":
         return isObjectNotArray(value);
       case "string":
@@ -6563,13 +6587,16 @@ const policySchemaMatchesValue = (
     );
   }
   if (
-    schema.const !== undefined && !fabricAwareEqual(schema.const, value)
+    schema.const !== undefined &&
+    !literalMemberMatches(schema.const, value, fabricAwareEqual)
   ) {
     return false;
   }
   if (
     Array.isArray(schema.enum) &&
-    !schema.enum.some((candidate) => fabricAwareEqual(candidate, value))
+    !schema.enum.some((candidate) =>
+      literalMemberMatches(candidate, value, fabricAwareEqual)
+    )
   ) {
     return false;
   }

@@ -122,6 +122,20 @@ describe("pattern", () => {
     });
   });
 
+  it("deep-freezes its manifest of derived internal cells, partial causes included", () => {
+    const increment = lift((x: number) => x + 1);
+    const double = lift((x: number) => x * 2);
+    const testPattern = pattern<{ x: number }>(({ x }) => {
+      const intermediate = increment(x);
+      return { doubled: double(intermediate) };
+    });
+
+    const manifest = testPattern.derivedInternalCells!;
+    expect(manifest[0].partialCause).toEqual({ $generated: 0 });
+    expect(Object.isFrozen(manifest[0].partialCause)).toBe(true);
+    expect(isDeepFrozen(manifest)).toBe(true);
+  });
+
   it("uniquifies repeated stable internal paths with schemas", () => {
     const isPositive = lift(
       (value: number) => value > 0,

@@ -231,23 +231,32 @@ Running it more often than that is harmless: a repaired profile is reported as
 
 `cf piece follow --cell <piece> <origin>` adopts the origin’s current pattern
 and records the origin for future updates. It refuses incompatible schemas by
-default. After reviewing the reported changes, pass
-`--dangerously-allow-incompatible-schema` to perform a fresh review and accept
-the candidate reviewed in that invocation. If the origin released between runs,
-this candidate and its incompatibilities can differ from the earlier report. The
-command prints the incompatibility it accepted, pins that candidate during
-confirmation, and revalidates source state and retained inputs. A changed review
-during confirmation is returned to the caller without automatically accepting
-it.
+default, except for a step the release gate already proved: the origin is a
+`system:` one, the piece runs its default export and the candidate is that
+export too, the piece's source was compiled from that origin's file (its
+retained entry is the origin's route), the piece knows when that source was
+released, and the deployment states a later release beside the candidate's
+identity. Such a step is taken as an automatic update from the origin takes it,
+without comparing schemas (`docs/specs/piece-source-lifecycle.md`), and the
+revision records the new release time. The stored argument, retained links, and
+stored CFC envelopes are checked either way. After reviewing the reported
+changes, pass `--dangerously-allow-incompatible-schema` to perform a fresh
+review and accept the candidate reviewed in that invocation. If the origin
+released between runs, this candidate and its incompatibilities can differ from
+the earlier report. The command prints the incompatibility it accepted, pins
+that candidate during confirmation, and revalidates source state and retained
+inputs. A changed review during confirmation is returned to the caller without
+automatically accepting it.
 
-A piece whose current pattern cannot be loaded is reported the same way: the
-candidate cannot be compared with what the piece ran, and that is the
-incompatibility. Under `--dangerously-allow-incompatible-schema` the piece
-adopts the origin's pattern and records the origin in one transition, and keeps
-the identity it displaced where its space retains no source for it. The stored
-argument is still checked against the candidate, which no flag waives, and a
-piece with recorded source history whose current source cannot be restored is
-still refused.
+Outside that exception, a piece whose current pattern cannot be loaded is
+reported the same way: the candidate cannot be compared with what the piece ran,
+and that is the incompatibility. A piece inside it is reviewed without that
+comparison, as an automatic update from the origin is. Under
+`--dangerously-allow-incompatible-schema` the piece adopts the origin's pattern
+and records the origin in one transition, and keeps the identity it displaced
+where its space retains no source for it. The stored argument is still checked
+against the candidate, which no flag waives, and a piece with recorded source
+history whose current source cannot be restored is still refused.
 
 A caller that decided to follow on the strength of what it inspected pins the
 follow to the source state it read, so a piece whose source changed in between

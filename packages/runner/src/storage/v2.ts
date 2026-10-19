@@ -100,10 +100,18 @@ import {
   type PendingCommitContext,
   type SpaceStorageDiagnostic,
   type SpaceStorageSizes,
+  STORAGE_DIAGNOSTICS_LIMIT,
   type StorageDiagnostics,
   type StorageSizes,
   sumSpaceStorageSizes,
 } from "./diagnostics.ts";
+import {
+  DOCUMENT_SIZE_NODE_BUDGET,
+  DocumentSizeEstimate,
+  type MeasureBudget,
+  measureDocumentSizes,
+  type SpaceDocumentSizes,
+} from "./document-sizes.ts";
 import type { Cell } from "../cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import {
@@ -921,6 +929,20 @@ const holdsContentAddressedValue = (
   const doc = record?.confirmed.value;
   return isObjectNotArray(doc) && taggedHashStringOf(doc.value) === hash;
 };
+
+/**
+ * Whether `record` holds content that no later commit can change: a
+ * content-addressed document in space scope whose confirmed value hashes to
+ * its id. In space scope only: a session-scoped write is promoted into the
+ * confirmed layer without any server accepting it.
+ */
+const holdsImmutableContent = (
+  id: URI,
+  scope: CellScope | undefined,
+  record: DocumentRecord | undefined,
+): boolean =>
+  id.startsWith("cid:") && normalizeCellScope(scope) === "space" &&
+  holdsContentAddressedValue(record, id.slice("cid:".length));
 
 /** Folds pending and locally accepted wave contributions in sealing order. */
 const materializePendingVersions = (
@@ -2724,8 +2746,45 @@ export class StorageManager implements IStorageManager {
     };
   }
 
-  /** @inheritDoc */
+  /**
+   * @inheritDoc
+   *
+   * The per-space entries are built in one pass over the open spaces, with
+   * the document measurement of `measureDocumentSizes()` sharing one
+   * {@link DOCUMENT_SIZE_NODE_BUDGET} among all of them, so a read is
+   * bounded however many documents the spaces hold.
+   */
   getSizes(): StorageSizes {
+    const bySpace = measureDocumentSizes(
+      [...this.#providers.values()].map((provider) => provider.replica),
+      DOCUMENT_SIZE_NODE_BUDGET,
+    ).sort((a, b) =>
+      b.approxBytes - a.approxBytes || b.documents - a.documents
+    );
+    const bySpaceOmitted = {
+      spaces: 0,
+      documents: 0,
+      watched: 0,
+      measuredDocuments: 0,
+      truncatedDocuments: 0,
+      approxBytes: 0,
+    };
+    let measuredDocuments = 0;
+    let truncatedDocuments = 0;
+    let approxBytes = 0;
+    for (const [index, entry] of bySpace.entries()) {
+      measuredDocuments += entry.measuredDocuments;
+      truncatedDocuments += entry.truncatedDocuments;
+      approxBytes += entry.approxBytes;
+      if (index < STORAGE_DIAGNOSTICS_LIMIT) continue;
+      bySpaceOmitted.spaces++;
+      bySpaceOmitted.documents += entry.documents;
+      bySpaceOmitted.watched += entry.watched;
+      bySpaceOmitted.measuredDocuments += entry.measuredDocuments;
+      bySpaceOmitted.truncatedDocuments += entry.truncatedDocuments;
+      bySpaceOmitted.approxBytes += entry.approxBytes;
+    }
+    bySpace.length = Math.min(bySpace.length, STORAGE_DIAGNOSTICS_LIMIT);
     return {
       ...sumSpaceStorageSizes(
         [...this.#providers.values()].map((provider) =>
@@ -2737,6 +2796,12 @@ export class StorageManager implements IStorageManager {
       pendingLoads: this.#pendingLoads.size,
       pendingCrossingLoads: this.#pendingCrossingLoads.size,
       pendingCrossSpace: this.#crossSpacePromises.size,
+      bySpace,
+      bySpaceOmitted,
+      measuredDocuments,
+      truncatedDocuments,
+      approxBytes,
+      wire: this.#sessionFactory.getSizes?.() ?? null,
     };
   }
 
@@ -3469,6 +3534,13 @@ export class StorageManager implements IStorageManager {
    * `identity` names that principal's instance of each scoped target
    * (server-execution v2 stage A), as `syncCell` does for a stored
    * document.
+   *
+   * A schema that is not deep-frozen is interned, and so frozen in place,
+   * before the walk reads it. The memo's key holds the schema's hash, and
+   * the schema of each child is derived from its parent's, so a mutable
+   * schema costs a hash at every record the walk descends, where an interned
+   * one is hashed once and its derivations come from the derivation cache,
+   * interned themselves.
    */
   #collectLinkedCellSyncs(
     value: unknown,
@@ -3484,6 +3556,9 @@ export class StorageManager implements IStorageManager {
     }
     if (typeof value !== "object") {
       return;
+    }
+    if (isObjectOrArray(schema) && !isDeepFrozen(schema)) {
+      schema = internSchema(schema);
     }
     const context = JSON.stringify([
       base.id,
@@ -4557,6 +4632,10 @@ export class SpaceReplica
   #aclChangedSinceMount = false;
 
   readonly #docs = new Map<string, DocumentRecord>();
+
+  /** The sizes read's running measurement of `#docs`; it reads nothing else. */
+  readonly #documentSizes = new DocumentSizeEstimate();
+
   readonly #syncTasks = new Map<string, SyncTask>();
   readonly #commitPromises = new Set<Promise<unknown>>();
 
@@ -5031,6 +5110,7 @@ export class SpaceReplica
       repairCount: this.#rejectedPendingLayers.size,
       parkedAcceptLocalSeqs: diagnosticPrefix(this.#parkedAccepts.keys()),
       parkedAcceptCount: this.#parkedAccepts.size,
+      sizes: this.getSizes(),
     };
   }
 
@@ -5048,6 +5128,23 @@ export class SpaceReplica
       parkedAccepts: this.#parkedAccepts.size,
       syncTasks: this.#syncTasks.size,
       pendingReads: this.#syncPromises.size,
+    };
+  }
+
+  /**
+   * This replica's documents and their approximate size, measured from the
+   * confirmed value of each within `budget`, which the measurement draws
+   * down; `DocumentSizeEstimate` says how the estimate is built across
+   * reads. Reading it starts no I/O and changes no document.
+   */
+  getDocumentSizes(budget: MeasureBudget): SpaceDocumentSizes {
+    const values = function* (docs: Iterable<DocumentRecord>) {
+      for (const record of docs) yield record.confirmed.value;
+    };
+    return {
+      space: this.#space,
+      watched: this.#watchedIds.size,
+      ...this.#documentSizes.measure(values(this.#docs.values()), budget),
     };
   }
 
@@ -6028,11 +6125,8 @@ export class SpaceReplica
     for (const { id, scope } of documents) {
       const key = this.#docKeyOf({ id, scope });
       if (
-        !this.#delivered.has(key) && !(id.startsWith("cid:") &&
-          holdsContentAddressedValue(
-            this.#docs.get(key),
-            id.slice("cid:".length),
-          ))
+        !this.#delivered.has(key) &&
+        !holdsImmutableContent(id, scope, this.#docs.get(key))
       ) {
         return undefined;
       }
@@ -6067,9 +6161,13 @@ export class SpaceReplica
       return false;
     }
     if (delivered === undefined) {
+      // A document this replica's own commit stored may never arrive in a
+      // frame: the server does not send a replica its own change to a
+      // document it holds, and ships a schema document only with a document
+      // that refers to it. An accepted whole write names the stored version,
+      // and content under a `cid:` id cannot change.
       return confirmed.acceptedWhole === true ||
-        (id.startsWith("cid:") &&
-          holdsContentAddressedValue(record, id.slice("cid:".length)));
+        holdsImmutableContent(id, scope, record);
     }
     // Past its delivered seq, the confirmed state is an own accepted write
     // promoted locally, which a push through that seq has since covered.
@@ -7908,17 +8006,14 @@ export class SpaceReplica
         !this.#isLocalSessionDocument(read)
       ),
     };
-    // A commit that writes only this replica's session documents settles
-    // here, whatever it read. A shared read names a document the replica
-    // holds, so a write that outdates the read reaches the replica as a
-    // frame, and the frame runs the derivation that read it again; a
-    // verdict refusing the read as stale would re-run the same derivation
-    // after the same frame. A read through a pending layer settles with
-    // that layer's commit below. A precondition on a shared document is a
-    // check on the server's head rather than on this replica's view, so a
-    // commit carrying one still travels, as a validation-only commit.
+    // A commit settles here only when nothing it touched is shared. One that
+    // read a shared document travels, with no operations when every write
+    // is local, because its session writes are only as good as those reads:
+    // a verdict refusing a read rolls the writes back, and it is what runs a
+    // handler, which no later frame runs again, against fresh state.
     const localOnly = this.#localSessionDocuments() &&
-      remoteOperations.length === 0 && !remotePreconditions?.length;
+      remoteOperations.length === 0 && !remotePreconditions?.length &&
+      remoteReads.confirmed.length === 0 && remoteReads.pending.length === 0;
     // Record local origins before the first rejection checkpoint: a later
     // guard must validate their failed verdict without contacting the server.
     if (localOnly) this.#localSessionCommitAccepted.set(localSeq, false);
@@ -7967,10 +8062,7 @@ export class SpaceReplica
       }
       // A local session read can depend on a mixed commit awaiting its
       // verdict or local application. Promote that dependency before its
-      // consumer can replace the confirmed base. A commit settling here
-      // waits for every pending layer it read through, shared ones
-      // included: the server is not asked about them, so a rejected one
-      // has to be found by the checkpoint below before the settle.
+      // consumer can replace the confirmed base.
       if (this.#localSessionDocuments()) {
         const origins = (commit.preconditions ?? []).flatMap((pin) =>
           pin.kind === "origin-committed" ? [pin.originLocalSeq] : []

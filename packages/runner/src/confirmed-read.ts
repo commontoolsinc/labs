@@ -15,7 +15,7 @@ export type ConfirmedRead<R> = {
    * Whether every document `read` consumed holds a known stored version in
    * `space`, with no pending local write or value the replica made up locally.
    * A delivery, an accepted whole-document set or deletion, or verified
-   * content-addressed content establishes that version
+   * content-addressed content in space scope establishes that version
    * (`ISpaceReplica.isConfirmedDocument`). A mutable document without a
    * delivered watch may be stale; confirmation alone does not prove freshness.
    */

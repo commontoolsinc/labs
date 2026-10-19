@@ -22,6 +22,7 @@ import { BranchListWalk, REACHED_AGAIN } from "./cfc/branch-list-walk.ts";
 import type { CfcConfClause } from "./cfc/clause.ts";
 import { uniqueCfcAtoms } from "./cfc/observation.ts";
 import {
+  cfcSchemaDocumentOf,
   cfcSchemaIsFalse,
   cfcSchemaIsInternalKey,
   cfcSchemaIsTrue,
@@ -346,6 +347,15 @@ function enumeratedTypes(
   return types;
 }
 
+/**
+ * The empty schema `getSchemaAtPath()` returns in place of `true`, one
+ * interned instance for every call. A fresh `{}` per call would be a mutable
+ * schema at every position a `true` schema admits, which neither the
+ * derivation cache nor the hash cache serves, and a walk that derives each
+ * child's schema from its parent's would miss both at every record below it.
+ */
+const EMPTY_SCHEMA_OBJECT: JSONSchema = internSchema({});
+
 // The cfc rules. Every member is static: the derivations are pure functions of
 // their arguments, and what caching there is lives in module-level maps keyed
 // by schema identity.
@@ -565,7 +575,11 @@ export class ContextualFlowControl {
       path,
       extraConfidentiality,
     );
-    return result === false ? undefined : result === true ? {} : result;
+    return result === false
+      ? undefined
+      : result === true
+      ? EMPTY_SCHEMA_OBJECT
+      : result;
   }
 
   /**
@@ -687,10 +701,11 @@ export class ContextualFlowControl {
     ) {
       // If the cursor is a $ref, get the target location
       if (isObjectOrArray(cursor) && "$ref" in cursor) {
-        // Follow the reference
+        // Follow the reference, against the one document kept for the map
+        // in effect: the resolver's memo is keyed on the root it is given.
         cursor = ContextualFlowControl.resolveSchemaRefsOrThrow(
           cursor,
-          { $defs: defs },
+          cfcSchemaDocumentOf(defs),
         );
         // The resolved view carries the definitions its local refs need.
         // A view without a map must also clear the referrer's definitions.

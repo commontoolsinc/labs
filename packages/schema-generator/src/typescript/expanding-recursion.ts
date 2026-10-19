@@ -22,8 +22,9 @@ import ts from "typescript";
 import { maxOf } from "@commonfabric/utils/math";
 
 /**
- * How many readings of one declaration, each instantiated after the one it is
- * read inside, may nest before the innermost is taken for a recursion that
+ * How many readings of one declaration, each instantiated with arguments at
+ * least as large as those of the one it is read inside (`expansionDepth()`),
+ * may nest before the innermost is taken for a recursion that
  * instantiates the declaration without end (`cutsExpansion()`), unless a
  * reading passes its own. The checker takes three for a recursion where its
  * answer is only "maybe"; this is set past the depth a finite chain written in
@@ -59,11 +60,12 @@ export const exhaustsBudget = (budget: ExpansionBudget): boolean =>
  * How deeply `type`, read inside `path`, the types it is read within,
  * outermost first, nests in instantiations of one declaration: the most
  * readings of any declaration it instantiates, itself among them, each
- * instantiated after the last, as the ids the checker numbers its types with
- * in creation order show. A nesting its author wrote out,
- * `Pair<Pair<Pair<string>>>`, is instantiated from the inside out, so its
- * readings are not counted. The checker counts the same way
- * (`isDeeplyNestedType`).
+ * instantiated with arguments at least as large as the last's
+ * (`argumentSize()`), as `Nest<T[]>` inside `Nest<T>` is. A nesting its
+ * author wrote out, `Pair<Pair<Pair<string>>>`, shrinks from the outside in,
+ * so its readings are not counted. The checker counts by the order it
+ * created the types in (`isDeeplyNestedType`), which depends on the rest of
+ * the program; their arguments do not.
  */
 export const expansionDepth = (
   type: ts.Type,
@@ -75,17 +77,57 @@ export const expansionDepth = (
     maxOf(
       recursionIdentities(type, checker).map((identity) => {
         let count = 0;
-        let lastId = 0;
+        let lastSize = -1;
         for (const outer of [...path, type]) {
           if (!recursionIdentities(outer, checker).includes(identity)) continue;
-          const id = (outer as ts.Type & { id?: number }).id ?? 0;
-          if (id >= lastId) count++;
-          lastId = id;
+          const size = argumentSize(outer);
+          if (size >= lastSize) count++;
+          lastSize = size;
         }
         return count;
       }),
     ),
   );
+
+/**
+ * The sizes `argumentSize()` has found, by type. A type's size is read only
+ * from what the checker gave it on creating it, which never changes, so it
+ * is found once.
+ */
+const argumentSizes = new WeakMap<ts.Type, number>();
+
+/**
+ * How large the arguments `type` was instantiated with are: one for the type,
+ * and the sizes of its arguments, an argument written twice counted twice,
+ * up to `Number.MAX_SAFE_INTEGER`, past which sizes compare as equal. It
+ * reads only the arguments the checker gave the type on creating it: an
+ * alias's instantiation's alias arguments, or a reference's own, except a
+ * deferred reference's, which are resolved only when something asks for
+ * them. A type's arguments are created before it, so none is the type
+ * itself or holds it, and each type's size is found once
+ * (`argumentSizes`), as `Dup<[T, T]>`'s two shared arguments need.
+ */
+const argumentSize = (type: ts.Type): number => {
+  const known = argumentSizes.get(type);
+  if (known !== undefined) return known;
+  const reference = type as ts.Type & {
+    readonly node?: ts.Node;
+    readonly resolvedTypeArguments?: readonly ts.Type[];
+  };
+  const isReference = ((type as ts.ObjectType).objectFlags &
+    ts.ObjectFlags.Reference) !== 0;
+  const args = type.aliasTypeArguments ??
+    (isReference && reference.node === undefined
+      ? reference.resolvedTypeArguments
+      : undefined) ??
+    [];
+  let size = 1;
+  for (const arg of args) {
+    size = Math.min(size + argumentSize(arg), Number.MAX_SAFE_INTEGER);
+  }
+  argumentSizes.set(type, size);
+  return size;
+};
 
 /**
  * Whether a reading cuts `type`, read inside `path`, as a recursion that

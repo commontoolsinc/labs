@@ -6,6 +6,7 @@ import {
   collectExternalSchemaRefHashes,
   parseExternalSchemaRef,
 } from "@commonfabric/data-model-schema/schema-refs";
+import { taggedHashStringOf } from "@commonfabric/data-model";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import type { Cell } from "../src/cell.ts";
@@ -22,7 +23,7 @@ import { lookupSchemaDocument } from "../src/schema-registry.ts";
 import type { SessionSync } from "@commonfabric/memory/v2";
 import type { SpaceReplica } from "../src/storage/v2.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { newSharedServer, TestStorageManager } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("confirmed read");
 const space = signer.did();
@@ -365,6 +366,42 @@ describe("confirmed-read", () => {
       expect((await committed.settled).error).toBeUndefined();
 
       expect(read).toEqual({ value: true, confirmed: false });
+    });
+
+    it("returns an unconfirmed read of one written in session scope, which no server stores", async () => {
+      const storage = TestStorageManager.create({
+        as: signer,
+        memoryHost: new URL("http://localhost:65535"),
+      }, {
+        create() {
+          throw new Error("Session state stays local");
+        },
+      });
+      const local = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: storage,
+        experimental: { localSessionDocuments: true, serverExecution: false },
+      });
+      try {
+        const schema = { type: "string" } as const satisfies JSONSchema;
+        const id: URI = `cid:${taggedHashStringOf(schema)}`;
+        const tx = local.edit();
+        tx.writeValueOrThrow({ space, id, path: [], scope: "session" }, schema);
+        expect((await tx.commit().settled).error).toBeUndefined();
+
+        const read = readConfirmed(local, space, (readTx) =>
+          readTx.read({
+            space,
+            id,
+            type: "application/json",
+            path: [],
+            scope: "session",
+          }).ok?.value !== undefined);
+        expect(read).toEqual({ value: true, confirmed: false });
+      } finally {
+        await local.dispose();
+        await storage.close();
+      }
     });
 
     it("returns an unconfirmed read of ones the reader does not hold", async () => {

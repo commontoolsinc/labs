@@ -70,10 +70,10 @@ mapped in [`../README.md`](../README.md).
   comments on a pull request: the commands that list a reviewer's findings and
   tell you which threads are still open, which automated reviewers post here,
   and why `gh pr view` returns none of it
-- [`deploying.md`](deploying.md) — how a commit reaches a host: which jobs
-  deploy where, and the contract the bastion's deploy wrapper enforces on what
-  they pass it. Read this before editing a deploy step, because that wrapper
-  lives in the infra repository rather than this one
+- [`deploying.md`](deploying.md) — coordinated Rapids releases and manual
+  Estuary deployments: which jobs deploy where, and the contracts the bastion's
+  wrappers enforce. Read this before editing a deploy step; those wrappers are
+  installed from the infra repository
 - [`staging-space-copy.md`](staging-space-copy.md) — how a *space* reaches a
   host: snapshotting one space's store and serving the copy from rapids, what
   installing it commits you to, and the questions a local clone answers more

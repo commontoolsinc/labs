@@ -7,6 +7,7 @@ import {
   equals,
   type FabricBytes,
   handler,
+  type HandlerFactory,
   ifElse,
   lift,
   NAME,
@@ -281,8 +282,10 @@ export type ProfileHomeOutput = {
   // read it; the profile shows `picture` in its place when it has one.
   avatar: OwnerProtectedProfileWrite<string, typeof setAvatar>;
   // The profile picture: the bytes of a raster image in any format an `<img>`
-  // decodes, the format being sniffed from the bytes. Absent until the owner
-  // sets one.
+  // decodes, the format being sniffed from the bytes. Absent until someone
+  // sets one. The picture's own label names the principal who set it, so a
+  // reader showing it as the owner's face reads that label (`principalOf` on
+  // the field), not the profile's label at `picture`.
   picture?: OwnerProtectedProfileWrite<FabricBytes, typeof setPicture>;
   // A short, human-authored free-text description of the profile owner
   // (CT-1648). Owner-protected like name/avatar; the canonical shared-profile
@@ -763,12 +766,29 @@ const setAvatar = handler<SetProfileAvatarEvent, { avatar: Writable<string> }>(
   },
 );
 
-// The authorized writer for the owner-protected `picture` field. An event
-// without bytes is a no-op, not a clear.
-const setPicture = handler<
+// The authorized writer for the `picture` field. An event without bytes is a
+// no-op, not a clear.
+//
+// The picture's cell has no default, so setup writes nothing to it and its
+// document stores no policy of its own. The handler's state declares that the
+// value represents the principal who writes it, so each write labels the
+// picture with its writer: the owner's picture says it is the owner's, and a
+// picture anyone else sets says it is theirs. The profile's space lets anyone
+// write, so this does not keep anyone from replacing the picture; it keeps a
+// reader from taking someone else's picture for the owner's. The explicit
+// `HandlerFactory` type lets the state name the handler as its own writer.
+export type SetProfilePictureState = {
+  picture: Writable<
+    RepresentsCurrentUser<
+      WriteAuthorizedBy<FabricBytes | undefined, typeof setPicture>
+    >
+  >;
+};
+
+const setPicture: HandlerFactory<
   SetProfilePictureEvent,
-  { picture: Writable<FabricBytes | undefined> }
->(
+  SetProfilePictureState
+> = handler<SetProfilePictureEvent, SetProfilePictureState>(
   (event, state) => {
     const picture = event.picture ?? event.detail?.bytes;
     if (!picture?.length) {

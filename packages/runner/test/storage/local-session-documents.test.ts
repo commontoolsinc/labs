@@ -414,11 +414,11 @@ describe("local-session-documents", () => {
   }
 
   for (const stale of [false, true]) {
-    it(`settles a session write over shared reads locally (stale ${stale})`, async () => {
-      // The reader's session write settles on its replica whatever it read:
-      // a shared read names a document the replica holds, and a later write
-      // to that document reaches the replica as a frame. A precondition on a
-      // shared document is a check on the server's head, and still travels.
+    it(`confirms shared reads used by a session write under client execution (stale ${stale})`, async () => {
+      // The session write stays on the replica, and the commit carrying its
+      // shared reads travels with no operations. A verdict refusing a read
+      // rolls the session write back, whether a handler or a derivation made
+      // it.
 
       const server = newSharedServer();
       const commits: ClientCommit[] = [];
@@ -463,32 +463,17 @@ describe("local-session-documents", () => {
           "session",
         );
         local.withTx(tx).set(2);
-        expect((await tx.commit().settled).error).toBeUndefined();
-        expect(local.get()).toBe(2);
-        const guarded = reader.edit();
-        guarded.addCommitPrecondition!(space, {
-          kind: "origin-committed",
-          originLocalSeq: getCommitLocalSeq(tx.tx, space)!,
-        });
-        local.withTx(guarded).set(local.withTx(guarded).get() + 1);
-        expect((await guarded.commit().settled).error).toBeUndefined();
-        expect(local.get()).toBe(3);
-        expect(commits).toHaveLength(sent);
-
-        await shared.sync();
-        expect(shared.get()).toBe(1);
-        const pinned = reader.edit();
-        pinned.addCommitPrecondition!(space, {
-          kind: "entity-value-hash",
-          id: shared.getAsNormalizedFullLink().id,
-          scope: "space",
-          valueHash: commitPreconditionValueHash(1),
-        });
-        local.withTx(pinned).set(4);
-        expect((await pinned.commit().settled).error).toBeUndefined();
-        expect(local.get()).toBe(4);
+        expect((await tx.commit().settled).error?.name).toBe(
+          stale ? "ConflictError" : undefined,
+        );
+        expect(local.get()).toBe(stale ? undefined : 2);
         expect(commits).toHaveLength(sent + 1);
         expect(commits[sent].operations).toEqual([]);
+        const scopes = new Set(
+          [...commits[sent].reads.confirmed, ...commits[sent].reads.pending]
+            .map((read) => read.scope ?? "space"),
+        );
+        expect([...scopes]).toEqual(["space"]);
       } finally {
         await reader.dispose();
         await writer.dispose();
@@ -502,8 +487,8 @@ describe("local-session-documents", () => {
   for (const rejected of [false, true]) {
     it(`settles a session write over a shared pending layer with that layer's commit (${rejected ? "rejects" : "succeeds"})`, async () => {
       // The session write read the shared document through the optimistic
-      // layer of a commit still awaiting its verdict. It settles after that
-      // commit does, as the verdict decides, and never travels itself.
+      // layer of a commit still awaiting its verdict. It travels with no
+      // operations, and settles as that commit's verdict decides.
 
       const server = newSharedServer();
       const commits: ClientCommit[] = [];
@@ -558,7 +543,8 @@ describe("local-session-documents", () => {
         );
         expect(shared.get()).toBe(rejected ? undefined : 3);
         expect(session.get()).toBe(rejected ? undefined : 13);
-        expect(commits).toHaveLength(1);
+        expect(commits).toHaveLength(2);
+        expect(commits[1].operations).toEqual([]);
       } finally {
         release.resolve();
         await runtime.dispose();

@@ -145,11 +145,20 @@ export class ReplicaLoadFailureError extends Error {
     readonly failure: ReplicaLoadFailure,
     cause: unknown,
   ) {
-    super(
-      cause instanceof Error ? cause.message : String(cause),
-      { cause },
-    );
+    super(loadFailureMessage(cause), { cause });
   }
+}
+
+/**
+ * Returns the message a load failure's cause carries. A pull reports its
+ * failure as a plain result object rather than an `Error`, so the message is
+ * read off any object that has one; a cause without one is stringified.
+ */
+function loadFailureMessage(cause: unknown): string {
+  return typeof cause === "object" && cause !== null && "message" in cause &&
+      typeof cause.message === "string"
+    ? cause.message
+    : String(cause);
 }
 
 export const toReplicaLoadFailureError = (
@@ -3368,9 +3377,10 @@ export interface ISpaceReplica extends ISpace {
    * A watched delivery establishes it, including absence; a newer own write
    * over that delivery waits for a covering push. An accepted whole-document
    * set or deletion also establishes a version without a frame delivery, as
-   * does verified content under its content-addressed id. A mutable version
-   * without a delivered watch may be stale: use `completeThroughSeq()` with
-   * the read documents to ask about coverage of later changes.
+   * does verified content under its content-addressed id in space scope. A
+   * mutable version without a delivered watch may be stale: use
+   * `completeThroughSeq()` with the read documents to ask about coverage of
+   * later changes.
    */
   isConfirmedDocument?(
     id: URI,

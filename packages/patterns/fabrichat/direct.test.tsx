@@ -4,8 +4,10 @@
  * people, each an OWNER of its space, may delete and obliterate their own
  * messages and neither of the other's. Someone the space admits with WRITE
  * alone, as a direct room whose space has grown may, likewise obliterates
- * their own messages, and nobody else's. `owner-obliteration.test.tsx` covers
- * a direct room configured to let its OWNERs obliterate.
+ * their own messages, and nobody else's. Each act the room refuses fails its
+ * run with a reason, and each participant requires exactly its own refusals,
+ * each by its reason. `owner-obliteration.test.tsx` covers a direct room
+ * configured to let its OWNERs obliterate.
  *
  * The test lane doesn't enforce the access list, so what this checks is what
  * the room decides from the level `spaceAccess()` reports.
@@ -195,6 +197,11 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       { label: "bob-done" },
       { await: "alice-done" },
     ],
+    // His refused deletion and obliteration of Alice's message.
+    expectRuntimeErrors: [
+      "Only its author can delete a message.",
+      "Only its author can remove a message in this chat.",
+    ],
   };
 });
 
@@ -251,6 +258,11 @@ export const carol = pattern<{ setup: Setup }>(({ setup }) => {
       },
       { label: "carol-done" },
       { await: "alice-done" },
+    ],
+    // Her refused deletion and obliteration of Alice's message.
+    expectRuntimeErrors: [
+      "Only its author can delete a message.",
+      "Only its author can remove a message in this chat.",
     ],
   };
 });
