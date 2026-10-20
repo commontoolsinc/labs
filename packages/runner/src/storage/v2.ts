@@ -4978,8 +4978,9 @@ export class SpaceReplica
 
   /**
    * The documents a release removed while something held them that could not
-   * be watched again, by doc key: each keeps its value, and the next pass
-   * watches it again unless a removal the server sends for it comes first.
+   * be watched again, by doc key. Each keeps its value, and the next pass
+   * watches it again, or drops it if nothing holds it any more, unless a
+   * frame for it arrives first.
    */
   readonly #owedWatches = new Map<string, SessionSync["removes"][number]>();
 
@@ -7169,10 +7170,12 @@ export class SpaceReplica
    * first watched on its own, with a selector that follows no links, so that
    * no removal can take it from the session. Of the documents the answer says
    * the session no longer covers, one that something began to hold while the
-   * removal was on its way keeps its value and is watched again on its own;
-   * every other one is emptied as any removal empties it and, unless a local
-   * write to it is pending, dropped, so that a later read of it loads it
-   * again. A root read or pulled since the previous pass is
+   * removal was on its way keeps its value and is watched again on its own
+   * (`#watchAgain()`); every other one is emptied as any removal empties it
+   * and, unless a local write to it is pending, dropped, so that a later read
+   * of it loads it again. A pass begins by watching again each document an
+   * earlier pass could not watch again, or by dropping it if nothing holds it
+   * any more. A root read or pulled since the previous pass is
    * kept for the next one, so a document loaded for a read not yet made, or
    * read into a value that follows its links later, stays loaded through the
    * pass that follows. A session whose server cannot remove a watch by id
@@ -7180,8 +7183,12 @@ export class SpaceReplica
    */
   async releaseUnread(): Promise<WatchAddress[]> {
     const pass = this.#releasePasses++;
-    if (this.#closed || this.#sessionClient === undefined) return [];
-    for (const remove of this.#owedWatches.values()) this.#watchAgain(remove);
+    if (this.#closed) return [];
+    for (const remove of this.#owedWatches.values()) {
+      if (this.#holds(removedAddress(remove))) this.#watchAgain(remove);
+      else this.#dropReleased(remove);
+    }
+    if (this.#sessionClient === undefined) return [];
     const releasable = (root: RootWatches) =>
       root.pulledInPass < pass &&
       (this.#docs.get(root.key)?.readInPass ?? -1) < pass &&
@@ -7259,6 +7266,10 @@ export class SpaceReplica
       );
       for (const remove of heldSince) {
         const key = this.#docKeyOf(removedAddress(remove));
+        // The session no longer keeps it current, so nothing may count it
+        // as delivered until the answer to its own watch arrives.
+        this.#delivered.delete(key);
+        this.#watchedIds.delete(key);
         if ((this.#docs.get(key)?.pending.length ?? 0) === 0) continue;
         // The session reports nothing about the document until it is
         // watched again, so a foreign change in between is hidden: the
@@ -7336,19 +7347,24 @@ export class SpaceReplica
         remove.id,
         error,
       ]);
-      if (!isPermanentAuthorizationFailure(error)) {
-        this.#owedWatches.set(key, remove);
-        return;
-      }
-      this.#applySessionSync({
-        type: "sync",
-        fromSeq: 0,
-        toSeq: 0,
-        upserts: [],
-        removes: [remove],
-      }, "integrate");
-      this.#forgetRemoved([remove]);
+      if (isPermanentAuthorizationFailure(error)) this.#dropReleased(remove);
+      else this.#owedWatches.set(key, remove);
     });
+  }
+
+  /**
+   * Empties and drops a document a release removed, as the removal would
+   * have had nothing held it.
+   */
+  #dropReleased(remove: SessionSync["removes"][number]): void {
+    this.#applySessionSync({
+      type: "sync",
+      fromSeq: 0,
+      toSeq: 0,
+      upserts: [],
+      removes: [remove],
+    }, "integrate");
+    this.#forgetRemoved([remove]);
   }
 
   /**
@@ -10086,6 +10102,8 @@ export class SpaceReplica
         this.instanceKey(upsert.scope, undefined, upsert.scopeKey),
       );
       this.#watchedIds.add(key);
+      // A frame for the document means a watch covers it again.
+      this.#owedWatches.delete(key);
       this.#delivered.set(key, {
         id: upsert.id as URI,
         scope: upsert.scope,
@@ -10149,7 +10167,7 @@ export class SpaceReplica
       this.#watchedIds.delete(key);
       this.#delivered.delete(key);
       // A removal settles what the session keeps of the document, so a
-      // watch a release still owes it is not asked for again.
+      // watch a release owes it is not asked for again.
       this.#owedWatches.delete(key);
       if (record.pending.length > 0) {
         // A shadowed remove carries no seq on the wire: the sentinel 1

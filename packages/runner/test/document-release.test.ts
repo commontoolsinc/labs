@@ -93,6 +93,10 @@ describe("document-release", () => {
 
   const readerReplica = () => readerStorage.open(space).replica;
 
+  /** Whether the reader's replica holds a known stored version of `id`. */
+  const confirmed = (id: URI) =>
+    readerReplica().isConfirmedDocument?.(id) === true;
+
   /** Runs two release passes, so a document loaded before the first goes. */
   const releaseTwice = async () => {
     await reader.scheduler.idle();
@@ -275,10 +279,12 @@ describe("document-release", () => {
       message: "watch failed",
     });
     expect(loaded(id)).toBe(true);
+    expect(confirmed(id)).toBe(false);
     expect(seen.at(-1)).toEqual({ n: 1 });
 
     await releaseTwice();
     await readerStorage.synced();
+    expect(confirmed(id)).toBe(true);
     await write("counter", 2);
     await reader.scheduler.idle();
     expect(seen.at(-1)).toEqual({ n: 2 });
@@ -286,6 +292,28 @@ describe("document-release", () => {
     reader.scheduler.unsubscribe(action);
     await releaseTwice();
     expect(loaded(id)).toBe(false);
+  });
+
+  it("drops a document that could not be watched again at the next pass once nothing holds it", async () => {
+    await write("counter", 1);
+    const id = idOf("counter");
+    const { action } = await releaseUnderRefusedRewatch(id, {
+      name: "Error",
+      message: "watch failed",
+    });
+    const dropped: URI[] = [];
+    const unsubscribe = readerStorage.subscribeDocumentsDropped(
+      (_space, addresses) => {
+        for (const address of addresses) dropped.push(address.id);
+      },
+    );
+    reader.scheduler.unsubscribe(action);
+    await reader.scheduler.idle();
+    await readerStorage.releaseUnreadDocuments();
+    await readerStorage.synced();
+    expect(loaded(id)).toBe(false);
+    expect(dropped).toEqual([id]);
+    unsubscribe();
   });
 
   it("drops a document held during its release when the space refuses to watch it again", async () => {
