@@ -771,7 +771,7 @@ async function withIdentity(
 /** The in-process server a harness hosts, when it hosts one. */
 type HostedServer = {
   /** The memory server, whose admitted commits include the serving loop's. */
-  readonly server: Pick<MemoryServer, "watchAdmittedCommits" | "readDocument">;
+  readonly server: Pick<MemoryServer, "watchAdmittedCommits">;
 
   /** The server's `idle()`, which covers storage and not a serving loop. */
   idle(): Promise<void>;
@@ -1138,25 +1138,6 @@ export class MultiRuntimeHarness {
       stopWatching();
     }
     return admitted;
-  }
-
-  /**
-   * The value of a document's space-scoped instance as of `seq`, read from
-   * the server the harness hosts, or `null` when the document had none then.
-   */
-  async documentValueAt(
-    space: string,
-    id: string,
-    seq: number,
-  ): Promise<FabricValue | null> {
-    if (this.#server === undefined) {
-      throw new Error(
-        "documentValueAt() reads the server the harness hosts, and this " +
-          "harness targets a running toolshed",
-      );
-    }
-    const document = await this.#server.server.readDocument(space, id, seq);
-    return document === null ? null : document.value ?? null;
   }
 
   /**
