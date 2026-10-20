@@ -1568,6 +1568,41 @@ describe("data-updating", () => {
       expect(slot(argument, "space").getRaw()).toEqual({ a: "shared" });
     });
 
+    it("replaces the binding held by its own narrower instance", async () => {
+      // The realization hop is the position itself; the redirect its narrower
+      // instance holds is a binding like any other.
+      const bound = idFor("binding walk chained binding target");
+      const argument = idFor("binding walk chained argument");
+      slot(bound, "user").setRaw({ a: "bound" });
+      slot(argument, "user").setRaw({
+        "/": {
+          "link@1": {
+            id: bound,
+            overwrite: "redirect",
+            path: [],
+            scope: "user",
+          },
+        },
+      });
+      slot(argument, "space").setRaw({
+        "/": { "link@1": { overwrite: "redirect", path: [], scope: "user" } },
+      });
+
+      diffAndUpdate(
+        runtime,
+        tx,
+        slot(argument, "space").getAsNormalizedFullLink(),
+        { a: "supplied" },
+        undefined,
+        { replacesBindings: true },
+      );
+      expect((await tx.commit().settled).error).toBeUndefined();
+      tx = runtime.edit();
+
+      expect(slot(bound, "user").getRaw()).toEqual({ a: "bound" });
+      expect(slot(argument, "user").getRaw()).toEqual({ a: "supplied" });
+    });
+
     it("writes through a redirect to its own position's user instance", () => {
       const argument = idFor("binding walk realized argument");
       slot(argument, "user").setRaw({ a: "mine" });

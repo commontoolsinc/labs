@@ -1274,10 +1274,8 @@ function isNarrowerInstanceOf(
   other: NormalizedFullLink,
   link: NormalizedFullLink,
 ): boolean {
-  return other.space === link.space && other.id === link.id &&
-    scopeRank(other.scope) > scopeRank(link.scope) &&
-    other.path.length === link.path.length &&
-    other.path.every((segment, index) => segment === link.path[index]);
+  return areNormalizedLinksSameIgnoringScope(other, link) &&
+    scopeRank(other.scope) > scopeRank(link.scope);
 }
 
 /**
@@ -1914,10 +1912,13 @@ export function normalizeAndDiff(
   }
 
   // Handle alias in current value (at this point: if newValue is not an alias)
+  const storedRedirect = currentValueIsLink && isWriteRedirectLink(currentValue)
+    ? parseLink(currentValue, link)
+    : undefined;
   if (
-    currentValueIsLink && isWriteRedirectLink(currentValue) &&
+    storedRedirect !== undefined &&
     (options?.replacesBindings !== true ||
-      isNarrowerInstanceOf(parseLink(currentValue, link), link))
+      isNarrowerInstanceOf(storedRedirect, link))
   ) {
     consumeSteeringSlot(tx, link, options);
     diffLogger.debug(
@@ -1925,13 +1926,15 @@ export function normalizeAndDiff(
       () =>
         `[BRANCH_CURRENT_ALIAS] Following current value alias at path=${pathStr}`,
     );
-    // Log reads of the alias, so that changing aliases cause refreshes
-    const redirectLink = resolveLink(
-      runtime,
-      tx,
-      parseLink(currentValue, link),
-      "writeRedirect",
-    );
+    // Log reads of the alias, so that changing aliases cause refreshes. A walk
+    // that replaces bindings takes the realization hop alone and diffs again
+    // at the narrower instance, so a binding stored there is replaced too
+    // rather than followed with the rest of the chain.
+    const redirectLink = options?.replacesBindings === true
+      ? storedRedirect.schema === undefined && link.schema !== undefined
+        ? { ...storedRedirect, schema: link.schema }
+        : storedRedirect
+      : resolveLink(runtime, tx, storedRedirect, "writeRedirect");
     return normalizeAndDiff(
       runtime,
       tx,
