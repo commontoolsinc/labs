@@ -13,6 +13,10 @@ export interface SelectionCases {
   readonly filenames: readonly string[];
   readonly aliases: readonly string[];
   readonly shebangs?: readonly string[];
+
+  /** Names no language claims, under which the fixture's own source selects
+   * the language. */
+  readonly unclaimedFilenames?: readonly string[];
 }
 
 /**
@@ -509,6 +513,10 @@ export const VIEW_LANGUAGE_FIXTURES: readonly ViewLanguageFixture[] = [
         "FabricWeaver.xcworkspace/contents.xcworkspacedata",
       ],
       aliases: ["xml", "svg", "plist"],
+      unclaimedFilenames: [
+        "apple/FabricWeaver/Base.lproj/Main.storyboard",
+        "apple/FabricWeaver/MainMenu.xib",
+      ],
     },
     beforeEvidence: {
       text: "android:allowBackup",

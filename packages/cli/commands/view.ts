@@ -17,7 +17,9 @@ covers Bash and POSIX shell, and XML covers Android manifests and resources, SVG
 and Apple property lists. Python interpreter shebangs select Python, 'swift' and
 'xcrun swift' shebangs select Swift, 'kotlin' shebangs select Kotlin, and 'sh',
 'bash', 'dash' and 'ash' shebangs select shell. Node, Deno and Bun shebangs
-select the TypeScript and JavaScript language family.
+select the TypeScript and JavaScript language family. For a name no language
+claims, source that starts with an XML declaration ('<?xml'), after any byte
+order mark, selects XML.
 Known binary filenames, NUL-containing input and invalid UTF-8 select the binary
 language. Its rendered view is a read-only hex dump with control pictures for
 bytes that have no printable ASCII character.
@@ -30,13 +32,13 @@ The Markdown language also has a rendered view that formats headings, lists,
 quotes, tables, links, emphasis and code while retaining source line positions.
 Source views remain verbatim and add color only.
 
-Raw unified diffs are detected automatically when their structural header is
-the first nonblank line. Standard Git commit output is detected from its complete
-header. Binary detection examines bytes; other source content is not used to
-guess a language. Piping 'git diff' in gives added and removed lines their
-tints, full syntax color, a structure tree of the code each hunk touches, and
-the semantic features (inferred types, go-to-definition) answered against the
-CURRENT state of the workspace files the diff names.
+Raw unified diffs are detected automatically when their structural header is the
+first nonblank line. Standard Git commit output is detected from its complete
+header. Binary detection examines bytes; beyond shebangs and XML declarations,
+source content is not used to guess a language. Piping 'git diff' in gives added
+and removed lines their tints, full syntax color, a structure tree of the code
+each hunk touches, and the semantic features (inferred types, go-to-definition)
+answered against the CURRENT state of the workspace files the diff names.
 
 COMMON USAGE:
   cf check ./pattern.tsx --show-transformed --no-run | cf view

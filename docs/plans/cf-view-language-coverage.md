@@ -2,44 +2,44 @@
 
 Status: In progress.
 
-Unknown named files and filename-free source without a recognized shebang use
-plain text, while filename-free transformed compiler output keeps its
-TypeScript default. Piped source can select a language directly or through a
-virtual filename. Declarative metadata can now describe extensions, exact
-names, compound patterns, explicit aliases, direct interpreter shebangs,
-launcher shebangs that a subcommand settles, and extensions that several
-syntaxes share. JSON Lines and NDJSON use the JSON tokenizer with independent
-lexical state for each record. JSON also covers the surveyed names that no
-`.json` suffix announces: web manifests, TLDraw documents, Deno lock files,
-editor workspace files, Swift package resolutions, and the `.cfg` files whose
-source opens a JSON object. Python has syntax highlighting and a structure tree
-of its classes and functions. Swift has syntax highlighting and a structure
+Unknown named files and filename-free source use plain text unless a recognized
+shebang or an XML declaration opens the source, while filename-free transformed
+compiler output keeps its TypeScript default. Piped source can select a language
+directly or through a virtual filename. Declarative metadata can now describe
+extensions, exact names, compound patterns, explicit aliases, direct interpreter
+shebangs, launcher shebangs that a subcommand settles, and extensions that
+several syntaxes share. JSON Lines and NDJSON use the JSON tokenizer with
+independent lexical state for each record. JSON also covers the surveyed names
+that no `.json` suffix announces: web manifests, TLDraw documents, Deno lock
+files, editor workspace files, Swift package resolutions, and the `.cfg` files
+whose source opens a JSON object. Python has syntax highlighting and a structure
+tree of its classes and functions. Swift has syntax highlighting and a structure
 tree of its types, functions, initializers, and type-level properties, and its
 package manifests select it through their `.swift` extension. Kotlin, which
 covers Gradle's Kotlin build scripts, has syntax highlighting and a structure
-tree of its types, objects, functions, constructors, and type-level
-properties. Shell, which covers Bash and POSIX shell, has syntax highlighting
-and a structure tree of its functions; `sh`, `bash`, `dash`, and `ash`
-shebangs select it for Git hooks and other extensionless programs viewed
-directly, and a heredoc's body is a string with the expansions its delimiter
-allows. TOML, which covers Gradle version catalogs and Cargo manifests and
-lock files, has syntax highlighting and a structure tree of tables and keys.
-Java properties files, ProGuard and R8 keep rules, and XML, which covers
-Android manifests and resources, SVG, and Apple property lists, have syntax
-highlighting; properties files list their keys, and XML lists its elements.
+tree of its types, objects, functions, constructors, and type-level properties.
+Shell, which covers Bash and POSIX shell, has syntax highlighting and a
+structure tree of its functions; `sh`, `bash`, `dash`, and `ash` shebangs select
+it for Git hooks and other extensionless programs viewed directly, and a
+heredoc's body is a string with the expansions its delimiter allows. TOML, which
+covers Gradle version catalogs and Cargo manifests and lock files, has syntax
+highlighting and a structure tree of tables and keys. Java properties files,
+ProGuard and R8 keep rules, and XML, which covers Android manifests and
+resources, SVG, and Apple property lists, have syntax highlighting; properties
+files list their keys, and XML lists its elements.
 
 Automatic container detection is limited to structurally identified raw unified
 diffs and standard Git commit output. Source evidence otherwise settles only an
 extension that several syntaxes share. Each of those extensions is paired in
 metadata with the evidence one language claims it on, and a view with no source
-text leaves such a name unclaimed. Recognized shebangs and transformed compiler
-headers remain explicit source selectors. A diff selects the language of each
-side of each file once, and every view of that side uses it. A path no language
-claims defers to that side's content: a hunk that begins at its first line,
-and then its complete file in the workspace or in Git. A side with no such
-evidence takes the other side's language. Binary is a supported, read-only
-language with raw-byte decoding and a hex-dump rendered view. Known binary
-filenames, NUL-containing input, and invalid UTF-8 select it before text
+text leaves such a name unclaimed. Recognized shebangs, XML declarations, and
+transformed compiler headers remain explicit source selectors. A diff selects
+the language of each side of each file once, and every view of that side uses
+it. A path no language claims defers to that side's content: a hunk that begins
+at its first line, and then its complete file in the workspace or in Git. A side
+with no such evidence takes the other side's language. Binary is a supported,
+read-only language with raw-byte decoding and a hex-dump rendered view. Known
+binary filenames, NUL-containing input, and invalid UTF-8 select it before text
 decoding. Interactive binary views use a bounded preview, while redirected
 output streams the complete dump. Text saves use the encoder paired with the
 decoded source, including preservation of a UTF-8 byte order mark. Binary files
@@ -541,7 +541,9 @@ a scanner covers it, with a structure tree of elements. The
 scanner also selects `.xcprivacy` privacy manifests and `.xcworkspacedata`
 workspace files, which are XML. It colored all 88 XML, SVG, property list,
 entitlement, and privacy manifest files in the local checkouts of the
-organization's repositories without altering their source.
+organization's repositories without altering their source. A file that no name
+claims selects XML when its source starts with an XML declaration, which covers
+Interface Builder documents and project files.
 
 Completion gate: host and embedded syntax ranges preserve the complete input,
 including malformed and partially edited markup.

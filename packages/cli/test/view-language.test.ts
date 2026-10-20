@@ -1,7 +1,7 @@
 /**
- * Language selection: declarative metadata covers filenames, aliases, and
- * shebangs, with plain text when none match. Transformed compiler output selects
- * TypeScript through a separate path. `languageMatchingSources` falls back from
+ * Language selection: declarative metadata covers filenames, aliases,
+ * shebangs, and signatures, with plain text when none match. Transformed
+ * compiler output selects TypeScript through a separate path. `languageMatchingSources` falls back from
  * filenames to content evidence, and `diffSemanticsFor` composes the diff view's
  * semantic layer from the languages present, scoped to each one's files.
  */
@@ -79,6 +79,7 @@ Deno.test("language metadata matches extensions, exact names, and compound patte
     filenamePatterns: [/^Dockerfile\..+$/i],
     aliases: ["example"],
     interpreters: ["example-runner"],
+    signatures: [],
     sharedExtensions: [{ extension: ".shared", content: /^demo:/ }],
   };
 
@@ -98,6 +99,7 @@ Deno.test("language metadata claims a shared extension only with its evidence", 
     filenamePatterns: [],
     aliases: [],
     interpreters: [],
+    signatures: [],
     sharedExtensions: [{ extension: ".shared", content: /^demo:/ }],
   };
 
