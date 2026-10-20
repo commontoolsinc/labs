@@ -918,7 +918,7 @@ holds the measurements and the conditions for revisiting.
   `packages/runner/test/refused-derived-write.test.ts`, and the plumbing by
   `packages/runner/test/experimental-options.test.ts`.
 - **Status on 2026-10-20.** `packages/toolshed/test/loom-cold-reader.test.ts`
-  turns the flag on for its viewer runtimes. Its READ viewer runs the loom
+  In its `serverExecution=false` arm, the READ viewer runs the loom
   root itself, and with the flag off that run settles only once every retry
   budget is spent, which takes minutes; the test goes with whichever arm
   wins.
