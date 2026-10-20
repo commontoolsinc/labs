@@ -527,6 +527,9 @@ export const VIEW_LANGUAGE_FIXTURES: readonly ViewLanguageFixture[] = [
   },
   {
     languageId: "ini",
+    // An INI `name=value` line is a valid make assignment, and make colors
+    // the name as INI colors its keys.
+    highlightingPeers: ["make"],
     surveyRepository: "infra",
     surveyCommit: "cfe4ac630b0b1e223d57bed12ae02fa6c53b9eb2",
     surveyPath: "ansible/rapids-inventory.ini",
