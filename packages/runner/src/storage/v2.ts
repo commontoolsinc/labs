@@ -10121,14 +10121,20 @@ export class SpaceReplica
     // applies.
     const quarantined = this.#validateArrivedSchemaDocuments(sync);
     if (quarantined.size > 0) {
-      this.#completeThroughLost = true;
-      const suspendedPlans = (sync.viewPlans ?? this.#viewPlans).map((
-        plan,
-      ) => ({ ...plan, eligibleActions: [] }));
-      this.#publishViewPlans(suspendedPlans);
+      // Subscription coverage and plans depend on complete delivery. A fetch
+      // outside that stream falls back to a watch for its quarantined roots.
+      if (delivery === "subscription") {
+        this.#completeThroughLost = true;
+        const suspendedPlans = (sync.viewPlans ?? this.#viewPlans).map((
+          plan,
+        ) => ({ ...plan, eligibleActions: [] }));
+        this.#publishViewPlans(suspendedPlans);
+        if (sync.viewPlans !== undefined) {
+          sync = { ...sync, viewPlans: suspendedPlans };
+        }
+      }
       sync = {
         ...sync,
-        ...(sync.viewPlans === undefined ? {} : { viewPlans: suspendedPlans }),
         upserts: sync.upserts.filter((upsert) =>
           typeof upsert.id !== "string" || !quarantined.has(upsert.id)
         ),

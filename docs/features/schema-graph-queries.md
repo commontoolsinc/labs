@@ -99,6 +99,8 @@ arrives. An unverified snapshot or quarantined closure takes the same fallback,
 preserving ordinary per-document validation without failing unrelated reads
 in the batch. Those fallback watches remain installed. Selectors that traverse
 data, mutable document IDs, and scoped reads also keep their ordinary subscriptions.
+Quarantining a fetched entry leaves subscription coverage and view plans intact;
+the fallback watch's delivery is validated as part of the subscription stream.
 Schema dependencies assembled as part of a mutable document's watch remain
 owned by that watch. This optimization reduces explicit immutable watch roots;
 it does not bound the client schema registry or rewrite historical documents.

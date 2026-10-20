@@ -5,7 +5,12 @@ import { stub } from "@std/testing/mock";
 import { taggedHashStringOf } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import type { URI } from "@commonfabric/memory/interface";
-import type { EntityDocument } from "@commonfabric/memory/v2";
+import {
+  type EntityDocument,
+  resetServerExecutionConfig,
+  setServerExecutionConfig,
+  type ViewPlan,
+} from "@commonfabric/memory/v2";
 import {
   type Client,
   connect,
@@ -307,6 +312,8 @@ describe("immutable document fetching", () => {
   });
 
   it("falls back from an incomplete closure without failing healthy reads in the batch", async () => {
+    setServerExecutionConfig(false);
+    cleanup.push(resetServerExecutionConfig);
     const child = { type: "number", description: "missing fetch closure" };
     const childId = cid(child);
     const value = { type: "object", properties: { count: { $ref: childId } } };
@@ -314,12 +321,38 @@ describe("immutable document fetching", () => {
     const healthy = { type: "boolean", description: "healthy closure batch" };
     const healthyId = cid(healthy);
     const mutableId = "of:healthy-closure-batch";
+    const watchedId = "of:fetch-coverage";
     await write([
       [childId, { value: child }],
       [id, { value }],
       [healthyId, { value: healthy }],
       [mutableId, { value: "mutable" }],
+      [watchedId, { value: "before" }],
     ]);
+    const provider = manager.open(space);
+    expect((await provider.sync(watchedId, rootOnly)).error).toBeUndefined();
+    await write([[watchedId, { value: "after" }]]);
+    await server.idle();
+    await manager.pullOpenSpacesToHead();
+    const completeThrough = replica.completeThroughSeq();
+    expect(completeThrough).toBeGreaterThan(0);
+    const plan: ViewPlan = {
+      id: "healthy-view",
+      revision: 0,
+      generation: 1,
+      eligibleActions: ["preview"],
+      pieces: [],
+    };
+    replica.accessForTestingOnly.applySessionSync({
+      type: "sync",
+      fromSeq: 0,
+      toSeq: 0,
+      upserts: [],
+      removes: [],
+      viewPlans: [plan],
+    }, "integrate");
+    const plans: (readonly ViewPlan[])[] = [];
+    cleanup.push(replica.subscribeViewPlans((value) => plans.push(value)));
     const original = server.graphQuery.bind(server);
     const incomplete = stub(server, "graphQuery", async (message) => {
       const response = await original(message);
@@ -333,7 +366,6 @@ describe("immutable document fetching", () => {
     cleanup.push(() => {
       if (!incomplete.restored) incomplete.restore();
     });
-    const provider = manager.open(space);
     const results = await Promise.all([
       provider.sync(id, rootOnly),
       provider.sync(healthyId, rootOnly),
@@ -352,6 +384,8 @@ describe("immutable document fetching", () => {
     expect(holdings).toContain(id);
     expect(holdings).toContain(mutableId);
     expect(holdings).not.toContain(healthyId);
+    expect(replica.completeThroughSeq()).toBe(completeThrough);
+    expect(plans).toEqual([[plan]]);
   });
 
   it("discards an in-flight fetch after reset and refetches into the new replica state", async () => {
