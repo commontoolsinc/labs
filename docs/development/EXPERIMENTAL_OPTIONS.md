@@ -900,15 +900,13 @@ holds the measurements and the conditions for revisiting.
 - **Purpose.** Gates the _local fold_ of
   [`docs/specs/memory-v2/03-commit-model.md`](../specs/memory-v2/03-commit-model.md)
   §3.8.3. A principal may read a space it cannot write, and a reactive
-  computation it runs there still writes its outputs. Under either arm the
-  scheduler takes no retry on a write the space refuses for lack of a grant,
-  and the revert of that write does not run the computation again; it runs
-  again when an input it did not write changes. With the flag off, the
-  refused write is reverted like any other rejection, so the output is
-  absent on the replica, and each run an input change causes is refused
-  again. With the flag on, the replica keeps the write as a fold over the
-  document's confirmed value, so the output reads as what the principal
-  computed.
+  computation it runs there still writes its outputs. With the flag off, a
+  write of that kind that the space refuses for lack of a grant is reverted
+  like any other rejection, the scheduler takes no retry on it, and the
+  revert does not run the computation again; it runs again when an input it
+  did not write changes, and is refused again. With the flag on, the replica
+  keeps the write as a fold over the document's confirmed value, and the
+  re-run the refusal causes reads what it computed and settles.
 - **Current default and planned end state.** Off by default. Set
   `EXPERIMENTAL_LOCAL_FOLD=true` or pass
   `RuntimeOptions.experimental.localFold: true` to keep refused derived
@@ -918,13 +916,14 @@ holds the measurements and the conditions for revisiting.
 - **Status on 2026-10-14.** Both arms are covered by
   `packages/runner/test/refused-derived-write.test.ts`, and the plumbing by
   `packages/runner/test/experimental-options.test.ts`.
-- **Status on 2026-10-20.** A refused derived write takes no scheduler retry
-  under either arm, so a READ principal running a pattern locally settles
+- **Status on 2026-10-20.** A refused derived write the replica reverts takes
+  no scheduler retry, so a READ principal running a pattern locally settles
   after one refusal per computation. Its derived state is not stored, the
   panel list's result container among it, so such a principal sees a loom's
   root without its panels; `packages/toolshed/test/loom-cold-reader.test.ts`
   pins that beside the cases that render them: a WRITE viewer under local and
-  server execution, and a READ viewer under server execution.
+  server execution, a READ viewer under server execution, and a READ viewer
+  under local execution with the flag on.
 - **Path to removal.** Remove the env mapping, the runtime option and its
   authority and shell-source entries, the shell define, and the gate in the
   scheduler. If the fold loses, the fold machinery in

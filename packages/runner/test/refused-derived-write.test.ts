@@ -204,8 +204,8 @@ describe("refused derived write", () => {
 
     expect(counts.refusals).toBe(1);
     expect(derived.get()).toBe(4);
-    // The refusal takes no retry; the kept value stands as the run's result.
-    expect(counts.runs).toBe(1);
+    // The second run reads the kept value and has nothing to write.
+    expect(counts.runs).toBe(2);
     const stored = ownerRuntime.getCell<number>(space, "derived");
     await stored.sync();
     expect(stored.get()).toBeUndefined();

@@ -75,7 +75,11 @@ describe("loom-cold-reader", () => {
     });
     const factory = new LoopbackSessionFactory(server);
     const runtimes: Runtime[] = [];
-    const client = (identity: Identity, served = false) => {
+    const client = (
+      identity: Identity,
+      served = false,
+      localFold = false,
+    ) => {
       const storageManager = TestStorageManager.overServer(
         { as: identity },
         factory,
@@ -83,7 +87,11 @@ describe("loom-cold-reader", () => {
       const runtime = new Runtime(runtimePresets.remoteClient({
         apiUrl: new URL("http://cold-loom.test"),
         storageManager,
-        experimental: { serverExecution: served, computedCellIds: true },
+        experimental: {
+          serverExecution: served,
+          computedCellIds: true,
+          localFold,
+        },
         trustSnapshotProvider: () => ({
           id: identity.did(),
           actingPrincipal: identity.did(),
@@ -226,12 +234,16 @@ describe("loom-cold-reader", () => {
    * panel renders, that the viewer's bindings reach the published document,
    * and that a later edit by the owner reaches the viewer.
    */
-  const expectPanelsRendered = async (loom: ColdLoom, served: boolean) => {
+  const expectPanelsRendered = async (
+    loom: ColdLoom,
+    served: boolean,
+    localFold = false,
+  ) => {
     const { access, viewerIdentity, space, rootRef, documentRef, client } =
       loom;
     const { stops } = loom;
     if (served) loom.serve();
-    const viewer = client(viewerIdentity, served);
+    const viewer = client(viewerIdentity, served, localFold);
     expect(
       (await new ACLManager(viewer, space.did()).get())?.[viewerIdentity.did()],
     ).toBe(access);
@@ -341,6 +353,19 @@ describe("loom-cold-reader", () => {
     const loom = await publishColdLoom("WRITE");
     try {
       await expectPanelsRendered(loom, false);
+    } finally {
+      await loom.close();
+    }
+  });
+
+  it("renders panel content for a cold READ viewer that runs it locally under localFold", async () => {
+    // The fold keeps the viewer's refused writes on the replica, the panel
+    // list's result container among them, so the panels render as they do
+    // for a WRITE viewer.
+
+    const loom = await publishColdLoom("READ");
+    try {
+      await expectPanelsRendered(loom, false, true);
     } finally {
       await loom.close();
     }

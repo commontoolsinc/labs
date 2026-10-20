@@ -641,13 +641,15 @@ runnable(N) = N.status ∈ {invalid, never-ran} ∧ live(N) ∧ eligible(N)
 
 Retry counters belong to the action across registrations. A successful commit,
 a permanent or terminal refusal, or a refusal for lack of a grant (an
-`AuthorizationError` carrying the server's permanent evidence) clears them
-even if its registration has retired; terminal refusals still reach the error
-channel. A grant refusal takes no attempt beyond the one refused, and the
-revert of the refused write is self-suppressed for its writer as P5
-suppresses the writer's own commit, so the writer runs again when another
-input changes rather than against the same refusal. Waking consumers on
-success requires the committing run's registration to remain active.
+`AuthorizationError` carrying the server's permanent evidence) of a write the
+replica reverted clears them even if its registration has retired; terminal
+refusals still reach the error channel. Such a grant refusal takes no attempt
+beyond the one refused, and the revert of the refused write is self-suppressed
+for its writer as P5 suppresses the writer's own commit, so the writer runs
+again when another input changes rather than against the same refusal. A grant
+refusal of a write the replica kept as a local fold takes the bounded retry,
+whose run reads the kept value. Waking consumers on success requires the
+committing run's registration to remain active.
 
 The run path refreshes live subscriptions incrementally, including during
 retry recovery, without tearing them down and recreating them. The change
