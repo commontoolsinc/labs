@@ -123,7 +123,8 @@ describe("refused derived write", () => {
    * reader holds `grant` on the space; with `revokeBeforeFirstPush`, the
    * owner lowers it to READ while the reader's first push is on its way to
    * the store, so the reader's replica decides that push by an access list
-   * the store no longer holds. The returned `settled` resolves once the
+   * the store no longer holds, and with `withoutAccessList` the reader's
+   * replica holds no copy of the list at all. The returned `settled` resolves once the
    * reader is idle, or once the action has run more often than any retry
    * could account for, so a run that never stops fails its case rather than
    * hanging it.
@@ -131,11 +132,18 @@ describe("refused derived write", () => {
   const readerDerives = async <S, D>(
     source: S,
     derive: (s: S) => D,
-    { stored, experimental, grant = "READ", revokeBeforeFirstPush = false }: {
+    {
+      stored,
+      experimental,
+      grant = "READ",
+      revokeBeforeFirstPush = false,
+      withoutAccessList = false,
+    }: {
       stored?: D;
       experimental?: ExperimentalOptions;
       grant?: "READ" | "WRITE";
       revokeBeforeFirstPush?: boolean;
+      withoutAccessList?: boolean;
     } = {},
   ) => {
     const owner = await Identity.fromPassphrase("refused write owner");
@@ -157,6 +165,9 @@ describe("refused derived write", () => {
     const derived = readerRuntime.getCell<D>(space, "derived");
     await sourceCell.sync();
     await derived.sync();
+    // The reader's replica holds the space's access list, as a client that
+    // has shown the space's membership does, unless the case wants it cold.
+    if (!withoutAccessList) await new ACLManager(readerRuntime, space).get();
     if (revokeBeforeFirstPush) {
       const factory = factories.get(readerRuntime)!;
       factory.beforeTransact = async () => {
@@ -219,6 +230,25 @@ describe("refused derived write", () => {
 
     expect(counts.refusals).toBe(0);
     expect(counts.runs).toBe(1);
+    expect(derived.get()).toBe(4);
+    expect(held()).toBe(1);
+    const stored = ownerRuntime.getCell<number>(space, "derived");
+    await stored.sync();
+    expect(stored.get()).toBeUndefined();
+  });
+
+  it("pushes the first derivation of a replica that holds no access list, is refused once, and holds the run that follows", async () => {
+    // Nothing on the reader's side says the principal cannot write until the
+    // store says so; the refusal teaches it, and the writer runs once more.
+
+    const { ownerRuntime, space, derived, counts, held } = await readerDerives(
+      2,
+      (n: number) => n * 2,
+      { withoutAccessList: true },
+    );
+
+    expect(counts.refusals).toBe(1);
+    expect(counts.runs).toBe(2);
     expect(derived.get()).toBe(4);
     expect(held()).toBe(1);
     const stored = ownerRuntime.getCell<number>(space, "derived");

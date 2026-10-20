@@ -838,11 +838,13 @@ a reader of an instance that setup could not store reads the default the
 schema declares, as any reader of an absent defaulted slot does.
 
 - The decision never waits, since a wait between a transaction's reads and
-  its commit is a window for the replica's view to move under it. The
-  runtime asks for a space's access list as soon as it opens the space, so
-  the list is there before the space's first derivation commits; one that
-  commits before it arrives is pushed, and the store's verdict then teaches
-  the runtime what the list would have.
+  its commit is a window for the replica's view to move under it, and asks
+  the replica for nothing: it reads the access list the replica holds, and a
+  derivation into a space whose list the replica does not hold is pushed,
+  the store's verdict then teaching the runtime what the list would have. A
+  runtime whose principal may write every space it touches is therefore
+  left exactly as it would be without this: no list is loaded or watched
+  for a space until it refuses a derivation or holds one.
 - A held derivation stands only where the store holds nothing. A write to a
   document the store already holds a value for is dropped, and the
   principal's view keeps the stored value: a principal who may write the

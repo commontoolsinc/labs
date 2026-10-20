@@ -904,13 +904,14 @@ holds the measurements and the conditions for revisiting.
   computation it runs there still writes its outputs. A client runtime holds
   such a write locally and pushes nothing when the access list its replica
   holds puts the principal below WRITE, so the store refuses a derived write
-  only when that list is behind the store's. With the flag off, the refused
-  write is reverted like any other rejection, the scheduler takes no retry on
-  it, and the revert does not run the computation again, so the output is
-  absent on the replica until the computation runs again and is held. With
-  the flag on, the replica keeps the refused write as a fold over the
-  document's confirmed value, and the re-run the refusal causes reads what
-  it computed and settles.
+  only when that list is behind the store's or the replica does not hold it,
+  and the runtime then holds every later derivation into the space. With the
+  flag off, the refused write is reverted like any other rejection, the
+  scheduler takes no retry on it, and the revert does not run the computation
+  again; the runtime runs it once more itself, and holds what that run
+  computes. With the flag on, the replica keeps the refused write as a fold
+  over the document's confirmed value, and the re-run the refusal causes
+  reads what it computed and settles.
 - **Current default and planned end state.** Off by default. Set
   `EXPERIMENTAL_LOCAL_FOLD=true` or pass
   `RuntimeOptions.experimental.localFold: true` to keep refused derived

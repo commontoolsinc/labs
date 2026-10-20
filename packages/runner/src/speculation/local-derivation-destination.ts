@@ -83,12 +83,6 @@ type HeldDerivation = {
   settled: Promise<unknown>;
 };
 
-/** The replica's record of a space's access list, and whether it has loaded. */
-type AccessListState = {
-  loaded: boolean;
-  load: Promise<void>;
-};
-
 const isAction = (value: unknown): value is Action =>
   typeof value === "function";
 
@@ -107,7 +101,11 @@ export class LocalDerivationDestination implements TransactionSealDestination {
   /** space → localSeq → held derivation. */
   readonly #held = new Map<MemorySpace, Map<number, HeldDerivation>>();
 
-  readonly #accessLists = new Map<MemorySpace, AccessListState>();
+  /**
+   * Spaces whose access list this destination has asked the replica for and
+   * keeps watched: those it holds derivations for, or that refused one.
+   */
+  readonly #watchedLists = new Set<MemorySpace>();
 
   /**
    * Spaces the store refused a derived write of for lack of a grant since
@@ -126,35 +124,25 @@ export class LocalDerivationDestination implements TransactionSealDestination {
   /** space → release of the arrival wake installed on the replica. */
   readonly #arrivalReleases = new Map<MemorySpace, () => void>();
 
-  /** The first-open observer this instance installed on the manager, if any. */
-  #installedOpenObserver: ((space: MemorySpace) => void) | undefined;
-
   #closed = false;
 
   /**
-   * Constructs an instance which holds derivations for `runtime`, and asks
-   * for the access list of every space the runtime's storage opens, so that
-   * the list is usually there before the space's first derivation commits.
+   * Constructs an instance which holds derivations for `runtime`. It asks
+   * the replica for nothing until a space refuses a derivation or holds one,
+   * so a runtime whose principal may write every space it touches is left
+   * exactly as it would be without it.
    */
   constructor(runtime: Runtime) {
     this.#runtime = runtime;
-    const manager = runtime.storageManager;
-    this.#accessListListener = new CoalescedDocListener(manager, {
-      wants: (space, id, scope) =>
-        (scope === undefined || scope === "space") &&
-        this.#accessLists.has(space) && id === aclDocId(space),
-      onNotify: (space) => this.#accessListChanged(space),
-    });
-    if (manager.spaceOpenObserver === undefined) {
-      const observer = (space: MemorySpace) => {
-        if (!this.#closed) this.#ensureAccessList(space);
-      };
-      manager.spaceOpenObserver = observer;
-      this.#installedOpenObserver = observer;
-    }
-    for (const space of manager.openedSpaces?.() ?? []) {
-      this.#ensureAccessList(space);
-    }
+    this.#accessListListener = new CoalescedDocListener(
+      runtime.storageManager,
+      {
+        wants: (space, id, scope) =>
+          (scope === undefined || scope === "space") &&
+          this.#watchedLists.has(space) && id === aclDocId(space),
+        onNotify: (space) => this.#accessListChanged(space),
+      },
+    );
   }
 
   /**
@@ -173,7 +161,7 @@ export class LocalDerivationDestination implements TransactionSealDestination {
 
   /**
    * DIAGNOSTIC (tests): what this runtime's principal may write in `space`,
-   * once its access list has loaded.
+   * as far as the access list the replica holds says.
    */
   writeAccess(space: MemorySpace): WriteAccess {
     return this.#writeAccess(space);
@@ -182,11 +170,11 @@ export class LocalDerivationDestination implements TransactionSealDestination {
   /**
    * Holds a derived transaction into a space the principal is known not to
    * write, and forwards every other transaction to the store. The decision
-   * never waits: a wait between a transaction's reads and its commit is a
-   * window for the replica's view to move under it. A derived transaction
-   * into a space whose access list has not arrived is therefore forwarded,
-   * and the store's verdict teaches this destination what the list would
-   * have.
+   * never waits, since a wait between a transaction's reads and its commit
+   * is a window for the replica's view to move under it, and asks the
+   * replica for nothing: a derived transaction into a space whose access
+   * list the replica does not hold is forwarded, and the store's verdict
+   * teaches this destination what the list would have.
    */
   seal(
     tx: IExtendedStorageTransaction,
@@ -196,7 +184,6 @@ export class LocalDerivationDestination implements TransactionSealDestination {
       return tx.tx.commit(options);
     }
     const spaces = tx.tx.writtenSpaces?.() ?? [];
-    for (const space of spaces) this.#ensureAccessList(space);
     if (spaces.some((space) => this.#writeAccess(space) === "refused")) {
       return this.#hold(tx);
     }
@@ -231,16 +218,8 @@ export class LocalDerivationDestination implements TransactionSealDestination {
       }
     }
     this.#arrivalReleases.clear();
-    this.#accessLists.clear();
+    this.#watchedLists.clear();
     this.#refused.clear();
-    const manager = this.#runtime.storageManager;
-    if (
-      this.#installedOpenObserver !== undefined &&
-      manager.spaceOpenObserver === this.#installedOpenObserver
-    ) {
-      manager.spaceOpenObserver = undefined;
-    }
-    this.#installedOpenObserver = undefined;
   }
 
   /**
@@ -266,7 +245,10 @@ export class LocalDerivationDestination implements TransactionSealDestination {
       ) {
         return;
       }
-      for (const space of spaces) this.#refused.add(space);
+      for (const space of spaces) {
+        this.#refused.add(space);
+        this.#watchAccessList(space);
+      }
       if (isAction(writer)) this.#runtime.scheduler.invalidateAction(writer);
     }, () => {});
     return receipt;
@@ -473,56 +455,54 @@ export class LocalDerivationDestination implements TransactionSealDestination {
     }
     held.set(entry.localSeq, entry);
     this.#ensureArrivalObserver(entry.space);
+    this.#watchAccessList(entry.space);
   }
 
   /**
    * Helper for {@link seal}, which returns the principal's standing in
-   * `space` from the access list the replica holds: `unknown` until the list
-   * has been asked for and has arrived, `granted` for an owner or writer and
-   * for a space with no list, which refuses nothing by one, and `refused`
-   * otherwise, or while a refusal from the store stands.
+   * `space` from the access list the replica holds, read beneath every held
+   * layer: `refused` while a refusal from the store stands and for a list
+   * that grants less than WRITE, `granted` for an owner or writer, and
+   * `unknown` for a space whose list the replica does not hold, which a
+   * space with no list reads as too.
    */
   #writeAccess(space: MemorySpace): WriteAccess {
     if (this.#refused.has(space)) return "refused";
-    const state = this.#accessLists.get(space);
-    if (state === undefined || !state.loaded) return "unknown";
-    const acl = this.#runtime.storageManager.open(space).replica
-      .getDocument(aclDocId(space) as URI, "space")?.value;
-    if (acl === undefined) return "granted";
+    const replica = this.#runtime.storageManager.open(space).replica;
+    const acl = (replica.getNonSpeculativeDocument ?? replica.getDocument)
+      .call(replica, aclDocId(space) as URI, "space")?.value;
+    if (acl === undefined) return "unknown";
     const role = spaceReaderRole(acl as ACL, this.#runtime.userIdentityDID);
     return role === "owner" || role === "writer" ? "granted" : "refused";
   }
 
   /**
-   * Helper for {@link seal}, which loads `space`'s access list into the
-   * replica once and keeps it watched, so that a change to it is acted on.
+   * Helper for {@link seal}, which asks the replica for `space`'s access
+   * list once and keeps it watched, so that a grant made while this runtime
+   * runs releases what it holds. Asked only for a space that refused a
+   * derivation or holds one: for every other space the replica is left as
+   * it is.
    */
-  #ensureAccessList(space: MemorySpace): Promise<void> {
-    const existing = this.#accessLists.get(space);
-    if (existing !== undefined) return existing.load;
-    const aclId = aclDocId(space) as URI;
-    const state: AccessListState = { loaded: false, load: Promise.resolve() };
+  #watchAccessList(space: MemorySpace): void {
+    if (this.#closed || this.#watchedLists.has(space)) return;
+    this.#watchedLists.add(space);
+    this.#accessListListener.ensure();
     const report = (error: unknown) => {
       logger.warn("access-list-load-failed", () => [
-        `the access list of ${space} could not be loaded; derived writes ` +
-        "there go to the store until it arrives",
+        `the access list of ${space} could not be loaded; a grant made ` +
+        "while this runtime runs reaches it only through a reload",
         error,
       ]);
     };
-    state.load = Promise.resolve(
+    Promise.resolve(
       this.#runtime.storageManager.open(space).sync(
-        aclId,
+        aclDocId(space) as URI,
         { path: [], schema: false },
         "space",
       ),
     ).then((result) => {
       if (result?.error !== undefined) report(result.error);
-    }, report).finally(() => {
-      state.loaded = true;
-    });
-    this.#accessLists.set(space, state);
-    this.#accessListListener.ensure();
-    return state.load;
+    }, report);
   }
 
   /**
