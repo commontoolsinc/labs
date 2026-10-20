@@ -23,7 +23,11 @@ structure tree of its functions; `sh`, `bash`, `dash`, and `ash` shebangs select
 it for Git hooks and other extensionless programs viewed directly, and a
 heredoc's body is a string with the expansions its delimiter allows. TOML, which
 covers Gradle version catalogs and Cargo manifests and lock files, has syntax
-highlighting and a structure tree of tables and keys. Java properties files,
+highlighting and a structure tree of tables and keys. HCL, which covers OpenTofu
+and Terraform configuration, variable definitions files, backend configuration
+files, and dependency lock files, has syntax highlighting and a structure tree
+of blocks and of the attributes that define values; a string's interpolations
+and template directives are code inside the string. Java properties files,
 ProGuard and R8 keep rules, and XML, which covers Android manifests and
 resources, SVG, and Apple property lists, have syntax highlighting; properties
 files list their keys, and XML lists its elements.
@@ -45,14 +49,14 @@ output streams the complete dump. Text saves use the encoder paired with the
 decoded source, including preservation of a UTF-8 byte order mark. Binary files
 remain outside diff editing and semantic source loading.
 
-Python, Swift, Kotlin, TOML, and shell run on Tree-sitter through a shared,
+Python, Swift, Kotlin, TOML, HCL, and shell run on Tree-sitter through a shared,
 language-neutral adapter, which Go and HTML will use as well. Java
 properties, ProGuard rules, and XML use focused scanners.
 The order is provisional because recent activity was measured in six of the 26
 active organization repositories.
 
 This plan takes `cf view` from its current TypeScript and JavaScript, Markdown,
-JSON, JSONC, JSON Lines, YAML, Python, Swift, Kotlin, TOML, shell, Java
+JSON, JSONC, JSON Lines, YAML, Python, Swift, Kotlin, TOML, HCL, shell, Java
 properties, ProGuard, XML, and diff support to honest
 handling of every textual syntax in the active
 `commonfabric` repositories.
@@ -161,16 +165,16 @@ and a warm dependency cache. Initialization starts at the first statement in a
 fresh Deno process and includes dynamic imports, runtime initialization, the
 selected grammar and query, and one empty highlight.
 
-| Dimension | Shipped Python | Shipped Swift | Shipped Kotlin | Shipped TOML | Shipped shell | Accepted maximum |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 95th-percentile lazy initialization | 29.41 ms | 71.98 ms | 65.31 ms | 23.42 ms | 56.6 ms, estimated | 75 ms |
-| 95th-percentile full highlighting | 27.89 ms | 37.69 ms | 44.66 ms | 19.79 ms | 32.7 ms, estimated | 50 ms |
-| 95th-percentile document parse, with structure | 35.56 ms | 39.08 ms | 54.36 ms | 29.61 ms | 39.7 ms, estimated | 50 ms |
-| 95th-percentile re-color after one edit | 15.07 ms | 15.36 ms | 32.76 ms | 11.96 ms | 23.9 ms, estimated | 25 ms |
-| Compiled `cf` increase | 12.03 MiB | 3.72 MiB | 4.09 MiB, with TOML | with Kotlin | 1.32 MiB | 14 MiB for runtime and first grammar; 10 MiB for a later grammar |
-| Unpacked dependencies | 11.95 MiB | 3.66 MiB | 3.30 MiB | 0.72 MiB | 19.34 MiB | 14 MiB for runtime and first grammar; 10 MiB for a later grammar |
-| Owned source | 584 lines | 200 lines | 200 lines | 75 lines | 91 lines | 650 shipped lines; 200 for a later grammar |
-| Parser-specific build and deployment steps | 0 | 0 | 0 | 0 | 0 | 0 |
+| Dimension | Shipped Python | Shipped Swift | Shipped Kotlin | Shipped TOML | Shipped shell | Shipped HCL | Accepted maximum |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 95th-percentile lazy initialization | 29.41 ms | 71.98 ms | 65.31 ms | 23.42 ms | 56.6 ms, estimated | 26.1 ms, estimated | 75 ms |
+| 95th-percentile full highlighting | 27.89 ms | 37.69 ms | 44.66 ms | 19.79 ms | 32.7 ms, estimated | 47.0 ms, estimated | 50 ms |
+| 95th-percentile document parse, with structure | 35.56 ms | 39.08 ms | 54.36 ms | 29.61 ms | 39.7 ms, estimated | 47.5 ms, estimated | 50 ms |
+| 95th-percentile re-color after one edit | 15.07 ms | 15.36 ms | 32.76 ms | 11.96 ms | 23.9 ms, estimated | 21.4 ms, estimated | 25 ms |
+| Compiled `cf` increase | 12.03 MiB | 3.72 MiB | 4.09 MiB, with TOML | with Kotlin | 1.32 MiB | 0.19 MiB | 14 MiB for runtime and first grammar; 10 MiB for a later grammar |
+| Unpacked dependencies | 11.95 MiB | 3.66 MiB | 3.30 MiB | 0.72 MiB | 19.34 MiB | 1.91 MiB | 14 MiB for runtime and first grammar; 10 MiB for a later grammar |
+| Owned source | 584 lines | 200 lines | 200 lines | 75 lines | 91 lines | 146 lines | 650 shipped lines; 200 for a later grammar |
+| Parser-specific build and deployment steps | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 
 The Python column is the
 [September 2026 Python measurement](../history/packages/cli/cf-view-python-treesitter-2026-09.md),
@@ -205,6 +209,17 @@ in any round. The report gives the figures measured directly, which exceed the
 document-parse and re-color maximums in some rounds. Shell is over the unpacked
 dependency maximum, for the reason under "Shell over its unpacked-dependency
 maximum".
+
+The HCL column is the
+[October 2026 HCL measurement](../history/packages/cli/cf-view-hcl-2026-10.md),
+made the same way in eight rounds, each between two TOML control runs, on a
+loaded machine. Its timings are estimates in the way the shell column's are:
+TOML's recorded 95th percentiles multiplied by the largest ratio of HCL to TOML
+seen in the six rounds whose controls stayed within 1.22 times TOML's recorded
+medians. The report gives the figures measured directly, which exceed the
+complete-highlight and document-parse maximums in some rounds. The HCL grammar names the node types a
+structure entry can be found inside, which keeps the structure walk out of
+expressions; without that, its document parse was over the maximum.
 
 The binary build leaves out every directory of a grammar package except the
 one holding its WebAssembly grammar, such as generated C source and native
@@ -571,7 +586,7 @@ selection path.
 
 ## Stage 8: OpenTofu, HCL, and infrastructure templates
 
-- [ ] Add `.tf` and `.tfvars` HCL.
+- [x] Add `.tf` and `.tfvars` HCL.
 - [ ] Layer Terraform interpolation over the shell host in `.tftpl`.
 - [ ] Layer Jinja delimiters over a separately selected host syntax.
 - [ ] Cover the surveyed shell, systemd-unit, authorized-keys, and YAML Jinja
@@ -579,6 +594,19 @@ selection path.
 
 Completion gate: an extension such as `.j2` does not force one host language,
 and every current Infra template has an explicit tested selection rule.
+
+HCL is implemented ahead of Stages 3 to 7. Outside its own language module it
+needed one optional addition to the shared adapter, the set of node types a
+structure entry can be found inside. The grammar's own npm package ships its
+WebAssembly build, and that grammar parsed every one of the 153 HCL files in the
+Infra repository without an error. HCL runs on the Tree-sitter adapter with the
+[`tree-sitter-grammars/tree-sitter-hcl`](https://github.com/tree-sitter-grammars/tree-sitter-hcl)
+grammar. It selects OpenTofu and Terraform configuration through `.tf` and
+`.tofu`, variable definitions files through `.tfvars`, backend configuration
+files through `.tfbackend`, and test files and dependency lock files through
+`.hcl`. The JSON forms of those files, such as `.tf.json`, remain JSON. It
+colored every character other than white space in those 153 files, and each
+file reconstructed exactly.
 
 ## Stage 9: build and operational configuration
 

@@ -395,6 +395,32 @@ export const VIEW_LANGUAGE_FIXTURES: readonly ViewLanguageFixture[] = [
     incompleteEvidence: { text: "tools", className: "interfaceName" },
   },
   {
+    languageId: "hcl",
+    surveyRepository: "infra",
+    surveyCommit: "3ae071216e1aad454f2465e8d57164d6c38c90e3",
+    surveyPath: "tofu/ci-runners/alerts.tf",
+    before: new URL("./hcl-infra/before.tf", import.meta.url),
+    after: new URL("./hcl-infra/after.tf", import.meta.url),
+    incomplete: new URL("./hcl-infra/incomplete.tf", import.meta.url),
+    selection: {
+      filenames: [
+        "tofu/ci-runners/alerts.tf",
+        "tofu/ci-runners/prod.tfvars",
+        "tofu/iam/.terraform.lock.hcl",
+        "tofu/shell/override.tofu",
+        "tofu/shell/prod.tfbackend",
+        "tests/main.tftest.hcl",
+      ],
+      aliases: ["hcl", "opentofu", "tofu", "terraform", "tf"],
+    },
+    beforeEvidence: { text: "reconcile_passes", className: "interfaceName" },
+    afterEvidence: { text: "controller_errors", className: "interfaceName" },
+    incompleteEvidence: {
+      text: "controller_errors",
+      className: "interfaceName",
+    },
+  },
+  {
     languageId: "shell",
     surveyRepository: "infra",
     surveyCommit: "e86055db01424713770930acc24b5a20d2e96448",
@@ -449,9 +475,10 @@ export const VIEW_LANGUAGE_FIXTURES: readonly ViewLanguageFixture[] = [
   },
   {
     languageId: "properties",
-    // A shell variable assignment is a `name=value` line, and shell colors the
-    // name as properties files color their keys.
-    highlightingPeers: ["shell"],
+    // A shell variable assignment and an HCL attribute are each a
+    // `name=value` line, and shell and HCL color the name as properties files
+    // color their keys.
+    highlightingPeers: ["hcl", "shell"],
     surveyRepository: "commonfabric-weaver",
     surveyCommit: "b457431c6f5e32305a2e6feb7901f8d05a9b2f6e",
     surveyPath: "android/gradle/wrapper/gradle-wrapper.properties",

@@ -38,6 +38,7 @@ import { swiftLanguage } from "./swift/language.ts";
 import { kotlinLanguage } from "./kotlin/language.ts";
 import { propertiesLanguage } from "./properties/language.ts";
 import { tomlLanguage } from "./toml/language.ts";
+import { hclLanguage } from "./hcl/language.ts";
 import { shellLanguage } from "./shell/language.ts";
 import { proguardLanguage } from "./proguard/language.ts";
 import { xmlLanguage } from "./xml/language.ts";
@@ -469,6 +470,7 @@ function allLanguages(): readonly Language[] {
     swiftLanguage,
     kotlinLanguage,
     tomlLanguage,
+    hclLanguage,
     shellLanguage,
     propertiesLanguage,
     proguardLanguage,
