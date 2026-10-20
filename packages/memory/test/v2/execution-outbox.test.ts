@@ -47,6 +47,19 @@ describe("execution-outbox", () => {
       expect(payload.replacing).toBeUndefined();
     });
 
+    it("returns an `undefined` payload as `undefined`", () => {
+      insertExecutionOutboxRows(engine, {
+        branch: "",
+        createdSeq: 1,
+        rows: [row(undefined)],
+      });
+
+      const [pending] = selectPendingExecutionOutboxRows(engine, {
+        branch: "",
+      });
+      expect(pending.payload).toBeUndefined();
+    });
+
     it("returns the value of a payload stored as plain JSON", () => {
       insertExecutionOutboxRows(engine, {
         branch: "",

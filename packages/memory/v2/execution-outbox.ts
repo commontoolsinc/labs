@@ -150,7 +150,7 @@ export const insertExecutionOutboxRows = (
         ? null
         : JSON.stringify(row.targetStreamLink),
       event_id: row.eventId,
-      payload: encodeMemoryBoundary(row.payload ?? null),
+      payload: encodeMemoryBoundary(row.payload),
       acting_principal: row.actingPrincipal ?? null,
       acting_session: row.actingSession ?? null,
       sessionless_space_scope: row.sessionlessSpaceScope === true ? 1 : null,
