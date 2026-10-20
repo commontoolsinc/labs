@@ -14,7 +14,8 @@ import { hclGrammar } from "./hcl.ts";
  * configuration, variable definitions files, backend configuration files, and
  * dependency lock files. It provides lossless syntax highlighting for direct
  * files, diffs, and live edits, and a structure tree of blocks and of the
- * attributes that define values. HCL has no semantic layer.
+ * attributes that define values, which are those at a file's top level and in
+ * `locals` blocks. HCL has no semantic layer.
  */
 export const hclLanguage: Language = {
   id: "hcl",

@@ -63,7 +63,7 @@ await hclLanguage.prepare!();
 await Parser.init();
 const parser = new Parser();
 parser.setLanguage(
-  await Language.load(new URL(hclGrammar.wasmUrl()).pathname),
+  await Language.load(await Deno.readFile(new URL(hclGrammar.wasmUrl()))),
 );
 
 const counts: Record<string, number> = {};

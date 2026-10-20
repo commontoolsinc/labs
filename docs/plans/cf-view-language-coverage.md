@@ -26,11 +26,12 @@ covers Gradle version catalogs and Cargo manifests and lock files, has syntax
 highlighting and a structure tree of tables and keys. HCL, which covers OpenTofu
 and Terraform configuration, variable definitions files, backend configuration
 files, and dependency lock files, has syntax highlighting and a structure tree
-of blocks and of the attributes that define values; a string's interpolations
-and template directives are code inside the string. Java properties files,
-ProGuard and R8 keep rules, and XML, which covers Android manifests and
-resources, SVG, and Apple property lists, have syntax highlighting; properties
-files list their keys, and XML lists its elements.
+of blocks and of the attributes that define values, which are those at a file's
+top level and in `locals` blocks; a string's interpolations and template
+directives are code inside the string. Java properties files, ProGuard and R8
+keep rules, and XML, which covers Android manifests and resources, SVG, and
+Apple property lists, have syntax highlighting; properties files list their
+keys, and XML lists its elements.
 
 Automatic container detection is limited to structurally identified raw unified
 diffs and standard Git commit output. Source evidence otherwise settles only an
