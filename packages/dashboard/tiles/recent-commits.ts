@@ -209,6 +209,13 @@ async function readCommits(
     credential,
   );
   const repository = isObjectNotArray(data) ? data.repository : undefined;
+  if (repository === null) {
+    // GitHub hides a repository the token may not read as missing.
+    throw new GitHubGraphqlError(
+      `GitHub GraphQL found no repository ${repo.name}`,
+      ["NOT_FOUND"],
+    );
+  }
   const branch = isObjectNotArray(repository)
     ? repository.defaultBranchRef
     : undefined;
@@ -487,6 +494,7 @@ export function createRecentCommits(
   let reading: Promise<void> | undefined;
   let readStartedAt = -Infinity;
   let failure: string | undefined;
+  let read = false;
 
   // Starts a read of the organization's commits when one is due. Once it
   // ends, the tile asks to be collected again if what it shows has changed.
@@ -500,6 +508,7 @@ export function createRecentCommits(
     reading = organization.refresh(credential).then(
       (changed) => {
         failure = undefined;
+        read = true;
         if (changed || failedBefore !== undefined) collectAgain?.();
       },
       (error) => {
@@ -553,7 +562,9 @@ export function createRecentCommits(
         ? `${refused} ${refused === 1 ? "repository" : "repositories"} unreadable`
         : undefined;
       const html = rows.map((row) => rowHtml(row, runs)).join("") ||
-        `<div class="ev"><span class="dot gray"></span><span>waiting for first poll…</span></div>`;
+        `<div class="ev"><span class="dot gray"></span><span>${
+          read ? "no commits found" : "waiting for first poll…"
+        }</span></div>`;
       const count = `${rows.length} in window`;
       return {
         status,

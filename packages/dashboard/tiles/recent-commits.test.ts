@@ -450,12 +450,17 @@ describe("recent-commits", () => {
           expect(organization.refused).toEqual(new Set());
         });
 
-        it("counts a GraphQL `FORBIDDEN` error as a refusal, and reads a repository again on the next refresh after any other GraphQL error or a rate limit", async () => {
+        it("counts a GraphQL `FORBIDDEN` error or a missing repository as a refusal, and reads a repository again on the next refresh after any other GraphQL error or a rate limit", async () => {
           const repos: RepoSpec[] = [
             {
               name: "secret",
               pushedAt: "2026-09-30T12:00:00Z",
               errorType: "FORBIDDEN",
+            },
+            {
+              name: "hidden",
+              pushedAt: "2026-09-30T12:00:00Z",
+              answer: { data: { repository: null } },
             },
             {
               name: "busy",
@@ -472,7 +477,9 @@ describe("recent-commits", () => {
           restore = standIn(() => repos, calls);
           const organization = new OrganizationCommits();
           await organization.refresh(CREDENTIAL);
-          expect(organization.refused).toEqual(new Set([`${ORG}/secret`]));
+          expect(organization.refused).toEqual(
+            new Set([`${ORG}/secret`, `${ORG}/hidden`]),
+          );
 
           calls.length = 0;
           await organization.refresh(CREDENTIAL);
@@ -833,7 +840,7 @@ describe("recent-commits", () => {
         ).toBe(1);
       });
 
-      it("counts on its sub line the repositories GitHub refused to read", async () => {
+      it("counts on its sub line the repositories GitHub refused to read, and says when a read found no commits", async () => {
         restore = standIn(() => [
           { name: "secret", pushedAt: "2026-09-30T12:00:00Z", errorType: "FORBIDDEN" },
           { name: "other", pushedAt: "2026-09-30T12:00:00Z", status: 403 },
@@ -845,12 +852,14 @@ describe("recent-commits", () => {
           env: (key) => key === "GH_TOKEN" ? "test-token" : undefined,
           collectAgain: () => asked++,
         });
-        expect((await tile.collect(collecting)).sub).toBe(undefined);
+        const before = await tile.collect(collecting);
+        expect(before.sub).toBe(undefined);
+        expect(before.extra).toContain("waiting for first poll…");
         await tile.reading();
         expect(asked).toBe(1);
-        expect((await tile.collect(collecting)).sub).toBe(
-          "2 repositories unreadable",
-        );
+        const view = await tile.collect(collecting);
+        expect(view.sub).toBe("2 repositories unreadable");
+        expect(view.extra).toContain("no commits found");
       });
 
       it("says why the organization's commits could not be listed, still lists the runs' commits, and asks to be collected again only when the reason changes", async () => {
