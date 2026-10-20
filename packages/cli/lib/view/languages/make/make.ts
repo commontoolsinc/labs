@@ -433,7 +433,7 @@ class Scanner {
       const c = text[i];
       if (c === "$") {
         i = this.#referenceEnd(i, end) - 1;
-      } else if ((c === "#" && !this.#escaped(i)) || c === ";") {
+      } else if ((c === "#" || c === ";") && !this.#escaped(i)) {
         return undefined;
       } else if ((c === "=" || c === ":") && this.#escaped(i)) {
         continue;
@@ -667,7 +667,7 @@ class Scanner {
         classes[i] = "operator";
       } else if (flags & RULE && (c === "|" || c === ":")) {
         classes[i] = "operator";
-      } else if (flags & RULE && c === ";") {
+      } else if (flags & RULE && c === ";" && !this.#escaped(i)) {
         classes[i] = "punctuation";
         this.#shell.push({ start: i + 1, end: limit });
         flags = 0;

@@ -299,11 +299,12 @@ describe("makeLanguage", () => {
     });
 
     it("keeps escaped characters inside a target's name", () => {
-      const document = makeLanguage.parseDocument("a\\#b a\\:c: d\n");
+      const document = makeLanguage.parseDocument("a\\#b a\\:c a\\;d: e\n");
 
       expect(document.structure.map((node) => node.label)).toEqual([
         "a\\#b",
         "a\\:c",
+        "a\\;d",
       ]);
     });
 
