@@ -226,6 +226,7 @@ import {
   viewWatches,
 } from "./view-interest.ts";
 
+export { MAX_DOCUMENT_INTEREST_SESSIONS } from "./document-interests.ts";
 export { SessionRegistry } from "./session-registry.ts";
 
 /**
@@ -631,8 +632,6 @@ export const getSessionReports = (): SessionReportsReport | undefined =>
 /** Live servers' document-interest providers, newest live server last. */
 const documentInterestsProviders:
   ((query: DocumentInterestQuery) => DocumentInterestsReport)[] = [];
-
-export { MAX_DOCUMENT_INTEREST_SESSIONS } from "./document-interests.ts";
 
 /** Reads the co-hosted server's session metadata; undefined without a server. */
 export const getDocumentInterests = (

@@ -154,7 +154,7 @@ export const dash = createRoute({
   },
 });
 
-/** On-demand attribution of one space-scoped document to retained sessions. */
+/** On-demand attribution of one content-addressed document to retained sessions. */
 export const documentInterests = createRoute({
   path: "/api/health/document-interests",
   method: "get",
@@ -162,7 +162,7 @@ export const documentInterests = createRoute({
   request: {
     query: z.object({
       space: z.string().min(1).max(1024),
-      id: z.string().min(1).max(4096),
+      id: z.string().startsWith("cid:").min(5).max(4096),
       branch: z.string().max(1024).default(""),
       limit: z.coerce.number().int().min(1)
         .max(MAX_DOCUMENT_INTEREST_SESSIONS)

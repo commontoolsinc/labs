@@ -725,8 +725,8 @@ whichever side is sending.
 
 ### Find sessions watching or caching a particular schema
 
-`GET /api/health/document-interests` accepts an exact `space` and document `id`
-and inspects the co-hosted memory server's existing session indexes:
+`GET /api/health/document-interests` accepts an exact `space` and `cid:` document
+`id` and inspects the co-hosted memory server's existing session indexes:
 
 ```sh
 curl --get "$API_URL/api/health/document-interests" \
@@ -737,12 +737,14 @@ curl --get "$API_URL/api/health/document-interests" \
 Query the worker that serves this space; another worker can correctly report
 no matches.
 
-The schema ID includes its `cid:` prefix. The lookup uses the shared `space`
-scope and the main branch (the empty string); pass `branch` to inspect another
-branch. It opens no storage, evaluates no queries, serializes no document
+The HTTP route accepts only `cid:` IDs; mutable document IDs such as `of:` are
+rejected. The lookup uses the shared `space` scope and the main branch (the empty
+string); pass `branch` to inspect another branch. It opens no storage, evaluates
+no queries, serializes no document
 contents, and changes no watches or delivery state. Like `/api/health/stats`,
-this is an operator health surface without route-level authentication; use the
-deployment's existing access restrictions.
+this is a health surface without route-level authentication; anyone who can
+reach it can see which principals retain a named content-addressed document.
+Use the deployment's existing access restrictions.
 
 Each matching row identifies the `sessionId`, authenticated `principal`,
 optional delegated `actingPrincipal`, and owning `connectionId`. It distinguishes

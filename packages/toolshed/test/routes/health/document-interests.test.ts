@@ -164,6 +164,8 @@ describe("health document interests", () => {
         const path of [
           "/api/health/document-interests",
           url(""),
+          url("cid:"),
+          url("of:private-document"),
           url("cid:unknown", "0"),
           url("cid:unknown", "101"),
           url("cid:unknown", "1.5"),

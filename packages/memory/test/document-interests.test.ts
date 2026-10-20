@@ -1,7 +1,10 @@
 import { expect } from "@std/expect";
+import { toFileUrl } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 
-import type { WatchSpec } from "../v2.ts";
+import { toValuePath, type WatchSpec } from "../v2.ts";
+import { close, open } from "../v2/engine.ts";
+import { toDocKey, trackGraph } from "../v2/query.ts";
 import { cacheKeyForEntity } from "../v2/server-sync.ts";
 import { SessionRegistry } from "../v2/session-registry.ts";
 
@@ -109,5 +112,94 @@ describe("document-interests", () => {
     expect(registry.peek(space, opened.sessionId)).toBe(session);
     expect(session.seenSeq).toBe(7);
     expect(session.entities.get(cacheKeyForEntity("", id))).toBe(entry);
+  });
+
+  it("resolves explicit instances before scope names and counts field watches", () => {
+    const registry = new SessionRegistry();
+    const opened = registry.open(space, {}, 0, "connection", "owner");
+    const session = registry.peek(space, opened.sessionId)!;
+    session.watches = [
+      {
+        id: "explicit-space",
+        kind: "graph",
+        query: {
+          roots: [{
+            id,
+            scope: "user",
+            entityScopeKey: "space",
+            selector: { path: [], schema: false },
+          }],
+        },
+      },
+      {
+        id: "explicit-user",
+        kind: "graph",
+        query: {
+          roots: [{
+            id,
+            scope: "space",
+            entityScopeKey: "user:owner",
+            selector: { path: [], schema: false },
+          }],
+        },
+      },
+      {
+        id: "field",
+        kind: "operation",
+        query: { id, path: toValuePath(["field"]) },
+      },
+      {
+        id: "user-field",
+        kind: "operation",
+        query: { id, path: toValuePath(["field"]), scope: "user" },
+      },
+      {
+        id: "other-branch-field",
+        kind: "operation",
+        query: { id, path: toValuePath(["field"]), branch: "other" },
+      },
+    ];
+    expect(registry.documentInterests({ space, id }).sessions[0])
+      .toMatchObject({ watchCount: 5, directWatchCount: 2 });
+    expect(
+      registry.documentInterests({ space, id, branch: "other" }).sessions[0]
+        .directWatchCount,
+    ).toBe(1);
+    session.watches = [session.watches[1], session.watches[3]];
+    expect(registry.documentInterests({ space, id }).totalMatches).toBe(0);
+  });
+
+  it("attributes view-demand graphs independently and isolates their branches", async () => {
+    const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+    const engine = await open({ url: toFileUrl(path) });
+    try {
+      const registry = new SessionRegistry();
+      const opened = registry.open(space, {}, 0, "connection", "owner");
+      const session = registry.peek(space, opened.sessionId)!;
+      const { state } = trackGraph(space, engine, {
+        roots: [{ id, selector: { path: [], schema: false } }],
+      });
+      expect(state.entities.has(toDocKey(space, id, "space", {}))).toBe(true);
+      session.viewDemandGraphs.set("main", state);
+      session.viewDemandGraphs.set("other", { ...state, branch: "other" });
+      const report = registry.documentInterests({ space, id });
+      expect(report.totalMatches).toBe(1);
+      expect(report.sessions[0]).toMatchObject({
+        directWatchCount: 0,
+        cached: false,
+        graphCount: 0,
+        viewDemandCached: false,
+        viewDemandGraphCount: 1,
+      });
+      session.viewDemandGraphs.delete("main");
+      expect(registry.documentInterests({ space, id }).totalMatches).toBe(0);
+      expect(
+        registry.documentInterests({ space, id, branch: "other" }).sessions[0]
+          .viewDemandGraphCount,
+      ).toBe(1);
+    } finally {
+      close(engine);
+      await Deno.remove(path);
+    }
   });
 });
