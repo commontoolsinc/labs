@@ -72,12 +72,14 @@ delivery record, and its watched mark go.
 A document that something began to hold while the removal was on its way is the
 exception. It keeps its value, but loses its delivery record and its watched
 mark, and is watched again on its own; the answer to that watch brings it up to
-date and records its delivery again. If that watch fails, the document stays as
-it is until the next pass, which watches it again, or drops it if nothing holds
-it any more. An action that reads the document does not load it again, so
-dropping it would leave the action with no value and no later changes. If the
-space refuses the watch outright, the document is removed and dropped like the
-others, so that its readers meet the refusal.
+date and records its delivery again. If that watch fails, the document keeps its
+value, still without a delivery record or a watched mark, and the next pass
+watches it again, or drops it if nothing holds it any more. A frame that
+delivers the document, or a removal the server sends for it, before then settles
+it instead, and the pass leaves it alone. An action that reads the document does
+not load it again, so dropping it would leave the action with no value and no
+later changes. If the space refuses the watch outright, the document is removed
+and dropped like the others, so that its readers meet the refusal.
 
 A removal the server sends for any other reason, such as the retraction of an
 instance whose lease has lapsed, empties the document in the same way, whatever
