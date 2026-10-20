@@ -75,10 +75,15 @@ it again. A removal the server sends for any other reason, such as the
 retraction of an instance whose lease has lapsed, empties the document in the
 same way, whatever holds it.
 
-The server answers a removal by walking every watch the session keeps, because
-it records which documents the session's watches reach but not which watch
-reached each one. A pass therefore costs about as much on the server as
-watching the space's documents from scratch.
+The server records which documents a session's watches reach, not which watch
+reached each one, so it answers the removal of a watch it walked by walking the
+remaining watches of that watch's branch again. Two things keep that short of
+watching the space from scratch: a branch the removal names no watch of keeps
+its graph, and a watch that was never walked, because the graph of its branch
+already covered every root of it when it was added, costs nothing to remove.
+The server records those covered watches, and when the watch covering one is
+removed it walks the covered watch into the rebuilt graph, so the documents it
+names stay delivered.
 
 A server that does not advertise `watchRemoveV1` could only be asked to remove
 a watch by replacing the whole watch set, which sends the whole union back.

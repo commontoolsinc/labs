@@ -65,6 +65,18 @@ export type SessionState = {
   /** Watch declarations by id, updated with the array at publication. */
   watchIndex: Map<string, WatchSpec>;
 
+  /**
+   * The graph watches, by id, that `session.watch.add` left unwalked
+   * because the graph of their branch already covered every root of
+   * theirs. Nothing in a graph is attributable to one of these, so
+   * removing it leaves its branch's graph as it stands, and removing a
+   * walked watch of the same branch evaluates that graph again and walks
+   * each of these that the rebuilt graph no longer covers. Every other
+   * graph watch was walked into its graph. A full replacement of the watch
+   * set walks every watch, so it empties this set.
+   */
+  coveredWatchIds: Set<string>;
+
   /** Scoped dirty keys owned by operation watches. Rebuilt on replacement. */
   operationTrackedIds: Set<string>;
 
@@ -262,6 +274,7 @@ export class SessionRegistry {
       viewDemandGraphs: existing?.viewDemandGraphs ?? new Map(),
       viewDemandEntities: existing?.viewDemandEntities ?? new Map(),
       watchIndex: existing?.watchIndex ?? new Map(),
+      coveredWatchIds: existing?.coveredWatchIds ?? new Set(),
       operationTrackedIds: existing?.operationTrackedIds ?? new Set(),
       operationWatches: existing?.operationWatches ?? [],
       operationCursors: existing?.operationCursors ?? new Map(),
