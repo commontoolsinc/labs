@@ -40,6 +40,7 @@
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
+import type { FabricValue } from "@commonfabric/data-model";
 import { aclDocId } from "@commonfabric/memory/acl";
 import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 import {
@@ -370,6 +371,7 @@ describe("private inbox across runtimes", () => {
     );
     const held = ["racingHome", "profiles", 0, "inbox", "piece"];
     return {
+      pointer,
       pointerWrites,
       ownerReads: await owner.link(held),
       ownerAgainReads: await ownerAgain.link(held),
@@ -1009,18 +1011,38 @@ describe("private inbox across runtimes", () => {
     // pointer. Either way the pointer is written once, and both runtimes read
     // the inbox that write set.
 
-    const { pointerWrites, ownerReads, ownerAgainReads } = await racing();
+    const { pointer, pointerWrites, ownerReads, ownerAgainReads } =
+      await racing();
 
+    // Each commit's writes are document ids, and a wave's commit writes every
+    // document any of its actions wrote, so the pointer's value before and
+    // after each commit says which of them changed it.
+    const pointerAt = async (seq: number) => {
+      let value = await harness.documentValueAt(
+        pointer.space,
+        pointer.id,
+        seq,
+      );
+      for (const key of pointer.path) {
+        value = (value as Record<string, FabricValue> | null)?.[key] ?? null;
+      }
+      return value;
+    };
+    const pointerCommits = await Promise.all(
+      pointerWrites.map(async (commit) => ({
+        seq: commit.seq,
+        class: commit.class,
+        holder: commit.holder,
+        sessionId: commit.sessionId,
+        before: await pointerAt(commit.seq - 1),
+        after: await pointerAt(commit.seq),
+        writes: commit.writes,
+      })),
+    );
     expect(
       pointerWrites.length,
-      `commits writing the pointer: ${
-        JSON.stringify(pointerWrites.map((commit) => ({
-          seq: commit.seq,
-          class: commit.class,
-          holder: commit.holder,
-          sessionId: commit.sessionId,
-          writes: commit.writes,
-        })))
+      `commits writing the pointer ${JSON.stringify(pointer)}: ${
+        JSON.stringify(pointerCommits)
       }`,
     ).toBe(1);
     const loom = await owner.link(["loomInbox", "piece"]);

@@ -3818,12 +3818,17 @@ export class Server {
     });
   }
 
+  /**
+   * Reads a document's space-scoped instance as of `seq`, or as of the head
+   * when `seq` is omitted.
+   */
   async readDocument(
     space: string,
     id: string,
+    seq?: number,
   ): Promise<EntityDocument | null> {
     const engine = await this.#openEngine(space);
-    return Engine.read(engine, { id });
+    return Engine.read(engine, { id, ...(seq === undefined ? {} : { seq }) });
   }
 
   async writeDocument(
