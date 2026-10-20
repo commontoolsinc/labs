@@ -274,6 +274,57 @@ describe("refused derived write", () => {
       .toMatchObject({ value: 2, confirmed: true });
   });
 
+  it("yields to a value the store holds for the document, holds nothing, and runs no further", async () => {
+    // The owner stored `derived` before the reader computed it, so the
+    // reader's write is dropped and its view keeps the stored value. The
+    // drop notifies nothing, so the reader's computation does not run
+    // against the stored value and write the same thing again.
+
+    const { ownerRuntime, space, derived, counts, settled, held } =
+      await readerDerives(2, (n: number) => n * 2, { stored: 7 });
+
+    expect(counts.refusals).toBe(0);
+    expect(counts.runs).toBe(1);
+    expect(derived.get()).toBe(7);
+    expect(held()).toBe(0);
+    await settled();
+    expect(counts.runs).toBe(1);
+    const stored = ownerRuntime.getCell<number>(space, "derived");
+    await stored.sync();
+    expect(stored.get()).toBe(7);
+  });
+
+  it("yields to a value the store takes for a held document, without running again", async () => {
+    // The reader held its own value first. The arriving stored value retires
+    // what it held and replaces it in the reader's view, and the retirement
+    // is the reader's own flip, which does not run its computation.
+
+    const {
+      ownerRuntime,
+      readerRuntime,
+      space,
+      derived,
+      counts,
+      settled,
+      held,
+    } = await readerDerives(2, (n: number) => n * 2);
+    expect(derived.get()).toBe(4);
+    expect(held()).toBe(1);
+
+    await ownerRuntime.editWithRetry((tx) => {
+      ownerRuntime.getCell<number>(space, "derived", undefined, tx).set(7);
+    });
+    await ownerRuntime.storageManager.synced();
+    await readerRuntime.storageManager.pullOpenSpacesToHead();
+    await settled();
+
+    expect(derived.get()).toBe(7);
+    expect(held()).toBe(0);
+    expect(counts.refusals).toBe(0);
+    await settled();
+    expect(counts.runs).toBe(1);
+  });
+
   it("stores the value once the principal is granted WRITE", async () => {
     const {
       ownerRuntime,

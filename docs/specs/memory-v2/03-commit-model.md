@@ -840,6 +840,14 @@ schema declares, as any reader of an absent defaulted slot does.
 - A derived transaction waits for the space's access list to arrive before
   it is decided, so a cold runtime's first derivation is held rather than
   pushed and refused.
+- A held derivation stands only where the store holds nothing. A write to a
+  document the store already holds a value for is dropped, and the
+  principal's view keeps the stored value: a principal who may write the
+  space produced it, from inputs this principal may not be able to read, and
+  what depends on the document runs from it. The drop changes nothing in the
+  replica, so it notifies nothing, and the computation that made the write
+  stays at rest rather than computing it again; it runs again when an input
+  changes, and is dropped again while the store holds the document.
 - A held derivation is replaced rather than accumulated. A newer one that
   writes every document of an older one whole retires the older one, and an
   authoritative value arriving for a document a held derivation wrote retires

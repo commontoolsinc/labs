@@ -10,6 +10,13 @@
  * and a principal who may not keeps a working copy of their own
  * (`docs/specs/memory-v2/03-commit-model.md` §3.8.3).
  *
+ * A held derivation stands only where the store holds nothing: a write to a
+ * document the store already holds a value for is dropped, and the principal's
+ * view keeps the stored value, which someone who may write the space
+ * computed from inputs this principal may not read. The drop changes nothing
+ * in the replica, so it notifies nothing and the writer stays at rest rather
+ * than computing the same write again.
+ *
  * A held derivation is replaced rather than accumulated. A newer whole-document
  * derivation of the same documents retires the older one, an authoritative
  * value arriving for a document it wrote retires it, and a grant of WRITE
@@ -280,6 +287,35 @@ export class LocalDerivationDestination implements TransactionSealDestination {
             },
           });
         }
+        // A document the store holds a value for is left as the store has
+        // it: the write to it is dropped before anything applies, so the
+        // replica changes nothing for it and no reader, the writer
+        // included, is notified.
+        const yielded = new Set(
+          native.operations
+            .filter((op) => this.#storeHolds(replica, op))
+            .map(docKey),
+        );
+        if (yielded.size > 0) {
+          native = {
+            ...native,
+            operations: native.operations.filter((op) =>
+              !yielded.has(docKey(op))
+            ),
+            ...(native.preconditions === undefined ? {} : {
+              preconditions: native.preconditions.filter((precondition) =>
+                precondition.kind === "origin-committed" ||
+                !yielded.has(docKey(precondition))
+              ),
+            }),
+          };
+          if (
+            native.operations.length === 0 &&
+            (native.sqliteOps?.length ?? 0) === 0
+          ) {
+            return Promise.resolve({ ok: {} });
+          }
+        }
         const { promise, resolve } = Promise.withResolvers<
           SealedCommitVerdict
         >();
@@ -362,6 +398,25 @@ export class LocalDerivationDestination implements TransactionSealDestination {
     }
     for (const entry of held) this.#register(entry);
     return { ok: {} };
+  }
+
+  /**
+   * Helper for {@link seal}, which returns whether the store holds a value for
+   * the document `op` writes, read beneath every held layer: a value the
+   * store holds is one a principal who may write the space produced, and the
+   * derivation yields to it.
+   */
+  #storeHolds(
+    replica: {
+      getNonSpeculativeDocument?: (
+        id: URI,
+        scope?: CellScope,
+      ) => { value?: unknown } | undefined;
+    },
+    op: { id: URI; scope?: CellScope },
+  ): boolean {
+    return replica.getNonSpeculativeDocument?.(op.id, op.scope)?.value !==
+      undefined;
   }
 
   /**
