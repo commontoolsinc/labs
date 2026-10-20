@@ -86,12 +86,7 @@ interface RepoSpec {
  * Returns a function that restores `fetch`.
  */
 function standIn(repos: () => RepoSpec[], calls: string[]): () => void {
-  const real = globalThis.fetch;
-  globalThis.fetch = (async (
-    input: string | URL | Request,
-    init?: RequestInit,
-  ) => {
-    const url = new URL(input instanceof Request ? input.url : String(input));
+  const answer = (url: URL, init?: RequestInit): Response => {
     if (url.pathname === `/orgs/${ORG}/repos`) {
       calls.push(url.pathname + url.search);
       return Response.json(repos().map((repo) => ({
@@ -143,7 +138,15 @@ function standIn(repos: () => RepoSpec[], calls: string[]): () => void {
         ? {}
         : { errors: [{ type: repo.errorType, message: "refused" }] }),
     });
-  }) as typeof fetch;
+  };
+  const real = globalThis.fetch;
+  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) =>
+    Promise.resolve(
+      answer(
+        new URL(input instanceof Request ? input.url : String(input)),
+        init,
+      ),
+    )) as typeof fetch;
   return () => {
     globalThis.fetch = real;
   };
