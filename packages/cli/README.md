@@ -418,35 +418,35 @@ uses this fixture mechanism at both postures.
 
 `cf view [file]` is an interactive pager for transformed TypeScript, source
 files, and unified diffs. Named Markdown, JSON, JSONC, JSON Lines, YAML, Python,
-Swift, Kotlin, TOML, HCL, shell, Java properties, ProGuard, and XML files use
-their own syntax highlighting. HCL covers OpenTofu and Terraform configuration
-named `.tf` or `.tofu`, variable definitions files named `.tfvars`, backend
-configuration files named `.tfbackend`, and other `.hcl` files, such as
-dependency lock files. A string's interpolations and template directives are
-colored as code inside the string. Shell covers Bash and POSIX shell scripts
-named `.sh`, `.bash`, or `.command`, and Bash's startup files, such as `.bashrc`
-and `.profile`. A heredoc's body is colored as a string, with the expansions its
-delimiter allows. A Swift package manifest is Swift source under its `.swift`
-extension, and a module's `.swiftinterface` is Swift as well. Gradle build and
-settings scripts are Kotlin scripts under the `.kts` extension. Gradle version
-catalogs and Cargo manifests are TOML, as are Cargo lock files. The ProGuard
-language covers the keep rules that ProGuard and R8 read: `proguard-rules.pro`
-and `consumer-rules.pro` select it by name, and another `.pro` file uses it when
-one of its lines starts with one of ProGuard's option names, because Qt project
-files and Prolog use that suffix as well. XML covers Android manifests,
-resources, and layouts, SVG images, and Apple property lists, entitlements, and
-privacy manifests. Web manifests, TLDraw documents, Deno lock files, editor
-workspace files, and Swift package resolutions use the JSON highlighting their
-suffixes do not announce. A `.cfg` file uses JSON highlighting when the source
-in view opens a JSON object; that suffix is shared with unrelated syntaxes, so
-its name alone leaves it as plain text. Transformed compiler output piped
-without a filename keeps TypeScript highlighting when its module header
-identifies it. Python interpreter shebangs select Python for otherwise
-unrecognized names, `swift` and `xcrun swift` shebangs select Swift, and
-`kotlin` shebangs select Kotlin. `sh`, `bash`, `dash`, and `ash` shebangs select
-shell, which covers Git hooks and other extensionless programs. Node, Deno, and
-Bun shebangs select the TypeScript and JavaScript language family. For an
-otherwise unrecognized name, source that starts with an XML declaration
+Swift, Kotlin, TOML, HCL, shell, Java properties, INI, ProGuard, and XML files
+use their own syntax highlighting. HCL covers OpenTofu and Terraform
+configuration named `.tf` or `.tofu`, variable definitions files named
+`.tfvars`, backend configuration files named `.tfbackend`, and other `.hcl`
+files, such as dependency lock files. A string's interpolations and template
+directives are colored as code inside the string. Shell covers Bash and POSIX
+shell scripts named `.sh`, `.bash`, or `.command`, and Bash's startup files,
+such as `.bashrc` and `.profile`. A heredoc's body is colored as a string, with
+the expansions its delimiter allows. A Swift package manifest is Swift source
+under its `.swift` extension, and a module's `.swiftinterface` is Swift as well.
+Gradle build and settings scripts are Kotlin scripts under the `.kts` extension.
+Gradle version catalogs and Cargo manifests are TOML, as are Cargo lock files.
+The ProGuard language covers the keep rules that ProGuard and R8 read:
+`proguard-rules.pro` and `consumer-rules.pro` select it by name, and another
+`.pro` file uses it when one of its lines starts with one of ProGuard's option
+names, because Qt project files and Prolog use that suffix as well. XML covers
+Android manifests, resources, and layouts, SVG images, and Apple property lists,
+entitlements, and privacy manifests. Web manifests, TLDraw documents, Deno lock
+files, editor workspace files, and Swift package resolutions use the JSON
+highlighting their suffixes do not announce. A `.cfg` file uses JSON
+highlighting when the source in view opens a JSON object; that suffix is shared
+with unrelated syntaxes, so its name alone leaves it as plain text. Transformed
+compiler output piped without a filename keeps TypeScript highlighting when its
+module header identifies it. Python interpreter shebangs select Python for
+otherwise unrecognized names, `swift` and `xcrun swift` shebangs select Swift,
+and `kotlin` shebangs select Kotlin. `sh`, `bash`, `dash`, and `ash` shebangs
+select shell, which covers Git hooks and other extensionless programs. Node,
+Deno, and Bun shebangs select the TypeScript and JavaScript language family. For
+an otherwise unrecognized name, source that starts with an XML declaration
 (`<?xml`), after any byte order mark, selects XML, which covers Interface
 Builder documents, project files, and the other XML formats that no extension
 announces. A diff reads a shebang or an XML declaration for a file whose path
@@ -458,6 +458,13 @@ selects a language by its stable identifier or alias. Both options keep the pipe
 read-only and suppress unified-diff auto-detection. An explicit language takes
 priority when both options are present. Use `--diff` instead when the pipe is a
 unified diff.
+
+INI covers `.ini` files, Ansible configuration and inventories, and the
+configuration files of Python tools such as `.coveragerc`, `.flake8`,
+`pylintrc`, and `.codespellrc`. A `.cfg` file is INI when its first line other
+than blank lines and comments heads a section. A line in an Ansible inventory
+that names a host and then sets `name=value` variables colors the host and each
+variable. The structure tree lists sections with the keys and hosts in each.
 
 The binary language handles known binary filenames, input containing a NUL byte,
 and input that is not valid UTF-8. It starts in a read-only rendered view with
