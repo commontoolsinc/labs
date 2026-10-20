@@ -1153,6 +1153,7 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
       initialNameApplied,
       [UI]: (
         <cf-screen
+          bleed
           data-ui-pattern={TRUSTED_PROFILE_HOME_SURFACE}
           data-ui-event-integrity={TRUSTED_PROFILE_HOME_SURFACE}
           style={{

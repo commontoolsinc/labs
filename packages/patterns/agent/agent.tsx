@@ -227,7 +227,7 @@ export default pattern<AgentInput, AgentOutput>(
     return {
       [NAME]: displayName,
       [UI]: (
-        <cf-screen>
+        <cf-screen bleed>
           {/* Header: name, status badge, enabled toggle */}
           <cf-hstack
             slot="header"

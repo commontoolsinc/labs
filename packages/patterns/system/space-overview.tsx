@@ -121,7 +121,7 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
   return {
     [NAME]: "Space Overview",
     [UI]: (
-      <cf-screen>
+      <cf-screen bleed>
         <cf-toolbar slot="header" sticky>
           <h2 style={{ margin: 0, fontSize: "18px" }}>Space Overview</h2>
         </cf-toolbar>

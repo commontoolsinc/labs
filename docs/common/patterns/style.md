@@ -126,7 +126,7 @@ const theme = {
 <cf-theme theme={theme}>
   <cf-screen>
     <cf-heading slot="header" level={2}>Budget tracker</cf-heading>
-    <cf-vstack gap="4" padding="4">
+    <cf-vstack gap="4">
       {/* themed UI */}
     </cf-vstack>
   </cf-screen>
@@ -143,6 +143,10 @@ main area, and a pinned footer.
 
 - Put ordinary vertical content directly in the default slot; it scrolls when
   it overflows.
+- The screen holds its header, main area, and footer a gutter in from its
+  edges, so content needs no padding of its own to clear them. Give the screen
+  `bleed` when the content lays out its own edge, such as a header bar with its
+  own background.
 - Use `cf-vscroll` inside `cf-screen` only when you need snap-to-bottom
   behavior, fade edges, or a styled/hidden scrollbar.
 - If the layout is wider than one viewport, introduce a deliberate `cf-hscroll`

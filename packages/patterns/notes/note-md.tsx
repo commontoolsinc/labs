@@ -206,7 +206,7 @@ export default pattern<NoteMdInput, NoteMdOutput>(
     return {
       [NAME]: displayName,
       [UI]: (
-        <cf-screen>
+        <cf-screen bleed>
           <cf-hstack
             slot="header"
             padding="4"

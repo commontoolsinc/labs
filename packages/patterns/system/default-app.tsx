@@ -218,7 +218,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
 
     [NAME]: computed(() => `Space Home (${visiblePieces.length})`),
     [UI]: (
-      <cf-screen>
+      <cf-screen bleed>
         <cf-toolbar slot="header" sticky>
           <div slot="start">
             <h2 style={{ margin: 0, fontSize: "20px" }}>Patterns</h2>

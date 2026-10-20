@@ -7,7 +7,7 @@ export default pattern(() => {
     [NAME]: "Aside",
     [UI]: (
       // cf-screen provides a full-height layout with header/main/footer areas
-      <cf-screen>
+      <cf-screen bleed>
         {/* Header slot - fixed at top */}
         <div slot="header">
           <h2>Header Section</h2>

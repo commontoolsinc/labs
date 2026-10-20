@@ -983,7 +983,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       isNotebook,
       isHidden,
       [UI]: (
-        <cf-screen>
+        <cf-screen bleed>
           <cf-vstack gap="4" padding="6">
             {/* Header row - parent link on left, Notebooks dropdown on right */}
             <div

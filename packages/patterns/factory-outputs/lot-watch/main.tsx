@@ -1463,7 +1463,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     return {
       [NAME]: "Lot Watch",
       [UI]: (
-        <cf-screen>
+        <cf-screen bleed>
           {/* Header with tab navigation */}
           <div
             slot="header"

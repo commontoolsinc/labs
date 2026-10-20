@@ -209,7 +209,7 @@ ${profileSection}`;
     return {
       [NAME]: "Quick Capture",
       [UI]: (
-        <cf-screen>
+        <cf-screen bleed>
           <cf-toolbar slot="header" sticky>
             <h2 style={{ margin: 0, fontSize: "18px" }}>Quick Capture</h2>
           </cf-toolbar>

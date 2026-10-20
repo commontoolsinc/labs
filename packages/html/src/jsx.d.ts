@@ -3264,6 +3264,10 @@ interface CFTagsAttributes<T> extends CFHTMLAttributes<T> {
   "oncf-change"?: EventHandler<{ tags: string[] }>;
 }
 
+interface CFScreenAttributes<T> extends CFHTMLAttributes<T> {
+  "bleed"?: boolean;
+}
+
 interface CFToolbarAttributes<T> extends CFHTMLAttributes<T> {
   "dense"?: boolean;
   "sticky"?: boolean;
@@ -5133,7 +5137,7 @@ declare global {
         CFCodeEditorElement
       >;
       "cf-screen": CFDOM.DetailedHTMLProps<
-        CFHTMLAttributes<CFScreenElement>,
+        CFScreenAttributes<CFScreenElement>,
         CFScreenElement
       >;
       "cf-autostart": CFDOM.DetailedHTMLProps<

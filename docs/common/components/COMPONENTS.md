@@ -663,11 +663,26 @@ Content in the default slot scrolls automatically when it overflows. Use
 `cf-vscroll` inside `cf-screen` only when you need snap-to-bottom (chat),
 fade-edges, or a styled/hidden scrollbar.
 
+The screen holds its header, main area, and footer a gutter in from its edges,
+so content needs no padding of its own to clear them. The gutter is the theme's
+`--cf-theme-spacing-loose`, and `--cf-screen-gutter` resizes it. A footer
+holding an inset `cf-tab-bar` keeps no gutter, since the bar places itself. Give
+the screen `bleed` when the content lays out its own edge, such as a header bar
+that paints its own background or a split view whose panes run to the edge.
+
 ```tsx
 // Shown for illustration only.
 // Simple case — main area scrolls automatically
 <cf-screen>
   <cf-heading slot="header" level={2}>Title</cf-heading>
+  <cf-vstack gap="4">
+    {items}
+  </cf-vstack>
+</cf-screen>
+
+// Own edge — a header bar painted to the edges
+<cf-screen bleed>
+  <cf-toolbar slot="header">Title</cf-toolbar>
   <cf-vstack gap="4" padding="4">
     {items}
   </cf-vstack>

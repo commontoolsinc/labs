@@ -459,7 +459,7 @@ const ChatNote = pattern<Input, Output>(
     return {
       [NAME]: `💬 ${title.get()}`,
       [UI]: (
-        <cf-screen>
+        <cf-screen bleed>
           <cf-vstack
             slot="header"
             gap="2"
