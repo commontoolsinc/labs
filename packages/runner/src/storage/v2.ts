@@ -4065,6 +4065,15 @@ type SpaceReplicaOptions = Omit<ProviderOptions, "createSession"> & {
  * address, by watch id, and the release pass in which that address was last
  * pulled.
  */
+/** The local address of a document a frame removes. */
+const removedAddress = (
+  remove: SessionSync["removes"][number],
+): LocalDocAddress => ({
+  id: remove.id as URI,
+  scope: remove.scope,
+  ...(remove.scopeKey !== undefined ? { scopeKey: remove.scopeKey } : {}),
+});
+
 type RootWatches = {
   address: WatchAddress;
 
@@ -7151,10 +7160,12 @@ export class SpaceReplica
    * previous pass began, and resolves to those roots once the session has
    * answered. A document the replica holds that no watch of its own covers is
    * first watched on its own, with a selector that follows no links, so that
-   * no removal can take it from the session. The documents the answer says
-   * the session no longer covers are emptied as any removal empties them, and
-   * those with no pending local write are then dropped, so that a later read
-   * of one loads it again. A root read or pulled since the previous pass is
+   * no removal can take it from the session. Of the documents the answer says
+   * the session no longer covers, one that something began to hold while the
+   * removal was on its way keeps its value and is watched again on its own;
+   * every other one is emptied as any removal empties it and, unless a local
+   * write to it is pending, dropped, so that a later read of it loads it
+   * again. A root read or pulled since the previous pass is
    * kept for the next one, so a document loaded for a read not yet made, or
    * read into a value that follows its links later, stays loaded through the
    * pass that follows. A session whose server cannot remove a watch by id
@@ -7232,27 +7243,29 @@ export class SpaceReplica
         view.close();
         return roots;
       }
-      this.#integrateWatchMutation(view, precedingSyncs, sync);
-      // The frame left each document it removed absent; one that nothing
-      // writes either goes.
-      const dropped: LocalDocAddress[] = [];
-      for (const remove of sync.removes) {
-        const address = {
-          id: remove.id as URI,
-          scope: remove.scope,
-          ...(remove.scopeKey !== undefined
-            ? { scopeKey: remove.scopeKey }
-            : {}),
-        };
-        const key = this.#docKeyOf(address);
-        if ((this.#docs.get(key)?.pending.length ?? 0) > 0) continue;
-        this.#docs.delete(key);
-        if (address.id.startsWith("cid:")) {
-          this.#kickedCfcSchemaPulls.delete(address.id.slice("cid:".length));
+      // A document something began to hold while the removal was on its way
+      // keeps its value and is watched again on its own; the answer to that
+      // watch brings it up to date.
+      const heldSince = new Set(
+        sync.removes.filter((remove) => this.#holds(removedAddress(remove))),
+      );
+      for (const remove of heldSince) {
+        const key = this.#docKeyOf(removedAddress(remove));
+        if ((this.#docs.get(key)?.pending.length ?? 0) === 0) continue;
+        // The session reports nothing about the document until it is
+        // watched again, so a foreign change in between is hidden: the
+        // sentinel 1 holds W until the shadow clears.
+        let seqs = this.#shadowedForeignSeqs.get(key);
+        if (seqs === undefined) {
+          seqs = new Set();
+          this.#shadowedForeignSeqs.set(key, seqs);
         }
-        dropped.push(address);
+        seqs.add(1);
       }
-      if (dropped.length > 0) this.#onDocumentsDropped?.(dropped);
+      const removes = sync.removes.filter((remove) => !heldSince.has(remove));
+      this.#integrateWatchMutation(view, precedingSyncs, { ...sync, removes });
+      this.#forgetRemoved(removes);
+      for (const remove of heldSince) this.#watchAgain(remove);
     } catch (error) {
       if (!this.#closed) {
         logger.warn("release-watches-failed", () => [
@@ -7271,6 +7284,53 @@ export class SpaceReplica
       return [];
     }
     return roots;
+  }
+
+  /**
+   * Drops each document a removal the frame applied left absent, unless a
+   * local write to it is pending, and reports the ones it dropped.
+   */
+  #forgetRemoved(removes: readonly SessionSync["removes"][number][]): void {
+    const dropped: LocalDocAddress[] = [];
+    for (const remove of removes) {
+      const address = removedAddress(remove);
+      const key = this.#docKeyOf(address);
+      if ((this.#docs.get(key)?.pending.length ?? 0) > 0) continue;
+      this.#docs.delete(key);
+      if (address.id.startsWith("cid:")) {
+        this.#kickedCfcSchemaPulls.delete(address.id.slice("cid:".length));
+      }
+      dropped.push(address);
+    }
+    if (dropped.length > 0) this.#onDocumentsDropped?.(dropped);
+  }
+
+  /**
+   * Watches on its own a document a release removed after something began to
+   * hold it. If that fails, the document is removed as the release removed
+   * it, so that its readers load it again rather than keep a value the
+   * session no longer keeps current.
+   */
+  #watchAgain(remove: SessionSync["removes"][number]): void {
+    void this.#watchDocument(removedAddress(remove)).then(
+      (result) => result.error,
+      (error: unknown) => error,
+    ).then((error) => {
+      if (error === undefined || this.#closed) return;
+      logger.warn("watch-again-failed", () => [
+        "a document held during its release could not be watched again:",
+        remove.id,
+        error,
+      ]);
+      this.#applySessionSync({
+        type: "sync",
+        fromSeq: 0,
+        toSeq: 0,
+        upserts: [],
+        removes: [remove],
+      }, "integrate");
+      this.#forgetRemoved([remove]);
+    });
   }
 
   /**
