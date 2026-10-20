@@ -14,7 +14,7 @@ import {
   stderrConsoleHandler,
 } from "../lib/json-output.ts";
 import { safeStringify } from "../lib/render.ts";
-import { cf, stripAnsi } from "./utils.ts";
+import { argv, cf, stripAnsi } from "./utils.ts";
 
 describe("JSON command contracts", () => {
   it("redirects runtime consoles without changing the console method", () => {
@@ -137,7 +137,7 @@ describe("JSON command contracts", () => {
   it("keeps the profiling marker off pattern JSON stdout", async () => {
     const env = { CF_PROFILE_DONE_MARKER: "profile finished" };
     const { code, stdout, stderr } = await cf(
-      "check fixtures/check-json-no-evaluate.ts --pattern-json",
+      argv`check fixtures/check-json-no-evaluate.ts --pattern-json`,
       { env },
     );
 
@@ -146,7 +146,7 @@ describe("JSON command contracts", () => {
     expect(stderr.join("\n")).toContain("profile finished");
 
     const transformed = await cf(
-      "check fixtures/check-json-no-evaluate.ts --show-transformed",
+      argv`check fixtures/check-json-no-evaluate.ts --show-transformed`,
       { env },
     );
     expect(transformed.code).toBe(0);
@@ -157,20 +157,20 @@ describe("JSON command contracts", () => {
   it("keeps parser help off reserved stdout modes", async () => {
     for (
       const command of [
-        "check --pattern-json --bogus fixtures/pow-5.tsx",
-        "get --bogus",
-        "piece get-label --bogus",
-        "piece set-label --bogus",
-        "piece --bogus survey",
-        "wish --bogus #profile",
+        argv`check --pattern-json --bogus fixtures/pow-5.tsx`,
+        argv`get --bogus`,
+        argv`piece get-label --bogus`,
+        argv`piece set-label --bogus`,
+        argv`piece --bogus survey`,
+        argv`wish --bogus #profile`,
         // Bundled beside unbundled, because cliffy accepts both and only the
         // walk here tells them apart. A bundle whose value was not skipped
         // reads `team` as the subcommand, reserves nothing, and prints the
         // usage page onto the stream the caller is parsing.
-        "piece -q -s team call --bogus",
-        "piece -qs team call --bogus",
-        "piece -qsi key call --bogus",
-        "cell -qs team get --bogus",
+        argv`piece -q -s team call --bogus`,
+        argv`piece -qs team call --bogus`,
+        argv`piece -qsi key call --bogus`,
+        argv`cell -qs team get --bogus`,
       ]
     ) {
       const { code, stdout, stderr } = await cf(command);
@@ -184,12 +184,12 @@ describe("JSON command contracts", () => {
   it("does not reserve stdout for unrelated piece argument values", async () => {
     for (
       const command of [
-        "piece new get-label --bogus",
-        "piece ls --space survey --bogus",
+        argv`piece new get-label --bogus`,
+        argv`piece ls --space survey --bogus`,
         // The same value under a bundle. `survey` reserves stdout as a
         // subcommand, so a walk that read this one as the subcommand rather
         // than as `-s`'s value would suppress the help this asserts.
-        "piece -qs survey --bogus",
+        argv`piece -qs survey --bogus`,
       ]
     ) {
       const { code, stdout, stderr } = await cf(command);
@@ -202,7 +202,7 @@ describe("JSON command contracts", () => {
 
   it("rejects inspect html --json before opening the space", async () => {
     const { code, stdout, stderr } = await cf(
-      "inspect html no-such-space --json",
+      argv`inspect html no-such-space --json`,
     );
 
     expect(code).not.toBe(0);
@@ -213,7 +213,7 @@ describe("JSON command contracts", () => {
   });
 
   it("rejects inspect --json without a data subcommand", async () => {
-    const { code, stdout, stderr } = await cf("inspect --json");
+    const { code, stdout, stderr } = await cf(argv`inspect --json`);
 
     expect(code).not.toBe(0);
     expect(stdout).toEqual([]);
@@ -224,7 +224,7 @@ describe("JSON command contracts", () => {
 
   it("rejects inspect graph --dot --json", async () => {
     const { code, stdout, stderr } = await cf(
-      "inspect graph no-such-space --dot --json",
+      argv`inspect graph no-such-space --dot --json`,
     );
 
     expect(code).not.toBe(0);
@@ -235,7 +235,7 @@ describe("JSON command contracts", () => {
   });
 
   it("rejects static human help when --json is present", async () => {
-    const { code, stdout, stderr } = await cf("wish --json --help");
+    const { code, stdout, stderr } = await cf(argv`wish --json --help`);
 
     expect(code).not.toBe(0);
     expect(stdout).toEqual([]);
@@ -245,8 +245,8 @@ describe("JSON command contracts", () => {
   });
 
   it("documents redundant --json options on JSON-only reads", async () => {
-    const pieceGet = await cf("cell get --help");
-    const wish = await cf("wish --help");
+    const pieceGet = await cf(argv`cell get --help`);
+    const wish = await cf(argv`wish --help`);
 
     expect(pieceGet.code).toBe(0);
     expect(stripAnsi(pieceGet.stdout.join("\n"))).toContain("--json");
@@ -257,8 +257,8 @@ describe("JSON command contracts", () => {
   it("rejects --json forwarded to fuse-daemon", async () => {
     for (
       const invocation of [
-        "fuse-daemon /tmp/commonfabric-json-test --json",
-        "fuse-daemon --json /tmp/commonfabric-json-test",
+        argv`fuse-daemon /tmp/commonfabric-json-test --json`,
+        argv`fuse-daemon --json /tmp/commonfabric-json-test`,
       ]
     ) {
       const { code, stdout, stderr } = await cf(invocation);
@@ -299,7 +299,7 @@ describe("call JSON arguments", () => {
     // writes first. The refusal prints the line that works rather than
     // reporting an unknown name.
     const { code, stdout, stderr } = await cf(
-      "piece call --identity ./missing.key --api-url http://127.0.0.1:1 --space test --piece example search -- --query milk",
+      argv`piece call --identity ./missing.key --api-url http://127.0.0.1:1 --space test --piece example search -- --query milk`,
     );
 
     expect(code).toBe(2);

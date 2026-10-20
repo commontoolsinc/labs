@@ -54,6 +54,7 @@ import {
   RowLabelCommitError,
   selectCommitsSince,
   selectDocHead,
+  selectSessionOverwritePathsSince,
   selectWritePathsSince,
   serverSeq,
   WaveCommitConflictError,
@@ -283,6 +284,24 @@ export class EngineWaveCommitSink implements WaveCommitSink {
       sinceSeq,
       ...(holder === undefined ? {} : { holder }),
     }));
+  }
+
+  /** @inheritDoc */
+  sessionOverwritePathsSince(
+    space: MemorySpace,
+    doc: { id: string; scope?: CellScope; scopeKey: string },
+    sinceSeq: number,
+    session: { principal: string; sessionId: string },
+  ): Promise<ReadonlyArray<readonly string[]>> {
+    return Promise.resolve(
+      selectSessionOverwritePathsSince(this.#engineFor(space), {
+        id: doc.id,
+        scopeKey: doc.scopeKey,
+        sinceSeq,
+        principal: session.principal,
+        sessionId: session.sessionId,
+      }),
+    );
   }
 
   /** @inheritDoc */

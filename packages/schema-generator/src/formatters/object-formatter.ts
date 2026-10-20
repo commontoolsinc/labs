@@ -30,7 +30,7 @@ import {
 } from "../type-utils.ts";
 import { getCellWrapperInfo } from "../typescript/cell-brand.ts";
 import {
-  holdsWriterPolicy,
+  readWriterPolicy,
   writerPolicyHeldWithin,
 } from "../typescript/writer-policy.ts";
 import { reportUnreadWriterBinding } from "../writer-binding-diagnostics.ts";
@@ -39,6 +39,7 @@ import {
   isDefaultNodeWithUndefined,
   isOptionalSymbol,
 } from "../typescript/property-optionality.ts";
+import { propertiesInSourceOrder } from "../typescript/source-order.ts";
 import {
   holdsTypeParameter,
   typeParameterOfType,
@@ -279,7 +280,12 @@ export class ObjectFormatter implements TypeFormatter {
       context.typeNode,
     );
 
-    const props = checker.getPropertiesOfType(type);
+    const props = propertiesInSourceOrder(
+      type,
+      checker.getPropertiesOfType(type),
+      context.typeNode,
+      checker,
+    );
     // A CFC metadata carrier a mapped type folded into the object is a
     // label, not a member: no value holds it.
     let carrier: ts.Symbol | undefined;
@@ -507,16 +513,21 @@ export class ObjectFormatter implements TypeFormatter {
         apSchema as MutableJSONSchemaObj;
       // A number index signature beside a string one is lowered as the string
       // one alone, so a writer policy only its values hold is lost. A document
-      // stored that way would admit any writer to them.
+      // stored that way would admit any writer to them. A string side whose
+      // reading stopped at a bound is not known to hold one, and a number
+      // side whose reading stopped at one may: either way the policy may be
+      // lost.
       const lostPolicy =
         context.definesDocument && stringIndex && numberIndex &&
-          !holdsWriterPolicy(stringIndex, checker)
-          ? writerPolicyHeldWithin(numberIndex, checker)
+          writerPolicyHeldWithin(stringIndex, checker) === undefined
+          ? readWriterPolicy(numberIndex, checker)
           : undefined;
       if (lostPolicy !== undefined) {
         reportUnreadWriterBinding(
           context,
-          lostPolicy,
+          // A policy past a bound names no alias; the report names the one a
+          // single writer's policy is written with.
+          lostPolicy === "unread" ? "WriteAuthorizedBy" : lostPolicy,
           "This schema defines a document, which would admit any writer, and " +
             "a number index signature beside a string one is lowered as the " +
             "string one alone, so the writer policy its values hold is lost. " +

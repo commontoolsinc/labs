@@ -2,8 +2,10 @@ import {
   action,
   assert,
   type Cell,
+  equals,
   NAME,
   pattern,
+  type Stream,
   TESTS,
   UI,
   Writable,
@@ -17,7 +19,11 @@ import {
   propValue,
 } from "../test/vnode-helpers.ts";
 import Home from "./home.tsx";
-import PrivateInbox, { type PrivateInboxPiece } from "./private-inbox.tsx";
+import PrivateInbox, {
+  type PrivateInboxPiece,
+  TRUSTED_PRIVATE_INBOX_REFUSAL_SURFACE,
+  TRUSTED_REPLACE_REFUSED_INBOX_ACTION,
+} from "./private-inbox.tsx";
 
 type SpaceEntry = { name: string; did?: string };
 
@@ -59,6 +65,26 @@ const REFUSAL_SENTENCES: readonly (readonly [string, string])[] = [
   ["inbox-offers-invalid", "It holds no list of offers."],
   ["inbox-receive-missing", "It has no way to receive offers."],
 ];
+
+/**
+ * Whether the rendering `ui` shows the button that replaces the refused inbox,
+ * marked as the action it is and sending `replace`, inside the notice marked as
+ * its trusted surface.
+ */
+function offersReplacementIn(ui: unknown, replace: Stream<void>): boolean {
+  const notice = refusalNoticeIn(ui);
+  const button = findNodeById(notice, "home-private-inbox-replace");
+  const onClick = propValue(button, "onClick");
+  return propValue(notice, "data-ui-pattern") ===
+      TRUSTED_PRIVATE_INBOX_REFUSAL_SURFACE &&
+    propValue(notice, "data-ui-event-integrity") ===
+      TRUSTED_PRIVATE_INBOX_REFUSAL_SURFACE &&
+    propValue(button, "data-ui-action") ===
+      TRUSTED_REPLACE_REFUSED_INBOX_ACTION &&
+    typeof onClick === "object" && onClick !== null &&
+    equals(onClick, replace) &&
+    hasText(notice, "Use a new inbox");
+}
 
 /** An inbox's result, as the link a refusal record keeps. */
 function linkOf(inbox: unknown): Cell<PrivateInboxPiece>;
@@ -241,8 +267,9 @@ export default pattern(() => {
 
   // The refusal notice shows while Home records a refusal, in the screen's
   // header slot, with the host's code as given, a sentence saying what a code
-  // Home knows means, and when Home first recorded it, in UTC; it is gone once
-  // the record is cleared.
+  // Home knows means, when Home first recorded it, in UTC, and the button that
+  // replaces the refused inbox, marked as its trusted surface's action; it is
+  // gone once the record is cleared.
   const refusedInbox = PrivateInbox({ offers: [] });
   const assert_no_refusal_notice = assert(() =>
     refusalNoticeIn(home[UI]) === undefined
@@ -266,7 +293,10 @@ export default pattern(() => {
       refusalNoticeIn(home[UI]),
       "First noticed 10/9/2026, 12:00:00 PM UTC.",
     ) &&
-    refusalNoticeInHeaderSlot(home[UI])
+    hasText(refusalNoticeIn(home[UI]), "loom shares still reach that daemon") &&
+    hasText(refusalNoticeIn(home[UI]), "stops receiving loom shares") &&
+    refusalNoticeInHeaderSlot(home[UI]) &&
+    offersReplacementIn(home[UI], home.replaceRefusedPrivateInbox)
   );
   // Each code the host sends shows its own sentence, and a record with an empty
   // code says that none was given.

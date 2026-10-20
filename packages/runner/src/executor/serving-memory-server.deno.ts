@@ -23,6 +23,9 @@
  * over a store in a temporary directory ({@link ServingMemoryServerOptions}'
  * `worker`).
  *
+ * The loop's work runs in the serving context, so a test hosting its clients
+ * in the same realm tells their output apart with {@link inServingContext}.
+ *
  * Neither publishes a posture on `/api/meta`, so a client that adopts its
  * server's flags resolves the posture from its own environment and default;
  * a test pairs one of these with clients resolving ON. The host is a process
@@ -53,6 +56,8 @@ import {
   ServingWorker,
 } from "./serving-worker-host.ts";
 import type { SpaceServerPolicy } from "./space-server.ts";
+
+export { inServingContext } from "./serving-context.ts";
 
 /** A memory server with a serving loop attached, for one test to own. */
 export interface ServingMemoryServer extends AsyncDisposable {
@@ -106,6 +111,16 @@ export type ServingMemoryServerOptions =
     ];
 
     /**
+     * The serving runtimes' outbound `fetch`, as `servingRuntimeFactory()`
+     * takes it. A test that stubs its own runtime's `fetch` passes the same
+     * stub here, since a served handler's fetches go through this one.
+     */
+    fetch?: ServingRuntimeFactoryOptions["fetch"];
+
+    /** As `servingRuntimeFactory()` takes it. */
+    moduleByteCache?: ServingRuntimeFactoryOptions["moduleByteCache"];
+
+    /**
      * Whether each served space gets its default pattern on activation.
      * Default: `false`, which is the switch the serving loop keeps for tests;
      * a deployment always ensures them.
@@ -118,7 +133,8 @@ export type ServingMemoryServerOptions =
      * `SERVER_EXECUTION_WORKER`. Default: `true` when that variable is the
      * literal `true` in this process's environment, which is how a lane runs
      * every test that leaves this unset under the worker. A worker takes no
-     * closure, so `prepareStorageManager` and the host's diagnostic hooks
+     * closure, so `prepareStorageManager`, `fetch`, `moduleByteCache`,
+     * `policy.flushDeadlineNow`, and the host's diagnostic hooks
      * other than `onActivationSettled` and `onSpaceParked` are refused under
      * it; a test that needs one says `false` here.
      *
@@ -298,6 +314,8 @@ export async function listenServingMemoryServer(
  */
 const WORKER_REFUSED_OPTIONS = [
   "prepareStorageManager",
+  "fetch",
+  "moduleByteCache",
   "decorateWaveCommitSink",
   "createWaveCommitSink",
   "onWaveCycle",
@@ -326,15 +344,20 @@ async function attachServingLoop(params: {
     worker: _worker,
     experimental,
     prepareStorageManager,
+    fetch,
+    moduleByteCache,
     ensureSpaceRoots = false,
     ...hostOptions
   } = params.options;
   const policy = policyFromEnvironment(hostOptions.policy);
   let loop: ServingLoopHandle;
   if (params.worker) {
-    const refused = WORKER_REFUSED_OPTIONS.filter((name) =>
+    const refused: string[] = WORKER_REFUSED_OPTIONS.filter((name) =>
       params.options[name] !== undefined
     );
+    if (policy?.flushDeadlineNow !== undefined) {
+      refused.push("policy.flushDeadlineNow");
+    }
     if (refused.length > 0) {
       await params.close();
       throw new Error(
@@ -385,6 +408,8 @@ async function attachServingLoop(params: {
         apiUrl: params.apiUrl,
         experimental,
         prepareStorageManager,
+        ...(fetch !== undefined ? { fetch } : {}),
+        ...(moduleByteCache !== undefined ? { moduleByteCache } : {}),
       }),
     });
     loop = {

@@ -393,6 +393,6 @@ export const inputCellsContextMessage = (
   return [
     "Input cells for this run:",
     ...inputCells.map((cell) => `- ${cell.token} — ${cell.name}`),
-    "You cannot read what an input cell holds. Wire it into run_pattern `inputs` to compute over it, or into any other tool input that accepts a handle; use describe_handle to see its shape.",
+    "describe_handle reports an input cell's shape, and the verbs of a piece. read_value returns what it holds once describe_handle has described it, where the run's policy lets the value reach you; what it reads joins the run's context and its label stays on the run. Wire it into run_pattern `inputs` to compute over it without reading it, or into any other tool input that accepts a handle.",
   ].join("\n");
 };

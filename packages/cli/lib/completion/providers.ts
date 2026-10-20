@@ -893,7 +893,8 @@ export function wishTargetCandidates(): ProviderResult {
   return values([
     { value: "#profile", description: "the viewer's active profile object" },
     { value: "#profileName", description: "its live display name" },
-    { value: "#profileAvatar", description: "its avatar" },
+    { value: "#profileAvatar", description: "its avatar text" },
+    { value: "#profilePicture", description: "its picture, as image bytes" },
     { value: "#profileBio", description: "its owner-authored bio" },
     { value: "#profileSpace", description: "its own space cell" },
     { value: "#favorites", description: "space-relative" },
@@ -1120,6 +1121,12 @@ const OPTION_VALUE_PROVIDERS: Readonly<Record<string, OptionProvider>> = {
   documents: onlyOn(
     ["space compact"],
     () => Promise.resolve(values(ID_PREFIX_CANDIDATES)),
+  ),
+  // `cf space compact --verify --against` names the backup a result was
+  // compacted from: a store file, like the positional.
+  against: onlyOn(
+    ["space compact"],
+    () => Promise.resolve(directive({ kind: "files", glob: "*.sqlite" })),
   ),
 };
 

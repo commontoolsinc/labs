@@ -18,6 +18,7 @@ import {
 import {
   attachMemorySocketPipeline,
   bufferTextMessagesUntilNegotiated,
+  setUpMemorySocket,
   warnOnOversizedOutboundFrame,
 } from "./memory.handlers.ts";
 import { memoryServer } from "@/routes/storage/memory.ts";
@@ -91,6 +92,24 @@ const runHelloThroughPipeline = async (
   fake.dispatchEvent(new CloseEvent("close"));
 };
 
+// Returns the arguments of each `console.error()` call made while `act` runs,
+// up to the settling of the promise it returns.
+const consoleErrorsDuring = async (
+  act: () => void | Promise<void>,
+): Promise<unknown[][]> => {
+  const reported: unknown[][] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => {
+    reported.push(args);
+  };
+  try {
+    await act();
+  } finally {
+    console.error = original;
+  }
+  return reported;
+};
+
 describe("memory.handlers", () => {
   // The toolshed `memoryServer` is a module-level singleton constructed when
   // memory.ts is imported. Deno isolates each test file's module graph, so
@@ -98,6 +117,48 @@ describe("memory.handlers", () => {
   // resources.
   afterAll(async () => {
     await memoryServer.close();
+  });
+
+  describe("bufferTextMessagesUntilNegotiated()", () => {
+    // Settles `firstMessage`, returning the error it rejects with, or
+    // `undefined` when it resolves.
+    const rejectionOf = (firstMessage: Promise<unknown>): Promise<unknown> =>
+      firstMessage.then(() => undefined, (error: unknown) => error);
+
+    it("rejects `.firstMessage` with the message and error an `ErrorEvent` carries", async () => {
+      const fake = new FakeSocket();
+      const negotiation = bufferTextMessagesUntilNegotiated(
+        fake as unknown as WebSocket,
+      );
+      const failure = new Error("Unexpected EOF");
+
+      fake.dispatchEvent(
+        new ErrorEvent("error", { message: failure.message, error: failure }),
+      );
+
+      const rejection = await rejectionOf(negotiation.firstMessage);
+      expect(rejection).toBeInstanceOf(Error);
+      expect((rejection as Error).message).toBe(
+        "Memory websocket failed before negotiation: Unexpected EOF",
+      );
+      expect((rejection as Error).cause).toBe(failure);
+    });
+
+    it("rejects `.firstMessage` with the fixed text alone for a plain `error` event", async () => {
+      const fake = new FakeSocket();
+      const negotiation = bufferTextMessagesUntilNegotiated(
+        fake as unknown as WebSocket,
+      );
+
+      fake.dispatchEvent(new Event("error"));
+
+      const rejection = await rejectionOf(negotiation.firstMessage);
+      expect(rejection).toBeInstanceOf(Error);
+      expect((rejection as Error).message).toBe(
+        "Memory websocket failed before negotiation",
+      );
+      expect((rejection as Error).cause).toBeUndefined();
+    });
   });
 
   describe("attachMemorySocketPipeline", () => {
@@ -315,6 +376,128 @@ describe("memory.handlers", () => {
         decodeMemoryBoundary<{ requestId: string }>(fake.sent[2]).requestId,
       ).toBe(requestId);
       fake.dispatchEvent(new CloseEvent("close"));
+    });
+  });
+
+  describe("attachMemorySocketPipeline failures", () => {
+    // Attaches the pipeline to `fake` after a hello, and resolves once the
+    // negotiated socket has been handed off to it.
+    const attachAfterHello = async (fake: FakeSocket): Promise<void> => {
+      const socket = fake as unknown as WebSocket;
+      const negotiation = bufferTextMessagesUntilNegotiated(socket);
+      const handedOff = Promise.withResolvers<void>();
+      const handoff = negotiation.handoff;
+      negotiation.handoff = (handlers) => {
+        handoff(handlers);
+        handedOff.resolve();
+      };
+      fake.dispatchEvent(new MessageEvent("message", { data: HELLO }));
+      const firstMessage = await negotiation.firstMessage;
+      expect(attachMemorySocketPipeline(socket, negotiation, firstMessage!))
+        .toBe(true);
+      await handedOff.promise;
+    };
+
+    it("logs a socket failure after the handoff before closing with 1011", async () => {
+      // Found in review: this close said nothing about why, though it ends
+      // every session the connection carries.
+      const fake = new FakeSocket();
+      await attachAfterHello(fake);
+
+      const reported = await consoleErrorsDuring(() => {
+        fake.dispatchEvent(new Event("error"));
+      });
+      expect(fake.closedWith?.code).toBe(1011);
+      expect(
+        reported.some(([text, cause]) =>
+          String(text).includes("after its socket failed") &&
+          cause instanceof Error &&
+          cause.message === "Memory websocket receive failure"
+        ),
+      ).toBe(true);
+      fake.dispatchEvent(new CloseEvent("close"));
+    });
+
+    it("logs the message and error an `ErrorEvent` carries with the socket failure", async () => {
+      const fake = new FakeSocket();
+      await attachAfterHello(fake);
+      const failure = new Error("Connection reset by peer (os error 104)");
+
+      const reported = await consoleErrorsDuring(() => {
+        fake.dispatchEvent(
+          new ErrorEvent("error", { message: failure.message, error: failure }),
+        );
+      });
+
+      expect(reported).toHaveLength(1);
+      const [text, logged] = reported[0];
+      expect(String(text)).toContain("after its socket failed");
+      expect(logged).toBeInstanceOf(Error);
+      expect((logged as Error).message).toBe(
+        "Memory websocket receive failure: " +
+          "Connection reset by peer (os error 104)",
+      );
+      expect((logged as Error).cause).toBe(failure);
+    });
+  });
+
+  describe("setUpMemorySocket()", () => {
+    it("logs the cause of a socket that fails before its first frame", async () => {
+      const fake = new FakeSocket();
+      const failure = new Error("Unexpected EOF");
+
+      const reported = await consoleErrorsDuring(async () => {
+        const setup = setUpMemorySocket(fake as unknown as WebSocket);
+        // Deno marks a socket closed before it dispatches `error`.
+        fake.readyState = WebSocket.CLOSED;
+        fake.dispatchEvent(
+          new ErrorEvent("error", { message: failure.message, error: failure }),
+        );
+        await setup;
+      });
+
+      expect(reported).toHaveLength(1);
+      const [text, logged] = reported[0];
+      expect(text).toBe("memory websocket: setup failed");
+      expect(logged).toBeInstanceOf(Error);
+      expect((logged as Error).message).toBe(
+        "Memory websocket failed before negotiation: Unexpected EOF",
+      );
+      expect((logged as Error).cause).toBe(failure);
+      expect(fake.closedWith).toBeUndefined();
+    });
+
+    it("logs a first frame that is not text", async () => {
+      const fake = new FakeSocket();
+
+      const reported = await consoleErrorsDuring(async () => {
+        const setup = setUpMemorySocket(fake as unknown as WebSocket);
+        fake.dispatchEvent(
+          new MessageEvent("message", { data: new ArrayBuffer(3) }),
+        );
+        await setup;
+      });
+
+      expect(reported).toHaveLength(1);
+      const [text, logged] = reported[0];
+      expect(text).toBe("memory websocket: setup failed");
+      expect(logged).toBeInstanceOf(Error);
+      expect((logged as Error).message).toBe(
+        "Memory websocket expects text before negotiation",
+      );
+    });
+
+    it("logs nothing for a socket closed before its first frame", async () => {
+      const fake = new FakeSocket();
+
+      const reported = await consoleErrorsDuring(async () => {
+        const setup = setUpMemorySocket(fake as unknown as WebSocket);
+        fake.dispatchEvent(new CloseEvent("close"));
+        await setup;
+      });
+
+      expect(reported).toEqual([]);
+      expect(fake.closedWith).toBeUndefined();
     });
   });
 

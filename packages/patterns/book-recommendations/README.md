@@ -7,9 +7,11 @@ cells, defaulting to empty arrays. Every finished book is a separate cell with
 
 The request passes the two input cells and a named `book_0`, `book_1`, and so on
 for each finished book. These are cell references, not values interpolated into
-the task. The tools are `loom_search` and `loom_page_read`. The named book
-inputs let a model select held book handles without a separate tool for
-traversing the list.
+the task. The run looks at each with `describe_handle` and reads it with
+`read_value`, which every run has; a read is measured against the run's read
+ceiling, and its label joins the run's context. The tools the request names are
+`loom_search` and `loom_page_read`. The named book inputs let a model select
+held book handles without a separate tool for traversing the list.
 
 The result has exactly five `picks`, each containing a read-only `book` link and
 an inline `why` string. An optional `sources` array contains read-only links to
@@ -105,9 +107,7 @@ builtin checks `maxConfidentiality`. Under max enforcement, a reference to a
 labeled cell is refused. A per-request sink ceiling is separate follow-up work.
 
 The book fixture declares the reader's `User` confidentiality label on each book
-cell. The result writer requires stored source-label metadata and refuses a link
-target whose metadata is absent; creating an unlabeled cell is not evidence that
-its public metadata is stored.
+cell.
 
 Loom deviation 10 also remains unchanged: a row without `ifc` inherits the label
 of its query. This can under-label a row, including admitting it as public on a

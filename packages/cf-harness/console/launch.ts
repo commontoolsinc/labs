@@ -42,7 +42,7 @@
  */
 import { isDID } from "@commonfabric/identity/did";
 import { parseArgs } from "@std/cli/parse-args";
-import { join } from "@std/path";
+import { fromFileUrl, join } from "@std/path";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import {
@@ -321,7 +321,7 @@ const objectField = (
  */
 const storeDirectoryPath = (memoryDir: string): string => {
   try {
-    return decodeURIComponent(new URL(memoryDir).pathname);
+    return fromFileUrl(memoryDir);
   } catch {
     return memoryDir;
   }

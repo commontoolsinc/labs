@@ -105,8 +105,18 @@ const connectionLostWhileRestoring = (): Error =>
 
 const logger = getLogger("memory.v2.client", {
   enabled: true,
-  level: "error",
+  level: "warn",
 });
+
+/**
+ * Names an error by its name and message, for a log line. The message is
+ * JSON-quoted: it can carry text a peer chose, such as a session id, and a
+ * line break in it would read as a log record of its own.
+ */
+const describeError = (error: unknown): string =>
+  error instanceof Error
+    ? `${JSON.stringify(error.name)}: ${JSON.stringify(error.message)}`
+    : JSON.stringify(String(error ?? "no error"));
 
 export type Transport = {
   /** Whether this transport can exchange negotiated compression envelopes. */
@@ -159,6 +169,27 @@ export type Transport = {
   delivered?(): Promise<void>;
 };
 
+/**
+ * The frames this process received as a server's `session/effect` push. A
+ * server sends one per fan-out turn, carrying every change since its last
+ * turn to the documents the session watches, so a session that has applied
+ * every frame before one is current through that frame's `toSeq`. Watch
+ * mutation replies, restore syncs and the client's own caught-up markers are
+ * not pushes: a watch mutation reply covers only the roots it added.
+ */
+const pushedSyncs = new WeakSet<SessionSync>();
+
+/**
+ * Returns whether `sync` arrived as a server's `session/effect` push, and so
+ * is current through its `toSeq` for a session that applied every frame
+ * before it. The guarantee is the server's publication turn: a commit that
+ * bypasses that turn can reach the head a push is stamped with before its
+ * changes reach the push.
+ */
+export function isPushedSync(sync: SessionSync): boolean {
+  return pushedSyncs.has(sync);
+}
+
 export type ConnectOptions = {
   transport: Transport;
   signal?: AbortSignal;
@@ -186,6 +217,14 @@ export type MountOptions = {
   sessionId?: string;
   seenSeq?: number;
   sessionToken?: string;
+
+  /** See the wire `SessionDescriptor.resumeKey`. `mount()` makes one for
+   * each session, replacing any a caller passes. */
+  resumeKey?: string;
+
+  /** See the wire `SessionDescriptor.resumeAttempt`. `mount()` sends 1, and
+   * each reopen of the session the next number. */
+  resumeAttempt?: number;
 
   /** The session-level delegated READ binding (OW31; see the wire
    * `SessionDescriptor.actingAs`): only the serving plane's loopback
@@ -702,6 +741,10 @@ export class Client {
       ...(options.genesisRoot === undefined ? {} : {
         genesisRoot: cloneIfNecessary(options.genesisRoot, { frozen: false }),
       }),
+      // The session this mount makes is the key's holder, so a caller's key
+      // is replaced, and this open is its first.
+      resumeKey: crypto.randomUUID(),
+      resumeAttempt: 1,
     };
     let opening: Promise<SessionOpenResult> | undefined;
     let result: SessionOpenResult;
@@ -728,12 +771,9 @@ export class Client {
       }
       throw error;
     }
-    // Between openSession resolving (the session now exists server-side)
-    // and the registration below, a session-scoped frame would find no
-    // routing entry. Unreachable for a transport that delivers one frame
-    // per event-loop task: this continuation is synchronous plus
-    // microtasks, which drain before the next task, and only a
-    // resume-mount has frames to deliver that early.
+    // A resumed session can receive `session/effect` while `openSession()`
+    // awaits catch-up. Reconnect restoration routes those frames to the
+    // existing `SpaceSession`; a new mount's routing entry is registered below.
     const session = new SpaceSession(
       this,
       space,
@@ -747,6 +787,8 @@ export class Client {
       options.genesisRoot,
       options.spaceKind,
       declaredSpaceKindOf(result),
+      options.resumeKey,
+      options.resumeAttempt,
     );
     this.#spaces.add(session);
     return session;
@@ -1614,6 +1656,11 @@ export class Client {
   restartConnection(error: Error): void {
     // A closed or failed client is never connected.
     if (!this.#connected) return;
+    logger.warn("connection-restart", () => [
+      "discarding the connection, and every session's requests in flight " +
+      `on it, after a held session's retried restore failed: ` +
+      describeError(error),
+    ]);
     if (!this.#discardConnection(error)) return;
     this.#restartDelayMs = reconnectDelayMs(this.#restarts++);
     // A discarded connection reports no close, so the reconnect starts here.
@@ -1865,7 +1912,7 @@ export class Client {
       return;
     }
     if (isSessionRevoked(message)) {
-      for (const session of this.#spaces) {
+      for (const session of [...this.#spaces]) {
         if (
           session.sessionId === message.sessionId &&
           session.space === message.space
@@ -1931,6 +1978,10 @@ export class Client {
     if (this.#closed) {
       return;
     }
+    logger.warn("connection-closed", () => [
+      `connection closed with ${this.#spaces.size} session(s) open, ` +
+      `reconnecting: ${describeError(error)}`,
+    ]);
     this.#connected = false;
     this.#endRenewals(toConnectionError(error));
     this.#noteStateChange();
@@ -2016,6 +2067,10 @@ export class Client {
    * the connection after `err` and reports whether a reconnect can follow.
    */
   #discardConnection(err: Error): boolean {
+    logger.warn("connection-discarded", () => [
+      `discarding the connection with ${this.#spaces.size} session(s) ` +
+      `open: ${describeError(err)}`,
+    ]);
     this.#connected = false;
     this.#endRenewals(toConnectionError(err));
     this.#noteStateChange();
@@ -2035,7 +2090,7 @@ export class Client {
       this.#noteStateChange();
       this.#endHeldMounts(err);
       this.#rejectPending(err);
-      for (const session of this.#spaces) {
+      for (const session of [...this.#spaces]) {
         session.handleConnectionFailure(err);
       }
       return false;
@@ -2107,7 +2162,7 @@ export class SpaceSession {
   #viewIntentVersion = 0;
   #restoreComplete: PromiseWithResolvers<void> | undefined;
   #viewCapabilityLostObservers = new Set<() => void>();
-  #accessLossObservers = new Set<(error: Error) => void>();
+  #terminationObservers = new Set<(error: Error) => void>();
   #watchSpecPositions = new Map<string, number[]>();
   #watchView: WatchView | null = null;
   #precedingWatchSyncs: SessionSync[] = [];
@@ -2153,6 +2208,7 @@ export class SpaceSession {
   #concurrentWatchRefresh = false;
 
   #closed = false;
+  #terminated = false;
   #closeError: Error | null = null;
   #readyOnConnection = true;
   #restoring = false;
@@ -2221,6 +2277,10 @@ export class SpaceSession {
   readonly #genesisRoot?: GenesisRoot;
   readonly #spaceKindIntent?: string;
   #declaredSpaceKind?: DeclaredSpaceKind;
+  /** See the wire `SessionDescriptor.resumeKey`. */
+  readonly #resumeKey: string;
+  /** The `resumeAttempt` of this session's latest open. */
+  #resumeAttempt: number;
 
   constructor(
     client: Client,
@@ -2235,8 +2295,12 @@ export class SpaceSession {
     genesisRoot?: GenesisRoot,
     spaceKindIntent?: string,
     declaredSpaceKind?: DeclaredSpaceKind,
+    resumeKey: string = crypto.randomUUID(),
+    resumeAttempt = 1,
   ) {
     this.#client = client;
+    this.#resumeKey = resumeKey;
+    this.#resumeAttempt = resumeAttempt;
     this.#auth = auth;
     this.#routeSignal = routeSignal;
     this.#actingAs = actingAs;
@@ -2763,22 +2827,25 @@ export class SpaceSession {
   }
 
   /**
-   * Observes an authoritative loss of this session's access. A permanent
-   * denial is replayed synchronously to late observers; normal closure,
-   * takeover, and transient connection failures do not report access loss.
+   * Observes this session ending with an error, which `closeError` then
+   * holds: a revocation (a takeover or an authorization denial), a permanent
+   * reopen denial, a restore the server cannot base on declared holdings, or
+   * a client that gives up reconnecting. A session that has already ended
+   * that way reports to a late observer synchronously. Normal closure and
+   * ordinary reconnects do not report.
    */
-  subscribeAccessLoss(observer: (error: Error) => void): () => void {
-    if (isPermanentAuthorizationError(this.#closeError)) {
+  subscribeTermination(observer: (error: Error) => void): () => void {
+    if (this.#terminated) {
       try {
         observer(this.#closeError!);
       } catch (cause) {
-        console.error("session-access-loss subscriber threw:", cause);
+        console.error("session-termination subscriber threw:", cause);
       }
       return () => {};
     }
     if (this.#closed) return () => {};
-    this.#accessLossObservers.add(observer);
-    return () => this.#accessLossObservers.delete(observer);
+    this.#terminationObservers.add(observer);
+    return () => this.#terminationObservers.delete(observer);
   }
 
   /**
@@ -2968,6 +3035,7 @@ export class SpaceSession {
     if (this.#closed) {
       return;
     }
+    pushedSyncs.add(effect);
     this.#noteResult(effect.toSeq);
     this.#noteOperationWatchCursors(effect);
     if (this.#watchView === null) {
@@ -3289,7 +3357,7 @@ export class SpaceSession {
     this.#replaceWatchSpecs([]);
     this.#viewInterests = [];
     this.#viewCapabilityLostObservers.clear();
-    this.#accessLossObservers.clear();
+    this.#terminationObservers.clear();
     this.#watchView?.close();
     this.#watchView = null;
   }
@@ -3315,7 +3383,14 @@ export class SpaceSession {
    * a permanent connection failure.
    */
   #terminateSession(error: Error): void {
+    // Terminal: nothing on this session works again. Termination observers
+    // hear the error below; this line is the record of why.
+    logger.error("session-terminated", () => [
+      `session ${JSON.stringify(this.#sessionId)} on ` +
+      `${JSON.stringify(this.space)} ended: ${describeError(error)}`,
+    ]);
     this.#closed = true;
+    this.#terminated = true;
     this.#closeError = error;
     this.#endHold();
     this.#restoreComplete?.reject(error);
@@ -3333,15 +3408,13 @@ export class SpaceSession {
     this.#watchView?.close();
     this.#watchView = null;
     this.#endPresenceRooms(error);
-    const observers = [...this.#accessLossObservers];
-    this.#accessLossObservers.clear();
-    if (isPermanentAuthorizationError(error)) {
-      for (const observer of observers) {
-        try {
-          observer(error);
-        } catch (cause) {
-          console.error("session-access-loss subscriber threw:", cause);
-        }
+    const observers = [...this.#terminationObservers];
+    this.#terminationObservers.clear();
+    for (const observer of observers) {
+      try {
+        observer(error);
+      } catch (cause) {
+        console.error("session-termination subscriber threw:", cause);
       }
     }
   }
@@ -3855,6 +3928,8 @@ export class SpaceSession {
       sessionId: this.#sessionId,
       seenSeq: this.#serverSeq,
       sessionToken: this.#sessionToken,
+      resumeKey: this.#resumeKey,
+      resumeAttempt: ++this.#resumeAttempt,
       // The delegated READ binding survives a route replacement (OW31):
       // a reopen without it would silently drop to envelope-only READ.
       ...(this.#actingAs !== undefined ? { actingAs: this.#actingAs } : {}),

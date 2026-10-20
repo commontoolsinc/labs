@@ -111,6 +111,14 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
     "profile repair-root:expect",
     "the receipt from the operator-reviewed inspection",
   ],
+  [
+    "piece follow:expect",
+    "the pattern the caller inspected the piece running",
+  ],
+  [
+    "piece follow:expect-revision",
+    "the revision head the caller inspected, or none",
+  ],
   ["piece new:request-key", "an opaque caller retry key"],
   [
     "ingest mint:gmail-access-token",
@@ -130,6 +138,7 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
     "a secret input path or stdin marker, supplied explicitly",
   ],
   // Numbers, durations and bounds. Nothing enumerates a count.
+  ["space compact:verify-sample", "an every-nth stride over the documents"],
   ["limit", "a row count"],
   ["depth", "a graph depth"],
   ["seq", "a revision sequence number"],

@@ -32,9 +32,11 @@ is an operator's command. It makes each existing profile whose space has no
 profile as its root into that root, across a whole store, so that a host holding
 only a profile space's DID reaches the profile. What a repaired profile is, and
 what it is not, is under "Profile" in
-[`HOME_SPACE.md`](../../docs/common/conventions/HOME_SPACE.md). A person can
-repair their own profiles without a snapshot, as "A person's own profiles" below
-describes.
+[`HOME_SPACE.md`](../../docs/common/conventions/HOME_SPACE.md). A person's own
+runtime makes the same repair to the profiles their Home lists when it brings
+Home up, as that document says, so the command is for the profiles of people who
+do not open Home again. A person can also run it over their own profiles without
+a snapshot, as "A person's own profiles" below describes.
 
 Which profiles exist comes from `<dir>`, a snapshot of the store's space
 databases, read offline and never written: every link in each Home's profile
@@ -117,8 +119,9 @@ deno task cf space verify ~/clones/profile-root --expect-migration
 Then compare the clone's pristine and working fingerprints entity by entity, as
 "Checking authored content" in that procedure shows. An inspection writes
 nothing. A repair writes the space cell, whose `defaultPattern` now links the
-profile, adding it where the space had none, and one empty content-addressed
-document beside it; any other changed entity means stop.
+profile, adding it where the space had none. Where that write gives the space
+cell its first label, it also writes one empty content-addressed document beside
+it; any other changed entity means stop.
 
 ### A person's own profiles
 
@@ -228,23 +231,46 @@ Running it more often than that is harmless: a repaired profile is reported as
 
 `cf piece follow --cell <piece> <origin>` adopts the origin’s current pattern
 and records the origin for future updates. It refuses incompatible schemas by
-default. After reviewing the reported changes, pass
-`--dangerously-allow-incompatible-schema` to perform a fresh review and accept
-the candidate reviewed in that invocation. If the origin released between runs,
-this candidate and its incompatibilities can differ from the earlier report. The
-command prints the incompatibility it accepted, pins that candidate during
-confirmation, and revalidates source state and retained inputs. A changed review
-during confirmation is returned to the caller without automatically accepting
-it.
+default, except for a step the release gate already proved: the origin is a
+`system:` one, the piece runs its default export and the candidate is that
+export too, the piece's source was compiled from that origin's file (its
+retained entry is the origin's route), the piece knows when that source was
+released, and the deployment states a later release beside the candidate's
+identity. Such a step is taken as an automatic update from the origin takes it,
+without comparing schemas (`docs/specs/piece-source-lifecycle.md`), and the
+revision records the new release time. The stored argument, retained links, and
+stored CFC envelopes are checked either way. After reviewing the reported
+changes, pass `--dangerously-allow-incompatible-schema` to perform a fresh
+review and accept the candidate reviewed in that invocation. If the origin
+released between runs, this candidate and its incompatibilities can differ from
+the earlier report. The command prints the incompatibility it accepted, pins
+that candidate during confirmation, and revalidates source state and retained
+inputs. A changed review during confirmation is returned to the caller without
+automatically accepting it.
 
-A piece whose current pattern cannot be loaded is reported the same way: the
-candidate cannot be compared with what the piece ran, and that is the
-incompatibility. Under `--dangerously-allow-incompatible-schema` the piece
-adopts the origin's pattern and records the origin in one transition, and keeps
-the identity it displaced where its space retains no source for it. The stored
-argument is still checked against the candidate, which no flag waives, and a
-piece with recorded source history whose current source cannot be restored is
-still refused.
+Outside that exception, a piece whose current pattern cannot be loaded is
+reported the same way: the candidate cannot be compared with what the piece ran,
+and that is the incompatibility. A piece inside it is reviewed without that
+comparison, as an automatic update from the origin is. Under
+`--dangerously-allow-incompatible-schema` the piece adopts the origin's pattern
+and records the origin in one transition, and keeps the identity it displaced
+where its space retains no source for it. The stored argument is still checked
+against the candidate, which no flag waives, and a piece with recorded source
+history whose current source cannot be restored is still refused.
+
+A caller that decided to follow on the strength of what it inspected pins the
+follow to the source state it read, so a piece whose source changed in between
+is left as it is. The pins cover the pattern and the source log, not the piece's
+data: an edit to its stored data alone does not refuse the follow.
+`--expect <identity>#<symbol>` names the pattern the piece must still run, and
+`--expect-revision <revision>` the revision its source log must still end at, or
+`none` for a log that must still be empty; both are what
+`cf piece inspect --pattern-identity --json` reports, as `patternIdentity` and
+`symbol`, and as a `revisionId` that is absent for an empty log. Every source
+transition appends a revision, so the revision pin refuses one that left the
+pattern as it was, such as a detach. A piece off either pin is refused before
+anything is written, and the command ends with exit status 3, so a script can
+tell that refusal from a failure.
 
 For a detached profile with the legacy inbox descriptor, the manual migration is
 `cf piece follow --cell <profile> system:system/profile-home.tsx
@@ -376,10 +402,13 @@ The verbose timing table always includes `prepareCfc`, `deriveFlowJoin`,
 A zero count means that interval did not call the operation. These are
 cumulative elapsed spans, nested inside preparation where applicable; do not add
 them as independent CPU time. The digest span covers canonicalization and
-hashing, including commit-time rechecks. Read counts retain their reactive-body
-boundary; preparation spans cover work outside that boundary. Explicit render
-steps print both timing and read tables. `--timing-measures-out` also captures
-the spans and the `runTestPattern/step/render_N/materialize` phase boundaries.
+hashing, which run when a digest is read or a commit-time recheck finds the
+transaction's activity moved since it prepared; a commit whose activity stands
+hashes nothing, so a zero digest count beside a nonzero `prepareCfc` count is
+the ordinary reading. Read counts retain their reactive-body boundary;
+preparation spans cover work outside that boundary. Explicit render steps print
+both timing and read tables. `--timing-measures-out` also captures the spans and
+the `runTestPattern/step/render_N/materialize` phase boundaries.
 
 The
 [mapped-render regression benchmark](../../docs/development/BENCHMARKS.md#labeled-pattern-test-mapped-render)
@@ -484,6 +513,21 @@ Markdown files can switch between the source and a rendered terminal view with
 markers, tables, rules, and code. The same view is available for Markdown files
 inside a unified diff; diff markers, addition and deletion tints, line
 positions, and hunk expansion remain in place.
+
+Press `P` to push the branch checked out in the repository the viewer runs in,
+as it stands, to the branch of the same name on `origin`. The push is forced,
+but fails rather than discard commits on `origin` that the branch has never
+included, even when they have been fetched. A dialog shows git's output as it
+arrives, with an Abort button that stops the push. When the push ends, the
+dialog adds how it ended and the button becomes Close, which leaves that summary
+in the status line. When the server's reply offers a page for creating a pull
+request, the viewer opens it in the browser. Git asks nothing on the terminal
+while the viewer holds it; a question such as a key's passphrase goes to the
+program `SSH_ASKPASS` names, and fails when it names none. `P` refuses to push
+`origin`'s default branch, and refuses when `origin` names no default branch
+(`git remote set-head origin --auto` finds it). It also refuses a checkout not
+on a branch, and refuses when git started the viewer as its pager for a
+different repository.
 
 Press `\` in the interactive pager to cycle through unwrapped lines, hard
 wrapping, and word wrapping. Hard wrapping fills every screen row before it
@@ -1065,12 +1109,17 @@ cf piece setsrc --cell fid1:piece --root packages/patterns \
 cf piece render --cell fid1:piece >/dev/null
 ```
 
-The source commit and refresh of the running piece are separate operations. If
-the commit lands but refresh fails, `setsrc` prints the commit receipt on
-stdout, prints the failure and recovery checks on stderr, and exits nonzero.
-That status means “source changed, running deploy unverified,” not rollback: use
-`piece render`, `piece inspect`, and `piece getsrc` to determine the live state.
-A receipt alone is never proof that the updated piece starts.
+The source commit and refresh of the running piece are separate operations. The
+refresh starts the piece in the command's own process, which commits the started
+graph's setup writes on a transaction of its own, and reads its result. Storage
+refusing that commit retires the graph, leaving the piece not running in the
+command's process, so it fails the refresh, and the failure names the refused
+commit and storage's reason. If the commit lands but refresh fails, `setsrc`
+prints the commit receipt on stdout, prints the failure and recovery checks on
+stderr, and exits nonzero. That status means “source changed, running deploy
+unverified,” not rollback: use `piece render`, `piece inspect`, and
+`piece getsrc` to determine the live state. A receipt alone is never proof that
+the updated piece starts.
 
 In either case the receipt names the committed pattern ref, the source revision,
 and the seq at which the space's commit log accepted the update. That seq is
@@ -1078,35 +1127,133 @@ what `cf inspect value-at --seq` and `diff --from` take, so the piece can be
 read at exactly the commit that applied the update, or diffed against what has
 landed since.
 
-## Planning a compaction
+## Rendering a piece
 
-`cf space compact <store.sqlite> --documents <prefix> --dry-run` reports what
-compacting a space store's history would remove, and writes nothing. It is the
-dry run of [the compaction plan](../../docs/plans/compact-space.md); the write
-path is that plan's stage 4 and does not exist yet, so the command refuses to
-run without `--dry-run`.
+`cf piece render --cell <reference>` starts the piece in the command's own
+process, renders its UI against an in-process document, and prints the HTML.
+`--no-start` renders the piece's stored state instead of starting it, and
+`--json` prints the HTML inside a JSON record. The references it accepts are
+described under [Cell references](#cell-references).
+
+Without `--watch` the command prints once and exits. It prints when three things
+hold at once: the piece has nothing left to compute, nothing it asked storage
+for is still loading, and no commit the render issued is still pending. The HTML
+is therefore the tree the piece settles to, including any list the piece builds
+only after its stored state has loaded.
+
+What ends a commit's pending state depends on where the commit went. One sent
+directly to the store is pending until the store confirms or refuses it. With
+[`serverExecution`](../../docs/development/EXPERIMENTAL_OPTIONS.md#serverexecution)
+on, what a computation writes is sealed into the client's speculation overlay
+instead, and that commit is pending only until the seal accepts it; the command
+does not wait for what becomes of it afterwards.
+
+With `serverExecution` off, starting a piece writes its derived state from this
+process, so the first render of a piece no client has run can issue hundreds of
+commits. The command waits for them because a commit still in flight when the
+process exits may never be applied, and the next load of the piece then computes
+and commits the same values again.
+
+The command does not wait for builtin I/O still in flight, such as a fetch or a
+language-model call. A piece that renders a pending state for one is printed in
+that state.
+
+With `--watch` the command stays connected and prints the HTML again each time
+the UI changes. Each print is the tree at a point where the piece has nothing
+left to compute and is waiting for nothing from storage. A commit may still be
+pending at that point, so a change that a commit's result causes is a later
+print.
+
+## Compacting a space store
+
+`cf space compact <store.sqlite> --documents <prefix> [--out <path>]` compacts a
+space store's revision history and writes the result as a fresh file. It is
+[the compaction plan](../../docs/plans/compact-space.md)'s tool, the one
+`cf space` command that rewrites a store's rows rather than copying or restoring
+a file. The write path runs offline against a copy of a backup, never against a
+file a server has open: the operator stops the owning instance, takes the
+backup, compacts a copy of it, verifies the result against the backup, and
+installs it, in the order that plan's §4 gives. `--dry-run` prints the report
+below and writes nothing; `--verify` checks a result against its backup; both
+open their files read-only and may be run on a snapshot taken while the space is
+still served.
 
 It takes the store's file path rather than a space name, for the reason the
 [staging copy procedure](../../docs/development/staging-space-copy.md) gives:
-the directory's neighbors are the authority on where a space's file is. The file
-is opened read-only. `--documents` names the instances by id prefix (`of:`,
-`computed:` or `cid:`), and may repeat; the ACL document is never selected.
-`--scope` restricts the selection to `space`, `user` or `session` instances;
-repeated or nested prefixes count as one selection. The cut is the head of every
-selected instance unless `--before-seq`, `--before <YYYY-MM-DD HH:MM:SS>` (UTC,
-in the store's own format and no other) or `--keep-last <n>` bounds it, and a
-row survives if any bound keeps it. `--keep-payloads <duration>` (default `24h`)
-is the window within which commits keep their payload; outside it a commit's
-payload is hollowed unless its seq is 1 or an `op_*` row references it, whether
-or not a surviving revision still points at the commit.
+the directory's neighbors are the authority on where a space's file is.
+`--documents` names the instances by id prefix (`of:`, `computed:` or `cid:`),
+and may repeat; the ACL document is never selected. `--scope` restricts the
+selection to `space`, `user` or `session` instances; repeated or nested prefixes
+count as one selection. The cut is the head of every selected instance unless
+`--before-seq`, `--before <YYYY-MM-DD HH:MM:SS>` (UTC, in the store's own format
+and no other) or `--keep-last <n>` bounds it, and a row survives if any bound
+keeps it. `--keep-payloads <duration>` (default `24h`) is the window, measured
+from the newest client commit, within which commits keep their payload; outside
+it a commit's payload is replaced by a marker carrying a hash of what it held,
+unless its seq is 1, an `op_*` row references it, or it is a compaction commit,
+whether or not a surviving revision still points at the commit. A hollowed
+commit is still a row in the log, told apart from an elided write by its marker;
+what is gone is its contents, which the backup keeps. A commit whose payload
+survives stays inspectable in full.
 
-The report counts the instances matched and truncated, the boundaries that
-become a `set`, the revision and snapshot rows and bytes that would go, the
+A run plans first, read-only, and prints the plan; refuses a store the plan says
+it must not write — one whose schema is behind the engine's, so that opening it
+would migrate it (a table, index or column the engine declares and the store
+lacks, a column declared differently, a legacy table the engine drops), one with
+a second branch, one with no commit 1, one with foreign-key violations, one
+holding more than one ACL document or an ACL document whose value is not an ACL,
+one with a non-empty `-wal` or `-journal` beside it, or a store or result path
+under a directory a local server serves; then opens the store through the engine
+with an exclusive lock and, in order: inserts the compaction commit at the next
+seq, a `system` commit under the `compaction:<run id>` session with the plan as
+its payload; compacts each selected instance in its own transaction — the oldest
+row the cut keeps becomes the base, rewritten as a `set` holding the engine's
+reconstruction at exactly that row if it was a patch, and attributed to the
+compaction commit whatever its op, with the rows and snapshots behind it
+deleted; hollows the payloads outside the window in seq-ranged batches; writes
+the audit revision on the space's ACL document, a whole-document `set` of the
+document as it stands with a `compaction` member beside `value`, when the store
+has a live one (a space with no ACL document gets none, and a tombstoned one is
+left as it is, since a `set` would recreate it); checks the foreign keys and the
+file's integrity; and writes the result with `VACUUM
+INTO` to `--out`,
+`<store>.compacted.sqlite` beside the source by default, never overwriting. A
+run interrupted anywhere leaves a store every reader can use, and running it
+again resumes it under a second compaction commit. The run's own summary follows
+the plan on stdout; progress goes to stderr; `--json` emits the summary as one
+document.
+
+`cf space compact <result.sqlite> --verify --against <backup.sqlite>` checks a
+result against the store it was compacted from, read-only on both, and exits
+nonzero when a check fails: the file's integrity and foreign keys; the
+compaction commits' presence and shape, the branch head at the newest, and no
+commit after it; every head but the ACL document's at its original address and
+joined to a row, with op changes only from `patch` to `set`; every row not
+attributed to a compaction commit byte-identical to the backup's, every
+attributed row but the ACL audit revision a boundary at a backup row's address,
+each materialized boundary holding what the backup reconstructs at exactly that
+row, every deleted row below a boundary and above no surviving row, and
+snapshots deleted only at or below a boundary; every document reconstructed on
+both files through the inspector's replay — a second implementation of the
+engine's rule — and compared, with the ACL document's `value` unchanged and a
+valid ACL and `compaction` the only member that differs, or its tombstone
+untouched; every table outside the history — `op_*`, `scheduler_basis`,
+`execution_outbox`, `blob_store`, the tables patterns created — identical in
+schema and contents; the content fingerprint; exactly the payloads the runs'
+windows reach hollowed, every marker's hash and length matching the backup's
+bytes, every commit row and every other commit column surviving; the single
+run's counts against its plan; and commit 1's payload byte-identical.
+`--verify-sample <n>` reconstructs every n-th document and checks every n-th
+marker, and skips the fingerprint: a quick pass during rehearsal, and a weaker
+claim.
+
+The dry-run report counts the instances matched and truncated, the boundaries
+that become a `set`, the revision and snapshot rows and bytes that would go, the
 commit payloads the run would hollow split by whether the commit still owns a
 head, the ten instances contributing the most rows, the seq the compaction
 commit would take, and the preconditions a run checks, foreign-key integrity
 among them. The payload accounting reads every commit's payload and is the slow
-part of the run. `--json` emits the same report as JSON.
+part of the plan. `--json` emits the same report as JSON.
 
 ## Creating a space
 
@@ -1581,7 +1728,8 @@ The door is HTTP on the Unix socket, mode 0600, with a bearer token in
 `<socket>.token`, also 0600 and minted at each start: reaching the socket is the
 authority. A caller enqueues
 `{caller, profile, idempotencyKey, task,
-instructions?, context?, resultSchema, tools?, maxModelTurns?, browserHost?}`
+instructions?, context?, resultSchema, tools?, maxModelTurns?, browserHost?,
+inputs?, foreignSpaces?}`
 with `POST /jobs`, reads a job with `GET /jobs/<id>` or the newest with
 `GET /jobs?limit=n`, stops one with `POST /jobs/<id>/cancel`, and watches one
 with `GET /jobs/<id>/events?after=<seq>`, a stream of server-sent events that
@@ -1613,18 +1761,26 @@ A profile, named in the host's file, is the authority a job runs with: its
 tools, its host Loom files, its model-turn cap, the prompt-slot role its task
 binds as, and whether a job may bring a browser host (`browserHost: true`). A
 request may name fewer tools and fewer turns, and, under a profile that admits
-one, declare a browser host (below); leaving it out declines the browser. It may
-set nothing else. A job runs through the same `cf-harness` path as an agent run,
-with no fabric session. Every tool call, including delegated calls, counts as
-progress, and so does its return; prose and reasoning do not. A `step` carries
-`{turn, tool}`, and the same step again with `returned: true` once the calls of
-that turn have returned and the loop's model has the turn. A `command` records
-each command the host ran for it. Children add
-`child: {profile, childRunId, parentToolCallId, depth}` to either body. The
-harness admits one level of delegation, so depth is `1`. Only a child's
-`browser` tool steps carry `action` (such as `click` or `snapshot`), without the
-operation's arguments or page content. Other child tool steps, such as
-`submit_result`, omit `action`.
+one, declare a browser host (below); leaving it out declines the browser. Under
+a profile with a fabric session it may hand the job pieces as
+`inputs: {<name>: <address>}`: each becomes an input cell the model holds as a
+handle from its first turn. An address naming another space by DID
+(`//<did>/of:<id>`) needs that space's host in
+`foreignSpaces: {<did>: <origin>}`; the job's session is routed there for that
+space, under the profile's identity, and may call the verbs of the piece it was
+handed. An input in another space with no host, a `foreignSpaces` entry no input
+names, or a slug address naming another space is refused at enqueue as
+`beyond_profile`. It may set nothing else. A job runs through the same
+`cf-harness` path as an agent run, with the fabric session its profile names, if
+any. Every tool call, including delegated calls, counts as progress, and so does
+its return; prose and reasoning do not. A `step` carries `{turn, tool}`, and the
+same step again with `returned: true` once the calls of that turn have returned
+and the loop's model has the turn. A `command` records each command the host ran
+for it. Children add `child: {profile, childRunId, parentToolCallId, depth}` to
+either body. The harness admits one level of delegation, so depth is `1`. Only a
+child's `browser` tool steps carry `action` (such as `click` or `snapshot`),
+without the operation's arguments or page content. Other child tool steps, such
+as `submit_result`, omit `action`.
 
 The lane coalesces consecutive steps with the same tool, child, browser action
 and `returned`, ignoring turn numbers. Thus N identical browser operations in

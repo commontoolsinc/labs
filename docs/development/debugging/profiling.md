@@ -537,10 +537,10 @@ process:
   `traverse` and `runner/start/*` appear here meaning the _server's_ work.
 - `logCounts` — the same per-logger counts, which is how a warning storm shows
   up as a number rather than as a log to grep.
-- `slowQueries` — the last hundred query, watch, or commit operations over
-  `CF_SLOW_QUERY_THRESHOLD_MS` (100 ms unless set; a local investigation sets it
-  to `0` to record every operation), with the space and the root and watch
-  counts. `graph.query`, `session.watch.set` and `session.watch.add` entries
+- `slowQueries` — the last hundred query, watch, commit, or SQLite read
+  operations over `CF_SLOW_QUERY_THRESHOLD_MS` (100 ms unless set; a local investigation sets it
+  to `0` to record every operation), with the space; query and watch entries
+  also carry the root and watch counts. `graph.query`, `session.watch.set` and `session.watch.add` entries
   attribute the traversal (`rootsVisited`, `rootsElapsedMs`, `slowestRoot`) and
   carry `managerReads`, the engine document reads across the whole request — the
   width a root count cannot show, since one root's declaration can fan out over
@@ -555,7 +555,14 @@ process:
   and `lockWaitMs`: how long the commit waited for the space publication lock
   before evaluating. Flush passes hold that same lock, so a `transact` whose
   `lockWaitMs` dominates its elapsed time was queued behind fan-out, not
-  expensive itself. Read the traversal fields with the query evaluation cache's
+  expensive itself. A `sqlite.query` entry carries the database handle's id
+  (`db`), its outcome (`ok` or the error name), and the rows a successful read
+  returned, recorded once the read's access has been checked again, so a read
+  refused at that check records the refusal. The statement itself runs
+  synchronously on the event loop, during which no other frame on the server
+  runs; the entry's time also covers opening the space's store when it was not
+  yet open, which can wait on I/O while other frames run. Read the traversal fields with the query
+  evaluation cache's
   coverage in mind. The cache serves only whole, current-state evaluations: an
   eligible `graph.query` (without `atSeq` or keyed snapshots), each branch group
   established by `session.watch.set`, and a `session.watch.add` group when that

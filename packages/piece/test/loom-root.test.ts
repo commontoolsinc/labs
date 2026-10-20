@@ -613,18 +613,18 @@ describe("loom-root", () => {
           entry.origin !== "link" &&
           entry.path.length === 1 && entry.path[0] === "addedByProfile"
         );
-        const copied = entries.filter((entry) =>
+        const atLink = entries.filter((entry) =>
           entry.origin === "link" && entry.path[0] === "addedByProfile"
         );
         // The actor is the one declared entry at exactly the field.
         expect(declared.flatMap(representations)).toEqual([
           ownerRepresentation(signer.did()),
         ]);
-        // The linked profile's owner arrives only as a copy of its label.
-        expect(copied.flatMap(representations)).toEqual([
-          ownerRepresentation(profileOwner.did()),
-        ]);
-        // A merged label view does not say which is which.
+        // The panel stores nothing of the linked profile's label: its owner
+        // is attested where the profile is stored.
+        expect(atLink.flatMap(representations)).toEqual([]);
+        // A label view of the field follows the link and joins the two, so
+        // it does not say which is which.
         const merged = cfcLabelViewForCell(panel.key("addedByProfile"))
           ?.entries.flatMap(representations) ?? [];
         expect(merged).toEqual(
@@ -1086,10 +1086,9 @@ describe("loom-root", () => {
     const panelsNow = async () =>
       (await output.key("panels").pull()).map((panel) => panel.resolveAsCell());
     const [first, second, third] = await panelsNow();
-    // Stage all three, so the presentation holds link copies of their labels
-    // too. Then remove the first panel, so the others each move up one
-    // position in both lists, and move the last one to the front of the
-    // panels.
+    // Stage all three, so the presentation links them too. Then remove the
+    // first panel, so the others each move up one position in both lists,
+    // and move the last one to the front of the panels.
     await sendAndSettle(
       await output.key("setPresentation").pull(),
       { stagedPanels: [first, second, third] },
@@ -1124,7 +1123,8 @@ describe("loom-root", () => {
       (readStoredCfcMetadata(read, link as never)?.labelMap.entries ??
         []) as readonly LabelEntry[];
     // Each panel's own document: the actor is the one declared entry at
-    // exactly the field, and the copied label is its own profile's owner.
+    // exactly the field, and the document stores nothing of its profile's
+    // label.
     const thirdEntries = storedEntries(third.getAsNormalizedFullLink());
     expect(
       representedSubjects(
@@ -1140,12 +1140,11 @@ describe("loom-root", () => {
           entry.origin === "link" && entry.path[0] === "addedByProfile"
         ),
       ),
-    ).toEqual([thirdOwner.did()]);
+    ).toEqual([]);
     expect(representedSubjects(storedEntries(second.getAsNormalizedFullLink())))
       .toEqual([]);
 
-    // A list holds its elements' labels as link copies, under each element's
-    // current position.
+    // A list stores nothing of its elements' labels at any position.
     const atPosition = (
       list: { id: string; path: readonly string[] },
       index: number,
@@ -1159,17 +1158,26 @@ describe("loom-root", () => {
       );
     const panelsList = output.key("panels").resolveAsCell()
       .getAsNormalizedFullLink();
-    expect(atPosition(panelsList, 0).sort()).toEqual(
-      [signer.did(), thirdOwner.did()].sort(),
-    );
+    expect(atPosition(panelsList, 0)).toEqual([]);
     expect(atPosition(panelsList, 1)).toEqual([]);
     const stagedList = output.key("presentation").key("stagedPanels")
       .resolveAsCell().getAsNormalizedFullLink();
     expect(atPosition(stagedList, 0)).toEqual([]);
-    expect(atPosition(stagedList, 1).sort()).toEqual(
-      [signer.did(), thirdOwner.did()].sort(),
-    );
+    expect(atPosition(stagedList, 1)).toEqual([]);
     read.abort();
+
+    // The adder and the profile's owner are read through each panel, in
+    // whichever position either list now holds it.
+    const reached = (panel: Cell<unknown>) =>
+      representedSubjects(
+        (cfcLabelViewForCell(panel.key("addedByProfile"))?.entries ??
+          []) as readonly LabelEntry[],
+      ).sort();
+    const both = [signer.did(), thirdOwner.did()].sort();
+    expect(reached(remaining[0])).toEqual(both);
+    expect(reached(remaining[1])).toEqual([]);
+    expect(reached(staged[0].resolveAsCell())).toEqual([]);
+    expect(reached(staged[1].resolveAsCell())).toEqual(both);
   });
 
   it("creates its chat room as a piece in its own space that a fresh runtime starts, with no panel, and creates no second one", async () => {

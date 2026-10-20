@@ -1,11 +1,13 @@
 import type {
+  FabricExecValue,
   InSpaceGrants,
   InSpaceOptions,
-  JSONSchemaObj,
 } from "@commonfabric/api";
 import {
   debugStr,
+  deepFreeze,
   hashStringOf,
+  isDeepFrozen,
   isWalkableObjectOrArray,
 } from "@commonfabric/data-model";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -24,7 +26,7 @@ import {
   SPACE_KIND_MAX_LENGTH,
 } from "@commonfabric/memory/v2/space-kind";
 
-import { type AliasBinding } from "../alias-binding.ts";
+import { type AliasBinding, isAliasBinding } from "../alias-binding.ts";
 import {
   exportCell,
   isCell,
@@ -40,6 +42,8 @@ import {
   externalizeSchema,
   getStableInternalPathSegment,
   KeepAsCell,
+  sanitizeAndFreezeSchemaForLinks,
+  sanitizeAndInternSchemaForLinks,
   sanitizeSchemaForLinks,
 } from "../link-utils.ts";
 import {
@@ -59,6 +63,7 @@ import {
   SUBPATTERN_ARGUMENT_BUILTIN_REFS,
 } from "./builtin-replayability.ts";
 import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
+import { instanceNameOf, instancePartialCause } from "./instance-name.ts";
 import {
   pushOntoFrameStack,
   pushOntoRootFrameStack,
@@ -76,7 +81,7 @@ import {
   patternToEncodableForm,
   withAliasBindings,
 } from "./to-encodable-form.ts";
-import { traverseValue } from "./traverse-utils.ts";
+import { traverseValue, visitValue } from "./traverse-utils.ts";
 import {
   type CellScope,
   type DerivedInternalCellDescriptor,
@@ -84,6 +89,7 @@ import {
   type Frame,
   type ICell,
   isModule,
+  isPattern,
   isReactive,
   JSONObject,
   type JSONSchema,
@@ -251,7 +257,8 @@ export function patternFromFrame<T, R>(
  *
  * That key marks the causes the pattern builder mints itself
  * (`{ $generated: N }`, plus `$kind` on streams and `name` on duplicate-name
- * wraps): a user cause like `Cell.for({ $generated: 0 })` would deliberately
+ * wraps, and `{ $generated: "instance", name }` for a named sub-pattern
+ * instance): a user cause like `Cell.for({ $generated: 0 })` would deliberately
  * mimic that namespace, and keeping the namespaces disjoint is what lets the
  * partial-cause assignment in `factoryFromPattern` skip collision checks for
  * generated causes entirely. `$generated` alone suffices — every builder-minted
@@ -390,8 +397,9 @@ function factoryFromPattern<T, R>(
   // collision handling: `.for()` rejects reserved keys at intake
   // (`assertNoReservedCauseKeys`), so no user-supplied cause carries
   // `$generated` — which makes every cause minted by
-  // `nextAnonymousPartialCause` (per-build-unique counter) and every
-  // `{name, $generated}` disambiguation wrap collision-free by construction:
+  // `nextAnonymousPartialCause` (per-build-unique counter), every
+  // `{name, $generated}` disambiguation wrap, and every instance cause (an
+  // instance name given to exactly one root) collision-free by construction:
   // no check, no set entry. A candidate name's collision test is an O(1) `Set`
   // lookup on `hashStringOf` — the canonical value hash, which is exactly
   // `deepEqual`'s comparison on the JSON values causes are made of: records
@@ -404,6 +412,29 @@ function factoryFromPattern<T, R>(
     const generated = { $generated: anonymousPartialCauseCount++ };
     return isStream ? { ...generated, $kind: "stream" } : generated;
   };
+  // A stream root never takes an instance name, so a name given to one does
+  // not keep another root from taking it.
+  const isNameableInternalRoot = (cell: ICell<unknown>): boolean => {
+    const { path, name, external, kind } = exportCell(cell);
+    return !external && path.length === 0 && name === undefined &&
+      kind !== "stream" && cellNameForCell(cell) === undefined;
+  };
+  // An instance name given to more than one root names none of them: each
+  // stays positional, as it would be with no name at all.
+  const instanceRootsByName = new Map<string, Set<OpaqueCell<any>>>();
+  allCells.forEach((cell) => {
+    if (!isNameableInternalRoot(cell)) return;
+    const top = exportCell(cell).cell;
+    const instanceName = instanceNameOf(top);
+    if (instanceName === undefined) return;
+    const roots = instanceRootsByName.get(instanceName) ?? new Set();
+    roots.add(top);
+    instanceRootsByName.set(instanceName, roots);
+  });
+  // The positional cause each named instance takes the place of. It still
+  // consumes its number, so every other anonymous root keeps the number it
+  // has without instance names.
+  const legacyPartialCauses = new Map<OpaqueCell<any>, JSONValue>();
   allCells.forEach((cell) => {
     const { cell: top, path, kind, name, external } = exportCell(cell);
     if (
@@ -417,6 +448,14 @@ function factoryFromPattern<T, R>(
     let partialCause: JSONValue;
     if (name === undefined) {
       partialCause = nextAnonymousPartialCause(isStream);
+      const instanceName = instanceNameOf(top);
+      if (
+        !isStream && instanceName !== undefined &&
+        instanceRootsByName.get(instanceName)?.size === 1
+      ) {
+        legacyPartialCauses.set(top, partialCause);
+        partialCause = instancePartialCause(instanceName);
+      }
     } else {
       // `.for()` already rejected reserved keys; re-assert at the assignment
       // site because the no-collision-check reasoning above relies on it (a
@@ -508,8 +547,10 @@ function factoryFromPattern<T, R>(
         ? declareStreamSchema(schema)
         : schema;
       derivedInternalPartialCausesByRoot.set(top, partialCause);
+      const legacyPartialCause = legacyPartialCauses.get(top);
       derivedInternalCells.push({
         partialCause,
+        ...(legacyPartialCause !== undefined && { legacyPartialCause }),
         ...(scope !== undefined &&
           (scope !== "space" || schemaCellScope(schema) !== undefined) &&
           { scope }),
@@ -517,6 +558,34 @@ function factoryFromPattern<T, R>(
       });
     }
   });
+  // The binding's schema position emits like a link's: a reference under
+  // the flag, keeping FabricValue-bearing schema content (defaults) out of
+  // the otherwise plain binding record; inline otherwise, and inline
+  // whenever decomposition refuses or the schema is a bare boolean. The
+  // reference is minted from the canonical strip of a deep-frozen schema,
+  // which the strip memoizes by identity and decomposition by the strip's,
+  // so a cell bound at many positions decomposes its schema once; a mutable
+  // schema is stripped as it is rather than frozen in place. An inline
+  // schema is a strip of its own per position, the refused decomposition's
+  // included: `createRef()` hashes an object it reaches twice in one cause
+  // as `null`, so two positions sharing one object would derive other ids.
+  const externalizeAlias = getContentAddressedSchemasConfig();
+  const aliasSchemaFor = (
+    schema: JSONSchema | undefined,
+  ): JSONSchema | undefined => {
+    if (schema === undefined || typeof schema === "boolean") return schema;
+    if (externalizeAlias && isDeepFrozen(schema)) {
+      const canonical = sanitizeAndInternSchemaForLinks(schema, KeepAsCell.All);
+      if (typeof canonical === "object") {
+        const externalized = externalizeSchema(canonical);
+        if (externalized !== canonical) return externalized;
+      }
+    }
+    const own = sanitizeSchemaForLinks(schema, KeepAsCell.All);
+    return externalizeAlias && typeof own === "object"
+      ? externalizeSchema(own)
+      : own;
+  };
   const resolveCellAlias: CellAliasResolver = (
     cell, // opaque cell that we found
     serializationPath, // path where we encountered the cell
@@ -542,18 +611,7 @@ function factoryFromPattern<T, R>(
       }
     }
 
-    const rawSanitizedSchema = cellReference.schema !== undefined
-      ? sanitizeSchemaForLinks(cellReference.schema, KeepAsCell.All)
-      : undefined;
-    // The binding's schema position emits like a link's: a reference under
-    // the flag, keeping FabricValue-bearing schema content (defaults) out
-    // of the otherwise plain binding record; inline otherwise, and inline
-    // whenever decomposition refuses or the schema is a bare boolean.
-    const sanitizedSchema = rawSanitizedSchema !== undefined &&
-        typeof rawSanitizedSchema === "object" &&
-        getContentAddressedSchemasConfig()
-      ? externalizeSchema(rawSanitizedSchema as JSONSchemaObj)
-      : rawSanitizedSchema;
+    const sanitizedSchema = aliasSchemaFor(cellReference.schema);
     const partialCause = derivedInternalPartialCausesByRoot.get(top);
     if (partialCause !== undefined) {
       if (!deepEqual(partialCause, cellReference.partialCause)) {
@@ -639,8 +697,17 @@ function factoryFromPattern<T, R>(
   });
 
   const pattern: Pattern & toEncodableForm & toJSON = {
-    argumentSchema: sanitizeSchemaForLinks(argumentSchema, KeepAsCell.All),
-    resultSchema: sanitizeSchemaForLinks(resultSchema, KeepAsCell.OnlyStream),
+    // Deep-frozen, each with a root of its own. Binding a node narrows the
+    // argument schema at every slot it binds, and `schemaAtPath()` keeps a
+    // narrowing only for a deep-frozen schema.
+    argumentSchema: sanitizeAndFreezeSchemaForLinks(
+      argumentSchema,
+      KeepAsCell.All,
+    ),
+    resultSchema: sanitizeAndFreezeSchemaForLinks(
+      resultSchema,
+      KeepAsCell.OnlyStream,
+    ),
     ...(derivedInternalCells.length > 0 ? { derivedInternalCells } : {}),
     result,
     nodes: serializedNodes,
@@ -650,6 +717,7 @@ function factoryFromPattern<T, R>(
     // What `JSON.stringify(SomePattern)` returns, which pattern source uses.
     toJSON: () => patternToEncodableForm(patternFactory),
   };
+  freezePartialCauses(pattern);
 
   const makePatternFactory = (
     defaultScope?: CellScope,
@@ -931,7 +999,7 @@ function assignComputedCellKinds(
 ): void {
   const collectCellRoots = (value: unknown): Set<OpaqueCell<any>> => {
     const roots = new Set<OpaqueCell<any>>();
-    traverseValue(value as FactoryInput<unknown>, (item) => {
+    visitValue(value as FactoryInput<unknown>, (item) => {
       if (isCellResultForDereferencing(item)) item = getCellOrThrow(item);
       if (isCell(item)) roots.add(exportCell(item).cell);
       return item;
@@ -1411,3 +1479,38 @@ export function getTopFrame(): Frame | undefined {
 
 /** The full type of the `pattern` function including all overloads. */
 export type PatternBuilder = typeof pattern;
+
+/**
+ * Deep-freezes every partial cause `pattern` holds: its manifest of derived
+ * internal cells, and the `partialCause` of each `$alias` binding in its
+ * nodes and its result. The runtime keeps the id a partial cause names by the
+ * cause's identity, and refuses a cause that is an object but not deep-frozen.
+ * The builder calls this on every pattern it builds.
+ */
+export function freezePartialCauses(pattern: Pattern): void {
+  if (pattern.derivedInternalCells !== undefined) {
+    deepFreeze(pattern.derivedInternalCells);
+  }
+  // TODO(danfuzz): Walk with `data-model`'s value visitor once that is ready
+  // for use outside its package.
+  visitValue(pattern.result, freezeAliasCause);
+  for (const node of pattern.nodes) {
+    visitValue(node.inputs, freezeAliasCause);
+    visitValue(node.outputs, freezeAliasCause);
+  }
+}
+
+/**
+ * Helper for {@link freezePartialCauses}, the `visitValue()` callback, which
+ * deep-freezes the partial cause of an `$alias` binding and returns `null` so
+ * that the walk descends no further into it. An embedded pattern is not
+ * descended either: the causes it holds are its own, frozen when it was built.
+ */
+function freezeAliasCause(value: FabricExecValue): null | undefined {
+  if (isAliasBinding(value)) {
+    const { partialCause } = value.$alias;
+    if (partialCause !== undefined) deepFreeze(partialCause);
+    return null;
+  }
+  return isPattern(value) ? null : undefined;
+}

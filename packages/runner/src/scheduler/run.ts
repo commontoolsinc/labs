@@ -50,6 +50,7 @@ import {
   getSchedulerActionName,
   toActionRunTraceAddress,
 } from "./diagnostics.ts";
+import { refusedReadIn } from "./events.ts";
 import {
   dirtyFanOutKey,
   type FanOutInstance,
@@ -205,6 +206,15 @@ export function watchReactiveActionCommit(state: {
   readonly action: Action;
   readonly tx: IExtendedStorageTransaction;
   readonly log: ReactivityLog;
+
+  /**
+   * Whether the run's transaction was withdrawn before the commit for what it
+   * read: a document its runtime refuses by construction, or a scoped
+   * instance not yet produced. A retry cannot fare better; the run's reads
+   * are what run it again.
+   */
+  readonly withdrawn?: boolean;
+
   readonly retries: WeakMap<Action, number>;
   readonly offBudgetRetries: WeakMap<Action, number>;
   readonly pending: Set<Action>;
@@ -239,6 +249,13 @@ export function watchReactiveActionCommit(state: {
       state.retries.delete(state.action);
       state.offBudgetRetries.delete(state.action);
       if (state.canRetry()) state.onSuccess?.();
+      return;
+    }
+
+    if (state.withdrawn === true) {
+      state.retries.delete(state.action);
+      state.offBudgetRetries.delete(state.action);
+      abandonAction(state, error);
       return;
     }
 
@@ -1204,6 +1221,38 @@ function finalizeReactiveActionCommit(
   // transaction's write details are still staged — a committed transaction
   // no longer exposes them — and classified once the commit has succeeded.
   let echoRun: EchoRun | undefined;
+  // A served run that read a document this runtime refuses by construction
+  // read an absence that is not the document's state, so what it derived from
+  // that absence is no value of the derivation, and committing it would
+  // overwrite the instance a runtime that can read the document derives. Its
+  // writes are withdrawn rather than sealed. The read is refused the same way
+  // every time, so the run is not retried: it runs again when another of its
+  // inputs changes, and withdraws again while it still reads the document.
+  // Only a serving manager refuses reads by construction, so on any other
+  // runtime the transaction is not inspected for them at all.
+  //
+  // A served run that read a scoped instance the serving loop has not
+  // produced yet (`unproducedScopedInstance`) is withdrawn the same way, for
+  // the same reason: the absence it read is not that instance's state. Its
+  // read of the instance stays subscribed, so it runs again once the instance
+  // is produced.
+  const refused = state.runtime.storageManager.servingHomeSpace === undefined
+    ? undefined
+    : refusedReadIn(state.runtime.storageManager, args.tx.tx);
+  const unproduced = args.tx.tx.unproducedScopedInstance;
+  if (args.tx.status().status === "ready") {
+    if (refused !== undefined) {
+      args.tx.abort(
+        new Error(`served derivation read a refused document: ${refused}`),
+      );
+    } else if (unproduced !== undefined) {
+      args.tx.abort(
+        new Error(
+          `served derivation read a scoped instance not yet produced: ${unproduced}`,
+        ),
+      );
+    }
+  }
   const commitPromise = startReactiveActionCommit({
     runtime: state.runtime,
     tx: args.tx,
@@ -1281,6 +1330,7 @@ function finalizeReactiveActionCommit(
     action: args.action,
     tx: args.tx,
     log: committedLog,
+    withdrawn: refused !== undefined || unproduced !== undefined,
     retries: state.retries,
     offBudgetRetries: state.offBudgetRetries,
     pending: state.pending,

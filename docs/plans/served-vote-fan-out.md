@@ -257,10 +257,10 @@ expression back. Everything passes under both forms at the branch head; the
 two places the forced run changed, the drain's in-flight guard recording its
 wave and the guard reading a sibling's seal, are in the served-vote record.
 A change to the cycle, the finish or the park is run both ways before it is
-pushed. In the container the records were taken in, the tests under
-`packages/runner/test/executor/` and the `parked-runtime` tests fail with
-`clock is not defined` on main as on the branch; that is the container, not
-the change.
+pushed. Run these suites with `--preload=test/clock-preload.ts` from
+`packages/runner`, as the package's `deno-test` task does. A bare
+`deno test` leaves the global `clock` undefined in the executor and
+parked-runtime tests; that failure does not establish a container defect.
 
 Before a push: repo-wide `deno fmt --check`, `deno lint`, `deno task check`,
 `deno task check-docs-history-index` and `deno task check-skill-facts`, the

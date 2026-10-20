@@ -5,7 +5,9 @@ import {
   CurrentPrincipal,
   Default,
   equals,
+  type FabricBytes,
   handler,
+  type HandlerFactory,
   ifElse,
   lift,
   NAME,
@@ -97,6 +99,13 @@ export type SetProfileAvatarEvent = {
   detail?: { message?: string };
   key?: string;
   target?: { value?: string };
+};
+
+/** The profile picture's bytes, sent directly as `picture` or carried as
+ * `detail.bytes` by the change event of `<cf-avatar-input>`. */
+export type SetProfilePictureEvent = {
+  picture?: FabricBytes;
+  detail?: { bytes?: FabricBytes };
 };
 
 export type SetProfileBioEvent = {
@@ -232,6 +241,30 @@ export function pointAtInboxIfUnset(
   profile.setInbox?.send({ inbox });
 }
 
+/**
+ * Points `profile` at the inbox `holder` holds, through the profile's own
+ * `setInbox`, when the profile points at `replaced`, by a comparison of links
+ * that reads only link shape. Does nothing when `holder` holds no inbox, or
+ * when the profile points at another inbox or at none. Call it as
+ * {@link pointAtInboxIfUnset} is called, and for `replaced`, a typed link.
+ *
+ * The read and the `setInbox` it leads to are two transactions in two spaces,
+ * so a pointer set between them is replaced.
+ */
+export function pointAtInboxInPlaceOf(
+  profile: InboxPointable | undefined,
+  replaced: Cell<ShareInboxPiece>,
+  holder: ProfileInbox | undefined,
+): void {
+  // The profile is given the inbox's own result document, for the reason
+  // `pointAtInboxIfUnset()` gives it.
+  const inbox = holder?.piece?.resolveAsCell();
+  if (inbox === undefined || profile === undefined) return;
+  const pointer = profile.inbox?.piece;
+  if (pointer === undefined || !equals(pointer, replaced)) return;
+  profile.setInbox?.send({ inbox });
+}
+
 type VerifiedIdentityListWrite<Binding> = OwnerProtectedProfileWrite<
   VerifiedExternalIdentityCell[],
   Binding
@@ -245,7 +278,15 @@ export type ProfileHomeOutput = {
   [NAME]: string;
   [UI]: VNode;
   name: OwnerProtectedProfileWrite<string, typeof setName>;
+  // Free text: a URL, a `data:` URL, or a glyph. Kept for the readers that
+  // read it; the profile shows `picture` in its place when it has one.
   avatar: OwnerProtectedProfileWrite<string, typeof setAvatar>;
+  // The profile picture: the bytes of a raster image in any format an `<img>`
+  // decodes, the format being sniffed from the bytes. Absent until someone
+  // sets one. The picture's own label names the principal who set it, so a
+  // reader showing it as the owner's face reads that label (`principalOf` on
+  // the field), not the profile's label at `picture`.
+  picture?: OwnerProtectedProfileWrite<FabricBytes, typeof setPicture>;
   // A short, human-authored free-text description of the profile owner
   // (CT-1648). Owner-protected like name/avatar; the canonical shared-profile
   // bio (distinct from Home's legacy `learned.summary`). Readable from the
@@ -293,6 +334,7 @@ export type ProfileHomeOutput = {
   // and never exist on a stored doc that predates them.
   setName: Stream<SetProfileNameEvent>;
   setAvatar: Stream<SetProfileAvatarEvent>;
+  setPicture: Stream<SetProfilePictureEvent>;
   setBio: Stream<SetProfileBioEvent>;
   setInbox: Stream<SetProfileInboxEvent>;
   addExternalLink: Stream<MutateExternalProfileLinksEvent>;
@@ -348,6 +390,7 @@ type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
 export type BackwardsCompatibleProfile = PartialBy<
   & Omit<ProfileHomeOutput, typeof UI>
   & { [UI]: unknown },
+  | "setPicture"
   | "setBio"
   | "setInbox"
   | "addExternalLink"
@@ -723,6 +766,38 @@ const setAvatar = handler<SetProfileAvatarEvent, { avatar: Writable<string> }>(
   },
 );
 
+// The authorized writer for the `picture` field. An event without bytes is a
+// no-op, not a clear.
+//
+// The picture's cell has no default, so setup writes nothing to it and its
+// document stores no policy of its own. The handler's state declares that the
+// value represents the principal who writes it, so each write labels the
+// picture with its writer: the owner's picture says it is the owner's, and a
+// picture anyone else sets says it is theirs. The profile's space lets anyone
+// write, so this does not keep anyone from replacing the picture; it keeps a
+// reader from taking someone else's picture for the owner's. The explicit
+// `HandlerFactory` type lets the state name the handler as its own writer.
+export type SetProfilePictureState = {
+  picture: Writable<
+    RepresentsCurrentUser<
+      WriteAuthorizedBy<FabricBytes | undefined, typeof setPicture>
+    >
+  >;
+};
+
+const setPicture: HandlerFactory<
+  SetProfilePictureEvent,
+  SetProfilePictureState
+> = handler<SetProfilePictureEvent, SetProfilePictureState>(
+  (event, state) => {
+    const picture = event.picture ?? event.detail?.bytes;
+    if (!picture?.length) {
+      return;
+    }
+    state.picture.set(picture);
+  },
+);
+
 // THE authorized writer for the owner-protected `bio` field (CT-1648). Bio is
 // multi-line free text, so — unlike setName — it is NOT Enter-gated and is
 // driven by a Save button reading the bound (unprotected) draft cell: a direct
@@ -900,6 +975,9 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
     const avatar = new Writable<
       OwnerProtectedProfileWrite<string, typeof setAvatar>
     >("").for("avatar");
+    const picture = new Writable<
+      OwnerProtectedProfileWrite<FabricBytes | undefined, typeof setPicture>
+    >(undefined).for("picture");
     const bio = new Writable<
       OwnerProtectedProfileWrite<string, typeof setBio>
     >("").for("bio");
@@ -997,6 +1075,7 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
       [NAME]: displayName,
       name,
       avatar,
+      picture,
       bio,
       inbox,
       externalLinks,
@@ -1004,6 +1083,7 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
       elements,
       setName: setName({ name }),
       setAvatar: setAvatar({ avatar }),
+      setPicture: setPicture({ picture }),
       setBio: setBio({ bio, draft: bioDraft }),
       setInbox: setInbox({ inbox }),
       addExternalLink: mutateExternalProfileLinks({
@@ -1192,13 +1272,16 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
                 </cf-vstack>
 
                 <cf-vstack gap="2">
-                  <label>Avatar</label>
-                  <span>{avatar}</span>
-                  <cf-message-input
+                  <label>Picture</label>
+                  <cf-avatar
+                    bytes={picture}
+                    src={avatar}
+                    name={name}
+                    size="xl"
+                  />
+                  <cf-avatar-input
                     data-ui-action={TRUSTED_PROFILE_EDIT_ACTION}
-                    placeholder="Avatar URL or text"
-                    appearance="rounded"
-                    oncf-send={setAvatar({ avatar })}
+                    oncf-change={setPicture({ picture })}
                   />
                 </cf-vstack>
 

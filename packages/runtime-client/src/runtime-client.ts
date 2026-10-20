@@ -17,6 +17,7 @@ import type {
   PresenceRecord,
 } from "@commonfabric/memory/v2";
 import type { PresenceEvent } from "@commonfabric/memory/v2/client";
+import type { JoinVisitDecision } from "@commonfabric/piece/ops";
 import { NameSchema } from "@commonfabric/runner/schemas";
 import type {
   ActionRunTraceEntry,
@@ -57,6 +58,7 @@ import {
   EventNeedsAttentionNotification,
   InitializationData,
   type LoggerCountsData,
+  type LoggerCountsResponse,
   type LoggerFlagsData,
   type LoggerMetadata,
   type LoggerTimingData,
@@ -942,15 +944,53 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   /**
    * Ensure the home space's default pattern is running and return a CellHandle to it.
-   * This starts the pattern if needed and waits for it to be ready.
+   * This starts the pattern if needed and waits for it to be ready, creating
+   * Home where it has no root. Bringing Home up also starts the worker's
+   * once-per-worker housekeeping over Home, as `getSpaceRootPattern()` says,
+   * without waiting for it.
+   *
+   * With `existingOnly` true, Home is brought up only where it already
+   * exists, its root recording the pattern it runs. Where it does not, as
+   * while another writer is still creating it, nothing is created or started,
+   * and this returns `undefined`.
    */
-  async ensureHomePatternRunning(): Promise<CellHandle<unknown>> {
+  ensureHomePatternRunning(): Promise<CellHandle<unknown>>;
+  ensureHomePatternRunning(
+    options: { existingOnly?: boolean },
+  ): Promise<CellHandle<unknown> | undefined>;
+  async ensureHomePatternRunning(
+    options: { existingOnly?: boolean } = {},
+  ): Promise<CellHandle<unknown> | undefined> {
     const response = await this.#conn.request<
       RequestType.EnsureHomePatternRunning
     >({
       type: RequestType.EnsureHomePatternRunning,
+      ...(options.existingOnly ? { existingOnly: true } : {}),
     });
+    if (response.cell === undefined) {
+      if (options.existingOnly) return undefined;
+      throw new Error("Home's root is missing from the worker's response.");
+    }
     return new CellHandle(this, response.cell);
+  }
+
+  /**
+   * Tells the user's chat manager that the user has joined the FabriChat room
+   * declared by `space`: the writable standalone root or the writable
+   * container root's explicit `chatRoom`. The manager makes the room
+   * one of the user's chats, lists a forgotten one again, and records nothing
+   * for one their chats list already. Home is never created for it.
+   *
+   * Resolves with what was decided, once any event is sent, which is before
+   * the manager has handled it: `sent`, `no-chat-manager`, or the reason
+   * vetting refused the space; `undefined` where the user has no Home.
+   */
+  async joinVisitedRoom(space: DID): Promise<JoinVisitDecision | undefined> {
+    const response = await this.#conn.request<RequestType.JoinVisitedRoom>({
+      type: RequestType.JoinVisitedRoom,
+      space,
+    });
+    return response.decision;
   }
 
   /**
@@ -1067,6 +1107,12 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * Opening a space with `start` true creates its root when it has none and
    * this runtime's identity owns the space. Reading with `start` false never
    * creates one, and neither does any other principal's open.
+   *
+   * Opening the root of this runtime's identity's own Home with `start` true
+   * also starts the worker's once-per-worker housekeeping over Home, as
+   * `ensureHomePatternRunning()` and `createSpace()` do: the adoption of
+   * legacy space entries, the private inbox ensure and the share intake. It
+   * returns without waiting for any of them.
    */
   async getSpaceRootPattern(
     space: DID,
@@ -1481,6 +1527,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     timing: LoggerTimingData;
     flags: LoggerFlagsData;
     cfc: Record<string, number>;
+    compileCache: Record<string, number>;
+    sizes: LoggerCountsResponse["sizes"];
   }> {
     const res = await this.#conn.request<RequestType.GetLoggerCounts>({
       type: RequestType.GetLoggerCounts,
@@ -1491,6 +1539,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       timing: res.timing,
       flags: res.flags,
       cfc: res.cfc,
+      compileCache: res.compileCache,
+      sizes: res.sizes,
     };
   }
 

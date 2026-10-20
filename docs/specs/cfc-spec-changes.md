@@ -531,7 +531,12 @@ one and nothing where it does not. Contract text in
 `docs/specs/cfc-enforcement-matrix.md` §4; tests `cfc-writer-fit.test.ts`.
 
 (d) **[normative] Residency fit — the ceiling a document carries by living
-where it lives.** The fit measurement joins the target's declared policy with
+where it lives.** `proposed` in
+[specs#68](https://github.com/commonfabric/specs/pull/68), option (b) on both
+of its questions: residency joins `Space(S)` over a declared policy as well as
+without one, and a store bound to one principal also carries
+`User(<that principal>)`; the runner conforms to both.
+The fit measurement joins the target's declared policy with
 one RESIDENCY clause, `Space(<the space the document resides in>)`. A flow
 clause listing that space among its alternatives therefore fits the document
 whatever it declares. The soundness argument is that writing into the space
@@ -1601,8 +1606,14 @@ it, as [protected initialization](./cfc-protected-initialization.md) states. A
 served run with no actor, which keeps the ambient service snapshot (SC-38), is
 refused a write whose persisted label would mint the claim on a position
 without an `ownerPrincipal`, so such a claim never names the service; a value
-it initializes on nobody's behalf mints no claim and is admitted. This entry
-leaves the `ownerPrincipal` arm as it is. What the claim never permits is
+it initializes on nobody's behalf mints no claim and is admitted. The
+runtime takes a run's actor from its serving loop's stamp, or, for a run of
+the loop's own, from the trust snapshot the loop attached; a demanded
+derivation's snapshot, attached for its reads, names no actor. The
+`ownerPrincipal` arm refuses a run that acts for no one the same way, everything but an initialization on
+nobody's behalf at a placeholder owner, as specs pull request 64 states for
+owner binding; the runtime holds that refusal under a `SPEC-PENDING` marker
+naming it. What the claim never permits is
 unchanged: its subject is the run's acting principal, never a literal a
 pattern supplies, so no principal's runtime mints a claim naming another.
 Proposed edit: state the authority reading, the declared-writer

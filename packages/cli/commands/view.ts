@@ -51,6 +51,7 @@ KEYS (press ? in the viewer for the full list):
   structure tree: w/s sibling · a/d parent/child · Tab/⇧Tab depth-first
   Enter info card · in it: ↑/↓ pick a reference · Enter opens it · z reveals it
   v source/rendered · t look up a definition · # line numbers · \\ wrap mode · q quit
+  P push the checked-out branch to origin and open the pull request page
 
 When stdout is not a terminal (piped/redirected) it prints the colorized text
 and exits, like less.`,

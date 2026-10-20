@@ -135,7 +135,8 @@ arguments or preceding-parameter defaults (§4.1). A member the bindings cannot
 read, such as an indexed access with no checker-created instantiation, remains
 unread at that member; it does not discard the enclosing object's readable
 shape. Missing required arguments and deferred conditional declarations remain
-unread on this fallback path. `CommonFabricFormatter` lowers scope wrappers
+unread on this fallback path. `CommonFabricFormatter` lowers scope wrappers,
+read through parentheses as other wrappers are (`resolveScopeWrapperNode()`),
 from their own payload argument without resolving the wrapper's name (the
 transformer prints a wrapper it builds as `__cfHelpers.PerUser<…>`, a name no
 scope declares), and follows CFC alias chains under their bindings (§11). A
@@ -196,7 +197,12 @@ type — a mapped type over an unbound parameter — which reads as an empty
 object with every member dropped. The alias rules exist so such a read keeps
 its declared members, `unknown` ones included. A mapped view is derived on
 a copy of the definition its argument refers to; the shared `Foo` definition
-other consumers read is untouched. `Partial<Foo>` and `Required<Foo>` map
+other consumers read is untouched. A member a homomorphic mapped type such as
+`Pick`, `Omit`, `Partial` or `Readonly` makes keeps the declaration of the
+member it maps, and is read as that declaration reads it where the mapping
+leaves its value as declared: a named member type stays a `$ref`, and the
+`undefined` an optional member's `?` adds stays out of it.
+`Partial<Foo>` and `Required<Foo>` map
 over each arm's own keys and so distribute over a union, arm by arm; on an
 array they map the elements, which count as optional: `Partial` admits
 `undefined` into the items, `Required` removes it. `Required` reads its
@@ -278,8 +284,8 @@ by any repo test.
 | `string` / `number` / `boolean` | `{ type: "string"/"number"/"boolean" }` | `primitive-formatter.ts` | many fixtures |
 | String/number literal | `{ type: …, enum: [v] }` (type path); `{ type: …, const: v }` (node path) | `primitive-formatter.ts`; `schema-generator.ts` | divergence pinned by `test/literal-encoding-paths.test.ts` (unions diverge structurally: `enum` list vs `anyOf` of `const`s); runner validation treats both alike but `schemasEqualIgnoringWriterStamp` (deepEqual, `cfc/prepare.ts`) does not — a path flip defeats stored-schema reuse |
 | Boolean literal | `{ type: "boolean", enum: [true/false] }` via `intrinsicName` | `primitive-formatter.ts` | boolean-literals test |
-| `bigint` | `{ type: "integer" }` | `primitive-formatter.ts` | probe only |
-| bigint literal (`42n`) | `{ type: "integer", enum: [Number(v)] }` — converted through `Number`, so precision above 2^53 would be lost | `primitive-formatter.ts` | probe only |
+| `bigint` | `{ type: "integer" }`; the runtime reads and validates a stored bigint under `integer` and `number` | `primitive-formatter.ts` | probe only |
+| bigint literal (`42n`) | `{ type: "integer", enum: [Number(v)] }` — converted through `Number`, so precision above 2^53 would be lost; the runtime matches a stored bigint to a whole-number member of its value | `primitive-formatter.ts` | probe only |
 | Template literal type | `{ type: "string" }` | `primitive-formatter.ts` | probe only |
 | `null` | `{ type: "null" }` | `primitive-formatter.ts` | fixtures |
 | `undefined` | `{ type: "undefined" }` — non-standard, deliberate (`api/index.ts`) | `primitive-formatter.ts`; node `schema-generator.ts` | fixtures |
@@ -291,11 +297,11 @@ by any repo test.
 | Type parameter bound at the reading (§4.1) | its argument, retaining authored argument syntax and its declaration scope | `schema-generator.ts`; `type-parameter-bindings.ts` | `test/typescript/type-arguments.test.ts`; generic writer tests |
 | Unbound type parameter | constraint if any, else default, else `{}` | `schema-generator.ts` | constraint reading: `test/typescript/type-arguments.test.ts`; the pipeline substitutes `unknown` nodes before generation (ts-transformers spec §10.5), so `{}` is the *local* behavior |
 | Conditional type | `{}`; a deferred reading under bindings is reported as unread | `schema-generator.ts` | `test/typescript/type-arguments.test.ts` |
-| `T[]` / `Array<T>` / `ReadonlyArray<T>` / aliases | `{ type: "array", items: <T> }`; node-first element detection, then Reference/typeArguments, then numeric index | `type-utils.ts`; `array-formatter.ts` | fixtures |
+| `T[]` / `Array<T>` / `ReadonlyArray<T>` / aliases | `{ type: "array", items: <T> }`; node-first element detection, then Reference/typeArguments, then the numeric index of an array-like type (one declaring `length` beside it: a tuple, a type built on an array, `ArrayLike<T>`) | `type-utils.ts`; `array-formatter.ts` | fixtures; record-mapped-types.test.ts |
 | Tuple (`[string, number]`) | `{ type: "array", items: <merged element union> }` — e.g. `items: { type: ["number","string"] }`. **No `prefixItems`, no length bounds**; positional structure is lost (numeric-index fallback, `type-utils.ts`; grep confirms `prefixItems` appears only in a comment) | `type-utils.ts` | `test/tuple-emission.test.ts` |
-| Dictionary with both string and number index | treated as object map, not array | `type-utils.ts` | untested directly |
+| Object with a numeric index signature and no `length` | an object map (`additionalProperties`), not an array, with or without a string index or declared numeric keys such as `0` | `type-utils.ts` | record-mapped-types.test.ts |
 | Index signatures on objects | `additionalProperties: <value schema>`; string index takes precedence over number; JSDoc from index-signature declarations propagates (conflicts → keep first + `$comment`) | `object-formatter.ts`; node path `schema-generator.ts` (no JSDoc) | descriptions-index* fixtures |
-| `Record<K,V>` with finite literal-union `K` | expands to concrete `properties` (checker-driven property enumeration) | via `ObjectFormatter`; fixture `record-union-keys` | record-mapped-types.test.ts |
+| `Record<K,V>` with finite literal-union `K` | expands to concrete `properties`, in the order `K` is written (a mapped type's properties follow its written key union, numeric keys by the property names they make, `-1` and `1.0` naming `"-1"` and `"1"`, else their declarations; JavaScript lists integer-like keys of `properties` in ascending order whatever order they are added in, so for those the order shows in `required`: `Omit<T, K>` lists `T`'s in `T`'s order; §8 says why the checker's order is not used) | via `ObjectFormatter`; `propertiesInSourceOrder()` in `source-order.ts`; fixture `record-union-keys` | record-mapped-types.test.ts; schema-order.test.ts |
 | Functions / callables / constructables | property skipped entirely (not in `properties`, not in `required`) — **except** callable properties whose call signature returns `Stream`/`Cell`/`SqliteDb` (ModuleFactory/HandlerFactory shapes): kept as `{ asCell: ["stream"/"cell"/"sqlite"] }`, they participate in `required`, and they carry the property's JSDoc description and lowered tags (`deprecated` included) exactly like a kept data property. Generic members, including nested type literals, union/intersection arms and array elements, use their instantiated type or bound argument to classify callability | classification: `object-formatter.ts`; member paths: `object-formatter.ts`, `schema-generator.ts` (only those three kinds; capability cells like `ReadonlyCell` returns are *not* kept) | pattern-with-types fixtures; object-formatter.test.ts |
 | `FabricPrimitive` class (`FabricBytes`, `FabricDurationDay`, `FabricDurationNsec`, `FabricEpochDay`, `FabricEpochNsec`, `FabricHash`, `FabricKeyPair`, `FabricRegExp`, `FabricUnavailable` carrying the `FabricPrimitive` brand) | `{ type: "<Name>" }` — the fabric-primitive schema vocabulary (§5.2); a leaf, not hoisted, matched by prototype at validation time | `native-type-formatter.ts` | fixture `fabric-special-object-brand`; end-to-end: ts-transformers `schema-transform/fabric-special-object-brand` |
 | `FabricInstancePlus` nominal brand (`FABRIC_INSTANCE_PLUS_BRAND` in `packages/data-model/src/api.ts`, an interned `unique symbol`), which `FabricInstance` declares at `never` | property skipped entirely (not in `properties`, not in `required`) — a symbol-keyed member, which the generator skips as it skips every symbol-keyed member; a field typed as `FabricInstance` emits `{ type: "object", properties: {} }` | `shouldSkipInternalProperty`, `object-formatter.ts` | fixture `fabric-special-object-brand` |
@@ -407,9 +413,11 @@ types.
 Every type with a usable name is hoisted into `$defs` and referenced by
 `{ "$ref": "#/$defs/<Name>" }` at non-root occurrences
 (`src/schema-generator.ts`). A reading under the `definesDocument` hint inside
-a schema that views other documents is hoisted as `<Name>:document` (§13), so
-it never shares a definition with the view's reading of the same type. No
-TypeScript name holds a `:`, so no type's name can take it. The emitted container key is `$defs` —
+a schema that views other documents is hoisted as `<Name>:document`, so it
+shares no definition with another reading of the same type. The variant is part of the
+reading's cycle identity too, so a recursion met inside such a reading refers
+to the definition that reading stores. No TypeScript name holds a `:`, so no
+type's name can take it. The emitted container key is `$defs` —
 never `definitions` (0 of 73 expected fixtures contain a `definitions` key; 29
 contain `$defs`, as of this writing); only the *internal* context field is
 still named `definitions` (`interface.ts`), and the README's `definitions`
@@ -566,11 +574,42 @@ it for its own type and for its payload's: `PerUser<never>` is
 which is read at `unknown`, around `unknown`: `PerUser<unknown[]>` read that
 way is `{ type: "array", items: { type: "unknown" }, scope: "user" }`.
 
-**Dead computation (observed implementation note):** every run performs a full
-DFS cycle pre-pass (`getCycles`, using `safe*` wrappers that
-`console.warn` and continue) and stores `cyclicTypes`/`cyclicNames` on the
-context (`interface.ts`) — but nothing reads either set
-(grep over `src/` finds writes only). Pure startup cost; a removal candidate.
+A recursion that instantiates its type without end, as `Nest<T[]>` inside
+`Nest<T>` does, meets no reading in progress, since each instantiation is a
+new type. The nesting bound (§11) ends it: the innermost reading accepts any
+value, and the remainder is reported as the `schema-type:unread` warning, or,
+in a CFC alias chain, as the `cfc-schema:recursion-limit` error. That bound
+compares the arguments bindings write, and two recursions it does not end are
+cut by the instantiations the reading is within instead
+(`cutsExpansion()`, `src/typescript/expanding-recursion.ts`): a reading
+under no bindings, as `Nest<T>` read at a type parameter nothing binds is; and
+an alias that recurses through the tuple or array it writes,
+`type Tup<T> = [T, Tup<T[]>?]`, which is read under bindings by its
+instantiation, whose arguments differ at each level. The cut comes where one
+declaration, or one such deferred reference, is instantiated
+`MAX_EXPANDING_NESTING` (32) deep inside itself, each instantiated with
+arguments at least as large as those of the one it is read within, `T[]`
+inside `T` (`argumentSize()`, which reads only the arguments the checker gave
+a type on creating it). The checker's own `isDeeplyNestedType` counts by the
+order it created the types in instead, which depends on the rest of the
+program, so this bound does not. The innermost reading then accepts any value
+and is reported as the `schema-type:unread` warning. A nesting written out,
+whose arguments shrink from the outside in, is never cut, and an array or
+tuple no alias writes is not counted. A finite chain that recurses through one declaration
+more than the cut allows is cut too; the remainder is reported, never refused.
+
+A recursion that branches, through more than one of its members, reaches
+either bound along every path, which is exponentially many readings. So every
+reading made inside a recursion of its own declaration spends one budget the
+whole schema shares, `MAX_EXPANDING_READINGS` (1000) readings: under bindings,
+a reading of a shape already being read; under none, or of a deferred
+reference, one instantiated inside another of its declaration
+(`exhaustsBudget()`). Once the budget is spent, each further such reading is
+cut as the bounds cut one, and reported the same way. A nesting written out
+spends none of it.
+
+The writer-policy reading (`writer-policy.ts`) writes nothing out and can
+refuse a schema on its answer, so it is bounded by depth and by count instead.
 
 ## 6. Wrapper Types And The `asCell` Vocabulary
 
@@ -881,7 +920,9 @@ Default paths of §7:
   bare same-`type` → bare type; bare primitive types merge into sorted
   **`type` arrays** — how `string | undefined` becomes
   `{ type: ["string","undefined"] }` (fixture `default-with-undefined-union`).
-  Singletons unwrap.
+  A member with no `type`, as the `{}` a nesting bound leaves, accepts any
+  value, and no type merges into it: beside `undefined` the union stays an
+  `anyOf` of the two. Singletons unwrap.
 - **`widenLiterals`** additionally merges member schemas that differ only in
   their literal values, an `enum` or a `const` whose values share one base
   type, widening those to that type, before the anyOf pass
@@ -894,10 +935,65 @@ Default paths of §7:
   (probe; the all-literal `enum` branch runs first and never consults the
   flag).
 - Member nodes re-associate with semantic members order-insensitively
-  (`orderMemberNodesBySemanticType`) — the checker canonicalizes
-  union order. Union alias nodes resolve through non-generic alias
-  declarations to recover member nodes (`getUnionTypeNode`).
+  (`orderMemberNodesBySemanticType`), since the checker keeps a union's
+  members in its own order. Union alias nodes resolve through non-generic
+  alias declarations to recover member nodes (`getUnionTypeNode`).
   Empty unions **throw**.
+- **Member order is read from the source** (`src/typescript/source-order.ts`).
+  The checker's own order is the order it created the member types in, which
+  depends on everything else in the program, so one module compiled inside two
+  programs would list one union two ways under one pattern identity. Emitted
+  `enum` values and `anyOf` arms follow this order instead, in
+  `UnionFormatter` and in a union of cell wrappers alike:
+  - the checker's intrinsic types (`string`, `number`, `undefined`, `null`,
+    `true`, `false`, and the rest) first, in the checker's order, which it
+    fixes before reading any source;
+  - then the members as the union is written where it is read, through
+    parentheses and non-generic aliases, `"a" | Tail | "d"` with
+    `type Tail = "b" | "c"` emitting `["a","b","c","d"]`;
+  - where the union is read through an indexed access written with a
+    literal key, `Row["status"]`, as the property's declaration writes them,
+    for a property of a type written without type arguments;
+  - a tuple's positionless items, the union of its element types, in the
+    order the tuple lists its elements, intrinsic ones included, so
+    `["a", 1]` emits `["a", 1]` and `[Box<string>, string]` lists the box
+    first;
+  - where nothing written is read — a node a transform built, as
+    ts-transformers builds one for an inferred type — as the union's alias
+    declares them, if it has one without type parameters;
+  - and otherwise in a canonical order: literals by kind and value, then
+    declared types by the name of their symbol and then by declaration, a TS
+    enum's members as the enum declares them, then every other type. Types
+    that order leaves equal are compared by what they are made of, as far as
+    the checker gave it to them on creating them, however deep: an alias's
+    instantiations by their alias arguments, a reference by its target and
+    its arguments (a deferred reference by the node writing it and the
+    arguments it was instantiated with), an instantiation of an object type a
+    source declares, as a generic function's return type is, by its type
+    arguments, an intersection or a union by its members, and an object no
+    source declares by its properties. A structure met again inside its own
+    comparison is equal so far, which ends a recursive one. A union the
+    checker builds, as `keyof T` or an inferred `cond ? "x" : "y"` is, is
+    listed this way.
+  - A union read without its type, at a node a transform built, keeps the
+    node's order where a source file writes the node or the node it was
+    copied from. Otherwise its keyword members keep their places, which a
+    node printed from the checker's type gives them the same way in every
+    program, and the other members fill the remaining places: literals by
+    kind and value, then the rest by a key read from each node's syntax, with
+    any union inside a node keyed whatever order it lists its members in.
+  An object's properties are read from the source the same way. An interface
+  or a class without type parameters lists its own members, a constructor's
+  parameter properties among them, and then each base's properties, base by
+  base in the order its heritage clauses name them. A mapped type lists its
+  properties in the order its key union is written, else, where it maps the
+  properties of another type as `Pick`, `Omit` and `Partial` do, in that
+  type's order, else by their declarations. A mapped type over keys of its
+  own, as `{ [P in "a" | "b"]: T }` is, does not take `T`'s order.
+  None of this creates a type: resolving a type's arguments, printing it, or
+  reading a generic alias's members anew can. The expanding recursion bound
+  spends one budget across a union's members in the order it reads them, so
+  where it cuts depends on that order, which is the source's.
 - The checker folds a member that is itself a union into the union it is a
   member of, so one member node can stand for several members
   (`pairUnionMemberNodes`, which `#labelsOf` in `schema-generator.ts` reads
@@ -1288,12 +1384,14 @@ Mechanics:
   payload"), and end-to-end in ts-transformers
   `printed-type-node-schema.test.ts` ("a labeled payload merged into a larger
   value").
-- A policy's type can lose its alias name. A payload member its metadata
-  carrier cannot intersect is reduced away: `Confidential<string | null, L>` is
-  `string & carrier`, and `Confidential<null, L>` is `never`. A rewrite such as
-  `NonNullable<…>`, which intersects with `{}`, drops the name too. A written
-  reference that names the policy still lowers it from its own arguments,
-  `null` and a `typeof` writer binding included. A payload that is itself
+- A policy's type keeps its alias name beside `null` and `undefined`: the
+  carrier holds them beside its stamp (`CfcTag`, `packages/api/cfc.ts`), so
+  `Confidential<string | null, L>` is `(string & carrier) | null` and reads
+  as its reference does, `null` included. A policy around `null` alone,
+  `Confidential<null, L>`, is `null`, with no name or carrier left, and a
+  rewrite such as `NonNullable<…>`, which intersects with `{}`, drops the name
+  too. A written reference that names the policy still lowers it from its own
+  arguments, `null` and a `typeof` writer binding included. A payload that is itself
   `never`, as in `Confidential<never, L>` or `Confidential<string & number, L>`,
   accepts nothing, and lowers to `{ not: true, ifc }` like any payload whose
   schema is `false`, whether written directly or through an alias (`type Sec<T>
@@ -1402,7 +1500,8 @@ Mechanics:
   a named policy alias such as `Readonly<Protected>`. An ordinary value query
   such as `Partial<typeof value>` retains the checker's utility-type semantics.
   Non-generic tuples and literal index signatures also retain authored writer
-  queries. Recursive definitions keep each writer's query origin even when
+  queries, a tuple named through a non-generic alias as much as one written in
+  place: it is read as the tuple the alias declares. Recursive definitions keep each writer's query origin even when
   handlers have identical types. An indexed access or conditional member that
   leaves a writer carrier without binding syntax, in a schema that defines a
   document, reports `cfc-write-authorized-by:unread` and explains the
@@ -1670,7 +1769,15 @@ Mechanics:
   So is a number index signature beside a string one whose value type holds
   a writer policy the string one's does not, naming the first policy its
   values hold (`writerPolicyHeldWithin()`): the pair is lowered as the
-  string one alone, so the policy is lost.
+  string one alone, so the policy is lost. That reading goes through the
+  values a type holds but not into the type a cell or a stream links to,
+  whose policy is the linked document's; a carrier around the cell is read. A reading of a type stops at a
+  bound, 100 object types deep or 10,000 types read, which a recursion that
+  instantiates its declaration without end always reaches and the types
+  patterns write do not (`readWriterPolicy()` is `"unread"`). It may miss a
+  policy past the bound, so it fails closed: on the number side it is
+  reported, naming `WriteAuthorizedBy`, and on the string side it does not
+  count as holding one.
   Any other schema views a document whose stored envelope binds its writers
   already, and reports nothing. It reads the policy whole or not at all.
   Where the writer went unread, the policy is marked as read in part
@@ -1757,8 +1864,8 @@ is `{ type: ts.Type; typeNode?: ts.TypeNode }`. Every member is read-only: the
 generator only reads hints, and copies the `requiredEventIntegrity` list on the
 way into the emitted schema. A node holds a hint of each kind, recorded apart
 from the others. The producer writes `items` and `cfcUiContract` to the node
-and its original (`cross-stage-state.ts`), and `narrowedFrom`, `spelledBy` and
-`definesDocument` to the node alone. A `cfcUiContract` lookup tries the node and
+and its original (`cross-stage-state.ts`), and `narrowedFrom`, `spelledBy`,
+and `definesDocument` to the node alone. A `cfcUiContract` lookup tries the node and
 `ts.getOriginalNode(node)` (`src/ui-contract.ts`, called from
 `schema-generator.ts` and `object-formatter.ts`); an `items` lookup reads the
 current hint node (`common-fabric-formatter.ts`); a `narrowedFrom` lookup reads
@@ -1824,7 +1931,10 @@ or a printed generation root is formatted (`formatChildType` and
   `PolicyOf<typeof rules>` does. A print spells the binding as the structural
   type of the value it names, from which no reader can tell the binding, so
   the node is read as the annotation spells the type at hand (`#spelling` in
-  `schema-generator.ts`):
+  `schema-generator.ts`). A print of an array is read by its type, and its
+  element at the annotation the hint on the print's element node spells,
+  where the lowering recorded one there (`ArrayFormatter`); that hint is
+  recorded only where the annotation denotes the element type:
   - Where the annotation denotes that type, the node is read as the
     annotation. An annotation denotes a type that is its own, or a union of
     the same members, since a union written through an alias is a type apart
@@ -1960,19 +2070,18 @@ synthetic node resolution failure → `any` → `true`
    collision case.
 6. **`VNode`/`JSONSchema*` lack the lib-declaration guard** (§5.2); untested.
 7. **Node/type literal-encoding divergence** (`const` vs `enum`, §2).
-8. **Dead cycle pre-pass** (§5.4).
-9. **Stale `$schema` doc-comments** (`schema-generator.ts`); no
+8. **Stale `$schema` doc-comments** (`schema-generator.ts`); no
    code path emits `$schema` (grep).
-10. **Transformer merge wart** — options spread twice, before and after
-    uiContract/writeAuthorizedBy attachment
-    (`ts-transformers/.../schema-generator.ts`); idempotent for
-    literal options.
-11. **`plugin.ts` hint-type drift** (§2).
-12. **Untested helper modules** — `typescript/property-name.ts`,
+9. **Transformer merge wart** — options spread twice, before and after
+   uiContract/writeAuthorizedBy attachment
+   (`ts-transformers/.../schema-generator.ts`); idempotent for
+   literal options.
+10. **`plugin.ts` hint-type drift** (§2).
+11. **Untested helper modules** — `typescript/property-name.ts`,
     `property-optionality.ts`, `type-traversal.ts`, `wrapper-names.ts` have no
     dedicated unit tests (`test/typescript/` holds one cell-brand test);
     exercised indirectly through ts-transformers suites.
-13. **Primitive fallback sentinel** (§15) — silent, mis-typed, untested.
+12. **Primitive fallback sentinel** (§15) — silent, mis-typed, untested.
 
 ## 17. Test Workflow
 

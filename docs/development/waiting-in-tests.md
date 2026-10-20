@@ -137,7 +137,10 @@ Waits split into two groups with different primitives.
 - `awaitViewSettled(page)` resolves once the worker has settled reactively, the
   resulting vdom batch has crossed to the main thread and been applied, and Lit
   has finished its update cycle. This is the "is the control interactive yet"
-  signal.
+  signal. It also waits for the bring-up of the user's Home that the shell
+  starts once a page's first piece is on screen, and the runtime's `idle()`
+  waits for the housekeeping that bring-up starts in the worker, so a settled
+  page has neither still running.
 - The higher-level wrappers in
   `packages/patterns/integration/cfc-browser-helpers.ts` compose the two
   primitives above for common waits and interactions. Each of them settles and
@@ -596,6 +599,11 @@ that document's sink in the awaiting worker.
 
 By the time the marker arrives, the server holds what the announcing participant
 wrote before it, so the reads that follow resolve against a server that has it.
+On the server-execution arm what a participant's handlers write is the serving
+loop's, and the participant announces only once every event it fired has its
+consequence back at its own runtime, so that holds for those writes too; an
+event a served handler fires on its own account is no participant's, and is not
+covered.
 Two mechanisms deliver it and both are ordered behind the marker. A document
 already in the awaiting replica's watch set arrives in a fan-out frame the
 server computes by diffing current storage, so a frame carrying the marker

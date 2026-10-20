@@ -47,6 +47,7 @@ import {
   type ClaimedAgentRun,
 } from "../src/agent-runner.ts";
 import { createTransactionCommitReceipt } from "../../runner/src/storage/commit-receipt.ts";
+import type { IStorageNotification } from "../../runner/src/storage/interface.ts";
 
 const CLOUD = "https://cloud.example";
 const LOCAL = "https://local.example";
@@ -258,19 +259,36 @@ describe("agent runner", () => {
 
   it("moves a record from `queued` through `claimed` and `running` to `completed`", async () => {
     const result = await submit();
+    // The runner writes the record through `runtime`, which reports each write
+    // as a commit holding the record as it stood before and after, so every
+    // state the record passes through is reported, back-to-back writes
+    // included.
     const runtime = connect(CLOUD);
+    const { id } = recordOf(result, runtime).getAsNormalizedFullLink();
     const states: string[] = [];
-    const stop = recordOf(result, runtime).sink((value) => {
-      if (value?.state && states.at(-1) !== value.state) {
-        states.push(value.state);
-      }
-    });
+    const commits: IStorageNotification = {
+      next(notification) {
+        if (notification.type !== "commit") return { done: false };
+        const change = [...notification.changes].find((change) =>
+          change.address.id === id
+        );
+        for (const side of change ? [change.before, change.after] : []) {
+          const state = (side as { value?: { state?: string } } | undefined)
+            ?.value?.state;
+          if (state !== undefined && states.at(-1) !== state) {
+            states.push(state);
+          }
+        }
+        return { done: false };
+      },
+    };
+    runtime.storageManager.subscribe(commits);
     await startRunner(completing(() => runtime), {
       runtimeForHost: () => Promise.resolve(runtime),
     });
 
     const record = await waitForState(result, "completed");
-    stop();
+    runtime.storageManager.unsubscribe?.(commits);
 
     expect(states).toEqual(["queued", "claimed", "running", "completed"]);
     expect(record.outcome).toBe("completed");
@@ -647,6 +665,7 @@ describe("agent runner", () => {
     const recoveryReady = defer<void>();
     const releaseRenewal = defer<void>();
     const executionStarted = defer<ClaimedAgentRun>();
+    const wakeScheduled = defer<void>();
     const held = defer<AgentRunExecution>();
     const original = runnerSide.editWithRetry.bind(runnerSide);
     let delayedRenewal = false;
@@ -683,11 +702,29 @@ describe("agent runner", () => {
     let wake: (() => void) | undefined;
     const runner = await startRunner((run) => {
       executionStarted.resolve(run);
+      // The run ends when it is aborted, so that stopping the runner in
+      // teardown returns even when the case fails before it resolves `held`.
+      run.signal.addEventListener(
+        "abort",
+        () => held.resolve({ outcome: "cancelled" }),
+        { once: true },
+      );
       return held.promise;
     }, {
       runtimeForHost: () => Promise.resolve(runnerSide),
+      // The scan that claims the record schedules the lease's expiry wake
+      // only after the claim's registration completes, and the run starts
+      // without waiting for either. Holding the registration until the
+      // renewal is in flight makes the wake always come after the run has
+      // started. This case does not test registration, so nothing is written.
+      registerRunner: async (entry) => {
+        if (entry?.lastClaimAt !== undefined) await renewalReady.promise;
+      },
       scheduleAt: (at, scheduled) => {
-        if (at.toISOString() === "2026-09-18T12:01:00.000Z") wake = scheduled;
+        if (at.toISOString() === "2026-09-18T12:01:00.000Z") {
+          wake = scheduled;
+          wakeScheduled.resolve();
+        }
         return () => {};
       },
     });
@@ -697,6 +734,7 @@ describe("agent runner", () => {
     clock = new Date("2026-09-18T12:00:30.000Z");
     const renewal = active.renewLease();
     await renewalReady.promise;
+    await wakeScheduled.promise;
     clock = new Date("2026-09-18T12:01:00.000Z");
     wake!();
     await recoveryReady.promise;
@@ -1624,7 +1662,7 @@ describe("agent runner", () => {
           }),
         },
       });
-      await startRunner(execute, { tools: ["describe_handle"] });
+      await startRunner(execute, { tools: ["describe_handle", "web_fetch"] });
       return () => seen;
     };
 
@@ -1788,7 +1826,7 @@ describe("agent runner", () => {
       expect(seen().prompt).toBe("- recommend a book");
     });
 
-    it("allows `submit_result` alongside an explicit request tool list", async () => {
+    it("adds the tools that read the request's inputs to an explicit request tool list", async () => {
       const seen = await startHarnessRunner(async ({ resultPath }) => {
         await Deno.writeTextFile(
           resultPath,
@@ -1796,7 +1834,7 @@ describe("agent runner", () => {
         );
         return loopResult("run-explicit-tools");
       });
-      const result = await submit({ tools: ["describe_handle"] });
+      const result = await submit({ tools: ["web_fetch"] });
 
       const record = await waitForCellValue<AgentRunRecord>(
         patternSide,
@@ -1805,7 +1843,12 @@ describe("agent runner", () => {
       );
 
       expect(record.state).toBe("completed");
-      expect(seen().allowedTools).toEqual(["describe_handle", "submit_result"]);
+      expect(seen().allowedTools).toEqual([
+        "web_fetch",
+        "describe_handle",
+        "read_value",
+        "submit_result",
+      ]);
     });
 
     it("uses the runner's allowlist when the request omits `tools`", async () => {
@@ -1819,10 +1862,14 @@ describe("agent runner", () => {
       const result = await submit();
 
       await waitForState(result, "completed");
-      expect(seen().allowedTools).toEqual(["describe_handle", "submit_result"]);
+      expect(seen().allowedTools).toEqual([
+        "describe_handle",
+        "read_value",
+        "submit_result",
+      ]);
     });
 
-    it("allows only `submit_result` for an explicitly empty tool list", async () => {
+    it("keeps the tools that read the request's inputs for an explicitly empty tool list", async () => {
       const seen = await startHarnessRunner(async ({ resultPath }) => {
         await Deno.writeTextFile(
           resultPath,
@@ -1833,7 +1880,11 @@ describe("agent runner", () => {
       const result = await submit({ tools: [] });
 
       await waitForState(result, "completed");
-      expect(seen().allowedTools).toEqual(["submit_result"]);
+      expect(seen().allowedTools).toEqual([
+        "describe_handle",
+        "read_value",
+        "submit_result",
+      ]);
     });
 
     it("accepts a handle token at an `asCell` position and writes a link there", async () => {
