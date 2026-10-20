@@ -159,6 +159,7 @@ import {
 } from "./event-append-queue.ts";
 import {
   IMemoryAddress,
+  IMemorySpaceAddress,
   IMergedChanges,
   IOperationStorageCapability,
   IPreconditionFailedError,
@@ -650,6 +651,13 @@ type ConfirmedVersion = MaterializedVersion & {
   seq: number;
 
   /**
+   * Whether an accept establishes this whole value: a remote set or
+   * deletion, or a write the server elided as an identity against the
+   * commit's read of the document.
+   */
+  acceptedWhole?: true;
+
+  /**
    * Whether `value` is the store's value at `seq` with a derived write folded
    * over it by this replica alone, because the space refused that write for
    * lack of a grant. The store never held it: a frame at a later seq replaces
@@ -925,6 +933,20 @@ const holdsContentAddressedValue = (
   const doc = record?.confirmed.value;
   return isObjectNotArray(doc) && taggedHashStringOf(doc.value) === hash;
 };
+
+/**
+ * Whether `record` holds content that no later commit can change: a
+ * content-addressed document in space scope whose confirmed value hashes to
+ * its id. In space scope only: a session-scoped write is promoted into the
+ * confirmed layer without any server accepting it.
+ */
+const holdsImmutableContent = (
+  id: URI,
+  scope: CellScope | undefined,
+  record: DocumentRecord | undefined,
+): boolean =>
+  id.startsWith("cid:") && normalizeCellScope(scope) === "space" &&
+  holdsContentAddressedValue(record, id.slice("cid:".length));
 
 /** Folds pending and locally accepted wave contributions in sealing order. */
 const materializePendingVersions = (
@@ -6124,7 +6146,20 @@ export class SpaceReplica
   }
 
   /** ISpaceReplica.completeThroughSeq. */
-  completeThroughSeq(): number | undefined {
+  completeThroughSeq(
+    documents: readonly Pick<IMemorySpaceAddress, "id" | "scope">[] = [],
+  ): number | undefined {
+    // A receipt proves one stored version. Only a delivered watch or immutable
+    // content also proves that later commits cannot have changed it unseen.
+    for (const { id, scope } of documents) {
+      const key = this.#docKeyOf({ id, scope });
+      if (
+        !this.#delivered.has(key) &&
+        !holdsImmutableContent(id, scope, this.#docs.get(key))
+      ) {
+        return undefined;
+      }
+    }
     if (this.#completeThroughLost || this.#completeThroughSeq === 0) {
       return undefined;
     }
@@ -6155,14 +6190,13 @@ export class SpaceReplica
       return false;
     }
     if (delivered === undefined) {
-      // A schema document this replica's own commit stored may never arrive
-      // in a frame: the server ships it with a document that refers to it,
-      // and does not send a replica its own change to a document it holds.
-      // Content under a `cid:` id cannot change, so holding that content
-      // confirmed is confirmation. In space scope only: a session-scoped
-      // write is promoted here without any server accepting it.
-      return id.startsWith("cid:") && normalizeCellScope(scope) === "space" &&
-        holdsContentAddressedValue(record, id.slice("cid:".length));
+      // A document this replica's own commit stored may never arrive in a
+      // frame: the server does not send a replica its own change to a
+      // document it holds, and ships a schema document only with a document
+      // that refers to it. An accepted whole write names the stored version,
+      // and content under a `cid:` id cannot change.
+      return confirmed.acceptedWhole === true ||
+        holdsImmutableContent(id, scope, record);
     }
     // Past its delivered seq, the confirmed state is an own accepted write
     // promoted locally, which a push through that seq has since covered.
@@ -10553,6 +10587,10 @@ export class SpaceReplica
             cloneIfNecessary(computed.value) as EntityDocument,
             coverClass,
           );
+          // The identity proof made against the commit's read shows the
+          // whole stored document is `computed.value`, whether the layer
+          // set the document or patched it.
+          record.confirmed.acceptedWhole = true;
         }
         record.pending = record.pending.filter((entry) =>
           entry.localSeq !== localSeq
@@ -10648,6 +10686,11 @@ export class SpaceReplica
       );
 
       if (promoted) {
+        // A blind patch can merge with content this replica has never read.
+        // A whole replacement or deletion establishes the complete result.
+        if (!local && (pending.op === "set" || pending.op === "delete")) {
+          promoted.acceptedWhole = true;
+        }
         record.confirmed = promoted;
         record.materialized = reusedSuffix && reusedSuffix.length > 0
           ? {
