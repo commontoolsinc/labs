@@ -542,6 +542,17 @@ export type DiffAndUpdateOptions = IReadOptions & {
    * marker on the containing document cannot cover them.
    */
   schemaRole?: "output";
+
+  /**
+   * The walk writes the bindings of the document it starts in, as a piece's
+   * setup writes its argument document. A write redirect stored at a
+   * position, or a link to a narrower scope's instance of another document, is
+   * replaced by what is written there rather than followed: the cell it names
+   * belongs to whoever bound it, and the walk writes none of that cell. A link
+   * to the same position in another scope's instance is the position itself,
+   * realized at that scope, and is followed as on any write.
+   */
+  replacesBindings?: true;
 };
 
 /**
@@ -1258,6 +1269,17 @@ function consumeSteeringSlot(
   tx.readValueOrThrow(link, options);
 }
 
+/** Whether `other` names `link`'s position in another scope's instance. */
+function isScopeInstanceOf(
+  other: NormalizedFullLink,
+  link: NormalizedFullLink,
+): boolean {
+  return other.space === link.space && other.id === link.id &&
+    other.scope !== link.scope &&
+    other.path.length === link.path.length &&
+    other.path.every((segment, index) => segment === link.path[index]);
+}
+
 /**
  * Whether `target`, a link about to be written at `link`, names the same
  * position of the same document at a broader scope, and that position is
@@ -1892,7 +1914,11 @@ export function normalizeAndDiff(
   }
 
   // Handle alias in current value (at this point: if newValue is not an alias)
-  if (currentValueIsLink && isWriteRedirectLink(currentValue)) {
+  if (
+    currentValueIsLink && isWriteRedirectLink(currentValue) &&
+    (options?.replacesBindings !== true ||
+      isScopeInstanceOf(parseLink(currentValue, link), link))
+  ) {
     consumeSteeringSlot(tx, link, options);
     diffLogger.debug(
       "diff",
@@ -1929,10 +1955,17 @@ export function normalizeAndDiff(
   // into the narrower-scope instance — overwriting it would land per-user /
   // per-session state at the shared base scope. Reference values are exempt:
   // writing a link re-binds the slot (and the schema-declared narrowing above
-  // already handled scoped re-binds before reaching here).
+  // already handled scoped re-binds before reaching here). A walk that
+  // replaces bindings follows only a link to this position's own narrower
+  // instance: a narrower-scope link to another document is a binding, which it
+  // replaces.
   if (currentValueIsLink && newValueLink === undefined) {
     const storedLink = parseLink(currentValue as PrimitiveCellLink, link);
-    if (scopeRank(storedLink.scope) > scopeRank(link.scope)) {
+    if (
+      scopeRank(storedLink.scope) > scopeRank(link.scope) &&
+      (options?.replacesBindings !== true ||
+        isScopeInstanceOf(storedLink, link))
+    ) {
       consumeSteeringSlot(tx, link, options);
       diffLogger.debug(
         "diff",

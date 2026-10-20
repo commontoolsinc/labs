@@ -1472,6 +1472,106 @@ describe("data-updating", () => {
     });
   });
 
+  describe("a walk that replaces bindings", () => {
+    // A piece's setup writes its argument document's bindings: a write
+    // redirect stored there names a cell the caller owns, and setup writes
+    // none of that cell. A same-document redirect to another scope's instance
+    // is the position itself, realized at that scope.
+
+    const slot = (id: URI, scope: "space" | "user") =>
+      runtime.getCellFromLink(
+        { space, id, path: [], scope },
+        undefined,
+        tx,
+      );
+
+    const idFor = (cause: string) =>
+      runtime.getCell(space, cause, undefined, tx).getAsNormalizedFullLink()
+        .id;
+
+    it("replaces a redirect to another document and leaves that document as it was", () => {
+      const bound = idFor("binding walk bound cell");
+      const argument = idFor("binding walk argument");
+      slot(bound, "space").setRaw({ a: "bound" });
+      slot(argument, "space").setRaw({
+        "/": {
+          "link@1": {
+            id: bound,
+            overwrite: "redirect",
+            path: [],
+            scope: "space",
+          },
+        },
+      });
+
+      diffAndUpdate(
+        runtime,
+        tx,
+        slot(argument, "space").getAsNormalizedFullLink(),
+        { a: "supplied" },
+        undefined,
+        { replacesBindings: true },
+      );
+
+      expect(slot(argument, "space").getRaw()).toEqual({ a: "supplied" });
+      expect(slot(bound, "space").getRaw()).toEqual({ a: "bound" });
+    });
+
+    it("replaces a redirect to another document's user instance and leaves that instance as it was", () => {
+      const bound = idFor("binding walk per-user bound cell");
+      const argument = idFor("binding walk per-user argument");
+      slot(bound, "user").setRaw({ a: "bound" });
+      slot(argument, "space").setRaw({
+        "/": {
+          "link@1": {
+            id: bound,
+            overwrite: "redirect",
+            path: [],
+            scope: "user",
+          },
+        },
+      });
+
+      diffAndUpdate(
+        runtime,
+        tx,
+        slot(argument, "space").getAsNormalizedFullLink(),
+        { a: "supplied" },
+        undefined,
+        { replacesBindings: true },
+      );
+
+      expect(slot(argument, "space").getRaw()).toEqual({ a: "supplied" });
+      expect(slot(bound, "user").getRaw()).toEqual({ a: "bound" });
+    });
+
+    it("writes through a redirect to its own position's user instance", () => {
+      const argument = idFor("binding walk realized argument");
+      slot(argument, "user").setRaw({ a: "mine" });
+      slot(argument, "space").setRaw({
+        "/": { "link@1": { overwrite: "redirect", path: [], scope: "user" } },
+      });
+
+      diffAndUpdate(
+        runtime,
+        tx,
+        slot(argument, "space").getAsNormalizedFullLink(),
+        { a: "supplied" },
+        undefined,
+        { replacesBindings: true },
+      );
+
+      expect(
+        slot(argument, "user").getRaw(),
+        "the content landed at the shared space slot, over the redirect to " +
+          "the user instance that holds it",
+      ).toEqual({ a: "supplied" });
+      expect(slot(argument, "space").getRaw()).toEqual({
+        "/": { "link@1": { overwrite: "redirect", path: [], scope: "user" } },
+      });
+    });
+  });
+
   describe("authoritative container re-assert in normalizeAndDiff", () => {
     // The two container re-assert branches, which are the ONLY places this
     // walk writes a container whole rather than by its members: a subtree that
