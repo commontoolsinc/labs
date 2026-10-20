@@ -1,0 +1,1 @@
+{"date": "2026-10-20", "from": {"k": "unit", "s": "runner", "n": "schema-doc-sync > leaves a forged schema document unregistered on arrival, with resolution closed"}, "to": {"k": "unit", "s": "runner", "n": "schema-doc-sync > leaves a forged schema unresolved without failing a coalesced mutable pull"}}

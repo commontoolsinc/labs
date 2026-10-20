@@ -261,18 +261,26 @@ describe("immutable document fetching", () => {
     expect(replica.holdings()).toEqual([]);
   });
 
-  it("rejects a forged immutable response and permits a subsequent valid fetch", async () => {
+  it("falls back from a forged snapshot without failing healthy reads in the batch", async () => {
     const value = { type: "string", description: "verified schema" };
     const id = cid(value);
-    await write([[id, { value }]]);
+    const healthy = { type: "boolean", description: "healthy batched schema" };
+    const healthyId = cid(healthy);
+    const mutableId = "of:healthy-forged-batch";
+    await write([
+      [id, { value }],
+      [healthyId, { value: healthy }],
+      [mutableId, { value: "mutable" }],
+    ]);
     const original = server.graphQuery.bind(server);
     const corrupt = stub(server, "graphQuery", async (message) => {
       const response = await original(message);
       if (response.ok) {
-        response.ok.entities = response.ok.entities.map((entity) => ({
-          ...entity,
-          document: { value: { type: "number" } },
-        }));
+        response.ok.entities = response.ok.entities.map((entity) =>
+          entity.id === id
+            ? { ...entity, document: { value: { type: "number" } } }
+            : entity
+        );
       }
       return response;
     });
@@ -280,22 +288,38 @@ describe("immutable document fetching", () => {
       if (!corrupt.restored) corrupt.restore();
     });
     const provider = manager.open(space);
-    expect((await provider.sync(id, rootOnly)).error?.message)
-      .toContain("Invalid immutable fetch result");
-    expect(replica.getDocument(id)).toBeUndefined();
-    expect(replica.holdings()).toEqual([]);
-    corrupt.restore();
-    expect((await provider.sync(id, rootOnly)).error).toBeUndefined();
+    const results = await Promise.all([
+      provider.sync(id, rootOnly),
+      provider.sync(healthyId, rootOnly),
+      provider.sync(mutableId, rootOnly),
+    ]);
+    expect(results.map((result) => result.error)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
     expect(replica.getDocument(id)?.value).toEqual(value);
-    expect(readerState().watches).toEqual([]);
+    expect(replica.getDocument(healthyId)?.value).toEqual(healthy);
+    expect(replica.getDocument(mutableId)?.value).toBe("mutable");
+    expect(replica.holdings().map((holding) => holding.id).sort()).toEqual(
+      [id, mutableId].sort(),
+    );
   });
 
-  it("refuses a schema whose fetched closure is incomplete", async () => {
+  it("falls back from an incomplete closure without failing healthy reads in the batch", async () => {
     const child = { type: "number", description: "missing fetch closure" };
     const childId = cid(child);
     const value = { type: "object", properties: { count: { $ref: childId } } };
     const id = cid(value);
-    await write([[childId, { value: child }], [id, { value }]]);
+    const healthy = { type: "boolean", description: "healthy closure batch" };
+    const healthyId = cid(healthy);
+    const mutableId = "of:healthy-closure-batch";
+    await write([
+      [childId, { value: child }],
+      [id, { value }],
+      [healthyId, { value: healthy }],
+      [mutableId, { value: "mutable" }],
+    ]);
     const original = server.graphQuery.bind(server);
     const incomplete = stub(server, "graphQuery", async (message) => {
       const response = await original(message);
@@ -310,13 +334,24 @@ describe("immutable document fetching", () => {
       if (!incomplete.restored) incomplete.restore();
     });
     const provider = manager.open(space);
-    expect((await provider.sync(id, rootOnly)).error?.message)
-      .toContain("Immutable fetch was quarantined");
-    expect(replica.getDocument(id)).toBeUndefined();
-    incomplete.restore();
-    expect((await provider.sync(id, rootOnly)).error).toBeUndefined();
+    const results = await Promise.all([
+      provider.sync(id, rootOnly),
+      provider.sync(healthyId, rootOnly),
+      provider.sync(mutableId, rootOnly),
+    ]);
+    expect(results.map((result) => result.error)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
     expect(replica.getDocument(id)?.value).toEqual(value);
     expect(replica.getDocument(childId)?.value).toEqual(child);
+    expect(replica.getDocument(healthyId)?.value).toEqual(healthy);
+    expect(replica.getDocument(mutableId)?.value).toBe("mutable");
+    const holdings = replica.holdings().map((holding) => holding.id);
+    expect(holdings).toContain(id);
+    expect(holdings).toContain(mutableId);
+    expect(holdings).not.toContain(healthyId);
   });
 
   it("discards an in-flight fetch after reset and refetches into the new replica state", async () => {

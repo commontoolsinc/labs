@@ -90,15 +90,21 @@ the retained snapshot.
 This creates no server watch, tracked graph, or session delivery-cache entry.
 The snapshot does not count as a subscription holding or advance the
 replica's complete-through watermark. It survives removal from a separate
-watch that also delivered it, while reset discards it. Session access checks
-still run before cached pulls succeed.
+watch that also delivered it, while reset discards it. A terminal authorization
+denial also refuses cached pulls of mutable documents and records those reads
+for retry after re-admission.
 
 An absent root falls back to the ordinary watch path so that a later creation
-arrives; that fallback watch remains installed. Selectors that traverse data,
-mutable document IDs, and scoped reads also keep their ordinary subscriptions.
+arrives. An unverified snapshot or quarantined closure takes the same fallback,
+preserving ordinary per-document validation without failing unrelated reads
+in the batch. Those fallback watches remain installed. Selectors that traverse
+data, mutable document IDs, and scoped reads also keep their ordinary subscriptions.
 Schema dependencies assembled as part of a mutable document's watch remain
 owned by that watch. This optimization reduces explicit immutable watch roots;
 it does not bound the client schema registry or rewrite historical documents.
+
+A mixed batch awaits the immutable query before issuing the remaining watches,
+so a cold load can pay an additional serial round trip.
 
 ## Sharing a tracker and a memo across walks
 

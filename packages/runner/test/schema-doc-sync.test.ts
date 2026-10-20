@@ -126,13 +126,18 @@ describe("schema-doc-sync", () => {
     expect(resolveSchema({ $ref: decomposed.rootRef })).not.toBe(false);
   });
 
-  it("leaves a forged schema document unregistered on arrival, with resolution closed", async () => {
+  it("leaves a forged schema unresolved without failing a coalesced mutable pull", async () => {
     const claimedSchema = {
       type: "object",
       properties: { forgedSyncTarget: { type: "string" } },
     } as const;
     const claimed = internSchemaAsTaggedHashString(claimedSchema);
-    await writeDocs({ [`cid:${claimed}`]: claimedSchema as FabricValue });
+    const innocentId = "of:forged-schema-innocent" as URI;
+    const innocentValue = { hello: "world" };
+    await writeDocs({
+      [`cid:${claimed}`]: claimedSchema as FabricValue,
+      [innocentId]: innocentValue,
+    });
     // The commit boundary admits nothing under an id its content does not
     // hash to, so a forgery reaches storage only out of band — direct
     // database manipulation, as genuine corruption would.
@@ -149,13 +154,16 @@ describe("schema-doc-sync", () => {
       `UPDATE head SET seq = seq + 1 WHERE id = :id`,
     ).run({ id: `cid:${claimed}` });
 
-    const result = await readerStorage.open(space).sync(
-      `cid:${claimed}` as URI,
-      { path: [], schema: false },
+    const provider = readerStorage.open(space);
+    const [forged, innocent] = await Promise.all([
+      provider.sync(`cid:${claimed}` as URI, { path: [], schema: false }),
+      provider.sync(innocentId, { path: [], schema: false }),
+    ]);
+    expect(innocent.error).toBeUndefined();
+    expect(provider.replica.getDocument(innocentId)?.value).toEqual(
+      innocentValue,
     );
-    expect(result.error?.message).toContain("Invalid immutable fetch result");
-    expect(readerStorage.open(space).replica.getDocument(`cid:${claimed}`))
-      .toBeUndefined();
+    expect(forged.error).toBeUndefined();
     expect(lookupSchemaDocument(claimed)).toBeUndefined();
     expect(resolveSchema({ $ref: `cid:${claimed}` })).toBe(false);
   });

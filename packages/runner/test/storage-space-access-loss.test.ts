@@ -185,6 +185,11 @@ describe("storage space access loss", () => {
       expect(manager.authorizationError(space)?.name).toBe(
         "AuthorizationError",
       );
+      // The selector already covers this mutable document. A denied session
+      // must still refuse the pull and retain it for an authorized retry.
+      expect((await manager.open(space).sync(`of:${space}`)).error?.name).toBe(
+        "AuthorizationError",
+      );
       await setAccess(true);
       manager.noteSpaceAclChanged(space);
       expect((await manager.open(space).sync(`of:${space}`)).error)

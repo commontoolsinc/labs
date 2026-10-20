@@ -4707,6 +4707,15 @@ type WatchAddress = {
   scopeKey?: ScopeKey;
 };
 
+/** Whether a read needs only the immutable shared-space document itself. */
+const isImmutableRootEntry = (
+  [address, selector]: [WatchAddress, SchemaPathSelector],
+): boolean =>
+  address.id.startsWith("cid:") &&
+  normalizeCellScope(address.scope) === "space" &&
+  address.scopeKey === undefined &&
+  selector.path.length === 0 && selector.schema === false;
+
 type SyncTask = {
   entries: [WatchAddress, SchemaPathSelector][];
   promise: Promise<Result<Unit, PullError>>;
@@ -7955,12 +7964,7 @@ export class SpaceReplica
       // A root-only read of immutable content needs availability, not ongoing
       // change delivery. Keep absence reactive: only a verified present result
       // leaves the ordinary watch path.
-      const immutableRoots = watchEntries.filter(([address, selector]) =>
-        address.id.startsWith("cid:") &&
-        normalizeCellScope(address.scope) === "space" &&
-        address.scopeKey === undefined &&
-        selector.path.length === 0 && selector.schema === false
-      );
+      const immutableRoots = watchEntries.filter(isImmutableRootEntry);
       // Reusing a snapshot can omit the query that otherwise checks session
       // admission. A restored, open session is still required for that read.
       if (immutableRoots.length > 0) {
@@ -8030,11 +8034,8 @@ export class SpaceReplica
           retained.has(docKey(address.id, "space"))
         ).map(([address]) => address.id),
       );
-      watchEntries = watchEntries.filter(([address, selector]) =>
-        !fetchedRoots.has(address.id) ||
-        normalizeCellScope(address.scope) !== "space" ||
-        address.scopeKey !== undefined ||
-        selector.path.length !== 0 || selector.schema !== false
+      watchEntries = watchEntries.filter((entry) =>
+        !isImmutableRootEntry(entry) || !fetchedRoots.has(entry[0].id)
       );
       if (watchEntries.length === 0) return { ok: {} };
 
@@ -8119,7 +8120,8 @@ export class SpaceReplica
   }
 
   /** Integrates verified immutable snapshots without claiming subscription
-   * delivery or a complete-through watermark. Absent roots remain watchable. */
+   * delivery or a complete-through watermark. Absent or unverified roots
+   * remain on the ordinary watch path, whose validation is per document. */
   #integrateImmutableQuery(
     result: GraphQueryResult,
     type: "pull" | "integrate",
@@ -8134,7 +8136,11 @@ export class SpaceReplica
         !Number.isSafeInteger(entity.seq) || entity.seq <= 0 ||
         taggedHashStringOf(entity.document.value) !== entity.id.slice(4)
       ) {
-        throw new Error(`Invalid immutable fetch result for ${entity.id}`);
+        logger.warn("immutable-fetch-invalid", () => [
+          `Ignoring an unverified immutable snapshot for ${entity.id}; ` +
+          "its root remains on the ordinary watch path.",
+        ]);
+        continue;
       }
       upserts.push({
         id: entity.id,
@@ -8159,11 +8165,6 @@ export class SpaceReplica
       type,
       "fetch",
     );
-    for (const entry of upserts) {
-      if (!this.#fetchedImmutableIds.has(docKey(entry.id as URI, "space"))) {
-        throw new Error(`Immutable fetch was quarantined for ${entry.id}`);
-      }
-    }
   }
 
   /**
