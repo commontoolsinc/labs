@@ -861,6 +861,36 @@ schema declares, as any reader of an absent defaulted slot does.
   an input it did not write changes. Later derivations into the space are
   held until the replica's copy of the list changes.
 
+A held derivation is a pending layer of the session's own that is never
+exported, which is what places it against the invariant catalog
+([09-invariants.md](09-invariants.md)):
+
+- INV-1 is untouched for every accepted commit. A commit in the same space
+  whose read set names a held layer is refused before it is exported, as one
+  naming any speculation layer is; a commit in another space carries no read
+  of it, which is the cross-space bound every derivation already has.
+- INV-9 holds for durable values as before. The locally visible value may
+  include a held layer, as it may include any pending write, and a held
+  layer is never added to the durable log. A frame at a later `seq` for a
+  document a held layer wrote retires the layer, and the entry is registered
+  in the same synchronous stretch as the layer is applied, so no frame can
+  move the base under a layer the retirement cannot see; a frame at the same
+  `seq` leaves it in place.
+- INV-10 holds through the claim check, which compares the local values a
+  transaction read, held layers included: a transaction built over a held
+  layer that changed before it closed is rejected locally and runs again,
+  and a transaction whose reads moved under it between its reads and its
+  hold is rejected the same way, so no layer is applied over a base other
+  than the one its run read.
+- INV-14 is unchanged: holdings declare delivered revisions, and a held
+  layer is never one. A reconnect that replaces the replica drops its held
+  layers with every other pending layer, and the computations run again.
+
+Nothing is ever published over a held layer. A grant of WRITE withdraws the
+held layers first and runs their writers only once the layers have left the
+replica, so each writer reads the durable value and commits an ordinary
+derivation over it, under the same validation any writer's commit gets.
+
 Under the `localFold` experimental flag
 ([registry](../../development/EXPERIMENTAL_OPTIONS.md#localfold)), off by
 default, a replica keeps such a refused write as a _local fold_ instead of

@@ -346,14 +346,20 @@ export class LocalDerivationDestination implements TransactionSealDestination {
           }
         }
         const writer = source.sourceAction;
-        held.push({
+        const entry: HeldDerivation = {
           space,
           localSeq: sealed.localSeq,
           resolveVerdict: resolve,
           writtenDocs: [...writtenDocs.values()],
           writer: isAction(writer) ? writer : undefined,
           settled: sealed.settled.catch(() => undefined),
-        });
+        };
+        held.push(entry);
+        // Registered in the same synchronous stretch as the layer is applied,
+        // so a frame that moves a written document's confirmed seq before the
+        // seal as a whole resolves still finds the entry and retires it; a
+        // layer the arrival wake cannot see would stand over a newer base.
+        this.#register(entry);
         return Promise.resolve({ ok: {} });
       },
     };
@@ -376,6 +382,7 @@ export class LocalDerivationDestination implements TransactionSealDestination {
     }
     if (result.error) {
       for (const entry of held) {
+        this.#held.get(entry.space)?.delete(entry.localSeq);
         entry.resolveVerdict({
           withdrawn: {
             message: `holding a derived write locally failed: ` +
@@ -385,18 +392,8 @@ export class LocalDerivationDestination implements TransactionSealDestination {
       }
       return result;
     }
-    if (this.#closed) {
-      for (const entry of held) {
-        entry.resolveVerdict({
-          withdrawn: {
-            message: "held derivation released: runtime closed while sealing",
-            superseded: true,
-          },
-        });
-      }
-      return { ok: {} };
-    }
-    for (const entry of held) this.#register(entry);
+    // A close that ran while the seal was in flight withdrew the entries the
+    // sink registered; either way the run's results are re-derivable.
     return { ok: {} };
   }
 
@@ -542,13 +539,18 @@ export class LocalDerivationDestination implements TransactionSealDestination {
   /**
    * Helper for the access-list watch, which withdraws every derivation held
    * for `space` and runs their writers again, which commit to the store now
-   * that the principal may write it.
+   * that the principal may write it. The writers run only once the withdrawn
+   * layers have left the replica: a run that still read a held layer would
+   * find its own value in place and write nothing, and the drop that follows
+   * is its own flip, which does not run it either.
    */
   #release(space: MemorySpace, reason: string): void {
     const held = this.#held.get(space);
     if (held === undefined || held.size === 0) return;
+    const entries = [...held.values()];
+    held.clear();
     const writers = new Set<Action>();
-    for (const entry of held.values()) {
+    for (const entry of entries) {
       if (entry.writer !== undefined) writers.add(entry.writer);
       entry.resolveVerdict({
         withdrawn: {
@@ -557,10 +559,12 @@ export class LocalDerivationDestination implements TransactionSealDestination {
         },
       });
     }
-    held.clear();
-    for (const writer of writers) {
-      this.#runtime.scheduler.invalidateAction(writer);
-    }
+    void Promise.all(entries.map((entry) => entry.settled)).then(() => {
+      if (this.#closed) return;
+      for (const writer of writers) {
+        this.#runtime.scheduler.invalidateAction(writer);
+      }
+    });
   }
 
   /**
