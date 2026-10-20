@@ -7275,7 +7275,8 @@ export class SpaceReplica
    * Watches on its own a document a release removed after something began to
    * hold it. If that fails, the document is removed as the release removed
    * it, so that its readers load it again rather than keep a value the
-   * session no longer keeps current.
+   * session no longer keeps current. One with a local write pending keeps
+   * that write over an emptied base, as under any removal.
    */
   #watchAgain(remove: SessionSync["removes"][number]): void {
     void this.#watchDocument(removedAddress(remove)).then(
