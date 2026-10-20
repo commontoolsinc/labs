@@ -4979,7 +4979,7 @@ export class SpaceReplica
   /**
    * The documents a release removed while something held them that could not
    * be watched again, by doc key: each keeps its value, and the next pass
-   * watches it again.
+   * watches it again unless a removal the server sends for it comes first.
    */
   readonly #owedWatches = new Map<string, SessionSync["removes"][number]>();
 
@@ -10148,6 +10148,9 @@ export class SpaceReplica
       );
       this.#watchedIds.delete(key);
       this.#delivered.delete(key);
+      // A removal settles what the session keeps of the document, so a
+      // watch a release still owes it is not asked for again.
+      this.#owedWatches.delete(key);
       if (record.pending.length > 0) {
         // A shadowed remove carries no seq on the wire: the sentinel 1
         // holds W entirely until the shadow clears (see the field doc).
