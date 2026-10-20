@@ -1538,13 +1538,14 @@ echo '{"integrity":[],"observes":"value"}' \
 ```
 
 The command updates the label through the same checked write path used by
-ordinary runtime operations. It does not edit raw CFC metadata. The
-stored-schema rules reject a confidentiality update that would make data less
-restricted and an integrity update that would silently make data more trusted.
-An absent path is also rejected rather than creating policy metadata without a
-value. An `observes` update is rejected when it would combine with an existing
-observation class instead of preserving the requested class. Omitting `observes`
-from a later update preserves an existing unambiguous class.
+ordinary runtime operations. Without
+`--dangerously-allow-lowering-confidentiality` it does not edit raw CFC
+metadata. The stored-schema rules reject a confidentiality update that would
+make data less restricted and an integrity update that would silently make data
+more trusted. An absent path is also rejected rather than creating policy
+metadata without a value. An `observes` update is rejected when it would combine
+with an existing observation class instead of preserving the requested class.
+Omitting `observes` from a later update preserves an existing unambiguous class.
 
 The path is followed through the links it crosses, as `get-label` reads it, so
 the update lands on the doc that holds the value rather than the doc the path
@@ -1552,6 +1553,36 @@ started in. The classes it is checked against are the effective ones, which
 merge both documents: the resolved doc's stored classes, and any the selected
 slot's own schema declares. Asking for `shape` where either declares `value` is
 refused rather than replacing it.
+
+`--dangerously-allow-lowering-confidentiality` turns the update into the
+opposite operation: it lowers confidentiality at the path, rewriting the stored
+CFC metadata. Every confidentiality clause stored at the path that the input's
+`confidentiality` list does not name is removed — from the declared label and
+the stored schema's declaration, from the labels derived from what was written
+there (the `shape` and `value` entries `get-label` shows), and from a link's own
+label. The input holds `confidentiality` alone, and each clause it names must
+already be stored at the path; adding a clause, or changing integrity or
+`observes`, is an update without the flag. Labels at other paths are left as
+they are, including an ancestor's label that covers this path.
+
+```bash
+echo '{"confidentiality":[]}' \
+  | cf cell set-label --cell ID queue --dangerously-allow-lowering-confidentiality
+```
+
+The identity may lower confidentiality only in its own space, the space whose
+DID is the identity's, and only for clauses whose every alternative stands for
+the identity alone: its DID, a `User`, `Context` or `Resource` atom naming it,
+or its own space as `Space` or `PersonalSpace` — each in plaintext or with the
+digest commitment a cross-space write stores in place of the DID. A clause with
+any other alternative is refused and left in place. So is the whole lowering
+when the path also shows a clause the input does not name from a position the
+lowering does not rewrite: an ancestor's or a wildcard label, a branch of the
+stored schema, or the piece's own schema, which a change to the pattern lowers.
+Each lowering commits with a create-only receipt in that space, readable by the
+identity alone, recording the clauses removed and digests of the stored metadata
+before and after. Reads served before the lowering keep the label they were
+served under.
 
 ## Invocation sessions
 

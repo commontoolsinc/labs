@@ -2275,11 +2275,20 @@ INPUT: An object with confidentiality and/or integrity arrays, plus an optional
 observes value: value, shape, enumerate, or followRef.
 
 The command records the label through the same checked write operation used for
-piece data. It never changes raw CFC metadata. Confidentiality may only become
-more restrictive. An integrity update may keep or remove existing claims, but
-cannot add trust. Conflicting observation classes are rejected. If observes is
-omitted, an existing unambiguous class is preserved. The command returns the
-updated effective label view.`,
+piece data. Without --dangerously-allow-lowering-confidentiality it never changes
+raw CFC metadata, and confidentiality may only become more restrictive. An
+integrity update may keep or remove existing claims, but cannot add trust.
+Conflicting observation classes are rejected. If observes is omitted, an
+existing unambiguous class is preserved. The command returns the updated
+effective label view.
+
+With --dangerously-allow-lowering-confidentiality, the command lowers
+confidentiality at the path instead, rewriting the stored CFC metadata: every
+stored clause the input's confidentiality list does not name is removed from
+the declared label, from the labels derived from what was written there (the
+shape and value entries get-label shows), and from a link's own label. The
+input holds confidentiality alone, naming only clauses the path already
+stores. Labels at other paths, an ancestor's included, are not changed.`,
       ),
     )
     .usage(`${pieceUsage} [path]`)
@@ -2295,11 +2304,29 @@ updated effective label view.`,
       ),
       "Remove declared integrity claims from an input value.",
     )
+    .example(
+      cliText(
+        `echo '{"confidentiality":[]}' | cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} queue --dangerously-allow-lowering-confidentiality`,
+      ),
+      "Remove every confidentiality clause stored at a value you own.",
+    )
     .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_PATH_HELP)
     .option(
       "--input",
       "Write to the piece's input cell instead of result cell (the " +
         '"#argument" reference suffix spells the same selection)',
+    )
+    .option(
+      "--dangerously-allow-lowering-confidentiality",
+      "Remove every confidentiality clause stored at the path that the " +
+        "input does not name, from every label there. Allowed only in the " +
+        "identity's own space (the space whose DID is the identity's), and " +
+        "only for clauses whose every alternative stands for the identity " +
+        "alone: its DID, User, Context or Resource naming it, or its own " +
+        "space as Space or PersonalSpace. Refused when the path also shows " +
+        "a clause the input does not name from an ancestor's or wildcard " +
+        "label or the piece's own schema. Records a receipt of the removal, " +
+        "readable by the identity alone, in that space.",
     )
     .option(
       "--json",
@@ -3302,6 +3329,12 @@ export interface PieceLabelCLIOptions extends PieceCLIOptions {
   quiet?: boolean;
 }
 
+/** The options `set-label` takes beyond those `get-label` takes. */
+export interface PieceSetLabelCLIOptions extends PieceLabelCLIOptions {
+  /** Lower confidentiality at the path rather than adding to it. */
+  dangerouslyAllowLoweringConfidentiality?: boolean;
+}
+
 export interface PieceLabelCommandDependencies {
   getCellCfcLabel?: typeof getCellCfcLabel;
   setCellCfcLabel?: typeof setCellCfcLabel;
@@ -3748,7 +3781,7 @@ export async function getCellCfcLabelFromCommand(
 }
 
 export async function setCellCfcLabelFromCommand(
-  options: PieceLabelCLIOptions,
+  options: PieceSetLabelCLIOptions,
   pathString?: string,
   deps: PieceLabelCommandDependencies = {},
 ): Promise<void> {
@@ -3766,7 +3799,12 @@ export async function setCellCfcLabelFromCommand(
     pieceConfig,
     pathSegments,
     update,
-    { input: pieceConfig.pieceInput },
+    {
+      input: pieceConfig.pieceInput,
+      ...(options.dangerouslyAllowLoweringConfidentiality === true
+        ? { lowerConfidentiality: true }
+        : {}),
+    },
   );
   (deps.render ?? render)(label, { json: true });
 }
