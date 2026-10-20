@@ -81,9 +81,11 @@ remaining watches of that watch's branch again. Two things keep that short of
 watching the space from scratch: a branch the removal names no watch of keeps
 its graph, and a watch that was never walked, because the graph of its branch
 already covered every root of it when it was added, costs nothing to remove.
-The server records those covered watches, and when the watch covering one is
-removed it walks the covered watch into the rebuilt graph, so the documents it
-names stay delivered.
+The server records those covered watches. A watch is covered by the graph as
+a whole, which several walked watches may contribute to, so when a walked
+watch is removed the server checks each covered watch of the branch against
+the rebuilt graph: one still covered stays unwalked, and one no longer covered
+is walked into the rebuilt graph, so the documents it names stay delivered.
 
 A server that does not advertise `watchRemoveV1` could only be asked to remove
 a watch by replacing the whole watch set, which sends the whole union back.

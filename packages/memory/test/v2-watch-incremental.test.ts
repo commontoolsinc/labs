@@ -1103,6 +1103,44 @@ describe("Server", () => {
         }
       });
 
+      it("keeps a watch covered while any walked watch still covers it", async () => {
+        // `of:b` links to `of:a`, so a `true` schema on `of:b` covers the
+        // narrow watch on `of:a` as the permissive watch on `of:a` does.
+        const fixture = await openCoveredFixture();
+        try {
+          await fixture.writer.transact({
+            localSeq: 3,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "set",
+              id: "of:b",
+              value: { value: { child: link(fixture.space, "of:a") } },
+            }],
+          });
+          await fixture.server.flushSessions();
+          await fixture.reader.watchAddSync([permissive("of:b")]);
+          expect([...fixture.state.coveredWatchIds]).toEqual(["of:a"]);
+          const first = await fixture.reader.watchRemoveSync(["of:a:all"]);
+          expect(first.sync.removes).toEqual([]);
+          expect([...fixture.state.coveredWatchIds]).toEqual(["of:a"]);
+          expect(ids([...fixture.state.entities.values()])).toEqual([
+            "of:a",
+            "of:b",
+            "of:x",
+            "of:y",
+          ]);
+          const second = await fixture.reader.watchRemoveSync(["of:b:all"]);
+          expect(ids(second.sync.removes)).toEqual(["of:b", "of:y"]);
+          expect(fixture.state.coveredWatchIds.size).toBe(0);
+          expect(ids([...fixture.state.entities.values()])).toEqual([
+            "of:a",
+            "of:x",
+          ]);
+        } finally {
+          await fixture.close();
+        }
+      });
+
       it("keeps the graph of a branch the removal does not touch", async () => {
         const fixture = await openCoveredFixture();
         try {
