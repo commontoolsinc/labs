@@ -1506,7 +1506,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       [NAME]: "Cozy lunch poll",
       [UI]: (
         <cf-theme theme={POLL_THEME}>
-          <cf-screen>
+          <cf-screen bleed>
             {/* Header */}
             <div
               slot="header"

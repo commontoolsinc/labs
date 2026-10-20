@@ -196,7 +196,7 @@ export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
     [NAME]: "Mobile App Demo",
     [UI]: (
       <cf-theme theme={IOS_HOME_THEME}>
-        <cf-screen>
+        <cf-screen bleed>
           {computed(() => {
             const tab = activeTab.get();
             const content = tabContent[tab] ?? tabContent.home;

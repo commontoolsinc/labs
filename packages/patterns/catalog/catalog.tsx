@@ -196,7 +196,7 @@ export default pattern<CatalogInput, CatalogOutput>(
     return {
       [NAME]: "Component Catalog",
       [UI]: (
-        <cf-screen>
+        <cf-screen bleed>
           <div style={styles.root}>
             {sidebarOpen.get()
               ? (

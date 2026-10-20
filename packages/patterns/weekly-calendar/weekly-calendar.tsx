@@ -534,7 +534,7 @@ const WeeklyCalendar = pattern<Input, Output>(
     return {
       [NAME]: computed(() => `${title} (${eventCount})`),
       [UI]: (
-        <cf-screen>
+        <cf-screen bleed>
           {/* Header */}
           <div
             slot="header"

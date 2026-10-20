@@ -246,7 +246,7 @@ const Event = pattern<Input, Output>(
     return {
       [NAME]: computed(() => `${title.get()}`),
       [UI]: (
-        <cf-screen>
+        <cf-screen bleed>
           {/* Header */}
           <cf-vstack
             slot="header"

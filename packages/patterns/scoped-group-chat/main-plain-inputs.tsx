@@ -224,7 +224,7 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
       [NAME]: "Scoped group chat",
       [UI]: (
         <cf-theme theme={CHAT_THEME}>
-          <cf-screen style={shellStyle}>
+          <cf-screen bleed style={shellStyle}>
             <cf-vstack slot="header" gap="3" style={headerStyle}>
               <cf-hstack justify="between" align="center" gap="4">
                 <div>

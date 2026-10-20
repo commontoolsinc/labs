@@ -1728,7 +1728,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     return {
       [NAME]: "Parking Coordinator",
       [UI]: (
-        <cf-screen>
+        <cf-screen bleed>
           {/* Header */}
           <div
             slot="header"

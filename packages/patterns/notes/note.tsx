@@ -533,7 +533,7 @@ const Note = pattern<NoteInput, NoteOutput>(
         content: projectedContent,
       },
       [UI]: (
-        <cf-screen>
+        <cf-screen bleed>
           <cf-vstack
             slot="header"
             gap="2"

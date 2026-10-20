@@ -676,8 +676,22 @@ main area **Tag**: `<cf-screen>`
   when content overflows
 - `footer` — Fixed content at the bottom
 
+**Attributes**:
+
+- `bleed` — Lays the content flush with the screen's edges, for content that
+  lays out its own edge (a hand-built header bar with its own background, a
+  split view)
+
+**CSS custom properties**:
+
+- `--cf-screen-gutter` — Space between the screen's edges and its content;
+  defaults to the theme's `--cf-theme-spacing-loose`
+
 **Usage notes**:
 
+- A screen has margins and bars do not: the screen pads itself by the gutter, so
+  content needs no padding of its own, and a `cf-toolbar` in the header or
+  footer, or a `cf-tab-bar` in the footer, runs to the edges by itself
 - Content in the default slot scrolls automatically — no need for `cf-vscroll`
   unless you need snap-to-bottom (chat), fade-edges, or styled scrollbar
 - Do NOT nest `cf-screen` inside another `cf-screen`
@@ -687,10 +701,10 @@ main area **Tag**: `<cf-screen>`
 ```html
 <cf-screen>
   <cf-heading slot="header" level="2">Title</cf-heading>
-  <cf-vstack gap="4" padding="4">
+  <cf-vstack gap="4">
     <!-- content scrolls if it overflows -->
   </cf-vstack>
-  <cf-hstack slot="footer" gap="2" padding="4">
+  <cf-hstack slot="footer" gap="2">
     <cf-button>Action</cf-button>
   </cf-hstack>
 </cf-screen>

@@ -44,7 +44,7 @@ const theme = {
 <cf-theme theme={theme}>
   <cf-screen>
     <cf-heading slot="header" level={2}>Pattern</cf-heading>
-    <cf-vstack gap="4" padding="4">
+    <cf-vstack gap="4">
       {/* main content — scrolls automatically */}
     </cf-vstack>
   </cf-screen>
