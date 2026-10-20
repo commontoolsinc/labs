@@ -434,9 +434,11 @@ export interface ExperimentalOptions {
   /**
    * A reactive computation's write that the space refuses for lack of a
    * grant is kept as a local fold over the document's confirmed value
-   * (`docs/specs/memory-v2/03-commit-model.md` §3.8.3), so that the output
-   * reads as what the principal computed. When false, such a write is
-   * reverted like any other rejection. Either way the refusal takes no
+   * (`docs/specs/memory-v2/03-commit-model.md` §3.8.3), where the write sits
+   * directly on the confirmed value it was made over, so that the output
+   * reads as what the principal computed; a write over anything else
+   * reverts. When false, such a write is reverted like any other rejection.
+   * Either way a refusal the server marks with permanent evidence takes no
    * retry, and the computation runs again only when an input it did not
    * write changes. Defaults to off.
    */

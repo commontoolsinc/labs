@@ -923,8 +923,8 @@ holds the measurements and the conditions for revisiting.
   after one refusal per computation. Its derived state is not stored, the
   panel list's result container among it, so such a principal sees a loom's
   root without its panels; `packages/toolshed/test/loom-cold-reader.test.ts`
-  pins that beside the arms that render them, a WRITE viewer under either
-  posture and a READ viewer under server execution.
+  pins that beside the cases that render them: a WRITE viewer under local and
+  server execution, and a READ viewer under server execution.
 - **Path to removal.** Remove the env mapping, the runtime option and its
   authority and shell-source entries, the shell define, and the gate in the
   scheduler. If the fold loses, the fold machinery in

@@ -501,9 +501,14 @@ Nothing else happens at invalidation time. No transitive marking, no effect
 scheduling, no history append. A dormant node accumulates `invalid` + causes
 and sits there at zero cost (D5).
 
-Reverts need no special handling: a revert's changes transition values back,
-the comparison fires, affected readers re-invalidate, and the optimistic
-chain re-settles.
+Reverts take the channel like any other notification: a revert's changes
+transition values back, the comparison fires, affected readers re-invalidate,
+and the optimistic chain re-settles. One revert is self-suppressed for one
+reader under P5: the revert of a write the space refused for lack of a grant
+(an `AuthorizationError` carrying the server's permanent evidence) does not
+invalidate the writer whose transaction it reverts, since that writer read the
+restored value before it wrote and would recompute the refused write. Every
+other reader of the reverted document re-invalidates as usual.
 
 ### 6.2 First-run dependencies — no prefetch
 
