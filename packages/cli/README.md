@@ -460,13 +460,13 @@ priority when both options are present. Use `--diff` instead when the pipe is a
 unified diff.
 
 INI covers `.ini` files, which include Ansible inventories with that suffix,
-Ansible's `ansible.cfg`, and the configuration files of Python tools such as
-`setup.cfg`, `.coveragerc`, `.flake8`, `pylintrc`, and `.codespellrc`. Another
-`.cfg` file is INI when its first line other than blank lines and comments heads
-a section whose name does not start the way a JSON array's first value does. A
-line in an Ansible inventory that names a host and then sets `name=value`
-variables colors the host and each variable. The structure tree lists sections
-with the keys and hosts in each.
+Ansible's `ansible.cfg` and `.ansible.cfg`, and the configuration files of
+Python tools such as `setup.cfg`, `.coveragerc`, `.flake8`, `pylintrc`, and
+`.codespellrc`. Another `.cfg` file is INI when its first line other than blank
+lines and comments heads a section whose name does not start the way a JSON
+array's first value does. A line in an Ansible inventory that names a host and
+then sets `name=value` variables colors the host and each variable. The
+structure tree lists sections with the keys and hosts in each.
 
 The binary language handles known binary filenames, input containing a NUL byte,
 and input that is not valid UTF-8. It starts in a read-only rendered view with

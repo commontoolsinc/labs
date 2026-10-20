@@ -635,16 +635,16 @@ continues that key's value. A line whose first word does not end in `:` and is
 followed by a `name=value` word or a `#` is an Ansible inventory host line,
 split into words as Ansible splits it: the first word is the host, the
 `name=value` words set the host's variables, and a `#` outside quotes starts a
-comment. `.ini` selects INI, and so do `ansible.cfg`, `setup.cfg`,
-`.codespellrc`, and the configuration files of Python tools that have no
-extension of their own. Another `.cfg` file is INI when its first line other
-than blank lines and comments heads a section whose name does not start the way
-a JSON array's first value does. TLC configuration and JSON do not open that
-way. Every character other than white space in the nine files has a token class.
-The scanner re-colors 100 kilobytes of inventory and configuration text in under
-2 milliseconds at the 95th percentile, and each 100-kilobyte input built to slow
-it that was measured, such as unclosed quotes or a single line of 25,000 words,
-in under 6. The fixture comes from Infra.
+comment. `.ini` selects INI, and so do `ansible.cfg`, `.ansible.cfg`,
+`setup.cfg`, `.codespellrc`, and the configuration files of Python tools that
+have no extension of their own. Another `.cfg` file is INI when its first line
+other than blank lines and comments heads a section whose name does not start
+the way a JSON array's first value does. TLC configuration and JSON do not open
+that way. Every character other than white space in the nine files has a token
+class. The scanner re-colors 100 kilobytes of inventory and configuration text
+in under 2 milliseconds at the 95th percentile, and each 100-kilobyte input
+built to slow it that was measured, such as unclosed quotes or a single line of
+25,000 words, in under 6. The fixture comes from Infra.
 
 Completion gate: every surveyed exact-name and compound-name operational file
 selects without content guessing.
