@@ -1478,7 +1478,7 @@ describe("data-updating", () => {
     // none of that cell. A same-document redirect to another scope's instance
     // is the position itself, realized at that scope.
 
-    const slot = (id: URI, scope: "space" | "user") =>
+    const slot = (id: URI, scope: "space" | "user" | "session") =>
       runtime.getCellFromLink(
         { space, id, path: [], scope },
         undefined,
@@ -1543,6 +1543,29 @@ describe("data-updating", () => {
 
       expect(slot(argument, "space").getRaw()).toEqual({ a: "supplied" });
       expect(slot(bound, "user").getRaw()).toEqual({ a: "bound" });
+    });
+
+    it("replaces a redirect to its own position's space instance and leaves that instance as it was", () => {
+      // A narrower instance redirecting to a broader one is no realization:
+      // the broader instance is shared, and setup content written through
+      // the redirect would land there for every reader.
+      const argument = idFor("binding walk broader-scope argument");
+      slot(argument, "space").setRaw({ a: "shared" });
+      slot(argument, "session").setRaw({
+        "/": { "link@1": { overwrite: "redirect", path: [], scope: "space" } },
+      });
+
+      diffAndUpdate(
+        runtime,
+        tx,
+        slot(argument, "session").getAsNormalizedFullLink(),
+        { a: "supplied" },
+        undefined,
+        { replacesBindings: true },
+      );
+
+      expect(slot(argument, "session").getRaw()).toEqual({ a: "supplied" });
+      expect(slot(argument, "space").getRaw()).toEqual({ a: "shared" });
     });
 
     it("writes through a redirect to its own position's user instance", () => {

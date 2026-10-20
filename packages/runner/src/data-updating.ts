@@ -549,8 +549,8 @@ export type DiffAndUpdateOptions = IReadOptions & {
    * position, or a link to a narrower scope's instance of another document, is
    * replaced by what is written there rather than followed: the cell it names
    * belongs to whoever bound it, and the walk writes none of that cell. A link
-   * to the same position in another scope's instance is the position itself,
-   * realized at that scope, and is followed as on any write.
+   * to the same position in a narrower scope's instance is the position
+   * itself, realized at that scope, and is followed as on any write.
    */
   replacesBindings?: true;
 };
@@ -1269,13 +1269,13 @@ function consumeSteeringSlot(
   tx.readValueOrThrow(link, options);
 }
 
-/** Whether `other` names `link`'s position in another scope's instance. */
-function isScopeInstanceOf(
+/** Whether `other` names `link`'s position in a narrower scope's instance. */
+function isNarrowerInstanceOf(
   other: NormalizedFullLink,
   link: NormalizedFullLink,
 ): boolean {
   return other.space === link.space && other.id === link.id &&
-    other.scope !== link.scope &&
+    scopeRank(other.scope) > scopeRank(link.scope) &&
     other.path.length === link.path.length &&
     other.path.every((segment, index) => segment === link.path[index]);
 }
@@ -1917,7 +1917,7 @@ export function normalizeAndDiff(
   if (
     currentValueIsLink && isWriteRedirectLink(currentValue) &&
     (options?.replacesBindings !== true ||
-      isScopeInstanceOf(parseLink(currentValue, link), link))
+      isNarrowerInstanceOf(parseLink(currentValue, link), link))
   ) {
     consumeSteeringSlot(tx, link, options);
     diffLogger.debug(
@@ -1964,7 +1964,7 @@ export function normalizeAndDiff(
     if (
       scopeRank(storedLink.scope) > scopeRank(link.scope) &&
       (options?.replacesBindings !== true ||
-        isScopeInstanceOf(storedLink, link))
+        isNarrowerInstanceOf(storedLink, link))
     ) {
       consumeSteeringSlot(tx, link, options);
       diffLogger.debug(
