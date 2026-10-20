@@ -124,6 +124,10 @@ import {
   commitStormThresholds,
 } from "./commit-rates.ts";
 import { classifyCommitTelemetry } from "./commit-telemetry.ts";
+import type {
+  DocumentInterestQuery,
+  DocumentInterestsReport,
+} from "./document-interests.ts";
 import {
   parseSessionReport,
   SessionReportLog,
@@ -222,6 +226,7 @@ import {
   viewWatches,
 } from "./view-interest.ts";
 
+export { MAX_DOCUMENT_INTEREST_SESSIONS } from "./document-interests.ts";
 export { SessionRegistry } from "./session-registry.ts";
 
 /**
@@ -623,6 +628,16 @@ const sessionReportsProviders: (() => SessionReportsReport)[] = [];
  * most recently constructed server still open; undefined when none is. */
 export const getSessionReports = (): SessionReportsReport | undefined =>
   sessionReportsProviders.at(-1)?.();
+
+/** Live servers' document-interest providers, newest live server last. */
+const documentInterestsProviders:
+  ((query: DocumentInterestQuery) => DocumentInterestsReport)[] = [];
+
+/** Reads the co-hosted server's session metadata; undefined without a server. */
+export const getDocumentInterests = (
+  query: DocumentInterestQuery,
+): DocumentInterestsReport | undefined =>
+  documentInterestsProviders.at(-1)?.(query);
 
 const randomHex = (bytes: number): string => {
   const data = crypto.getRandomValues(new Uint8Array(bytes));
@@ -2666,6 +2681,7 @@ export class Server {
     );
     commitRatesProviders.push(this.#commitRatesProvider);
     sessionReportsProviders.push(this.#sessionReportsProvider);
+    documentInterestsProviders.push(this.#documentInterestsProvider);
   }
 
   /**
@@ -2715,6 +2731,8 @@ export class Server {
   #documentCachesDiagnosticsProvider = () => this.documentCachesDiagnostics();
   #commitRatesProvider = () => this.commitRates();
   #sessionReportsProvider = () => this.sessionReports();
+  #documentInterestsProvider = (query: DocumentInterestQuery) =>
+    this.#sessions.documentInterests(query);
 
   /** Every open engine's document-cache counters, keyed by space. A peek:
    * nothing is opened by asking. */
@@ -3715,6 +3733,10 @@ export class Server {
     );
     withdrawProvider(commitRatesProviders, this.#commitRatesProvider);
     withdrawProvider(sessionReportsProviders, this.#sessionReportsProvider);
+    withdrawProvider(
+      documentInterestsProviders,
+      this.#documentInterestsProvider,
+    );
     this.#cancelScheduledRefresh();
     for (const connection of [...this.#connections.values()]) {
       connection.close();
