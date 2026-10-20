@@ -185,6 +185,85 @@ describe("document-release", () => {
     expect(loaded(id)).toBe(false);
   });
 
+  it("keeps current a document an action begins to read while its release is on its way", async () => {
+    await write("counter", 1);
+    const id = idOf("counter");
+    await load(id);
+    await readerStorage.releaseUnreadDocuments();
+
+    // The server holds the removal until the action has read the document.
+    const removal = defer<void>();
+    const watchRemove = server.watchRemove.bind(server);
+    server.watchRemove = async (message) => {
+      await removal.promise;
+      return await watchRemove(message);
+    };
+    const released = reader.releaseUnreadDocuments();
+    await reader.scheduler.idle();
+    const seen: unknown[] = [];
+    const action: Action = (tx) => {
+      seen.push(tx.readValueOrThrow({ space, scope: "space", id, path: [] }));
+    };
+    reader.scheduler.subscribe(action, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, { isEffect: true });
+    await reader.scheduler.idle();
+    removal.resolve();
+    await released;
+    await readerStorage.synced();
+    expect(loaded(id)).toBe(true);
+
+    await write("counter", 2);
+    await reader.scheduler.idle();
+    expect(seen.at(-1)).toEqual({ n: 2 });
+    reader.scheduler.unsubscribe(action);
+  });
+
+  it("drops a document held during its release when it cannot be watched again", async () => {
+    await write("counter", 1);
+    const id = idOf("counter");
+    await load(id);
+    await readerStorage.releaseUnreadDocuments();
+
+    const removal = defer<void>();
+    const watchRemove = server.watchRemove.bind(server);
+    server.watchRemove = async (message) => {
+      await removal.promise;
+      return await watchRemove(message);
+    };
+    const released = reader.releaseUnreadDocuments();
+    await reader.scheduler.idle();
+    const action: Action = (tx) => {
+      tx.readValueOrThrow({ space, scope: "space", id, path: [] });
+    };
+    reader.scheduler.subscribe(action, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, { isEffect: true });
+    await reader.scheduler.idle();
+    server.watchAdd = (message) =>
+      Promise.resolve({
+        type: "response",
+        requestId: message.requestId,
+        error: { name: "Error", message: "watch refused" },
+      });
+    const dropped: URI[] = [];
+    const unsubscribe = readerStorage.subscribeDocumentsDropped((
+      _space,
+      addresses,
+    ) => dropped.push(...addresses.map((address) => address.id)));
+    removal.resolve();
+    await released;
+    await readerStorage.synced();
+    expect(loaded(id)).toBe(false);
+    expect(dropped).toEqual([id]);
+    unsubscribe();
+    reader.scheduler.unsubscribe(action);
+  });
+
   it("keeps a document a live cell has loaded, and keeps it current", async () => {
     await write("counter", 1);
     const cell = reader.getCell(space, "counter", counterSchema);

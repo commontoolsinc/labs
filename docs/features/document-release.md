@@ -67,7 +67,11 @@ since the previous pass began, so no removal can take a kept document from the
 session. The server answers with `removes` naming each document no remaining
 watch reaches. Each is emptied as any removal empties it, and then dropped
 unless a local write to it is pending: its value, its delivery record, and its
-watched mark go. A removal the server sends for any other reason, such as the
+watched mark go. A document that something began to hold while the removal was
+on its way is the exception: it keeps its value and is watched again on its
+own, and the answer to that watch brings it up to date. If that watch fails,
+the document is removed and dropped like the others, so that its readers load
+it again. A removal the server sends for any other reason, such as the
 retraction of an instance whose lease has lapsed, empties the document in the
 same way, whatever holds it.
 
