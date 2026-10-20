@@ -477,11 +477,33 @@ export const VIEW_LANGUAGE_FIXTURES: readonly ViewLanguageFixture[] = [
     incompleteEvidence: { text: "fi", className: "controlKeyword" },
   },
   {
+    languageId: "make",
+    surveyRepository: "infra",
+    surveyCommit: "574f4a94cebb04cd12134146a25f0d7ba804da67",
+    surveyPath: "tofu/postmark/Makefile",
+    before: new URL("./make-infra/before.mk", import.meta.url),
+    after: new URL("./make-infra/after.mk", import.meta.url),
+    incomplete: new URL("./make-infra/incomplete.mk", import.meta.url),
+    selection: {
+      filenames: [
+        "tofu/postmark/Makefile",
+        "website/assets/logos/makefile",
+        "GNUmakefile",
+        "tools/bazel.mk",
+      ],
+      aliases: ["make", "makefile", "mk"],
+      shebangs: ["#!/usr/bin/make -f", "#!/usr/bin/env make"],
+    },
+    beforeEvidence: { text: "servers", className: "functionName" },
+    afterEvidence: { text: "verify-domains", className: "functionName" },
+    incompleteEvidence: { text: "if", className: "callName" },
+  },
+  {
     languageId: "properties",
-    // A shell variable assignment, an HCL attribute, and an INI key are each
-    // a `name=value` line, and shell, HCL, and INI color the name as
+    // A shell or make variable assignment, an HCL attribute, and an INI key are
+    // each a `name=value` line, and shell, make, HCL, and INI color the name as
     // properties files color their keys.
-    highlightingPeers: ["hcl", "shell", "ini"],
+    highlightingPeers: ["hcl", "shell", "make", "ini"],
     surveyRepository: "commonfabric-weaver",
     surveyCommit: "b457431c6f5e32305a2e6feb7901f8d05a9b2f6e",
     surveyPath: "android/gradle/wrapper/gradle-wrapper.properties",

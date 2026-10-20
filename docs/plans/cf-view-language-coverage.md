@@ -21,19 +21,22 @@ tree of its types, objects, functions, constructors, and type-level properties.
 Shell, which covers Bash and POSIX shell, has syntax highlighting and a
 structure tree of its functions; `sh`, `bash`, `dash`, and `ash` shebangs select
 it for Git hooks and other extensionless programs viewed directly, and a
-heredoc's body is a string with the expansions its delimiter allows. TOML, which
-covers Gradle version catalogs and Cargo manifests and lock files, has syntax
-highlighting and a structure tree of tables and keys. HCL, which covers OpenTofu
-and Terraform configuration, variable definitions files, backend configuration
-files, and dependency lock files, has syntax highlighting and a structure tree
-of blocks and of the attributes that define values, which are those at a file's
-top level and in `locals` blocks; a string's interpolations and template
-directives are code inside the string. Java properties files, ProGuard and R8
-keep rules, and XML, which covers Android manifests and resources, SVG, and
-Apple property lists, have syntax highlighting; properties files list their
-keys, and XML lists its elements. INI, which covers Ansible configuration and
-inventories and the configuration files of Python tools, has syntax
-highlighting and a structure tree of sections and the keys and hosts in each.
+heredoc's body is a string with the expansions its delimiter allows. Makefiles
+have syntax highlighting, with recipes and the other commands make passes to the
+shell colored by the shell grammar, and a structure tree of targets and
+variables. TOML, which covers Gradle version catalogs and Cargo manifests and
+lock files, has syntax highlighting and a structure tree of tables and keys. HCL,
+which covers OpenTofu and Terraform configuration, variable definitions files,
+backend configuration files, and dependency lock files, has syntax highlighting
+and a structure tree of blocks and of the attributes that define values, which
+are those at a file's top level and in `locals` blocks; a string's
+interpolations and template directives are code inside the string. Java
+properties files, ProGuard and R8 keep rules, and XML, which covers Android
+manifests and resources, SVG, and Apple property lists, have syntax
+highlighting; properties files list their keys, and XML lists its elements.
+INI, which covers Ansible configuration and inventories and the configuration
+files of Python tools, has syntax highlighting and a structure tree of sections
+and the keys and hosts in each.
 
 Automatic container detection is limited to structurally identified raw unified
 diffs and standard Git commit output. Source evidence otherwise settles only an
@@ -54,13 +57,13 @@ remain outside diff editing and semantic source loading.
 
 Python, Swift, Kotlin, TOML, HCL, and shell run on Tree-sitter through a shared,
 language-neutral adapter, which Go and HTML will use as well. Java
-properties, INI, ProGuard rules, and XML use focused scanners.
+properties, INI, ProGuard rules, XML, and makefiles use focused scanners.
 The order is provisional because recent activity was measured in six of the 26
 active organization repositories.
 
 This plan takes `cf view` from its current TypeScript and JavaScript, Markdown,
-JSON, JSONC, JSON Lines, YAML, Python, Swift, Kotlin, TOML, HCL, shell, Java
-properties, INI, ProGuard, XML, and diff support to honest
+JSON, JSONC, JSON Lines, YAML, Python, Swift, Kotlin, TOML, HCL, shell,
+makefile, Java properties, INI, ProGuard, XML, and diff support to honest
 handling of every textual syntax in the active
 `commonfabric` repositories.
 
@@ -614,13 +617,39 @@ file reconstructed exactly.
 ## Stage 9: build and operational configuration
 
 - [ ] Add Dockerfile, including every `Dockerfile.*` variant.
-- [ ] Add Makefile and `.mk`.
+- [x] Add Makefile and `.mk`.
 - [ ] Add Git, Docker, Deno, and Bazel ignore files.
 - [ ] Add Git attributes, modules, hooks, and worktree-include syntax.
 - [ ] Add dotenv files and compound examples.
 - [x] Add INI, Ansible configuration, and inventory files.
 - [ ] Add systemd units, tmpfiles configuration, and surveyed directive
   configuration.
+
+Makefiles are implemented ahead of the rest of this stage. An October 20, 2026
+read of the local checkouts of the organization's repositories found 19
+makefiles in 5 repositories, all named `Makefile` or `.mk`, with 56 path-change
+events on them in the six months before the read. `Makefile`, `makefile`,
+`GNUmakefile`, and `.mk` select the language, as do `make` and `gmake`
+shebangs.
+
+The language uses a focused scanner rather than Tree-sitter. The
+[`tree-sitter-grammars/tree-sitter-make`](https://github.com/tree-sitter-grammars/tree-sitter-make)
+grammar's npm package ships its WebAssembly build, but the grammar could not
+parse part of 7 of the 19 files, 133 of the 2,595 lines in all 19. It fails on
+idioms those files use: a `$$(` shell substitution, a `$(shell ...)` call that
+spans continuation lines, and parentheses inside a variable's value. Make's
+lexical syntax is line-oriented, and a scanner reads every one of those files
+and reconstructs each exactly.
+
+Make passes recipe lines, the recipe after a rule's `;`, the command of a `!=`
+assignment, and the argument of the `shell` function to the shell. The scanner
+colors each such stretch through the shell language's grammar as make runs
+it: one logical recipe line at a time, or a rule's whole recipe at a time when
+the makefile names the `.ONESHELL` target. Make's own references inside a
+stretch are hidden from that grammar and colored by the scanner. On 100
+kilobytes of gVisor's makefile, the 95th-percentile full highlight took 10.6
+milliseconds, the document parse 7.2, and the re-color after one edit 6.9, all
+inside the maximums for a parser-backed language.
 
 An October 20, 2026 refresh found nine INI files in the local checkouts of the
 organization's repositories: six Ansible inventories and the Ansible

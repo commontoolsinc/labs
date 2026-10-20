@@ -234,12 +234,27 @@ export function highlightLines(
   grammar: TreeSitterGrammar,
   text: string,
 ): Line[] {
+  const classes = tokenClasses(grammar, text);
+  return classes === undefined
+    ? plainTextLines(text)
+    : linesFromClasses(text, classes);
+}
+
+/**
+ * The token class of every character of `text` through its grammar, left
+ * undefined where the query claims nothing, or undefined while the grammar
+ * loads. A language that colors part of its source with another language's
+ * grammar reads that part's classes here.
+ */
+export function tokenClasses(
+  grammar: TreeSitterGrammar,
+  text: string,
+): (TokenClass | undefined)[] | undefined {
   const ready = loadedGrammar(grammar);
-  if (ready === undefined) return plainTextLines(text);
+  if (ready === undefined) return undefined;
   const tree = parseWith(ready, parserText(grammar, text));
   try {
-    const lineStarts = computeLineStarts(text);
-    return colorLines(ready, tree, text, lineStarts);
+    return classify(ready, tree, text.length);
   } finally {
     tree.delete();
   }
