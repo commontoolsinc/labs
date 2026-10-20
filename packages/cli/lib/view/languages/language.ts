@@ -41,6 +41,7 @@ import { iniLanguage } from "./ini/language.ts";
 import { tomlLanguage } from "./toml/language.ts";
 import { hclLanguage } from "./hcl/language.ts";
 import { shellLanguage } from "./shell/language.ts";
+import { makeLanguage } from "./make/language.ts";
 import { proguardLanguage } from "./proguard/language.ts";
 import { xmlLanguage } from "./xml/language.ts";
 import { binaryLanguage } from "./binary/language.ts";
@@ -254,7 +255,7 @@ export interface Language {
   /**
    * Stable identifier, such as `"typescript"`, `"markdown"`, `"json"`,
    * `"json-lines"`, `"yaml"`, `"python"`, `"swift"`, `"kotlin"`, `"shell"`,
-   * `"binary"`, or `"plain-text"`.
+   * `"make"`, `"binary"`, or `"plain-text"`.
    */
   readonly id: string;
 
@@ -473,6 +474,7 @@ function allLanguages(): readonly Language[] {
     tomlLanguage,
     hclLanguage,
     shellLanguage,
+    makeLanguage,
     propertiesLanguage,
     iniLanguage,
     proguardLanguage,

@@ -41,6 +41,7 @@ import { kotlinLanguage } from "../lib/view/languages/kotlin/language.ts";
 import { tomlLanguage } from "../lib/view/languages/toml/language.ts";
 import { hclLanguage } from "../lib/view/languages/hcl/language.ts";
 import { shellLanguage } from "../lib/view/languages/shell/language.ts";
+import { makeLanguage } from "../lib/view/languages/make/language.ts";
 import { propertiesLanguage } from "../lib/view/languages/properties/language.ts";
 import { proguardLanguage } from "../lib/view/languages/proguard/language.ts";
 import { iniLanguage } from "../lib/view/languages/ini/language.ts";
@@ -152,6 +153,9 @@ Deno.test("languageForName: identifiers and aliases resolve explicit overrides",
   assertEquals(languageForName("shell"), shellLanguage);
   assertEquals(languageForName("sh"), shellLanguage);
   assertEquals(languageForName("bash"), shellLanguage);
+  assertEquals(languageForName("make"), makeLanguage);
+  assertEquals(languageForName("makefile"), makeLanguage);
+  assertEquals(languageForName("mk"), makeLanguage);
   assertEquals(languageForName("properties"), propertiesLanguage);
   assertEquals(languageForName("java-properties"), propertiesLanguage);
   assertEquals(languageForName("proguard"), proguardLanguage);
@@ -179,6 +183,7 @@ Deno.test("languageForName: identifiers and aliases resolve explicit overrides",
     "toml",
     "hcl",
     "shell",
+    "make",
     "properties",
     "ini",
     "proguard",
@@ -214,6 +219,9 @@ Deno.test("languageForName: identifiers and aliases resolve explicit overrides",
     "shell",
     "sh",
     "bash",
+    "make",
+    "makefile",
+    "mk",
     "properties",
     "java-properties",
     "ini",
