@@ -286,10 +286,13 @@ decision is `planConfidentialityRelease()` in
   `Space` or `PersonalSpace` — with a digest commitment to the principal's
   DID read as the DID. §3.1.8 bounds an authored clause by the same
   authority: choosing the audience of one's own content.
-- **What it refuses to leave behind.** A clause the cell's effective label
-  view shows at the path from a position the release does not rewrite — an
-  ancestor's or a wildcard entry, a branch of the stored schema, or the
-  cell's own schema — refuses the whole release unless the caller keeps it.
+- **What it refuses to leave behind.** The path's effective label view is
+  read again in the releasing transaction, and a clause it still shows from a
+  position the release does not rewrite — an ancestor's or a wildcard entry,
+  a branch of the stored schema, or the cell's own schema — refuses the whole
+  release, and a change to a label that view read fails the commit. The
+  request may keep only clauses stored at the path (§8.12.7), so a path such a
+  position also labels is released only once that position is.
 - **The record.** Each release commits with a create-only receipt in the same
   space, labeled `User(actor)` and writable only by the release writer,
   holding the actor, the document and path, the clauses removed and their

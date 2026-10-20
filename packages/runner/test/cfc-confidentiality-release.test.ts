@@ -29,6 +29,18 @@ const actor = signer.did();
 const other = (await Identity.fromPassphrase("runner-cfc-release-other")).did();
 const owner = cfcAtom.personalSpace(actor);
 
+/** A document's schema without labels, as a reader that declares none sees it. */
+const PLAIN = {
+  type: "object",
+  properties: { text: { type: "string" } },
+} as const satisfies JSONSchema;
+
+/** `PLAIN`, declaring `confidentiality` at the root. */
+const declaring = (confidentiality: CfcConfClause[]) => ({
+  ...PLAIN,
+  ifc: { confidentiality },
+});
+
 describe("confidentiality release", () => {
   describe("clauseReleasableBy()", () => {
     it("returns `true` for a clause whose every alternative stands for the actor", () => {
@@ -52,6 +64,7 @@ describe("confidentiality release", () => {
         cfcAtom.personalSpace(other),
         { anyOf: [cfcAtom.user(actor), cfcAtom.user(other)] },
         cfcAtom.space(other),
+        { type: CFC_ATOM_TYPE.Space, id: commitCfcFieldValue(actor) },
         { type: owner.type, owner: commitCfcFieldValue(other) },
         { ...cfcAtom.user(actor), scope: "session" },
         cfcAtom.expires(1),
@@ -242,24 +255,30 @@ describe("confidentiality release", () => {
     let runtime: Runtime;
     let secret: Cell<{ text: string }>;
 
+    /**
+     * Writes a document through a schema declaring `confidentiality`, and
+     * returns a handle on it whose own schema declares nothing, so what a
+     * release finds is what the document stores.
+     */
+    const seed = async (
+      rt: Runtime,
+      cause: string,
+      confidentiality: CfcConfClause[],
+    ) => {
+      const tx = rt.edit();
+      rt.getCell<{ text: string }>(actor, cause, declaring(confidentiality))
+        .withTx(tx).set({ text: "personal" });
+      expect((await tx.commit().settled).error).toBeUndefined();
+      return rt.getCell<{ text: string }>(actor, cause, PLAIN);
+    };
+
     beforeEach(async () => {
       storageManager = StorageManager.emulate({ as: signer });
       runtime = new Runtime({
         apiUrl: new URL("https://example.com"),
         storageManager,
       });
-      secret = runtime.getCell<{ text: string }>(
-        actor,
-        "runner-cfc-release-secret",
-        {
-          type: "object",
-          ifc: { confidentiality: [owner] },
-          properties: { text: { type: "string" } },
-        },
-      );
-      const tx = runtime.edit();
-      secret.withTx(tx).set({ text: "personal" });
-      expect((await tx.commit().settled).error).toBeUndefined();
+      secret = await seed(runtime, "runner-cfc-release-secret", [owner]);
     });
 
     afterEach(async () => {
@@ -324,23 +343,29 @@ describe("confidentiality release", () => {
           type: owner.type,
           owner: commitCfcFieldValue(actor),
         };
-        const cell = runtime.getCell<{ text: string }>(
-          actor,
+        const cell = await seed(
+          runtime,
           "runner-cfc-release-committed",
-          {
-            type: "object",
-            ifc: { confidentiality: [committed] },
-            properties: { text: { type: "string" } },
-          },
+          [committed],
         );
-        const seed = runtime.edit();
-        cell.withTx(seed).set({ text: "personal" });
-        expect((await seed.commit().settled).error).toBeUndefined();
 
         const release = await releaseCellConfidentiality(cell, []);
 
         expect(release.released).toEqual([committed]);
         expect(storedEntries(cell)).toEqual([]);
+      });
+
+      it("refuses a clause the cell's own schema declares, and writes nothing", async () => {
+        const before = storedEntries(secret);
+        const declared = runtime.getCell<{ text: string }>(
+          actor,
+          "runner-cfc-release-secret",
+          declaring([owner]),
+        );
+
+        await expect(releaseCellConfidentiality(declared, [])).rejects
+          .toThrow("from a position a release does not rewrite");
+        expect(storedEntries(secret)).toEqual(before);
       });
 
       it("refuses a clause the path shows from a wildcard position, and writes nothing", async () => {
@@ -376,14 +401,10 @@ describe("confidentiality release", () => {
           cfcContentAddressedLabels: true,
         });
         try {
-          const cell = v2.getCell<{ text: string }>(actor, "runner-cfc-v2", {
-            type: "object",
-            ifc: { confidentiality: [owner, cfcAtom.user(actor)] },
-            properties: { text: { type: "string" } },
-          });
-          const seed = v2.edit();
-          cell.withTx(seed).set({ text: "personal" });
-          expect((await seed.commit().settled).error).toBeUndefined();
+          const cell = await seed(v2, "runner-cfc-v2", [
+            owner,
+            cfcAtom.user(actor),
+          ]);
           const stored = () => {
             const tx = v2.edit();
             try {

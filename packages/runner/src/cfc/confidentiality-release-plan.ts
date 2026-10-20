@@ -25,6 +25,7 @@ import {
   normalizeClause,
 } from "./clause.ts";
 import { isActorOwnedAlternative } from "./host-review.ts";
+import { classifyAtomField } from "./label-field-classification.ts";
 import {
   commitmentAwareEquals,
   isCfcFieldCommitment,
@@ -81,16 +82,20 @@ const nonEmptyLabel = (
 };
 
 /**
- * `atom` with each field that is a digest commitment to `actor`'s DID written
- * as that DID, and every other field as stored. A label crossing a space
- * boundary stores an owner as such a commitment (§4.6.4.1).
+ * `atom` with each commitment-classified field that holds a digest
+ * commitment to `actor`'s DID written as that DID, and every other field as
+ * stored. A label crossing a space boundary stores such a field — a `User`'s
+ * subject, a `PersonalSpace`'s owner — as its commitment (§4.6.4.1); a field
+ * the representation table keeps public, such as a `Space`'s id, never holds
+ * one, so a commitment there is left as it is and matches no one.
  */
 const openActorCommitments = (atom: CfcConfClause, actor: string) =>
   isObjectNotArray(atom)
     ? Object.fromEntries(
       Object.entries(atom).map(([key, value]) => [
         key,
-        isCfcFieldCommitment(value) && commitmentAwareEquals(value, actor)
+        classifyAtomField(atom, [key]) === "commitment" &&
+          isCfcFieldCommitment(value) && commitmentAwareEquals(value, actor)
           ? actor
           : value,
       ]),

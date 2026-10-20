@@ -10,6 +10,7 @@
 
 import { cfcAtom } from "@commonfabric/api/cfc";
 import { debugStr } from "@commonfabric/data-model";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 import { type Cell, cellRuntime } from "../cell.ts";
 import { resolveLink } from "../link-resolution.ts";
@@ -35,7 +36,9 @@ export interface CellConfidentialityRelease extends CfcConfidentialityRelease {
 /**
  * Helper for {@link releaseCellConfidentiality}, which returns the
  * confidentiality clauses `cell`'s effective label view holds at its own path:
- * what `cf cell get-label` shows there, the cell's own schema included.
+ * what `cf cell get-label` shows there, the cell's own schema included. Read
+ * through `cell`'s transaction, so a release in that transaction is seen, and
+ * so the commit conflicts with a change to any label the view read.
  *
  * @throws If the labels cannot be read.
  */
@@ -63,25 +66,28 @@ const shownConfidentiality = (cell: Cell<unknown>): CfcConfClause[] => {
  *
  * The acting principal is the runtime's authenticated user. The document must
  * sit in that principal's own space, and every released clause must stand for
- * that principal alone (`clauseReleasableBy()`). The path is resolved when the
- * call starts, so a link retargeted before the release commits does not move
- * it.
+ * that principal alone (`clauseReleasableBy()`). A link the path crosses that
+ * is retargeted before the release commits refuses it.
  *
- * A clause `cell`'s effective label view shows at the path that the release
- * cannot reach — an ancestor's or a wildcard entry, a declaration in a branch
- * of the stored schema, or one in the cell's own schema — and that `keep` does
- * not name is refused rather than left in place unreported.
+ * Once released, the path's effective label view is read again in the
+ * releasing transaction. A clause it still shows that `keep` does not name —
+ * held at a position the release does not rewrite, such as an ancestor's or a
+ * wildcard entry, a branch of the stored schema, or the cell's own schema —
+ * refuses the release rather than leave the clause in place unreported, and a
+ * change to any label the view read before the commit lands fails the commit.
+ * `keep` may name only clauses stored at the path (§8.12.7), so a path such a
+ * position also labels is released only once that position is.
  *
  * @throws When the release is refused (see
- *   `IExtendedStorageTransaction.releaseCfcConfidentiality()`), when a clause
- *   the path shows lies out of its reach, or when its commit fails.
+ *   `IExtendedStorageTransaction.releaseCfcConfidentiality()`), when the path
+ *   still shows an unkept clause, when a link it crosses was retargeted, or
+ *   when its commit fails.
  */
 export async function releaseCellConfidentiality(
   cell: Cell<unknown>,
   keep: readonly CfcConfClause[],
 ): Promise<CellConfidentialityRelease> {
   const runtime = cellRuntime(cell);
-  const shown = shownConfidentiality(cell);
   // The path is resolved in a transaction of its own, so that the links it
   // crosses do not join the label of the receipt the release writes.
   const resolving = runtime.edit();
@@ -109,14 +115,29 @@ export async function releaseCellConfidentiality(
       path: target.path,
       keep,
     });
-    const unreachable = shown.find((clause) =>
-      !keep.some((kept) => sameClause(kept, clause)) &&
-      !release.released.some((gone) => sameClause(gone, clause))
+    const location = target.path.length === 0
+      ? "<root>"
+      : target.path.join("/");
+    if (
+      !deepEqual(
+        resolveLink(
+          runtime,
+          tx,
+          cell.getAsNormalizedFullLink(),
+          "writeRedirect",
+        ),
+        target,
+      )
+    ) {
+      throw new Error(
+        `Cannot lower confidentiality at ${location}: a link the path ` +
+          "crosses changed while the release was prepared.",
+      );
+    }
+    const unreachable = shownConfidentiality(cell.withTx(tx)).find((clause) =>
+      !keep.some((kept) => sameClause(kept, clause))
     );
     if (unreachable !== undefined) {
-      const location = target.path.length === 0
-        ? "<root>"
-        : target.path.join("/");
       throw new Error(
         debugStr`Cannot lower confidentiality at ${location}: ` +
           debugStr`$quote,long${unreachable} labels the path from a position ` +

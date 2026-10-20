@@ -1573,16 +1573,17 @@ echo '{"confidentiality":[]}' \
 The identity may lower confidentiality only in its own space, the space whose
 DID is the identity's, and only for clauses whose every alternative stands for
 the identity alone: its DID, a `User`, `Context` or `Resource` atom naming it,
-or its own space as `Space` or `PersonalSpace` — each in plaintext or with the
-digest commitment a cross-space write stores in place of the DID. A clause with
-any other alternative is refused and left in place. So is the whole lowering
-when the path also shows a clause the input does not name from a position the
-lowering does not rewrite: an ancestor's or a wildcard label, a branch of the
-stored schema, or the piece's own schema, which a change to the pattern lowers.
-Each lowering commits with a create-only receipt in that space, readable by the
-identity alone, recording the clauses removed and digests of the stored metadata
-before and after. Reads served before the lowering keep the label they were
-served under.
+or its own space as `Space` or `PersonalSpace`. A `User` subject or a
+`PersonalSpace` owner may be the digest commitment a cross-space write stores in
+place of the DID. A clause with any other alternative refuses the whole
+lowering, and every clause stays in place. So does a clause the path still shows
+afterwards that the input does not name, from a position the lowering does not
+rewrite: an ancestor's or a wildcard label, a branch of the stored schema, or
+the piece's own schema, which a change to the pattern lowers. Each lowering
+commits with a create-only receipt in that space, readable by the identity
+alone, recording the clauses removed and digests of the stored metadata before
+and after. Reads served before the lowering keep the label they were served
+under.
 
 ## Invocation sessions
 
