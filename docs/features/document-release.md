@@ -70,8 +70,10 @@ unless a local write to it is pending: its value, its delivery record, and its
 watched mark go. A document that something began to hold while the removal was
 on its way is the exception: it keeps its value and is watched again on its
 own, and the answer to that watch brings it up to date. If that watch fails,
-the document is removed and dropped like the others, so that its readers load
-it again. A removal the server sends for any other reason, such as the
+the document keeps its value and the next pass watches it again, since an
+action that reads it need not load it again; if the space refuses the watch
+outright, the document is removed and dropped like the others, so that its
+readers meet the refusal. A removal the server sends for any other reason, such as the
 retraction of an instance whose lease has lapsed, empties the document in the
 same way, whatever holds it.
 

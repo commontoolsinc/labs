@@ -221,9 +221,15 @@ describe("document-release", () => {
     reader.scheduler.unsubscribe(action);
   });
 
-  it("drops a document held during its release when it cannot be watched again", async () => {
-    await write("counter", 1);
-    const id = idOf("counter");
+  /**
+   * Loads the counter, has an action begin to read it while the server holds
+   * its removal, and lets the removal through with `watchAdd` answering the
+   * replacement watch with `refusal`, once. Resolves to what the action read.
+   */
+  const releaseUnderRefusedRewatch = async (
+    id: URI,
+    refusal: { name: string; message: string },
+  ) => {
     await load(id);
     await readerStorage.releaseUnreadDocuments();
 
@@ -235,8 +241,9 @@ describe("document-release", () => {
     };
     const released = reader.releaseUnreadDocuments();
     await reader.scheduler.idle();
+    const seen: unknown[] = [];
     const action: Action = (tx) => {
-      tx.readValueOrThrow({ space, scope: "space", id, path: [] });
+      seen.push(tx.readValueOrThrow({ space, scope: "space", id, path: [] }));
     };
     reader.scheduler.subscribe(action, {
       reads: [],
@@ -244,21 +251,56 @@ describe("document-release", () => {
       writes: [],
     }, { isEffect: true });
     await reader.scheduler.idle();
-    server.watchAdd = (message) =>
-      Promise.resolve({
+    const watchAdd = server.watchAdd.bind(server);
+    server.watchAdd = (message) => {
+      server.watchAdd = watchAdd;
+      return Promise.resolve({
         type: "response",
         requestId: message.requestId,
-        error: { name: "Error", message: "watch refused" },
+        error: refusal,
       });
+    };
+    removal.resolve();
+    await released;
+    await readerStorage.synced();
+    await reader.scheduler.idle();
+    return { seen, action };
+  };
+
+  it("keeps a document held during its release that cannot at first be watched again, and the next pass keeps it current", async () => {
+    await write("counter", 1);
+    const id = idOf("counter");
+    const { seen, action } = await releaseUnderRefusedRewatch(id, {
+      name: "Error",
+      message: "watch failed",
+    });
+    expect(loaded(id)).toBe(true);
+    expect(seen.at(-1)).toEqual({ n: 1 });
+
+    await releaseTwice();
+    await readerStorage.synced();
+    await write("counter", 2);
+    await reader.scheduler.idle();
+    expect(seen.at(-1)).toEqual({ n: 2 });
+
+    reader.scheduler.unsubscribe(action);
+    await releaseTwice();
+    expect(loaded(id)).toBe(false);
+  });
+
+  it("drops a document held during its release when the space refuses to watch it again", async () => {
+    await write("counter", 1);
+    const id = idOf("counter");
     const dropped: URI[] = [];
     const unsubscribe = readerStorage.subscribeDocumentsDropped(
       (_space, addresses) => {
         for (const address of addresses) dropped.push(address.id);
       },
     );
-    removal.resolve();
-    await released;
-    await readerStorage.synced();
+    const { action } = await releaseUnderRefusedRewatch(id, {
+      name: "AuthorizationError",
+      message: "watch refused",
+    });
     expect(loaded(id)).toBe(false);
     expect(dropped).toEqual([id]);
     unsubscribe();

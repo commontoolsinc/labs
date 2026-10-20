@@ -4976,6 +4976,13 @@ export class SpaceReplica
   /** How many release passes (`releaseUnread()`) have begun. */
   #releasePasses = 0;
 
+  /**
+   * The documents a release removed while something held them that could not
+   * be watched again, by doc key: each keeps its value, and the next pass
+   * watches it again.
+   */
+  readonly #owedWatches = new Map<string, SessionSync["removes"][number]>();
+
   readonly #isRead: (address: LocalDocAddress) => boolean;
   readonly #onDocumentsDropped:
     | ((addresses: readonly LocalDocAddress[]) => void)
@@ -7174,6 +7181,7 @@ export class SpaceReplica
   async releaseUnread(): Promise<WatchAddress[]> {
     const pass = this.#releasePasses++;
     if (this.#closed || this.#sessionClient === undefined) return [];
+    for (const remove of this.#owedWatches.values()) this.#watchAgain(remove);
     const releasable = (root: RootWatches) =>
       root.pulledInPass < pass &&
       (this.#docs.get(root.key)?.readInPass ?? -1) < pass &&
@@ -7307,15 +7315,20 @@ export class SpaceReplica
 
   /**
    * Watches on its own a document a release removed after something began to
-   * hold it. If that fails, the document is removed as the release removed
-   * it, so that its readers load it again rather than keep a value the
-   * session no longer keeps current. One with a local write pending keeps
-   * that write over an emptied base, as under any removal.
+   * hold it. If that fails, the document keeps its value and the next pass
+   * tries again (`#owedWatches`), since a reader of it need not load it
+   * again. If the space refuses the watch outright, the document is removed
+   * as the release removed it, so that its readers meet the refusal rather
+   * than keep a value the session no longer keeps current; one with a local
+   * write pending keeps that write over an emptied base, as under any
+   * removal.
    */
   #watchAgain(remove: SessionSync["removes"][number]): void {
+    const key = this.#docKeyOf(removedAddress(remove));
+    this.#owedWatches.delete(key);
     void this.#watchDocument(removedAddress(remove)).then(
       (result) => result.error,
-      (error: unknown) => error,
+      toPullError,
     ).then((error) => {
       if (error === undefined || this.#closed) return;
       logger.warn("watch-again-failed", () => [
@@ -7323,6 +7336,10 @@ export class SpaceReplica
         remove.id,
         error,
       ]);
+      if (!isPermanentAuthorizationFailure(error)) {
+        this.#owedWatches.set(key, remove);
+        return;
+      }
       this.#applySessionSync({
         type: "sync",
         fromSeq: 0,
