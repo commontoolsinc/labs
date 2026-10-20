@@ -441,8 +441,9 @@ identifies it. Python interpreter shebangs select Python for otherwise
 unrecognized names, `swift` and `xcrun swift` shebangs select Swift, and
 `kotlin` shebangs select Kotlin. `sh`, `bash`, `dash`, and `ash` shebangs select
 shell, which covers Git hooks and other extensionless programs. Node, Deno, and
-Bun shebangs select the TypeScript and JavaScript language family. Source that
-starts with an XML declaration (`<?xml`) selects XML, which covers Interface
+Bun shebangs select the TypeScript and JavaScript language family. For an
+otherwise unrecognized name, source that starts with an XML declaration
+(`<?xml`), after any byte order mark, selects XML, which covers Interface
 Builder documents, project files, and the other XML formats that no extension
 announces. A diff reads a shebang or an XML declaration for a file whose path
 selects no language, from a hunk that starts at the file's first line, from the

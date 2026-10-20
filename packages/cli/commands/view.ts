@@ -17,8 +17,9 @@ covers Bash and POSIX shell, and XML covers Android manifests and resources, SVG
 and Apple property lists. Python interpreter shebangs select Python, 'swift' and
 'xcrun swift' shebangs select Swift, 'kotlin' shebangs select Kotlin, and 'sh',
 'bash', 'dash' and 'ash' shebangs select shell. Node, Deno and Bun shebangs
-select the TypeScript and JavaScript language family. Source that starts with
-an XML declaration ('<?xml') selects XML.
+select the TypeScript and JavaScript language family. For a name no language
+claims, source that starts with an XML declaration ('<?xml'), after any byte
+order mark, selects XML.
 Known binary filenames, NUL-containing input and invalid UTF-8 select the binary
 language. Its rendered view is a read-only hex dump with control pictures for
 bytes that have no printable ASCII character.

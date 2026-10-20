@@ -2,19 +2,19 @@
 
 Status: In progress.
 
-Unknown named files and filename-free source without a recognized shebang or XML
-declaration use plain text, while filename-free transformed compiler output
-keeps its TypeScript default. Piped source can select a language directly or
-through a virtual filename. Declarative metadata can now describe extensions,
-exact names, compound patterns, explicit aliases, direct interpreter shebangs,
-launcher shebangs that a subcommand settles, and extensions that several
-syntaxes share. JSON Lines and NDJSON use the JSON tokenizer with independent
-lexical state for each record. JSON also covers the surveyed names that no
-`.json` suffix announces: web manifests, TLDraw documents, Deno lock files,
-editor workspace files, Swift package resolutions, and the `.cfg` files whose
-source opens a JSON object. Python has syntax highlighting and a structure tree
-of its classes and functions. Swift has syntax highlighting and a structure tree
-of its types, functions, initializers, and type-level properties, and its
+Unknown named files and filename-free source use plain text unless a recognized
+shebang or an XML declaration opens the source, while filename-free transformed
+compiler output keeps its TypeScript default. Piped source can select a language
+directly or through a virtual filename. Declarative metadata can now describe
+extensions, exact names, compound patterns, explicit aliases, direct interpreter
+shebangs, launcher shebangs that a subcommand settles, and extensions that
+several syntaxes share. JSON Lines and NDJSON use the JSON tokenizer with
+independent lexical state for each record. JSON also covers the surveyed names
+that no `.json` suffix announces: web manifests, TLDraw documents, Deno lock
+files, editor workspace files, Swift package resolutions, and the `.cfg` files
+whose source opens a JSON object. Python has syntax highlighting and a structure
+tree of its classes and functions. Swift has syntax highlighting and a structure
+tree of its types, functions, initializers, and type-level properties, and its
 package manifests select it through their `.swift` extension. Kotlin, which
 covers Gradle's Kotlin build scripts, has syntax highlighting and a structure
 tree of its types, objects, functions, constructors, and type-level properties.
