@@ -34,6 +34,7 @@ import { Runtime } from "../src/runtime.ts";
 import { resolveSchema } from "../src/schema.ts";
 import { decomposeSchema } from "../src/schema-decompose.ts";
 import { registerSchemaDocument } from "../src/schema-registry.ts";
+import type { URI } from "../src/sigil-types.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { getTransactionWriteDetails } from "../src/storage/transaction-inspection.ts";
 import { toURI } from "../src/uri-utils.ts";
@@ -1262,6 +1263,92 @@ describe("data-updating", () => {
     // Verify neither source nor destination cells were modified
     expect(sourceCell.get()).toEqual({ value: 99 });
     expect(destinationCell.get()).toEqual({ value: 42 });
+  });
+
+  describe("a link written into the slot it resolves to", () => {
+    // A space slot whose content is realized at a narrower scope holds a
+    // same-document redirect to that instance, so a write through the space
+    // slot lands in the user instance. A link to the space slot written there
+    // would point the user instance back at the slot that points at it, and
+    // every later read would meet a link cycle.
+
+    const redirectTo = (id: URI, scope: "space" | "user") => ({
+      "/": { "link@1": { id, overwrite: "redirect", path: [], scope } },
+    });
+
+    const slot = (id: URI, scope: "space" | "user" | "session") =>
+      runtime.getCellFromLink(
+        { space, id, path: [], scope },
+        undefined,
+        tx,
+      );
+
+    // Stores `{ a: "hello" }` behind a target id: at its user instance, with
+    // its space slot redirecting there, when `realizedAtUser`; else at the
+    // space slot itself.
+    const target = (cause: string, realizedAtUser: boolean) => {
+      const id = runtime.getCell(space, cause, undefined, tx)
+        .getAsNormalizedFullLink().id;
+      if (realizedAtUser) {
+        slot(id, "user").setRaw({ a: "hello" });
+        slot(id, "space").setRaw({
+          "/": { "link@1": { overwrite: "redirect", path: [], scope: "user" } },
+        });
+      } else {
+        slot(id, "space").setRaw({ a: "hello" });
+      }
+      return id;
+    };
+
+    it("writes nothing for a link to the space slot realized at this user instance", () => {
+      const id = target("self link realized at user", true);
+
+      const changes = normalizeAndDiff(
+        runtime,
+        tx,
+        slot(id, "user").getAsNormalizedFullLink(),
+        redirectTo(id, "space"),
+      );
+
+      expect(changes).toEqual([]);
+    });
+
+    it("writes a link to the space slot of a document whose content is at that slot", () => {
+      // Not a realization: the space slot holds content, so a link from the
+      // user instance to it reaches content and closes no cycle.
+      const id = target("self link not realized", false);
+
+      const changes = normalizeAndDiff(
+        runtime,
+        tx,
+        slot(id, "user").getAsNormalizedFullLink(),
+        redirectTo(id, "space"),
+      );
+
+      expect(changes.length).toBe(1);
+    });
+
+    it("keeps a realized target's content when an argument document is set to the redirect it holds", () => {
+      // `Cell.set()` follows the argument document's stored redirect to the
+      // target's user instance before it diffs, as the runner's argument
+      // write does when a nested piece's code changes under a live session.
+      const id = target("argument re-set realized at user", true);
+      const argumentId = runtime.getCell(
+        space,
+        "argument re-set argument",
+        undefined,
+        tx,
+      ).getAsNormalizedFullLink().id;
+      slot(argumentId, "session").setRaw(redirectTo(id, "space"));
+
+      slot(argumentId, "session").set(redirectTo(id, "space"));
+
+      expect(slot(argumentId, "session").getRaw()).toEqual(
+        redirectTo(id, "space"),
+      );
+      expect(slot(id, "user").getRaw()).toEqual({ a: "hello" });
+      expect(slot(argumentId, "session").get()).toEqual({ a: "hello" });
+    });
   });
 
   describe("authoritative container re-assert in normalizeAndDiff", () => {

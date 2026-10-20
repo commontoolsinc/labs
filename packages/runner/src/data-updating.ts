@@ -1258,6 +1258,37 @@ function consumeSteeringSlot(
 }
 
 /**
+ * Whether `target`, a link about to be written at `link`, names the same
+ * position of the same document at another scope, and that position's slot
+ * is a scope realization redirecting to `link` itself. Such a slot hands its
+ * content to the narrower instance at `link`, so a write there of a link to
+ * the slot would point the instance back at the slot that points at it: a
+ * link cycle every later read meets. Written there, the link refers to the
+ * instance itself.
+ */
+function realizesAt(
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  target: NormalizedFullLink,
+  options: DiffAndUpdateOptions | undefined,
+): boolean {
+  if (
+    target.space !== link.space || target.id !== link.id ||
+    target.scope === link.scope ||
+    target.path.length !== link.path.length ||
+    target.path.some((segment, index) => segment !== link.path[index])
+  ) {
+    return false;
+  }
+  const stored = tx.readValueOrThrow(target, {
+    ...options,
+    meta: { ...options?.meta, ...writeDestinationRead },
+  });
+  return isPrimitiveCellLink(stored) && isWriteRedirectLink(stored) &&
+    areNormalizedLinksSame(parseLink(stored, target), link);
+}
+
+/**
  * Traverses objects and returns an array of changes that should be written. An
  * empty array means no changes.
  *
@@ -1759,9 +1790,12 @@ export function normalizeAndDiff(
     );
   }
 
-  // If we're about to create a reference to ourselves, no-op
+  // If we're about to create a reference to ourselves, no-op: a link to this
+  // very slot, or to the broader-scope slot whose realization this is.
   if (
-    newValueLink !== undefined && areNormalizedLinksSame(link, newValueLink)
+    newValueLink !== undefined &&
+    (areNormalizedLinksSame(link, newValueLink) ||
+      realizesAt(tx, link, newValueLink, options))
   ) {
     diffLogger.debug(
       "diff",
