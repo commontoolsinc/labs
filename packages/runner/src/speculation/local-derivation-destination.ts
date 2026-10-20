@@ -229,7 +229,9 @@ export class LocalDerivationDestination implements TransactionSealDestination {
    * writer whose run was refused, when the transaction names one, runs once
    * more so that its derivation is held rather than lost. The rerun is
    * requested only once the refusal's revert has been applied, so the writer
-   * reads the restored state rather than the write the store refused.
+   * reads the restored state rather than the write the store refused. Under
+   * the `localFold` flag the replica keeps the refused write and the
+   * scheduler's own retry reads it, so no rerun is requested here.
    */
   #forward(
     tx: IExtendedStorageTransaction,
@@ -249,7 +251,9 @@ export class LocalDerivationDestination implements TransactionSealDestination {
         this.#refused.add(space);
         this.#watchAccessList(space);
       }
-      if (isAction(writer)) this.#runtime.scheduler.invalidateAction(writer);
+      if (isAction(writer) && this.#runtime.experimental.localFold !== true) {
+        this.#runtime.scheduler.invalidateAction(writer);
+      }
     }, () => {});
     return receipt;
   }
