@@ -157,7 +157,7 @@ snapshot carries what the branch says of its commit. Every view that draws a run
 on main large enough to carry it marks such a commit with a green star: solid
 while the branch is at the commit, and hollow once the branch has moved past it.
 A commit the branch moved past without stopping at gets no star, although the
-branch contains it. The views are the rows of the recent main runs tile, the
+branch contains it. The views are the rows of the recent commits tile, the
 bars of a repository page's main-branch chart and the runs listed under it, and
 the heading of the commit CI Gantt page. The star's tooltip names the branch and
 says whether it is or was at the commit.
@@ -475,7 +475,7 @@ sub line and the foot of a chart on plain color.
 Everything the dashboard draws over a texture has to stay legible against it,
 and the faintest marks are the ones that decide how strong a texture can be: a
 tile's title, its drill-down hint, its running badge, and the times, dividers
-and pop-out arrows down the recent-runs list. Those are set against the lightest the background
+and pop-out arrows down the recent commits list. Those are set against the lightest the background
 reaches under a texture band rather than against the tile's flat color. The
 dividers and the arrows are fractions of white rather than fixed grays,
 because the surface they sit on is tinted by the status and a gray that reads
@@ -509,7 +509,7 @@ wrapping. A line longer than that width is not shortened by the renderer so much
 as cut off by it, and a line that ends in an ellipsis has taken the whole line
 and delivered none of it. So the headline figure and the sub line under it are
 what a tile has room to say. Text can go below them — the host names down the
-production tile, the run list on the full-width recent runs — but only text
+production tile, the commit list on the full-width recent commits — but only text
 short enough to be read whole at the width the tile is actually given. Something
 longer is not a longer tile, it is a page.
 
@@ -559,7 +559,7 @@ window the same parts follow one another down the page.
   it now across its jobs and its run snapshots, and the median time of the
   main runs that passed among those the chart shows.
 - On the left, for each of its run sources, main before pull requests, a chart
-  of its newest runs, as many as the recent main runs tile shows: a bar for
+  of its newest `RECENT_DISPLAY` (50) runs: a bar for
   each run, oldest on the left, as tall as the run took and colored by what it
   concluded, with the dashboard's diamond over each failure and the green
   branch's star over each commit it is or was at. The charts share
@@ -637,8 +637,8 @@ installation with the same permissions; see [Credentials](#credentials).
 | labs ci trust, labs ci duration | GitHub Actions (`deno.yml` in `commonfabric/labs`), via the REST API. Trust reads the runs on main; duration reads the pull request runs. Each trust tile opens its repository's page, and each cell of its strip opens its run | `GH_TOKEN` (or `GITHUB_TOKEN`) |
 | loom ci trust, loom ci duration | the same two tiles for `commonfabric/loom` (`test-fast.yml`) | `GH_TOKEN` (read access to loom); optional `DASHBOARD_LOOM_REPO` |
 | weaver ci trust, weaver ci duration | the same two tiles for `commonfabric/commonfabric-weaver` (`ci.yml`). The duration tile is not a link, because the history views cover only labs and loom | `GH_TOKEN` (read access to weaver); optional `DASHBOARD_WEAVER_REPO` |
-| recent main runs | Labs and Loom main-run snapshots, refreshed independently and merged chronologically whenever either arrives; each row is tagged with its repo and links to its run, except that a pull request number in its title, such as "(#1234)", links to that pull request, and its arrow links to the pull request that landed the commit, or to the commit when its title names none; a row whose commit the repository's green branch is or was at opens with a star, read from GitHub's activity record for the repository | `GH_TOKEN` |
-| commit CI Gantt → `/ci-gantt` | job and step timing for every successful main workflow run attached to one commit, linked from run durations in recent main runs; the commit wears the green branch's star when the branch is or was at it | `GH_TOKEN` |
+| recent commits | the newest commits on the default branch of every repository the token can see that is not archived, interleaved newest first and each tagged with its repository: each commit that landed a pull request opened by an account GitHub does not mark as a bot, and each commit that the labs, loom, or weaver main CI workflow ran on after a push. The commit a pull request landed is the one GitHub merged it with: the squashed commit, the merge commit, or the last commit rebased onto the branch, so a pull request is one row. The rest are left out: a commit pushed without a pull request, and a bot's pull request, such as an automated deployment's, unless one of those workflows ran on it. So a repository used as a notebook adds no rows. A pull request counts only when it was merged into the repository's default branch. The tile lists the organization's repositories at most every thirty seconds. When a repository's last push has changed since its commits were read, one GraphQL query reads its newest hundred commits again, each with the pull request that landed it. A repository GitHub refuses to read keeps the commits already read until its next push, and the tile's sub line counts such repositories. That read runs in the background, and the tile is collected again when it finds new commits. A commit one of those workflows ran on carries the newest such run's result and duration, from the same main-run snapshots the ci trust tiles read, and its text links to that run; the text of any other commit links to the commit. A pull request number in a title, such as "(#1234)", links to that pull request, and the row's arrow links to the pull request that landed the commit, or to the commit when its title names none. A row whose commit the repository's green branch is or was at opens with a star, read from GitHub's activity record for the repository. The tile is red when the newest finished run of those workflows failed, and orange when one of the nine before it did | `GH_TOKEN` (Contents and Pull requests read across the organization) |
+| commit CI Gantt → `/ci-gantt` | job and step timing for every successful main workflow run attached to one commit, linked from run durations in recent commits; the commit wears the green branch's star when the branch is or was at it | `GH_TOKEN` |
 | CI duration history → `/bench?view=ci` | labs and loom job, shard-group, and end-to-end workflow duration trends. The labs and loom duration tiles open their repository's view, which charts runs on main rather than the pull request runs the tiles measure | `GH_TOKEN` |
 | CI run Gantt → `/bench?view=gantt` | detailed labs or loom job phases from `scripts/ci-gantt.ts`, backed by the CI history cache | `GH_TOKEN` |
 | flaky tests | how many tests the test-selection publisher measured disagreeing with themselves often enough to keep off pull requests, read from the newest selection manifest. The headline names what it counts, so it reads `25 flaky tests`, or `no flaky tests` when there are none. The line under it says what the count was drawn from: the span of history a flake share is measured over, which the manifest's `FLAKE_WINDOW_DAYS` dial names, and how long ago the publisher measured. The sparkline plots the count across every available manifest. Which tests they are is on the page behind it. Amber from one, red from ten. Gray with a dash when no manifest is available, the newest readable manifest has an empty corpus, or none of the manifests it looked at can be read, naming the shape it found in that last case. Readable history remains visible when the newest object cannot be read | optional `GH_TOKEN` for publisher activity |
@@ -972,8 +972,9 @@ requests an hour, where a personal access token is allowed 5,000.
    App**. An app the enterprise owns can be installed only on the enterprise
    and its organizations, which are the two installations the dashboard uses.
    Give it any homepage URL and clear **Webhook** → **Active**.
-2. **Repository permissions**: **Actions** and **Contents**, both
-   **Read-only**. **Metadata** becomes read-only automatically.
+2. **Repository permissions**: **Actions**, **Contents**, and **Pull
+   requests**, all **Read-only**. **Metadata** becomes read-only
+   automatically. **Pull requests** is for **recent commits**.
 3. **Organization permissions**: **Members** **Read-only** for **github
    users**. GitHub refuses an app's tokens for an organization's billing
    ("Resource not accessible by integration"), so **github spend** reads
@@ -986,7 +987,7 @@ requests an hour, where a personal access token is allowed 5,000.
    downloaded `.pem` file's whole contents, PKCS#1 as GitHub issues it, go in
    `GH_APP_PRIVATE_KEY`. PKCS#8 works as well.
 6. **Install App** on the organization, with **All repositories** so the **ci**
-   tile covers the whole organization. For enterprise billing, install it on
+   and **recent commits** tiles cover the whole organization. For enterprise billing, install it on
    the enterprise too. An enterprise installation receives only the app's
    enterprise permissions, and the organization installation only its
    repository and organization permissions, which is why the dashboard keeps
@@ -995,7 +996,7 @@ requests an hour, where a personal access token is allowed 5,000.
 ### `GH_TOKEN` (or `GITHUB_TOKEN`)
 
 Powers **ci**, **labs ci trust**, **labs ci duration**, the **loom** and
-**weaver** counterparts, **recent main runs**, **github users**, and
+**weaver** counterparts, **recent commits**, **github users**, and
 **github spend** when `GH_BILLING_TOKEN` is unset. It also powers the optional
 publisher-activity indicators on **flaky tests** and **test selection**; their
 public measurements need no token. Needs
@@ -1006,9 +1007,10 @@ the github-ci-spend tile additionally needs org **Administration: read** on
 the enterprise credentials described under `GH_BILLING_TOKEN`; a separate
 `GH_BILLING_TOKEN` is simpler. The **github users** tile needs org
 **Members: read**. The
-**ci** tile covers every repository the token can see, so a token selecting only
-some repositories leaves the rest out of that tile without saying so: give it
-**All repositories** for the tile to cover the organization. One fine-grained
+**ci** and **recent commits** tiles cover every repository the token can see,
+so a token selecting only some repositories leaves the rest out of those tiles
+without saying so: give it **All repositories** for them to cover the
+organization. One fine-grained
 token can carry all of these permissions:
 
 The account that owns the token must be a member of the organization. GitHub's
@@ -1020,11 +1022,12 @@ organization member; other callers see only public memberships.
 2. Set **Resource owner** to the **commonfabric** organization (not your
    personal account) — org ownership is what unlocks the billing permission.
 3. **Repository access** → **All repositories**, which is what lets the **ci**
-   tile see the whole organization. **Only select repositories** with
-   `commonfabric/labs`, `commonfabric/loom`, and
+   and **recent commits** tiles see the whole organization. **Only select
+   repositories** with `commonfabric/labs`, `commonfabric/loom`, and
    `commonfabric/commonfabric-weaver` covers every other GitHub tile, and
-   narrows **ci** to those three.
-4. **Repository permissions**: set **Actions** and **Contents** to **Read-only**.
+   narrows **ci** and **recent commits** to those three.
+4. **Repository permissions**: set **Actions**, **Contents**, and **Pull
+   requests** to **Read-only**. **Pull requests** is for **recent commits**.
 5. **Organization permissions**: set **Members** to **Read-only** for GitHub
    users. Set **Administration** to **Read-only** for github spend. Only an org
    owner or billing manager can grant the latter permission. Skip either
@@ -1678,7 +1681,7 @@ Notes:
 Everything below is a tunable constant in `config.ts`:
 
 - **Status thresholds:** `TRUST_GOOD`/`TRUST_WARN` (first-try-green %), `DUR_GOOD`/`DUR_WARN` (median CI minutes).
-- **Data windows:** The shared fetch returns at most `CI_RUNS_MAX=200` workflow runs and stops at `CI_RUNS_MAX_AGE_DAYS=60` days. CI trust uses the newest `TRUST_RUNS_MAX=160` fetched runs. CI duration uses whichever is larger: `DUR_MIN_RUNS=20` passing runs or `DUR_MAX_AGE_HOURS=6` hours. The benchmark trend uses the same larger-of-the-two idea in days: `BENCH_TREND_MIN_RUNS=20` runs or `BENCH_TREND_MAX_AGE_DAYS=14` days. Recent runs shows `RECENT_DISPLAY=50` entries.
+- **Data windows:** The shared fetch returns at most `CI_RUNS_MAX=200` workflow runs and stops at `CI_RUNS_MAX_AGE_DAYS=60` days. CI trust uses the newest `TRUST_RUNS_MAX=160` fetched runs. CI duration uses whichever is larger: `DUR_MIN_RUNS=20` passing runs or `DUR_MAX_AGE_HOURS=6` hours. The benchmark trend uses the same larger-of-the-two idea in days: `BENCH_TREND_MIN_RUNS=20` runs or `BENCH_TREND_MAX_AGE_DAYS=14` days. Recent commits shows `RECENT_DISPLAY=50` commits.
 - **ci-trust cell grid:** The grid has up to `TRUST_RUNS_MAX=160` square cells in rows of `TRUST_COLS=40`. On wide tiles, the squares stop growing and the columns spread out to keep the grid clear of the subheading while preserving its equal left, right, and bottom insets. First-try successes are green. In-progress runs are blue. Completed runs that lower the trust percentage are red, including a run that needed a rerun and a run whose one attempt left was cancelled after it started a job. Ignored runs are gray, including a run cancelled before it started a job on every attempt.
 
 ## Local development

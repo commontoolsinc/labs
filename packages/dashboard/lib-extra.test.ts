@@ -16,6 +16,7 @@ import {
   github,
   githubDownload,
   githubOperationsInProgress,
+  GitHubStatusError,
   memo,
   performanceGithub,
   RUN_LIST_ACCESS,
@@ -130,11 +131,13 @@ Deno.test("github: non-OK -> throws with the status; the error body is not retur
       const e = await assertRejects(() => github("repos/o/missing"), Error);
       assertEquals(e.message, "GitHub API repos/o/missing failed: HTTP 404");
       assertEquals(friendlyError(e.message), "not found");
+      assert(e instanceof GitHubStatusError && !e.rateLimited);
     });
     await withFetch(() => Response.json({}, { status: 429 }), async () => {
       const e = await assertRejects(() => github("rate/limited"), Error);
       assertEquals(e.message, "GitHub API rate/limited failed: HTTP 429");
       assertEquals(friendlyError(e.message), "rate limit hit");
+      assert(e instanceof GitHubStatusError && e.rateLimited);
     });
     await withFetch(
       () =>
@@ -149,6 +152,7 @@ Deno.test("github: non-OK -> throws with the status; the error body is not retur
           "GitHub API rate/limited failed: HTTP 403 (rate-limited)",
         );
         assertEquals(friendlyError(e.message), "rate limit hit");
+        assert(e instanceof GitHubStatusError && e.rateLimited);
       },
     );
   });

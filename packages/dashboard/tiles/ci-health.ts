@@ -72,13 +72,20 @@ import {
   escapeHtml,
   friendlyError,
   github,
+  GITHUB_REQUEST_CONCURRENCY,
+  inParallel,
   memo,
+  messageOf,
   runDurationMs,
   STATUS_RANK,
 } from "../lib.ts";
 import type { GitHubCredential } from "../github-auth.ts";
 import { type GitHubRun, RunLists } from "../github-runs.ts";
 import { dashboardCacheFile } from "../history-files.ts";
+import {
+  type OrganizationRepo,
+  organizationRepos,
+} from "../organization-repos.ts";
 import {
   type Ctx,
   type Run,
@@ -87,8 +94,6 @@ import {
   type Tile,
   type TileView,
 } from "../types.ts";
-
-const ORG = REPO.split("/")[0];
 
 // The set of repositories and the workflows in them changes far more slowly
 // than a job's result, so the inventory is read once an hour while the results
@@ -104,11 +109,6 @@ const PINNED = [
   runSource(REPO, CI_WORKFLOW, "main"),
   runSource(LOOM_REPO, LOOM_CI_WORKFLOW, "main"),
 ];
-
-// Requests in flight at once. The inventory is tens of repositories wide and
-// GitHub asks for a client's requests to be spread out rather than fired
-// together.
-const REQUEST_CONCURRENCY = 8;
 
 const FAILING_CONCLUSIONS = new Set([
   "failure",
@@ -126,12 +126,6 @@ const PULL_REQUEST_EVENTS = new Set([
 // The most runs of one workflow, of any branch or event, read for a verdict.
 // A workflow with no verdict among its newest runs this far down has none.
 const RUNS_READ_MAX = 1_000;
-
-interface OrgRepo {
-  full_name: string;
-  default_branch: string;
-  archived: boolean;
-}
 
 interface Workflow {
   id: number;
@@ -155,22 +149,12 @@ interface Listing {
   error?: string;
 }
 
-const isOrgRepo = (value: unknown): value is OrgRepo =>
-  typeof value === "object" && value !== null &&
-  typeof (value as OrgRepo).full_name === "string" &&
-  typeof (value as OrgRepo).default_branch === "string" &&
-  typeof (value as OrgRepo).archived === "boolean";
-
 const isWorkflow = (value: unknown): value is Workflow =>
   typeof value === "object" && value !== null &&
   Number.isSafeInteger((value as Workflow).id) &&
   typeof (value as Workflow).name === "string" &&
   typeof (value as Workflow).path === "string" &&
   typeof (value as Workflow).state === "string";
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 
 function workflowFile(path: string): string {
@@ -188,58 +172,19 @@ function isPinned(repo: string, path: string): boolean {
   );
 }
 
-/** Runs tasks with a bounded number in flight, answering in the given order. */
-async function inParallel<T>(
-  limit: number,
-  tasks: readonly (() => Promise<T>)[],
-): Promise<T[]> {
-  const results = new Array<T>(tasks.length);
-  let next = 0;
-  const worker = async (): Promise<void> => {
-    while (next < tasks.length) {
-      const index = next++;
-      results[index] = await tasks[index]();
-    }
-  };
-  await Promise.all(
-    Array.from({ length: Math.min(limit, tasks.length) }, worker),
-  );
-  return results;
-}
-
-/**
- * Every repository in the organization the token can see, minus the archived
- * ones. A token that cannot see a private repository is not shown it here, so
- * the tile covers what the token reaches and says nothing about the rest.
- */
-async function organizationRepos(credential: GitHubCredential): Promise<OrgRepo[]> {
-  const repos: OrgRepo[] = [];
-  for (let page = 1;; page++) {
-    const batch = await github<unknown>(
-      `orgs/${ORG}/repos?per_page=100&page=${page}`,
-      credential,
-    );
-    if (!Array.isArray(batch) || !batch.every(isOrgRepo)) {
-      throw new Error("GitHub organization repositories returned invalid data");
-    }
-    for (const repo of batch) if (!repo.archived) repos.push(repo);
-    if (batch.length < 100) return repos;
-  }
-}
-
 async function repoWorkflows(
-  repo: OrgRepo,
+  repo: OrganizationRepo,
   credential: GitHubCredential,
 ): Promise<RepoInventory> {
   const inventory: RepoInventory = {
-    repo: repo.full_name,
-    branch: repo.default_branch,
+    repo: repo.name,
+    branch: repo.branch,
     workflows: [],
   };
   try {
     for (let page = 1;; page++) {
       const answer = await github<{ workflows?: unknown }>(
-        `repos/${repo.full_name}/actions/workflows?per_page=100&page=${page}`,
+        `repos/${repo.name}/actions/workflows?per_page=100&page=${page}`,
         credential,
       );
       const batch = answer.workflows;
@@ -261,7 +206,7 @@ async function repoWorkflows(
 async function readInventory(credential: GitHubCredential): Promise<RepoInventory[]> {
   const repos = await organizationRepos(credential);
   return await inParallel(
-    REQUEST_CONCURRENCY,
+    GITHUB_REQUEST_CONCURRENCY,
     repos.map((repo) => () => repoWorkflows(repo, credential)),
   );
 }
@@ -631,7 +576,7 @@ export function createCiHealth(
       }
     }
     const listings = await inParallel(
-      REQUEST_CONCURRENCY,
+      GITHUB_REQUEST_CONCURRENCY,
       readable.flatMap((repo) =>
         repo.workflows
           .filter((workflow) => !isPinned(repo.repo, workflow.path))
@@ -640,7 +585,7 @@ export function createCiHealth(
     );
     const redefined = new Map<number, Promise<boolean>>();
     const jobs = await inParallel(
-      REQUEST_CONCURRENCY,
+      GITHUB_REQUEST_CONCURRENCY,
       listings.map((listing) => () => judge(listing, redefined, credential)),
     );
     logUnreadable([
