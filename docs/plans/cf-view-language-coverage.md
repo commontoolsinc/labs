@@ -31,7 +31,9 @@ top level and in `locals` blocks; a string's interpolations and template
 directives are code inside the string. Java properties files, ProGuard and R8
 keep rules, and XML, which covers Android manifests and resources, SVG, and
 Apple property lists, have syntax highlighting; properties files list their
-keys, and XML lists its elements.
+keys, and XML lists its elements. INI, which covers Ansible configuration and
+inventories and the configuration files of Python tools, has syntax
+highlighting and a structure tree of sections and the keys and hosts in each.
 
 Automatic container detection is limited to structurally identified raw unified
 diffs and standard Git commit output. Source evidence otherwise settles only an
@@ -52,13 +54,13 @@ remain outside diff editing and semantic source loading.
 
 Python, Swift, Kotlin, TOML, HCL, and shell run on Tree-sitter through a shared,
 language-neutral adapter, which Go and HTML will use as well. Java
-properties, ProGuard rules, and XML use focused scanners.
+properties, INI, ProGuard rules, and XML use focused scanners.
 The order is provisional because recent activity was measured in six of the 26
 active organization repositories.
 
 This plan takes `cf view` from its current TypeScript and JavaScript, Markdown,
 JSON, JSONC, JSON Lines, YAML, Python, Swift, Kotlin, TOML, HCL, shell, Java
-properties, ProGuard, XML, and diff support to honest
+properties, INI, ProGuard, XML, and diff support to honest
 handling of every textual syntax in the active
 `commonfabric` repositories.
 
@@ -616,9 +618,33 @@ file reconstructed exactly.
 - [ ] Add Git, Docker, Deno, and Bazel ignore files.
 - [ ] Add Git attributes, modules, hooks, and worktree-include syntax.
 - [ ] Add dotenv files and compound examples.
-- [ ] Add INI, Ansible configuration, and inventory files.
+- [x] Add INI, Ansible configuration, and inventory files.
 - [ ] Add systemd units, tmpfiles configuration, and surveyed directive
   configuration.
+
+An October 20, 2026 refresh found nine INI files in the local checkouts of the
+organization's repositories: six Ansible inventories and the Ansible
+configuration in Infra, `pytest.ini` in Loom, and `.codespellrc` in gVisor. The
+six months before the refresh hold 23 path-change events on the Infra files, 9
+on Loom's, and none on gVisor's.
+
+INI uses a focused scanner, in the dialect Python's `configparser` reads by
+default: `;` and `#` start comment lines, the first `=` or `:` separates a key
+from its value, and a line indented further than the line that set a key
+continues that key's value. A line whose first word does not end in `:` and is
+followed by a `name=value` word or a `#` is an Ansible inventory host line,
+split into words as Ansible splits it: the first word is the host, the
+`name=value` words set the host's variables, and a `#` outside quotes starts a
+comment. `.ini` selects INI, and so do `ansible.cfg`, `.ansible.cfg`,
+`setup.cfg`, `.codespellrc`, and the configuration files of Python tools that
+have no extension of their own. Another `.cfg` file is INI when its first line
+other than blank lines and comments heads a section whose name does not start
+the way a JSON array's first value does. TLC configuration and JSON do not open
+that way. Every character other than white space in the nine files has a token
+class. The scanner re-colors 100 kilobytes of inventory and configuration text
+in under 2 milliseconds at the 95th percentile, and each 100-kilobyte input
+built to slow it that was measured, such as unclosed quotes or a single line of
+25,000 words, in under 6. The fixture comes from Infra.
 
 Completion gate: every surveyed exact-name and compound-name operational file
 selects without content guessing.

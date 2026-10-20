@@ -43,6 +43,7 @@ import { hclLanguage } from "../lib/view/languages/hcl/language.ts";
 import { shellLanguage } from "../lib/view/languages/shell/language.ts";
 import { propertiesLanguage } from "../lib/view/languages/properties/language.ts";
 import { proguardLanguage } from "../lib/view/languages/proguard/language.ts";
+import { iniLanguage } from "../lib/view/languages/ini/language.ts";
 import { xmlLanguage } from "../lib/view/languages/xml/language.ts";
 import { binaryLanguage } from "../lib/view/languages/binary/language.ts";
 import { plainTextLanguage } from "../lib/view/languages/plain-text/language.ts";
@@ -155,6 +156,8 @@ Deno.test("languageForName: identifiers and aliases resolve explicit overrides",
   assertEquals(languageForName("java-properties"), propertiesLanguage);
   assertEquals(languageForName("proguard"), proguardLanguage);
   assertEquals(languageForName("r8"), proguardLanguage);
+  assertEquals(languageForName("ini"), iniLanguage);
+  assertEquals(languageForName("dosini"), iniLanguage);
   assertEquals(languageForName("xml"), xmlLanguage);
   assertEquals(languageForName("svg"), xmlLanguage);
   assertEquals(languageForName("plist"), xmlLanguage);
@@ -177,6 +180,7 @@ Deno.test("languageForName: identifiers and aliases resolve explicit overrides",
     "hcl",
     "shell",
     "properties",
+    "ini",
     "proguard",
     "xml",
     "binary",
@@ -212,6 +216,9 @@ Deno.test("languageForName: identifiers and aliases resolve explicit overrides",
     "bash",
     "properties",
     "java-properties",
+    "ini",
+    "dosini",
+    "cfg",
     "proguard",
     "r8",
     "xml",
@@ -601,7 +608,10 @@ describe("languageMatchingSources()", () => {
     expect(languageMatchingSources("tool", sources())).toBe(pythonLanguage);
     expect(read).toEqual(["workspace", "hunk"]);
     expect(
-      languageMatchingSources("settings.cfg", ["[defaults]\n", '{"a": 1}\n']),
+      languageMatchingSources("settings.cfg", [
+        "SPECIFICATION Spec\n",
+        '{"a": 1}\n',
+      ]),
     ).toBe(jsonLanguage);
   });
 
