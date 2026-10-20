@@ -771,7 +771,8 @@ export function messageOf(error: unknown): string {
 
 /**
  * Runs `tasks` with at most `limit` in flight at once, returning their results
- * in the order of `tasks`.
+ * in the order of `tasks`. Once a task rejects, no further task starts, and
+ * the returned promise rejects with that task's error.
  */
 export async function inParallel<T>(
   limit: number,
@@ -779,10 +780,16 @@ export async function inParallel<T>(
 ): Promise<T[]> {
   const results = new Array<T>(tasks.length);
   let next = 0;
+  let failed = false;
   const worker = async (): Promise<void> => {
-    while (next < tasks.length) {
+    while (!failed && next < tasks.length) {
       const index = next++;
-      results[index] = await tasks[index]();
+      try {
+        results[index] = await tasks[index]();
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
     }
   };
   await Promise.all(
