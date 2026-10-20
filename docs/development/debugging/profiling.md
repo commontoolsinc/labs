@@ -742,9 +742,11 @@ rejected. The lookup uses the shared `space` scope and the main branch (the empt
 string); pass `branch` to inspect another branch. It opens no storage, evaluates
 no queries, serializes no document
 contents, and changes no watches or delivery state. Like `/api/health/stats`,
-this is a health surface without route-level authentication; anyone who can
-reach it can see which principals retain a named content-addressed document.
-Use the deployment's existing access restrictions.
+this route is public today: toolshed applies no authentication or access gate
+to it. Anyone who can reach it can see which principals retain a named
+content-addressed document and whether their sessions are connected. The
+[security roadmap's Diagnostics item](../../plans/security-privacy-roadmap.md#e-private-operations)
+tracks the operator gate and the longer-term private-operations boundary.
 
 Each matching row identifies the `sessionId`, authenticated `principal`,
 optional delegated `actingPrincipal`, and owning `connectionId`. It distinguishes
@@ -753,6 +755,10 @@ direct watch declarations (`directWatchCount`) from delivery-cache entries
 cache fields. Graph entries can arise from following links or loading schema
 dependencies. Counts include absence records, so they attribute interest rather
 than measure retained bytes; shared object references are not separate copies.
+
+Use this lookup when an investigation needs session attribution for a known
+schema CID. Aggregate retention counts can reveal subscription accumulation,
+but cannot identify the sessions responsible for retaining that schema.
 
 The response includes detached sessions still held during their grace period
 and marks expired ones not yet pruned. Reading this diagnostic does not prune

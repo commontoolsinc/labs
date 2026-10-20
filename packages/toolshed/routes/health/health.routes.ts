@@ -164,6 +164,7 @@ export const documentInterests = createRoute({
       space: z.string().min(1).max(1024),
       id: z.string().startsWith("cid:").min(5).max(4096),
       branch: z.string().max(1024).default(""),
+      // Bound HTTP input before dispatch; the inspector also guards direct calls.
       limit: z.coerce.number().int().min(1)
         .max(MAX_DOCUMENT_INTEREST_SESSIONS)
         .default(MAX_DOCUMENT_INTEREST_SESSIONS),

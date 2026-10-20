@@ -102,6 +102,7 @@ export function inspectDocumentInterests(
   const branch = query.branch ?? DEFAULT_BRANCH;
   const timestamp = Date.now();
   const cacheKey = cacheKeyForEntity(branch, query.id, "space");
+  // Shared-space keys are independent of the requesting identity.
   const graphKey = toDocKey(query.space, query.id, "space", {});
   const matches: DocumentInterestSession[] = [];
   let totalMatches = 0;
