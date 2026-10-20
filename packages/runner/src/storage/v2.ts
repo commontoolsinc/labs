@@ -650,7 +650,11 @@ type PendingVersion =
 type ConfirmedVersion = MaterializedVersion & {
   seq: number;
 
-  /** Whether an accepted remote set or deletion establishes this whole value. */
+  /**
+   * Whether an accept establishes this whole value: a remote set or
+   * deletion, or a write the server elided as an identity against the
+   * commit's read of the document.
+   */
   acceptedWhole?: true;
 
   /**
@@ -10583,7 +10587,10 @@ export class SpaceReplica
             cloneIfNecessary(computed.value) as EntityDocument,
             coverClass,
           );
-          if (computed.op === "set") record.confirmed.acceptedWhole = true;
+          // The identity proof made against the commit's read shows the
+          // whole stored document is `computed.value`, whether the layer
+          // set the document or patched it.
+          record.confirmed.acceptedWhole = true;
         }
         record.pending = record.pending.filter((entry) =>
           entry.localSeq !== localSeq

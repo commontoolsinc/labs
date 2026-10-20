@@ -200,6 +200,48 @@ describe("confirmed-read", () => {
       });
     });
 
+    describe("elided against the commit's read of it", () => {
+      // The reader's commit reads a version another session has since
+      // replaced, and writes what that session stored. The server refuses
+      // the read as stale and elides the write as an identity, so the commit
+      // is accepted only by elision.
+
+      /** Commits `write` over the reader's read of `{ n: 1 }` after the
+       * writer has stored `{ n: 3 }`. */
+      async function commitOverStaleRead(
+        write: (tx: IExtendedStorageTransaction) => void,
+      ): Promise<void> {
+        await replace(reader, 1);
+        const tx = reader.edit();
+        expect(tx.read(address).ok?.value).toEqual({ value: { n: 1 } });
+        await replace(writer, 3);
+        write(tx);
+        expect((await tx.commit().settled).error).toBeUndefined();
+      }
+
+      it("returns a set as confirmed", async () => {
+        await commitOverStaleRead((tx) => {
+          expect(tx.write(address, { value: { n: 3 } }).error)
+            .toBeUndefined();
+        });
+        expect(readDocument()).toEqual({
+          value: { value: { n: 3 } },
+          confirmed: true,
+        });
+      });
+
+      it("returns a patch as confirmed", async () => {
+        await commitOverStaleRead((tx) => {
+          expect(tx.write({ ...address, path: ["value", "n"] }, 3).error)
+            .toBeUndefined();
+        });
+        expect(readDocument()).toEqual({
+          value: { value: { n: 3 } },
+          confirmed: true,
+        });
+      });
+    });
+
     it("returns an accepted deletion as confirmed", async () => {
       await replace(writer, 7);
       const replica = readerManager.open(space).replica;

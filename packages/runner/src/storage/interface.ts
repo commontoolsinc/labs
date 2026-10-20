@@ -3392,10 +3392,11 @@ export interface ISpaceReplica extends ISpace {
    * A watched delivery establishes it, including absence; a newer own write
    * over that delivery waits for a covering push. An accepted whole-document
    * set or deletion also establishes a version without a frame delivery, as
-   * does verified content under its content-addressed id in space scope. A
-   * mutable version without a delivered watch may be stale: use
-   * `completeThroughSeq()` with the read documents to ask about coverage of
-   * later changes.
+   * does a write the server elided as an identity against the commit's read
+   * of the document, and verified content under its content-addressed id in
+   * space scope. A mutable version without a delivered watch may be stale:
+   * use `completeThroughSeq()` with the read documents to ask about coverage
+   * of later changes.
    */
   isConfirmedDocument?(
     id: URI,
