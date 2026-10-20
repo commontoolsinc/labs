@@ -83,7 +83,7 @@ export interface Tile {
 export interface Ctx {
   runs(): Promise<Run[]>; // labs deno.yml runs on main (shared across CI tiles, memoized)
   // The runs of any source, memoized per source so several tiles reading the
-  // same one share one fetch (loom's CI tiles, and the combined recent-runs
+  // same one share one fetch (loom's CI tiles, and the combined recent commits
   // stream).
   runsFor(source: RunSource): Promise<Run[]>;
   // For a tile collected from run-source snapshots: why the snapshot of that
