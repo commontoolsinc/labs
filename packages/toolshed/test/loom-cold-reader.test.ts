@@ -58,10 +58,20 @@ describe("loom-cold-reader", () => {
           { as: identity },
           factory,
         );
+        // A READ viewer that runs the root itself writes the derived values
+        // its computations produce, and the space refuses each one. The local
+        // fold keeps such a write on the replica so the run settles; with the
+        // fold off, each refusal re-runs the computation against the same
+        // refusal until every retry budget is spent, which takes the viewer
+        // many minutes to reach.
         const runtime = new Runtime(runtimePresets.remoteClient({
           apiUrl: new URL("http://cold-loom.test"),
           storageManager,
-          experimental: { serverExecution: served, computedCellIds: true },
+          experimental: {
+            serverExecution: served,
+            computedCellIds: true,
+            localFold: true,
+          },
           trustSnapshotProvider: () => ({
             id: identity.did(),
             actingPrincipal: identity.did(),
