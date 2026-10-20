@@ -755,9 +755,12 @@ delivery and traversal split the work in two layers:
 
 A client that syncs a document therefore receives the schema documents for
 every link it contains in the same round trip, keeping the "resolved means
-locally available" property. Schema documents are immutable, so their
-presence in watch sets is quiet; whether they deserve a fetch-once path
-instead is an open question shared with all `cid:` documents.
+locally available" property. Schema dependencies assembled for a mutable
+document remain in that document's watch graph. Explicit root-only pulls
+of shared-space `cid:` documents use the remote runner's
+[fetch-once path](../features/schema-graph-queries.md#fetching-immutable-roots):
+present, verified snapshots need no standing watch. Missing roots still
+install a watch so their later creation arrives.
 
 Scan results are cached per document version and engine, so in steady
 state a version is scanned once however many sessions deliver it, and
@@ -878,11 +881,13 @@ playbook:
    documented patch shape: a reference introduced by a patch that edits
    inside an existing link's schema escapes commit-time collection, and
    read-side assembly is what catches it.
-3. **Fetch-once for immutable documents.** Every pull is a watch add, so
-   schema documents permanently grow the session watch set even though they
-   can never change. Quiet but not free; a fetch-without-subscribe
-   primitive for `cid:` documents would benefit blobs and module sources
-   equally.
+3. **Fetch-once for immutable documents.** Implemented for present,
+   shared-space `cid:` roots read without traversal or an explicit scope
+   instance. The runner uses `graph.query`, verifies the result, and retains
+   it outside subscription ownership. Missing roots keep a fallback watch;
+   traversal selectors and schema dependencies of mutable watches also
+   remain subscribed. Releasing those fallback watches after arrival and
+   bounding local schema retention remain separate work.
 4. **Garbage collection.** Nothing collects unreferenced documents today;
    schema documents accumulate like `pattern:` and CFC `cid:` documents do.
    Net bytes still fall (each document replaces many inline copies), so

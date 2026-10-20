@@ -2896,7 +2896,9 @@ describe("cell-cache", () => {
       ).run({ id });
       const synced = await smB.open(space).sync(id, {
         path: [],
-        schema: false,
+        // A watched delivery exercises the loader's own identity check.
+        // Root-only fetches reject the forged content before installation.
+        schema: true,
       });
       expect(synced.error).toBeUndefined();
       const rtx = rtB.edit();

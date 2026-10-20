@@ -74,6 +74,32 @@ caller keeps them, walks them under a schema, and records what it reached.
 Everything else about a query — the engine reads, the entity snapshots, the
 watch bookkeeping, the branch and sequence handling — stays in `memory`.
 
+## Fetching immutable roots
+
+The remote runner batches root-only reads of shared-space `cid:` documents
+through the existing authenticated `graph.query` operation. These reads use
+`{ path: [], schema: false }` and name no explicit scope instance. A present
+result carries the schema closure required to interpret it; the replica
+verifies content hashes and that closure before treating the content as
+available. Root-only reads also reuse a hash-verified copy confirmed by this
+replica's acknowledged write when it has no schema dependencies; roots with
+dependencies are fetched with their closure. An optimistic write or a
+realm-wide registry entry is not persistence evidence. Later reads reuse
+the retained snapshot.
+
+This creates no server watch, tracked graph, or session delivery-cache entry.
+The snapshot does not count as a subscription holding or advance the
+replica's complete-through watermark. It survives removal from a separate
+watch that also delivered it, while reset discards it. Session access checks
+still run before cached pulls succeed.
+
+An absent root falls back to the ordinary watch path so that a later creation
+arrives; that fallback watch remains installed. Selectors that traverse data,
+mutable document IDs, and scoped reads also keep their ordinary subscriptions.
+Schema dependencies assembled as part of a mutable document's watch remain
+owned by that watch. This optimization reduces explicit immutable watch roots;
+it does not bound the client schema registry or rewrite historical documents.
+
 ## Sharing a tracker and a memo across walks
 
 A walk owns its pointer-cycle tracker, which is what makes a cycle of documents

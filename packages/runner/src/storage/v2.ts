@@ -45,6 +45,7 @@ import {
   type GenesisRoot,
   getCommitPreconditionsConfig,
   getServerExecutionConfig,
+  type GraphQueryResult,
   isScopeKey,
   type MemoryProtocolFlags,
   type OperationFieldQuery,
@@ -4969,6 +4970,11 @@ export class SpaceReplica
   );
   #watchedIds = new Set<string>();
 
+  /** Immutable snapshots fetched by this replica, retained outside watch
+   * ownership. Replaced on reset so an older in-flight fetch cannot repopulate
+   * the reset replica. */
+  #fetchedImmutableIds = new Set<string>();
+
   /** The watches this replica added to its session, by the doc key of the
    * root they share. */
   readonly #rootWatches = new Map<string, RootWatches>();
@@ -7038,6 +7044,9 @@ export class SpaceReplica
     // resolved and the await is a no-op.
     const coveredInFlight: Promise<Result<Unit, PullError>>[] = [];
     const newEntries = normalizedEntries.filter(([address, selector]) => {
+      // A denied session must reach the refresh path to record a refused
+      // load. Cached availability is not evidence of current access.
+      if (sessionError?.name === "AuthorizationError") return true;
       const baseAddress = {
         id: address.id,
         type: DOCUMENT_MIME,
@@ -7862,6 +7871,7 @@ export class SpaceReplica
       );
     }
     this.#docs.clear();
+    this.#fetchedImmutableIds = new Set();
     this.#watchedIds.clear();
     this.#rootWatches.clear();
     this.#delivered.clear();
@@ -7880,15 +7890,16 @@ export class SpaceReplica
   }
 
   /**
-   * Adds the watches `entries` describe to the session and applies the
-   * frames that come back, resolving to the pull's verdict; a refresh that
-   * fails resolves to its error rather than rejecting.
+   * Fetches present root-only immutable documents and watches the remaining
+   * entries. Applies their results before resolving to the pull's verdict;
+   * a refresh that fails resolves to its error rather than rejecting.
    */
   async #refreshWatchSet(
     entries: Iterable<[WatchAddress, SchemaPathSelector]>,
     type: "pull" | "integrate" = "pull",
   ): Promise<Result<Unit, PullError>> {
     const refreshStart = performance.now();
+    const retained = this.#fetchedImmutableIds;
     try {
       let { session } = await this.#activeSessionHandle();
       // Per-session (no global): mirror the storage setting onto the session so
@@ -7900,7 +7911,7 @@ export class SpaceReplica
         this.#settings.experimentalConcurrentWatchRefresh === true,
       );
       const rawEntries = [...entries];
-      const watchEntries = compactWatchEntries(
+      let watchEntries = compactWatchEntries(
         rawEntries,
         this.#scopeKeyIdentity(),
       );
@@ -7940,6 +7951,92 @@ export class SpaceReplica
           }
         }
       }
+
+      // A root-only read of immutable content needs availability, not ongoing
+      // change delivery. Keep absence reactive: only a verified present result
+      // leaves the ordinary watch path.
+      const immutableRoots = watchEntries.filter(([address, selector]) =>
+        address.id.startsWith("cid:") &&
+        normalizeCellScope(address.scope) === "space" &&
+        address.scopeKey === undefined &&
+        selector.path.length === 0 && selector.schema === false
+      );
+      // Reusing a snapshot can omit the query that otherwise checks session
+      // admission. A restored, open session is still required for that read.
+      if (immutableRoots.length > 0) {
+        await session.whenRestored();
+        if (session.closeError !== undefined) throw session.closeError;
+        if (retained !== this.#fetchedImmutableIds) {
+          throw new Error("Immutable fetch outlived its replica or session");
+        }
+      }
+      // An acknowledged local write is already a server-confirmed copy.
+      // Pending writes and realm-wide registry entries are not persistence
+      // evidence for this replica.
+      for (const [address] of immutableRoots) {
+        const record = this.#docs.get(docKey(address.id, "space"));
+        if (
+          record !== undefined && record.confirmed.seq > 0 &&
+          record.confirmed.localFold !== true &&
+          record.confirmed.localWavePromotion === undefined &&
+          holdsContentAddressedValue(record, address.id.slice(4))
+        ) {
+          const doc = record.confirmed.value!;
+          const metadata = classifySchemaMeta(doc);
+          const schema = verifySchemaDocument(address.id.slice(4), doc.value);
+          const refs = schema === undefined
+            ? linkSchemaRefHashes(doc as FabricValue)
+            : collectExternalSchemaRefHashes(schema);
+          // An acknowledged root alone does not prove its dependencies are
+          // locally available. Fetch such roots with their assembled closure.
+          if (
+            metadata.kind !== "malformed" &&
+            schemaMetaRefHashes(metadata).size === 0 && refs.size === 0
+          ) {
+            retained.add(docKey(address.id, "space"));
+          }
+        }
+      }
+      const missingRoots = immutableRoots.filter(([address]) =>
+        !retained.has(docKey(address.id, "space"))
+      );
+      if (missingRoots.length > 0) {
+        const query = {
+          roots: missingRoots.map(([address, selector]) => ({
+            id: address.id,
+            selector,
+          })),
+        };
+        let fetched: GraphQueryResult;
+        try {
+          fetched = await session.queryGraph(query);
+        } catch (error) {
+          if (!this.#remountedSince(session)) throw error;
+          ({ session } = await this.#activeSessionHandle());
+          fetched = await session.queryGraph(query);
+        }
+        if (
+          this.#closed || retained !== this.#fetchedImmutableIds ||
+          this.#remountedSince(session)
+        ) {
+          throw new Error("Immutable fetch outlived its replica or session");
+        }
+        this.#assertActiveRoute();
+        if (session.closeError !== undefined) throw session.closeError;
+        this.#integrateImmutableQuery(fetched, type);
+      }
+      const fetchedRoots = new Set(
+        immutableRoots.filter(([address]) =>
+          retained.has(docKey(address.id, "space"))
+        ).map(([address]) => address.id),
+      );
+      watchEntries = watchEntries.filter(([address, selector]) =>
+        !fetchedRoots.has(address.id) ||
+        normalizeCellScope(address.scope) !== "space" ||
+        address.scopeKey !== undefined ||
+        selector.path.length !== 0 || selector.schema !== false
+      );
+      if (watchEntries.length === 0) return { ok: {} };
 
       const watches = watchEntries.map(([address, selector]) => ({
         id: watchIdForEntry(address, selector, ""),
@@ -8018,6 +8115,54 @@ export class SpaceReplica
       return { error: toPullError(error) };
     } finally {
       logger.time(refreshStart, "watchRefresh", "total");
+    }
+  }
+
+  /** Integrates verified immutable snapshots without claiming subscription
+   * delivery or a complete-through watermark. Absent roots remain watchable. */
+  #integrateImmutableQuery(
+    result: GraphQueryResult,
+    type: "pull" | "integrate",
+  ): void {
+    const upserts: SessionSyncUpsert[] = [];
+    for (const entity of result.entities) {
+      if (entity.document === null) continue;
+      if (
+        !entity.id.startsWith("cid:") || entity.branch !== DEFAULT_BRANCH ||
+        normalizeCellScope(entity.scope) !== "space" ||
+        (entity.scopeKey !== undefined && entity.scopeKey !== "space") ||
+        !Number.isSafeInteger(entity.seq) || entity.seq <= 0 ||
+        taggedHashStringOf(entity.document.value) !== entity.id.slice(4)
+      ) {
+        throw new Error(`Invalid immutable fetch result for ${entity.id}`);
+      }
+      upserts.push({
+        id: entity.id,
+        branch: entity.branch,
+        scope: "space",
+        seq: entity.seq,
+        doc: entity.document,
+        ...(entity.coverClass === undefined
+          ? {}
+          : { coverClass: entity.coverClass }),
+      });
+    }
+    if (upserts.length === 0) return;
+    this.#applySessionSync(
+      {
+        type: "sync",
+        fromSeq: minOf(upserts.map((entry) => entry.seq)),
+        toSeq: maxOf(upserts.map((entry) => entry.seq)),
+        upserts,
+        removes: [],
+      },
+      type,
+      "fetch",
+    );
+    for (const entry of upserts) {
+      if (!this.#fetchedImmutableIds.has(docKey(entry.id as URI, "space"))) {
+        throw new Error(`Immutable fetch was quarantined for ${entry.id}`);
+      }
     }
   }
 
@@ -9899,6 +10044,7 @@ export class SpaceReplica
   #applySessionSync(
     sync: SessionSync,
     type: "pull" | "integrate",
+    delivery: "subscription" | "fetch" = "subscription",
   ): void {
     const pushed = MemoryV2Client.isPushedSync(sync);
     // No read during a frame's integration — the differential checkout's
@@ -9920,7 +10066,7 @@ export class SpaceReplica
           ),
         };
       }
-      this.#applySessionSyncFrame(sync, type);
+      this.#applySessionSyncFrame(sync, type, delivery);
     } catch (error) {
       this.#completeThroughLost = true;
       throw error;
@@ -9947,6 +10093,7 @@ export class SpaceReplica
   #applySessionSyncFrame(
     sync: SessionSync,
     type: "pull" | "integrate",
+    delivery: "subscription" | "fetch",
   ): void {
     for (const delivery of sync.operationFields ?? []) {
       for (const callback of this.#operationSinks.get(delivery.watchId) ?? []) {
@@ -10101,17 +10248,21 @@ export class SpaceReplica
         upsert.id as URI,
         this.instanceKey(upsert.scope, undefined, upsert.scopeKey),
       );
-      this.#watchedIds.add(key);
-      // A frame for the document means a watch covers it again.
-      this.#owedWatches.delete(key);
-      this.#delivered.set(key, {
-        id: upsert.id as URI,
-        scope: upsert.scope,
-        scopeKey: upsert.scopeKey,
-        branch: upsert.branch,
-        seq: upsert.seq,
-        deleted: upsert.deleted === true,
-      });
+      if (delivery === "fetch") {
+        this.#fetchedImmutableIds.add(key);
+      } else {
+        this.#watchedIds.add(key);
+        // A subscription frame covers the document again.
+        this.#owedWatches.delete(key);
+        this.#delivered.set(key, {
+          id: upsert.id as URI,
+          scope: upsert.scope,
+          scopeKey: upsert.scopeKey,
+          branch: upsert.branch,
+          seq: upsert.seq,
+          deleted: upsert.deleted === true,
+        });
+      }
       // The settle input barrier's shadow case (Phase 2 revisit (a)):
       // a FOREIGN value integrating UNDER an own pending write is
       // invisible through the materialized view — and the change
@@ -10158,12 +10309,14 @@ export class SpaceReplica
     for (const remove of sync.removes) {
       const id = remove.id as URI;
       const record = this.#record(id, remove.scope, undefined, remove.scopeKey);
-      record.confirmed = confirmedVersion(0, undefined);
-      record.materialized = undefined;
       const key = docKey(
         id,
         this.instanceKey(remove.scope, undefined, remove.scopeKey),
       );
+      if (!this.#fetchedImmutableIds.has(key)) {
+        record.confirmed = confirmedVersion(0, undefined);
+        record.materialized = undefined;
+      }
       this.#watchedIds.delete(key);
       this.#delivered.delete(key);
       // A removal settles what the session keeps of the document, so a

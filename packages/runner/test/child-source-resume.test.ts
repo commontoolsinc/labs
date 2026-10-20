@@ -133,6 +133,8 @@ export default pattern(() => ({ child: Child${
           });
           await child.pull();
           await runtime.scheduler.idleWithPendingCommits();
+          await runtime.runner.patternPointerFollowed(child);
+          await child.pull();
           const ref = getPatternIdentityRef(child);
           const history = getPieceSourceRevisions(child);
           expect(child.key("marker").get()).toBe("updated owner");

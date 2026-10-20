@@ -153,7 +153,9 @@ describe("schema-doc-sync", () => {
       `cid:${claimed}` as URI,
       { path: [], schema: false },
     );
-    expect(result.error).toBeUndefined();
+    expect(result.error?.message).toContain("Invalid immutable fetch result");
+    expect(readerStorage.open(space).replica.getDocument(`cid:${claimed}`))
+      .toBeUndefined();
     expect(lookupSchemaDocument(claimed)).toBeUndefined();
     expect(resolveSchema({ $ref: `cid:${claimed}` })).toBe(false);
   });
