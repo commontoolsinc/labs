@@ -251,10 +251,11 @@ describe("document-release", () => {
         error: { name: "Error", message: "watch refused" },
       });
     const dropped: URI[] = [];
-    const unsubscribe = readerStorage.subscribeDocumentsDropped((
-      _space,
-      addresses,
-    ) => dropped.push(...addresses.map((address) => address.id)));
+    const unsubscribe = readerStorage.subscribeDocumentsDropped(
+      (_space, addresses) => {
+        for (const address of addresses) dropped.push(address.id);
+      },
+    );
     removal.resolve();
     await released;
     await readerStorage.synced();
