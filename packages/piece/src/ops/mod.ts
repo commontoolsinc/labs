@@ -76,7 +76,7 @@ export {
   type SurveyResult,
   type TallyEntry,
 } from "./bulk-survey.ts";
-export { PiecesController } from "./pieces-controller.ts";
+export { type PieceOpen, PiecesController } from "./pieces-controller.ts";
 export {
   ensurePrivateInboxOf,
   INBOX_ADOPTION_REFUSALS,

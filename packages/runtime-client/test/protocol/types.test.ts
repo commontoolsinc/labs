@@ -24,6 +24,7 @@ const PIECE_OPERATIONS = [
   RequestType.PieceRemove,
   RequestType.PieceStart,
   RequestType.PieceStop,
+  RequestType.PieceRelease,
   RequestType.PieceGetAll,
   RequestType.PieceSynced,
   RequestType.PieceGetSource,

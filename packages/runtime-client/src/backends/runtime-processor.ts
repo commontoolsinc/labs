@@ -48,6 +48,7 @@ import {
 } from "@commonfabric/memory/v2";
 import {
   PieceController,
+  type PieceOpen,
   PiecesController,
   type PreparedPieceSourceChange,
   readPieceSourceMetadata,
@@ -257,6 +258,7 @@ import {
   type PieceGetSlugRequest,
   type PieceGetSourceRequest,
   type PieceGetSourceRevisionRequest,
+  type PieceReleaseRequest,
   type PieceRemoveRequest,
   PieceResponse,
   type PieceSourceResponse,
@@ -1581,6 +1583,11 @@ export class RuntimeProcessor {
       if (membership.client.id !== client.id) continue;
       void this.#endPresenceMembership(subscriptionId);
     }
+
+    // Last, once nothing of the client's still reads them: the pieces it
+    // started stop, unless another client still holds one or something else
+    // keeps it running.
+    this.#runtime.releaseAllHolds(client);
   }
 
   #hostSelectedCell(ref: CellRef): Cell<unknown> {
@@ -3223,6 +3230,7 @@ export class RuntimeProcessor {
    */
   async handlePieceGet(
     request: PieceGetRequest,
+    client: WorkerClient = ownerClient,
   ): Promise<PieceResponse> {
     // TODO(danfuzz): Refuse a cell that is not a piece cell in the surviving
     // walk, once `parseSlugRedirect()` is the one copy.
@@ -3304,15 +3312,21 @@ export class RuntimeProcessor {
         );
         return { piece: createPieceRef(cell) };
       }
-      const cell = await cc.getPieceCell(landing, request.runIt ?? false);
+      const cell = await this.#releasingIfDeparted(
+        client,
+        cc.getPieceCell(landing, this.#pieceOpenFor(request.runIt, client)),
+      );
       return { piece: createPieceRef(cell) };
     }
 
-    const cell = await cc.getPieceCell(
-      request.pieceId,
-      request.runIt ?? false,
-      undefined,
-      request.scope,
+    const cell = await this.#releasingIfDeparted(
+      client,
+      cc.getPieceCell(
+        request.pieceId,
+        this.#pieceOpenFor(request.runIt, client),
+        undefined,
+        request.scope,
+      ),
     );
 
     return {
@@ -3402,9 +3416,13 @@ export class RuntimeProcessor {
 
   async handlePieceStart(
     request: PieceStartRequest,
+    client: WorkerClient = ownerClient,
   ): Promise<BooleanResponse> {
     const cc = this.#getSpaceCtx(request.space);
-    await cc.startPiece(request.pieceId, request.scope);
+    await this.#releasingIfDeparted(
+      client,
+      cc.startPiece(request.pieceId, request.scope, { holder: client }),
+    );
     // A missing piece throws in `startPiece()`, so `true` here means the
     // piece started.
     // TODO(danfuzz): Report whether it was already running, once
@@ -3422,6 +3440,48 @@ export class RuntimeProcessor {
     // TODO(danfuzz): Report whether it was running, once `stopPiece()`
     // says so.
     return { value: true };
+  }
+
+  async handlePieceRelease(
+    request: PieceReleaseRequest,
+    client: WorkerClient = ownerClient,
+  ): Promise<BooleanResponse> {
+    const cc = this.#getSpaceCtx(request.space);
+    return {
+      value: await cc.releasePiece(request.pieceId, client, request.scope),
+    };
+  }
+
+  /**
+   * How a piece request opens a piece: running it, and so holding it for
+   * `client`, when it asks to run it. A client holds every piece it starts,
+   * and its departure gives the holds up (`disposeClient()`), so a piece no
+   * client shows stops running.
+   */
+  #pieceOpenFor(
+    runIt: boolean | undefined,
+    client: WorkerClient,
+  ): boolean | PieceOpen {
+    return runIt ? { reconcile: true, start: true, holder: client } : false;
+  }
+
+  /**
+   * `opening`, after which every hold `client` has is given up if the client
+   * left while it was in flight: `disposeClient()` came too early to see a
+   * hold the open took. Given up whether the open succeeded or not, since a
+   * start can take its hold before a later step of the open fails.
+   */
+  async #releasingIfDeparted<T>(
+    client: WorkerClient,
+    opening: Promise<T>,
+  ): Promise<T> {
+    try {
+      return await opening;
+    } finally {
+      if (this.#detachedClients.has(client)) {
+        this.#runtime.releaseAllHolds(client);
+      }
+    }
   }
 
   async handlePieceGetAll(request: PieceGetAllRequest): Promise<CellResponse> {
@@ -4039,7 +4099,7 @@ export class RuntimeProcessor {
           request,
         );
       case RequestType.PieceGet:
-        return await this.handlePieceGet(request);
+        return await this.handlePieceGet(request, client);
       case RequestType.PieceGetSlug:
         return await this.handlePieceGetSlug(request);
       case RequestType.SlugResolve:
@@ -4047,9 +4107,11 @@ export class RuntimeProcessor {
       case RequestType.PieceRemove:
         return await this.handlePieceRemove(request);
       case RequestType.PieceStart:
-        return await this.handlePieceStart(request);
+        return await this.handlePieceStart(request, client);
       case RequestType.PieceStop:
         return await this.handlePieceStop(request);
+      case RequestType.PieceRelease:
+        return await this.handlePieceRelease(request, client);
       case RequestType.PieceGetAll:
         return await this.handlePieceGetAll(request);
       case RequestType.PieceGetSource:

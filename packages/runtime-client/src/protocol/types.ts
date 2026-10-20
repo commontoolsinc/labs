@@ -487,11 +487,24 @@ export enum RequestType {
   /** Removes a piece from its space's list. */
   PieceRemove = "piece:remove",
 
-  /** Starts a piece running. */
+  /**
+   * Starts a piece running. The lifetime this gives the piece is held by the
+   * requesting client, as a `PieceGet` that runs the piece holds it: see
+   * {@link RequestType.PieceRelease}.
+   */
   PieceStart = "piece:start",
 
   /** Stops a running piece. */
   PieceStop = "piece:stop",
+
+  /**
+   * Gives up the requesting client's hold on a piece it started. A piece that
+   * a client started, by `PieceStart` or by a `PieceGet` that runs it, keeps
+   * running while any client holds it; a client's departure gives up all its
+   * holds. Once the last holder lets go, the piece stops unless something else
+   * keeps it running (`Runner.releaseHold()`).
+   */
+  PieceRelease = "piece:release",
 
   /**
    * Answers with a ref to the cell holding a space's piece registry. The
@@ -2788,6 +2801,16 @@ export type PieceStopRequest = BaseRequest & PieceAddress & {
   space: DID;
 };
 
+/** The {@link RequestType.PieceRelease} request. */
+export type PieceReleaseRequest = BaseRequest & PieceAddress & {
+  type: RequestType.PieceRelease;
+
+  /**
+   * The space the piece lives in.
+   */
+  space: DID;
+};
+
 /** The {@link RequestType.PieceGetAll} request. */
 export type PieceGetAllRequest = BaseRequest & {
   type: RequestType.PieceGetAll;
@@ -3450,6 +3473,7 @@ export type IPCClientRequest =
   | PieceRemoveRequest
   | PieceStartRequest
   | PieceStopRequest
+  | PieceReleaseRequest
   | PieceGetAllRequest
   | PieceSyncedRequest
   | PieceGetSourceRequest
@@ -4669,6 +4693,10 @@ export type Commands = {
   };
   [RequestType.PieceStop]: {
     request: PieceStopRequest;
+    response: BooleanResponse;
+  };
+  [RequestType.PieceRelease]: {
+    request: PieceReleaseRequest;
     response: BooleanResponse;
   };
   [RequestType.PieceGetAll]: {

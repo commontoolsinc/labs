@@ -551,6 +551,16 @@ type StartAttempt = {
   // The result this attempt resolved to, which a link start only learns by
   // following the link.
   targetKey?: `${MemorySpace}/${ScopeKey}/${URI}`;
+  // The root cell of that result, which a held lifetime stops by.
+  targetCell?: Cell<unknown>;
+  // The lifetimes this attempt's callers asked for, all claimed when it
+  // settles: permanent, for a caller that named no holder, and held, for each
+  // holder a caller named.
+  permanent?: boolean;
+  holders?: Set<object>;
+  // Whether a launch named the result while this attempt was resolving, which
+  // makes the registration it installed that launch's too.
+  disowned?: boolean;
   // The exact registration THIS attempt's `#startCore()` created, when it
   // created one. A walk can also report success for a registration it did
   // NOT create (doStart's already-started returns, including the
@@ -573,6 +583,34 @@ type StartAttempt = {
   // runs again from the top after the read, and must not read again for a
   // grant the durable metadata does not carry.
   authorityReadFor?: Set<string>;
+};
+
+/**
+ * A lifetime that holders can give up (`Runner.releaseHold()`), for one
+ * result.
+ */
+type HeldLifetime = {
+  /** The result's root cell. */
+  readonly cell: Cell<unknown>;
+  /** Who holds it. The lifetime ends when the last of them lets go. */
+  readonly holders: Set<object>;
+  /**
+   * The registration a held start installed, which ending the lifetime may
+   * end. `undefined` when the result was already running when the first held
+   * start reached it, or once a launch has named the result since: what is
+   * running then is not the holders' to end.
+   */
+  registration: Cancel | undefined;
+};
+
+/** Options for `Runner.start()`. */
+export type RunnerStartOptions = {
+  /**
+   * Who the lifetime this start gives the result belongs to. Without one, the
+   * lifetime is permanent: only a stop ends it. With one, it lasts until every
+   * holder has given it up through `Runner.releaseHold()`.
+   */
+  holder?: object;
 };
 
 /**
@@ -2653,6 +2691,17 @@ export class Runner {
    */
   #independentlyStartedResults = new Set<
     `${MemorySpace}/${ScopeKey}/${URI}`
+  >();
+
+  /**
+   * Lifetimes of their own that holders can give up, by result: what a start
+   * made for a holder (`start(cell, { holder })`) gives the result instead of
+   * a permanent one. While any holder holds it, the result keeps running as an
+   * independently started one does. See {@link releaseHold}.
+   */
+  #heldLifetimes = new Map<
+    `${MemorySpace}/${ScopeKey}/${URI}`,
+    HeldLifetime
   >();
 
   /**
@@ -4911,9 +4960,18 @@ export class Runner {
    * different docs whose links resolve to the same piece do not join either;
    * they run separate resolutions and converge at the registration guard
    * before instantiation.
+   *
+   * The lifetime a start gives the result is permanent unless the start names
+   * a `holder`, in which case it lasts until every holder has given it up
+   * through {@link releaseHold}. A start that joins an attempt claims its own
+   * lifetime of its own kind, so a held start and a permanent one of the same
+   * piece leave it permanent.
    */
-  start<T = any>(resultCell: Cell<T>): Promise<boolean> {
-    return this.#joinOrBeginStart(resultCell).settled;
+  start<T = any>(
+    resultCell: Cell<T>,
+    options: RunnerStartOptions = {},
+  ): Promise<boolean> {
+    return this.#joinOrBeginStart(resultCell, options.holder).settled;
   }
 
   /**
@@ -4935,8 +4993,14 @@ export class Runner {
    * @throws Error naming the failed piece-start commit, with storage's
    * verdict, or whatever else cut the commit short, as its `cause`.
    */
-  async startWithCommit<T = any>(resultCell: Cell<T>): Promise<boolean> {
-    const { attempt, settled } = this.#joinOrBeginStart(resultCell);
+  async startWithCommit<T = any>(
+    resultCell: Cell<T>,
+    options: RunnerStartOptions = {},
+  ): Promise<boolean> {
+    const { attempt, settled } = this.#joinOrBeginStart(
+      resultCell,
+      options.holder,
+    );
     const started = await settled;
     const commits = attempt.instantiationCommits ?? [];
     for (const failure of await Promise.all(commits)) {
@@ -4954,9 +5018,121 @@ export class Runner {
   /**
    * Helper for `start()` and `startWithCommit()`, which returns the current
    * in-flight start attempt for `resultCell`'s document, or begins one, along
-   * with its outcome.
+   * with its outcome, having asked it for the lifetime this caller wants: held
+   * by `holder`, or permanent without one.
    */
   #joinOrBeginStart<T>(
+    resultCell: Cell<T>,
+    holder?: object,
+  ): { attempt: StartAttempt; settled: Promise<boolean> } {
+    const joined = this.#joinOrBeginAttempt(resultCell);
+    if (holder === undefined) joined.attempt.permanent = true;
+    else (joined.attempt.holders ??= new Set()).add(holder);
+    return joined;
+  }
+
+  /**
+   * Claims the lifetimes `attempt`'s callers asked for, for the result at
+   * `target` that the attempt left running.
+   */
+  #claimLifetimes(
+    attempt: StartAttempt,
+    target: `${MemorySpace}/${ScopeKey}/${URI}`,
+    cell: Cell<unknown>,
+  ): void {
+    if (attempt.permanent) this.#independentlyStartedResults.add(target);
+    if (attempt.holders === undefined) return;
+    // Only a registration this start installed is the holders' to end. A
+    // result that was already running belongs to whatever started it.
+    const installed = !attempt.disowned &&
+        attempt.installedRegistration !== undefined &&
+        this.#cancels.get(target) === attempt.installedRegistration
+      ? attempt.installedRegistration
+      : undefined;
+    let held = this.#heldLifetimes.get(target);
+    if (held === undefined) {
+      held = { cell, holders: new Set(), registration: installed };
+      this.#heldLifetimes.set(target, held);
+    } else if (held.registration === undefined) {
+      held.registration = installed;
+    }
+    for (const holder of attempt.holders) held.holders.add(holder);
+  }
+
+  /**
+   * Gives up `holder`'s hold on the lifetime a held start gave `resultCell`'s
+   * result. Returns whether `holder` held one.
+   *
+   * When the last holder lets go, this is a *release* of the registration the
+   * held starts installed (`docs/specs/runner-child-run-ownership.md`), not a
+   * stop: it ends that registration only when it still stands and nothing
+   * else has claimed the result since — no permanent lifetime, no launch that
+   * named it, no start still resolving. Otherwise the result keeps running,
+   * as it would had the held starts never happened. Scoped programs belong to
+   * all their selecting instances and are never ended here.
+   */
+  releaseHold<T>(resultCell: Cell<T>, holder: object): boolean {
+    const link = resultCell.getAsNormalizedFullLink();
+    const rootCell = link.path.length > 0
+      ? this.#runtime.getCellFromLink({ ...link, path: [] })
+      : resultCell;
+    const key = this.#getDocKey(rootCell);
+    const held = this.#heldLifetimes.get(key);
+    if (held === undefined || !held.holders.delete(holder)) return false;
+    if (held.holders.size === 0) this.#endHeldLifetime(key, held);
+    return true;
+  }
+
+  /**
+   * Gives up every hold `holder` has, as {@link releaseHold} does for one.
+   */
+  releaseAllHolds(holder: object): void {
+    for (const [key, held] of [...this.#heldLifetimes]) {
+      if (held.holders.delete(holder) && held.holders.size === 0) {
+        this.#endHeldLifetime(key, held);
+      }
+    }
+  }
+
+  #endHeldLifetime(
+    key: `${MemorySpace}/${ScopeKey}/${URI}`,
+    held: HeldLifetime,
+  ): void {
+    // A start still resolving may be about to hold the result. The entry stays,
+    // holding no one, so that start inherits the registration to end.
+    if ((this.#activeStartAttemptsByDoc.get(key)?.size ?? 0) > 0) return;
+    if (this.#heldLifetimes.get(key) === held) this.#heldLifetimes.delete(key);
+    if (held.registration === undefined) return;
+    if (this.#cancels.get(key) !== held.registration) return;
+    if (this.#independentlyStartedResults.has(key)) return;
+    if (this.#usesScopedPrograms(held.cell)) return;
+    this.#stopResult(held.cell);
+  }
+
+  /** Whether something holds a lifetime of its own for the result at `key`. */
+  #hasOwnLifetime(key: `${MemorySpace}/${ScopeKey}/${URI}`): boolean {
+    return this.#independentlyStartedResults.has(key) ||
+      (this.#heldLifetimes.get(key)?.holders.size ?? 0) > 0;
+  }
+
+  /**
+   * A launch named the result at `key`: whatever runs there is now also its,
+   * so ending a held lifetime no longer ends the registration.
+   */
+  #disownHeldRegistration(key: `${MemorySpace}/${ScopeKey}/${URI}`): void {
+    const held = this.#heldLifetimes.get(key);
+    if (held !== undefined) held.registration = undefined;
+    // …and a held start still resolving claims no registration to end.
+    for (const attempt of this.#activeStartAttemptsByDoc.get(key) ?? []) {
+      attempt.disowned = true;
+    }
+  }
+
+  /**
+   * The current in-flight start attempt for `resultCell`'s document, or a new
+   * one, with its outcome.
+   */
+  #joinOrBeginAttempt<T>(
     resultCell: Cell<T>,
   ): { attempt: StartAttempt; settled: Promise<boolean> } {
     const startKey = this.#getDocKey(resultCell);
@@ -4977,7 +5153,8 @@ export class Runner {
       const settled = this.#doStart(resultCell, new Set(), attempt)
         .then((started) => {
           // This start gives the result a lifetime of its own, so an enclosing
-          // pattern releasing it later leaves it running. An attempt whose
+          // pattern releasing it later leaves it running: permanent, or held
+          // by the holders its callers named. An attempt whose
           // target a stop superseded claims nothing: the registration under
           // the key belongs to whatever replaced it, and a stop that won the
           // race leaves no registration at all. Both cases report that this
@@ -4989,8 +5166,17 @@ export class Runner {
           const stillRunning = started && target !== undefined &&
             this.#isStartAttemptCurrentFor(attempt, target) &&
             this.#cancels.has(target);
-          if (stillRunning) {
-            this.#independentlyStartedResults.add(target);
+          // Settled: a later caller begins an attempt of its own, which finds
+          // the result running, rather than joining one whose lifetimes are
+          // already claimed.
+          for (const key of attempt.generationsByDoc.keys()) {
+            if (this.#inFlightStartsByDoc.get(key) === attempt) {
+              this.#inFlightStartsByDoc.delete(key);
+            }
+          }
+          const cell = attempt.targetCell;
+          if (stillRunning && target !== undefined && cell !== undefined) {
+            this.#claimLifetimes(attempt, target, cell);
           }
           return stillRunning;
         })
@@ -5056,6 +5242,13 @@ export class Runner {
       return;
     }
     if (this.#independentlyStartedResults.has(key)) return;
+    const held = this.#heldLifetimes.get(key);
+    if (held !== undefined && held.holders.size > 0) {
+      // The launch lets go of what its holders still hold, so what runs is
+      // theirs from now on: the last of them to let go ends it.
+      held.registration = registration;
+      return;
+    }
     // A start still resolving may be about to give this result a lifetime of
     // its own, and it cannot say so until it finishes. Declining here keeps a
     // page that is still opening from being closed by its parent. An attempt
@@ -6859,6 +7052,7 @@ export class Runner {
       this.#runtime.viewReplication.active(resultCell.space)
     ) {
       attempt.targetKey = this.#getDocKey(resultCell);
+      attempt.targetCell = resultCell;
       return Promise.resolve(this.#cancels.has(attempt.targetKey));
     }
     if (!this.#isStartAttemptCurrent(attempt)) {
@@ -6878,6 +7072,7 @@ export class Runner {
 
     const key = this.#getDocKey(rootCell);
     attempt.targetKey = key;
+    attempt.targetCell = rootCell;
     // Step 2: Already started? Return success
     if (this.#cancels.has(key)) return Promise.resolve(true);
 
@@ -7193,7 +7388,10 @@ export class Runner {
       scoped.ensure(tx, givenPattern);
       return undefined;
     }
-    if (this.#cancels.has(key)) return undefined;
+    if (this.#cancels.has(key)) {
+      this.#disownHeldRegistration(key);
+      return undefined;
+    }
 
     const registration = this.#startCore(resultCell, {
       tx,
@@ -8364,6 +8562,7 @@ export class Runner {
           // a context under someone else's authority; the recovery's purpose
           // is met and its claim dissolves. Settling the token touches no
           // live registration (its stale install no longer matches).
+          this.#disownHeldRegistration(key);
           ownership.cancel();
           return;
         }
@@ -8471,6 +8670,7 @@ export class Runner {
               // let a parent cancel tear down a run whose lifecycle the parent
               // does not own. Yield exactly as `#startWithTx()` yields on an
               // owned key: settle the token without touching the registration.
+              this.#disownHeldRegistration(target!);
               ownership.cancel();
               return true;
             }
@@ -8729,6 +8929,7 @@ export class Runner {
     // a release leaves a result started in its own right running, and such a
     // result keeps that lifetime across the retirement.
     const docKey = this.#getDocKey(resultCell);
+    this.#disownHeldRegistration(docKey);
     const refusedRegistration = this.#registrationsInstalledByRefusedRuns.get(
       docKey,
     );
@@ -10996,6 +11197,9 @@ export class Runner {
         attempt.preResolutionStopKeys.add(key);
       }
     }
+    // A stop discards every lifetime the result holds, the held ones too:
+    // their holders' later releases find nothing to give up.
+    this.#heldLifetimes.delete(key);
     this.#stopResult(resultCell);
   }
 
@@ -11264,6 +11468,7 @@ export class Runner {
     // later start can join one; dropping the index releases the attempts too.
     this.#inFlightStartsByDoc.clear();
     this.#independentlyStartedResults.clear();
+    this.#heldLifetimes.clear();
     this.#registrationsInstalledByRefusedRuns.clear();
     for (const key of [...this.#pendingDeferredStarts.keys()]) {
       this.#cancelPendingDeferredStarts(key);
@@ -14873,11 +15078,9 @@ export class Runner {
         // its exact token so parent teardown cannot stop a replacement run.
         const cancel = childRun.cancelDeferredStart;
         addCancel(() => {
-          if (
-            !this.#independentlyStartedResults.has(
-              this.#getDocKey(childResultCell),
-            )
-          ) cancel();
+          if (!this.#hasOwnLifetime(this.#getDocKey(childResultCell))) {
+            cancel();
+          }
         });
       }
 

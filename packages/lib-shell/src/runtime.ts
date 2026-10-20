@@ -666,6 +666,23 @@ export class RuntimeInternals extends EventTarget {
   }
 
   /**
+   * Gives up this runtime's hold on a pattern it started (`getPattern` with
+   * `start`). The pattern stops once no client holds it, unless something else
+   * keeps it running. The cached load goes too, so a later `getPattern` that
+   * starts it starts it again. Resolves to whether this runtime held it.
+   */
+  releasePattern(
+    space: DID,
+    id: string,
+    options?: { scope?: CellScope },
+  ): Promise<boolean> {
+    this.#check();
+    const scope = options?.scope ?? "space";
+    this.#dropPattern(space, scope, id);
+    return this.#client.releasePiece(id, space, scope);
+  }
+
+  /**
    * Drop one loaded piece, and any level of the cache it was the last thing
    * in. A nested map holds a level per address component, so a level left
    * empty is a space or a scope the runtime goes on holding for a piece it
