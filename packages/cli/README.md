@@ -418,10 +418,14 @@ uses this fixture mechanism at both postures.
 
 `cf view [file]` is an interactive pager for transformed TypeScript, source
 files, and unified diffs. Named Markdown, JSON, JSONC, JSON Lines, YAML, Python,
-Swift, Kotlin, TOML, shell, Java properties, ProGuard, and XML files use their
-own syntax highlighting. Shell covers Bash and POSIX shell scripts named `.sh`,
-`.bash`, or `.command`, and Bash's startup files, such as `.bashrc` and
-`.profile`. A heredoc's body is colored as a string, with the expansions its
+Swift, Kotlin, TOML, HCL, shell, Java properties, ProGuard, and XML files use
+their own syntax highlighting. HCL covers OpenTofu and Terraform configuration
+named `.tf` or `.tofu`, variable definitions files named `.tfvars`, backend
+configuration files named `.tfbackend`, and other `.hcl` files, such as
+dependency lock files. A string's interpolations and template directives are
+colored as code inside the string. Shell covers Bash and POSIX shell scripts
+named `.sh`, `.bash`, or `.command`, and Bash's startup files, such as `.bashrc`
+and `.profile`. A heredoc's body is colored as a string, with the expansions its
 delimiter allows. A Swift package manifest is Swift source under its `.swift`
 extension, and a module's `.swiftinterface` is Swift as well. Gradle build and
 settings scripts are Kotlin scripts under the `.kts` extension. Gradle version

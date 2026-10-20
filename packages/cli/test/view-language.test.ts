@@ -39,6 +39,7 @@ import { pythonLanguage } from "../lib/view/languages/python/language.ts";
 import { swiftLanguage } from "../lib/view/languages/swift/language.ts";
 import { kotlinLanguage } from "../lib/view/languages/kotlin/language.ts";
 import { tomlLanguage } from "../lib/view/languages/toml/language.ts";
+import { hclLanguage } from "../lib/view/languages/hcl/language.ts";
 import { shellLanguage } from "../lib/view/languages/shell/language.ts";
 import { propertiesLanguage } from "../lib/view/languages/properties/language.ts";
 import { proguardLanguage } from "../lib/view/languages/proguard/language.ts";
@@ -144,6 +145,9 @@ Deno.test("languageForName: identifiers and aliases resolve explicit overrides",
   assertEquals(languageForName("kotlin"), kotlinLanguage);
   assertEquals(languageForName("kt"), kotlinLanguage);
   assertEquals(languageForName("toml"), tomlLanguage);
+  assertEquals(languageForName("hcl"), hclLanguage);
+  assertEquals(languageForName("opentofu"), hclLanguage);
+  assertEquals(languageForName("terraform"), hclLanguage);
   assertEquals(languageForName("shell"), shellLanguage);
   assertEquals(languageForName("sh"), shellLanguage);
   assertEquals(languageForName("bash"), shellLanguage);
@@ -170,6 +174,7 @@ Deno.test("languageForName: identifiers and aliases resolve explicit overrides",
     "swift",
     "kotlin",
     "toml",
+    "hcl",
     "shell",
     "properties",
     "proguard",
@@ -197,6 +202,11 @@ Deno.test("languageForName: identifiers and aliases resolve explicit overrides",
     "kotlin",
     "kt",
     "toml",
+    "hcl",
+    "opentofu",
+    "tofu",
+    "terraform",
+    "tf",
     "shell",
     "sh",
     "bash",
