@@ -81,7 +81,11 @@ async function holder(server?: MemoryV2Server.Server) {
         },
       },
     );
-    expect((await tx.commit().settled).error).toBeUndefined();
+    // Its verdict alone: under a server whose fan-out the test delivers,
+    // coverage of the write waits on that delivery.
+    const committed = await tx.commit({ holdSyncedUntilCovered: false })
+      .verdict;
+    expect(committed.error).toBeUndefined();
     await runtime.idle();
   };
   await writeSecret("first secret");
@@ -172,7 +176,9 @@ describe("cell-read-projected", () => {
       // reader is another client, told of the write by the server, as a
       // reader of someone else's document is, and it reads the value through
       // a schema that types it.
-      const server = newSharedServer({ subscriptionRefreshDelayMs: 0 });
+      // Fan-out held until the test delivers it, so the reader is told of
+      // the write at a point the test names.
+      const server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
       try {
         await using docs = await holder(server);
         const storageManager = EmulatedStorageManager.connectTo(server, {
@@ -197,20 +203,16 @@ describe("cell-read-projected", () => {
             expect(confidentiality).toContain(SECRET_ATOM);
             const before = delivered.length;
             await docs.writeLabel(OTHER_ATOM);
-            // Until the reader holds the new label: a read that subscribes to
-            // nothing, so it cannot run the sink itself.
-            const secret = reader.getCellFromLink(docs.secret.getAsLink());
-            for (
-              let tries = 0;
-              !readProjected(secret, (value) => value).consumed
-                .confidentiality.includes(OTHER_ATOM) && tries < 200;
-              tries++
-            ) {
-              await reader.storageManager.synced();
-              await reader.idle();
-              await new Promise((resolve) => setTimeout(resolve, 10));
-            }
+            await server.flushSessions([space]);
+            await clock.settle();
+            await storageManager.synced();
             await reader.idle();
+            // The new label has reached the reader: a read that subscribes to
+            // nothing, so it cannot have run the sink itself.
+            const secret = reader.getCellFromLink(docs.secret.getAsLink());
+            expect(
+              readProjected(secret, (value) => value).consumed.confidentiality,
+            ).toContain(OTHER_ATOM);
 
             expect(delivered.length).toBe(before + 1);
             expect(delivered.at(-1)).toEqual({
