@@ -135,13 +135,17 @@ fund the service. These must be developed alongside confidential hosting.
   minimum population thresholds. Noise, contribution limits, and repeated-query
   budgets need a defined privacy model; low-volume statistics stay withheld.
 - **Diagnostics:** the health surface is public today: `/api/health/stats`
-  session rows and `/api/health/document-interests` expose per-space principals,
-  delegated identities, and connection liveness without authentication.
+  exposes per-space session IDs and principals without authentication.
+  `/api/health/document-interests` also exposes delegated identities and
+  connection liveness.
   Restrict these surfaces to authenticated operators before claiming operator
   exclusion. The immediate follow-up is shared operator-diagnostics middleware
   based on the [memory-dump gate](../../packages/toolshed/routes/storage/memory/memory-dump.index.ts):
-  explicit environment opt-in with production mounting refused, CF1 first-party
-  signature verification against a DID allowlist, and an audit log per request.
+  explicit opt-in, CF1 first-party signature verification against a DID
+  allowlist, and an audit log per request. The shared gate must refuse production
+  mounting and require an explicitly configured, recognized non-production
+  environment. An unset or unknown `ENV` must fail closed instead of inheriting
+  the current `development` default.
   An operator gate is an interim access boundary; private operations must also
   replace routine operator access to this metadata.
 
