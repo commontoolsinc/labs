@@ -21,18 +21,16 @@ export function footerFades(slotted: readonly FooterSlotEntry[]): boolean {
 /**
  * CFScreen - Full height screen layout component with header/main/footer slots
  *
- * The screen holds its content a gutter in from its edges, so content that
- * does no layout of its own does not draw against the edge of whatever hosts
- * the screen. Each region pads itself rather than the screen as a whole: the
- * main region scrolls edge to edge with the gutter inside it, and an empty
- * header or footer adds nothing. A footer holding an inset `cf-tab-bar` keeps
- * no gutter, since that bar places itself. `bleed` drops the gutter from every
- * region, for content that lays out its own edge, such as a header bar that
- * paints its own background.
+ * A screen has margins and bars do not. The screen pads itself by a gutter, so
+ * content that does no layout of its own does not draw against the edge of
+ * whatever hosts it. A `cf-toolbar` in the header or footer, or a `cf-tab-bar`
+ * in the footer, cancels the gutter and runs to the screen's edges. `bleed`
+ * drops the gutter, for content that lays out its own edge, such as a
+ * hand-built header bar that paints its own background.
  *
  * @element cf-screen
  *
- * @attr {boolean} bleed - Lays every region out flush with the screen's edges.
+ * @attr {boolean} bleed - Lays the content out flush with the screen's edges.
  *
  * @slot header - Fixed header content at the top
  * @slot main - Main content that expands to fill available space (default slot)
@@ -67,6 +65,7 @@ export class CFScreen extends BaseElement {
         --cf-screen-gutter,
         var(--cf-theme-spacing-loose, 0.75rem)
       );
+      --_cf-screen-gutter-pull: calc(-1 * var(--_cf-screen-gutter));
       /* Internal fallback defaults for footer tab-bar overlap and fade. */
       --_cf-screen-footer-overlap-default: 4rem;
       --_cf-screen-footer-fade-height-default: 2rem;
@@ -76,18 +75,23 @@ export class CFScreen extends BaseElement {
       height: 100%;
       overflow: hidden;
       box-sizing: border-box;
+      padding: var(--_cf-screen-gutter);
     }
 
     :host([bleed]) {
       --_cf-screen-gutter: 0px;
     }
 
+    /* A region reaches into the padding at its outer edge and pads it back, */
+    /* so a bar that cancels the gutter leaves the region its full height. */
     .header {
       flex: none;
+      margin-top: var(--_cf-screen-gutter-pull);
+      padding-top: var(--_cf-screen-gutter);
     }
 
-    :host([data-header]) .header {
-      padding: var(--_cf-screen-gutter) var(--_cf-screen-gutter) 0;
+    slot[name="header"]::slotted(cf-toolbar) {
+      margin: var(--_cf-screen-gutter-pull) var(--_cf-screen-gutter-pull) 0;
     }
 
     .main {
@@ -97,7 +101,6 @@ export class CFScreen extends BaseElement {
       flex-direction: column;
       overflow-y: auto;
       overflow-x: hidden;
-      padding: var(--_cf-screen-gutter);
     }
 
     :host([data-footer-fade]) .main {
@@ -130,44 +133,40 @@ export class CFScreen extends BaseElement {
 
     .footer {
       flex: none;
+      margin-bottom: var(--_cf-screen-gutter-pull);
+      padding-bottom: var(--_cf-screen-gutter);
     }
 
-    :host([data-footer]:not([data-footer-fade])) .footer {
-      padding: 0 var(--_cf-screen-gutter) var(--_cf-screen-gutter);
+    slot[name="footer"]::slotted(cf-toolbar),
+    slot[name="footer"]::slotted(cf-tab-bar) {
+      margin: 0 var(--_cf-screen-gutter-pull) var(--_cf-screen-gutter-pull);
     }
   `;
 
   override firstUpdated() {
-    this._syncHeader();
-    this._syncFooter();
+    this._syncFooterFade();
   }
 
-  private _assigned(name: string): Element[] {
-    return this.shadowRoot?.querySelector<HTMLSlotElement>(
-      `slot[name="${name}"]`,
-    )?.assignedElements({ flatten: true }) ?? [];
-  }
-
-  private _syncHeader = () => {
-    this.toggleAttribute("data-header", this._assigned("header").length > 0);
-  };
-
-  private _syncFooter = () => {
-    const footer = this._assigned("footer");
-    this.toggleAttribute("data-footer", footer.length > 0);
-    this.toggleAttribute("data-footer-fade", footerFades(footer));
+  private _syncFooterFade = () => {
+    const footerSlot = this.shadowRoot?.querySelector<HTMLSlotElement>(
+      'slot[name="footer"]',
+    );
+    this.toggleAttribute(
+      "data-footer-fade",
+      footerFades(footerSlot?.assignedElements({ flatten: true }) ?? []),
+    );
   };
 
   override render() {
     return html`
       <div class="header" part="header">
-        <slot name="header" @slotchange="${this._syncHeader}"></slot>
+        <slot name="header"></slot>
       </div>
       <div class="main" part="main">
         <slot></slot>
       </div>
       <div class="footer" part="footer">
-        <slot name="footer" @slotchange="${this._syncFooter}"></slot>
+        <slot name="footer" @slotchange="${this._syncFooterFade}"></slot>
       </div>
     `;
   }

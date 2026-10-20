@@ -284,7 +284,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     quickCapture,
     [NAME]: computed(() => `Ben's Space (${visiblePieces.length})`),
     [UI]: (
-      <cf-screen bleed>
+      <cf-screen>
         <cf-keybind
           code="KeyO"
           meta

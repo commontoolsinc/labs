@@ -111,7 +111,7 @@ const SummaryIndex = pattern<Input, Output>(() => {
   return {
     [NAME]: "SummaryIndex",
     [UI]: (
-      <cf-screen bleed>
+      <cf-screen>
         <cf-toolbar slot="header" sticky>
           <h2 style={{ margin: 0, fontSize: "18px" }}>Search</h2>
         </cf-toolbar>

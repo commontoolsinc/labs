@@ -98,7 +98,7 @@ describe("cf-screen", () => {
 
         it("returns a named header slot, a named footer slot, and a default slot", () => {
           const html = staticHtml(new CFScreen());
-          expect(html).toContain('<slot name="header"');
+          expect(html).toContain('<slot name="header">');
           expect(html).toContain('<slot name="footer"');
           expect(html).toContain("<slot></slot>");
         });

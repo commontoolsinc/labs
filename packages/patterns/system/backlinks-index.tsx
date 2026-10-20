@@ -202,7 +202,7 @@ const BacklinksIndex = pattern<Input, Output>(({ pieceRegistry }) => {
   return {
     [NAME]: "BacklinksIndex",
     [UI]: (
-      <cf-screen bleed>
+      <cf-screen>
         <cf-toolbar slot="header" sticky>
           <h2 style={{ margin: 0, fontSize: "18px" }}>Mentions</h2>
         </cf-toolbar>

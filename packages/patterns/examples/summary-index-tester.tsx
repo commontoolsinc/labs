@@ -29,7 +29,7 @@ export default pattern<Record<string, never>>((_) => {
   return {
     [NAME]: "Summary Index Tester",
     [UI]: (
-      <cf-screen bleed>
+      <cf-screen>
         <cf-toolbar slot="header" sticky>
           <h2 style={{ margin: 0, fontSize: "18px" }}>Summary Index Tester</h2>
         </cf-toolbar>

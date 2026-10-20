@@ -678,8 +678,9 @@ main area **Tag**: `<cf-screen>`
 
 **Attributes**:
 
-- `bleed` — Lays every region flush with the screen's edges, for content that
-  lays out its own edge (a header bar with its own background, a split view)
+- `bleed` — Lays the content flush with the screen's edges, for content that
+  lays out its own edge (a hand-built header bar with its own background, a
+  split view)
 
 **CSS custom properties**:
 
@@ -688,8 +689,9 @@ main area **Tag**: `<cf-screen>`
 
 **Usage notes**:
 
-- The screen holds its header, main area, and footer a gutter in from its edges,
-  so content needs no padding of its own to clear them
+- A screen has margins and bars do not: the screen pads itself by the gutter, so
+  content needs no padding of its own, and a `cf-toolbar` in the header or
+  footer, or a `cf-tab-bar` in the footer, runs to the edges by itself
 - Content in the default slot scrolls automatically — no need for `cf-vscroll`
   unless you need snap-to-bottom (chat), fade-edges, or styled scrollbar
 - Do NOT nest `cf-screen` inside another `cf-screen`

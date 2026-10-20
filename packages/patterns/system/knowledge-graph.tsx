@@ -319,7 +319,7 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
       return `Knowledge Graph (${total} links)`;
     }),
     [UI]: (
-      <cf-screen bleed>
+      <cf-screen>
         <cf-toolbar slot="header" sticky>
           <h2 style={{ margin: 0, fontSize: "18px" }}>Knowledge Graph</h2>
           <div slot="end">

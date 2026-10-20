@@ -737,7 +737,7 @@ export default pattern<LoomInput, LoomOutput>(
       [NAME]: title,
       [UI]: (
         <cf-theme>
-          <cf-screen bleed>
+          <cf-screen>
             <cf-toolbar slot="header">
               <h1 slot="start">{title}</h1>
               <cf-hstack slot="end" gap="2" wrap>
