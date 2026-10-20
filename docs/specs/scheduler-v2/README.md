@@ -651,7 +651,9 @@ refusal of a write the replica kept as a local fold takes the bounded retry,
 whose run reads the kept value. A client whose principal cannot write the
 space pushes no derived write at all (memory-v2 03-commit-model.md §3.8.3),
 so such a refusal arises only where the replica's access list was behind the
-store's. Waking consumers on success requires the committing run's
+store's or the replica did not hold it; the client then runs the writer once
+more, by an invalidation of its own after the revert, and holds what that run
+computes. Waking consumers on success requires the committing run's
 registration to remain active.
 
 The run path refreshes live subscriptions incrementally, including during

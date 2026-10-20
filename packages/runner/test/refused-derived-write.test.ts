@@ -361,7 +361,7 @@ describe("refused derived write", () => {
     // pushes the derivation, and the store, which has taken the revocation
     // by then, refuses it for lack of a grant.
 
-    it("reverts the refused write and runs no further, when `localFold` is off", async () => {
+    it("reverts the refused write, then runs once more and holds what that run computes, when `localFold` is off", async () => {
       const { ownerRuntime, space, derived, counts, held } =
         await readerDerives(
           2,
@@ -373,12 +373,13 @@ describe("refused derived write", () => {
           },
         );
 
-      // The refusal names a grant no re-run can supply, so the run takes no
-      // retry, and the revert of its own write does not run it again.
+      // The refusal names a grant no re-run can supply, so the scheduler
+      // takes no retry. The runtime, having learned the store's verdict,
+      // runs the writer once more after the revert, and that run is held.
       expect(counts.refusals).toBe(1);
-      expect(counts.runs).toBe(1);
-      expect(derived.get()).toBeUndefined();
-      expect(held()).toBe(0);
+      expect(counts.runs).toBe(2);
+      expect(derived.get()).toBe(4);
+      expect(held()).toBe(1);
       const stored = ownerRuntime.getCell<number>(space, "derived");
       await stored.sync();
       expect(stored.get()).toBeUndefined();
@@ -411,13 +412,16 @@ describe("refused derived write", () => {
       await readerRuntime.storageManager.pullOpenSpacesToHead();
       await settled();
 
-      expect(counts.runs).toBe(2);
+      expect(counts.runs).toBe(3);
       expect(counts.refusals).toBe(1);
       expect(derived.get()).toBe(6);
       expect(held()).toBe(1);
     });
 
     it("keeps the refused write as a fold, when `localFold` is on", async () => {
+      // The run after the revert reads the folded value and has nothing to
+      // write, so nothing is held.
+
       const { ownerRuntime, space, derived, counts, held } =
         await readerDerives(
           2,
@@ -430,7 +434,7 @@ describe("refused derived write", () => {
         );
 
       expect(counts.refusals).toBe(1);
-      expect(counts.runs).toBe(1);
+      expect(counts.runs).toBe(2);
       expect(derived.get()).toBe(4);
       expect(held()).toBe(0);
       const stored = ownerRuntime.getCell<number>(space, "derived");

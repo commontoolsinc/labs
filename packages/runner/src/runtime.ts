@@ -2176,6 +2176,15 @@ export class Runtime {
         }
       }
 
+      // Constructed here rather than at the first `edit()`: it asks for each
+      // space's access list when the space first opens, which is before any
+      // derivation into the space can commit.
+      if (
+        !this.servingPosture && this.experimental.serverExecution !== true
+      ) {
+        this.#localDerivation = new LocalDerivationDestination(this);
+      }
+
       // Handle pattern environment configuration. Only set the (process-global)
       // pattern environment when a host explicitly provides one — setting it
       // unconditionally from every Runtime would let the last-constructed runtime

@@ -204,9 +204,9 @@ export function watchReactiveActionCommit(state: {
   /**
    * Whether the replica keeps a derived write the space refuses for lack of
    * a grant as a local fold (the `localFold` flag), in which case the run
-   * that follows reads what was kept.
+   * that follows reads what was kept. Absent: it reverts them.
    */
-  readonly keepsRefusedDerivedWrites: boolean;
+  readonly keepsRefusedDerivedWrites?: boolean;
 
   /** Waits for catch-up and scoped conflict pulls before requeueing. */
   readonly awaitRetryReadiness: (error: unknown) => Promise<void>;
@@ -289,7 +289,7 @@ export function watchReactiveActionCommit(state: {
     if (
       isPermanentRejection(error) || isTerminalRejection(error) ||
       (isPermanentAuthorizationRefusal(error) &&
-        !(state.keepsRefusedDerivedWrites &&
+        !(state.keepsRefusedDerivedWrites === true &&
           state.tx.tx.derivedWrites === true))
     ) {
       state.retries.delete(state.action);

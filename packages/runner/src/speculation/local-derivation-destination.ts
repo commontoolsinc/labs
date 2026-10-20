@@ -35,7 +35,6 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { spaceReaderRole } from "../cfc/space-membership.ts";
 import type { Runtime } from "../runtime.ts";
 import type { Action } from "../scheduler.ts";
-import { createTransactionCommitReceipt } from "../storage/commit-receipt.ts";
 import type {
   CommitError,
   IExtendedStorageTransaction,
@@ -52,6 +51,7 @@ import type {
   URI,
 } from "../storage/interface.ts";
 import { isPermanentAuthorizationRefusal } from "../storage/rejection.ts";
+import { CoalescedDocListener } from "./doc-notification-listener.ts";
 
 const logger = getLogger("local-derivation", {
   enabled: true,
@@ -116,17 +116,45 @@ export class LocalDerivationDestination implements TransactionSealDestination {
    */
   readonly #refused = new Set<MemorySpace>();
 
-  /** space → cancel of the sink that re-reads the access list on change. */
-  readonly #accessListSinks = new Map<MemorySpace, () => void>();
+  /**
+   * The one storage-notification listener that re-reads a space's access
+   * list when it changes: outside the scheduler, so a change costs no
+   * transaction and no run of anything.
+   */
+  readonly #accessListListener: CoalescedDocListener;
 
   /** space → release of the arrival wake installed on the replica. */
   readonly #arrivalReleases = new Map<MemorySpace, () => void>();
 
+  /** The first-open observer this instance installed on the manager, if any. */
+  #installedOpenObserver: ((space: MemorySpace) => void) | undefined;
+
   #closed = false;
 
-  /** Constructs an instance which holds derivations for `runtime`. */
+  /**
+   * Constructs an instance which holds derivations for `runtime`, and asks
+   * for the access list of every space the runtime's storage opens, so that
+   * the list is usually there before the space's first derivation commits.
+   */
   constructor(runtime: Runtime) {
     this.#runtime = runtime;
+    const manager = runtime.storageManager;
+    this.#accessListListener = new CoalescedDocListener(manager, {
+      wants: (space, id, scope) =>
+        (scope === undefined || scope === "space") &&
+        this.#accessLists.has(space) && id === aclDocId(space),
+      onNotify: (space) => this.#accessListChanged(space),
+    });
+    if (manager.spaceOpenObserver === undefined) {
+      const observer = (space: MemorySpace) => {
+        if (!this.#closed) this.#ensureAccessList(space);
+      };
+      manager.spaceOpenObserver = observer;
+      this.#installedOpenObserver = observer;
+    }
+    for (const space of manager.openedSpaces?.() ?? []) {
+      this.#ensureAccessList(space);
+    }
   }
 
   /**
@@ -151,7 +179,15 @@ export class LocalDerivationDestination implements TransactionSealDestination {
     return this.#writeAccess(space);
   }
 
-  /** Holds a derived transaction, or forwards any other to the store. */
+  /**
+   * Holds a derived transaction into a space the principal is known not to
+   * write, and forwards every other transaction to the store. The decision
+   * never waits: a wait between a transaction's reads and its commit is a
+   * window for the replica's view to move under it. A derived transaction
+   * into a space whose access list has not arrived is therefore forwarded,
+   * and the store's verdict teaches this destination what the list would
+   * have.
+   */
   seal(
     tx: IExtendedStorageTransaction,
     options?: TransactionCommitOptions,
@@ -160,18 +196,11 @@ export class LocalDerivationDestination implements TransactionSealDestination {
       return tx.tx.commit(options);
     }
     const spaces = tx.tx.writtenSpaces?.() ?? [];
-    const loads = spaces
-      .filter((space) => this.#writeAccess(space) === "unknown")
-      .map((space) => this.#ensureAccessList(space));
-    if (loads.length === 0) return this.#decide(tx, options, spaces);
-    // The decision waits for the access lists it turns on, which is what
-    // keeps a cold runtime's first derivation from being pushed and refused
-    // while its list is still arriving.
-    return createTransactionCommitReceipt((async () => {
-      await Promise.all(loads);
-      const decided = this.#decide(tx, options, spaces);
-      return "settled" in decided ? await decided.settled : await decided;
-    })());
+    for (const space of spaces) this.#ensureAccessList(space);
+    if (spaces.some((space) => this.#writeAccess(space) === "refused")) {
+      return this.#hold(tx);
+    }
+    return this.#forward(tx, options, spaces);
   }
 
   /**
@@ -193,14 +222,7 @@ export class LocalDerivationDestination implements TransactionSealDestination {
       held.clear();
     }
     this.#held.clear();
-    for (const cancel of this.#accessListSinks.values()) {
-      try {
-        cancel();
-      } catch {
-        // sink cancellation is best-effort during teardown
-      }
-    }
-    this.#accessListSinks.clear();
+    this.#accessListListener.release();
     for (const release of this.#arrivalReleases.values()) {
       try {
         release();
@@ -211,24 +233,24 @@ export class LocalDerivationDestination implements TransactionSealDestination {
     this.#arrivalReleases.clear();
     this.#accessLists.clear();
     this.#refused.clear();
-  }
-
-  /** Helper for {@link seal}, which holds or forwards once access is known. */
-  #decide(
-    tx: IExtendedStorageTransaction,
-    options: TransactionCommitOptions | undefined,
-    spaces: readonly MemorySpace[],
-  ): Promise<Result<Unit, CommitError>> | TransactionCommitReceipt {
-    if (spaces.some((space) => this.#writeAccess(space) === "refused")) {
-      return this.#hold(tx);
+    const manager = this.#runtime.storageManager;
+    if (
+      this.#installedOpenObserver !== undefined &&
+      manager.spaceOpenObserver === this.#installedOpenObserver
+    ) {
+      manager.spaceOpenObserver = undefined;
     }
-    return this.#forward(tx, options, spaces);
+    this.#installedOpenObserver = undefined;
   }
 
   /**
    * Helper for {@link seal}, which commits `tx` to the store and learns from
    * a refusal: a grant refusal says the store's access list is ahead of the
-   * replica's, so later derivations into the same spaces are held.
+   * replica's, so later derivations into the same spaces are held, and the
+   * writer whose run was refused, when the transaction names one, runs once
+   * more so that its derivation is held rather than lost. The rerun is
+   * requested only once the refusal's revert has been applied, so the writer
+   * reads the restored state rather than the write the store refused.
    */
   #forward(
     tx: IExtendedStorageTransaction,
@@ -236,13 +258,16 @@ export class LocalDerivationDestination implements TransactionSealDestination {
     spaces: readonly MemorySpace[],
   ): TransactionCommitReceipt {
     const receipt = tx.tx.commit(options);
+    const writer = tx.tx.sourceAction;
     receipt.settled.then((result) => {
       if (
-        result.error !== undefined &&
-        isPermanentAuthorizationRefusal(result.error)
+        this.#closed || result.error === undefined ||
+        !isPermanentAuthorizationRefusal(result.error)
       ) {
-        for (const space of spaces) this.#refused.add(space);
+        return;
       }
+      for (const space of spaces) this.#refused.add(space);
+      if (isAction(writer)) this.#runtime.scheduler.invalidateAction(writer);
     }, () => {});
     return receipt;
   }
@@ -496,43 +521,20 @@ export class LocalDerivationDestination implements TransactionSealDestination {
       state.loaded = true;
     });
     this.#accessLists.set(space, state);
-    this.#watchAccessList(space, aclId);
+    this.#accessListListener.ensure();
     return state.load;
   }
 
   /**
-   * Helper for {@link seal}, which re-reads `space`'s access list whenever
-   * it changes. A change retires a refusal decided by the old list, and a
-   * grant of WRITE releases what is held and runs the writers again.
+   * Helper for the access-list listener, which acts on a change to `space`'s
+   * access list: a refusal decided by the old list is retired, and a grant of
+   * WRITE releases what is held and runs the writers again.
    */
-  #watchAccessList(space: MemorySpace, aclId: URI): void {
-    try {
-      const cell = this.#runtime.getCellFromLink<unknown>({
-        space,
-        id: aclId,
-        path: [],
-      });
-      // The sink reports the current value once at subscription; only the
-      // changes after that are acted on.
-      let primed = false;
-      const cancel = cell.sink(() => {
-        if (!primed) {
-          primed = true;
-          return;
-        }
-        if (this.#closed) return;
-        this.#refused.delete(space);
-        if (this.#writeAccess(space) === "granted") {
-          this.#release(space, "the principal may now write the space");
-        }
-      });
-      this.#accessListSinks.set(space, cancel);
-    } catch (error) {
-      logger.warn("access-list-watch-failed", () => [
-        `the access list of ${space} could not be watched; a grant made ` +
-        "while this runtime runs reaches it only through a reload",
-        error,
-      ]);
+  #accessListChanged(space: MemorySpace): void {
+    if (this.#closed) return;
+    this.#refused.delete(space);
+    if (this.#writeAccess(space) === "granted") {
+      this.#release(space, "the principal may now write the space");
     }
   }
 

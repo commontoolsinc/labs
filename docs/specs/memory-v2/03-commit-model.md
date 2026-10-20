@@ -837,9 +837,12 @@ writes into an absent scoped instance are an initialization it records, and
 a reader of an instance that setup could not store reads the default the
 schema declares, as any reader of an absent defaulted slot does.
 
-- A derived transaction waits for the space's access list to arrive before
-  it is decided, so a cold runtime's first derivation is held rather than
-  pushed and refused.
+- The decision never waits, since a wait between a transaction's reads and
+  its commit is a window for the replica's view to move under it. The
+  runtime asks for a space's access list as soon as it opens the space, so
+  the list is there before the space's first derivation commits; one that
+  commits before it arrives is pushed, and the store's verdict then teaches
+  the runtime what the list would have.
 - A held derivation stands only where the store holds nothing. A write to a
   document the store already holds a value for is dropped, and the
   principal's view keeps the stored value: a principal who may write the
@@ -855,11 +858,13 @@ schema declares, as any reader of an absent defaulted slot does.
 - A grant of WRITE retires every derivation held for the space and runs
   their writers again, which then commit to the store.
 - A derived write the store refuses for lack of a grant after all, because
-  the replica's copy of the access list was behind the store's, is reverted
-  as any other rejection is. The scheduler takes no retry on it, and the
-  revert does not run the computation again; the computation runs again when
-  an input it did not write changes. Later derivations into the space are
-  held until the replica's copy of the list changes.
+  the replica's copy of the access list was behind the store's or had not
+  arrived, is reverted as any other rejection is. The scheduler takes no
+  retry on it, and the revert does not run the computation again. The
+  runtime instead holds every later derivation into the space until the
+  replica's copy of the list changes, and runs the refused computation once
+  more, after the revert, so that what it computes is held rather than
+  lost; that run reaches no store and is refused by nothing.
 
 A held derivation is a pending layer of the session's own that is never
 exported, which is what places it against the invariant catalog
