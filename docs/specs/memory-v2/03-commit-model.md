@@ -807,15 +807,57 @@ The client provider fires three notification types:
   notifications MUST reflect the visible state transitions, not hidden
   intermediate states.
 
-### 3.8.3 A Derived Write the Space Refuses
+### 3.8.3 Derived State a Principal Cannot Store
 
 A principal may read a space it cannot write, and a reactive computation it
 runs there still writes its outputs. Those writes are derived: running the
-computation again reproduces them. When the server refuses such a commit with
-an `AuthorizationError` it has not marked retriable, a client running under
-the `localFold` flag keeps each written document's new value instead of
-reverting it, as a _local fold_: the confirmed value at the same `seq`, with
-the refused write applied, held by that replica alone.
+computation again reproduces them. The view such a principal reads is made
+of them, so the principal's runtime keeps them rather than asking the space
+to. A client runtime seals a transaction whose writes are derived into the
+replica's process-local layer, and never pushes it, when the principal's
+level in the space, as the access list the replica holds states it, is below
+WRITE. Reads see the held value through the ordinary pending materialization,
+as they see any pending write. A confirmed read, which reads the durable
+view, finds the document as the store holds it and reports it unconfirmed
+while the held layer stands over it; a durable read's settlement promise
+resolves when the held derivation is replaced or released. Nothing is sent,
+synced, or kept past the runtime's life. The store stays the cache of derived
+state for the principals who may write it, and reading a space never requires
+writing one of its documents, user-scoped or otherwise.
+
+The transactions whose writes are derived: a reactive run; a list
+coordinator's seed, settle, and republish of its result container; a piece
+start deferred from one of those, so that the element pieces a held
+coordinator starts, their result documents, and their back-links are held
+with it; and the report a wish writes into its own surface when what it
+resolves fails. An event handler's writes are acts rather than derivations
+and are not held: a refusal of one is reverted and reported. Nor is the
+setup a host asks for, such as a pattern's start, held: the defaults it
+writes into an absent scoped instance are an initialization it records, and
+a reader of an instance that setup could not store reads the default the
+schema declares, as any reader of an absent defaulted slot does.
+
+- A derived transaction waits for the space's access list to arrive before
+  it is decided, so a cold runtime's first derivation is held rather than
+  pushed and refused.
+- A held derivation is replaced rather than accumulated. A newer one that
+  writes every document of an older one whole retires the older one, and an
+  authoritative value arriving for a document a held derivation wrote retires
+  it.
+- A grant of WRITE retires every derivation held for the space and runs
+  their writers again, which then commit to the store.
+- A derived write the store refuses for lack of a grant after all, because
+  the replica's copy of the access list was behind the store's, is reverted
+  as any other rejection is. The scheduler takes no retry on it, and the
+  revert does not run the computation again; the computation runs again when
+  an input it did not write changes. Later derivations into the space are
+  held until the replica's copy of the list changes.
+
+Under the `localFold` experimental flag
+([registry](../../development/EXPERIMENTAL_OPTIONS.md#localfold)), off by
+default, a replica keeps such a refused write as a _local fold_ instead of
+reverting it: the confirmed value at the same `seq`, with the refused write
+applied, held by that replica alone.
 
 - A document is folded only where the refused write sits directly on the
   confirmed version it was made over. Where a newer confirmed version arrived
@@ -832,16 +874,6 @@ the refused write applied, held by that replica alone.
 - The re-run the scheduler makes after the refusal reads the folded value and
   so has nothing to write. Its computation settles instead of re-running
   against the same refusal.
-
-Event handlers are not folded. Their writes are acts rather than derivations,
-and a refusal of one is reverted and reported.
-
-The fold is gated by the `localFold` experimental flag
-([registry](../../development/EXPERIMENTAL_OPTIONS.md#localfold)), off by
-default. Without it, a refused derived write is reverted as any other
-rejection is. The computation is not retried, and the revert of its own
-write does not run it again; it runs again when an input it did not write
-changes, and is refused again while the grant is missing.
 
 ## 3.9 Commit Ordering
 

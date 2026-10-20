@@ -116,27 +116,33 @@ describe("refused derived write", () => {
 
   /**
    * Opens `space`, holding `source` and, when given, `stored` as `derived`,
-   * as the owner and as a READ principal whose runtime takes `experimental`,
-   * and subscribes an action in the reader's runtime that writes
+   * as the owner and as a reader whose runtime takes `experimental`, and
+   * subscribes an action in the reader's runtime that writes
    * `derive(source)` to `derived`. The action reads the cell it writes, as a
    * computation reads its own output to leave an unchanged one alone. The
-   * returned `settled` resolves once the reader is idle, or once the action
-   * has run more often than any retry could account for, so a run that never
-   * stops fails its case rather than hanging it.
+   * reader holds `grant` on the space; with `revokeBeforeFirstPush`, the
+   * owner lowers it to READ while the reader's first push is on its way to
+   * the store, so the reader's replica decides that push by an access list
+   * the store no longer holds. The returned `settled` resolves once the
+   * reader is idle, or once the action has run more often than any retry
+   * could account for, so a run that never stops fails its case rather than
+   * hanging it.
    */
   const readerDerives = async <S, D>(
     source: S,
     derive: (s: S) => D,
-    { stored, experimental }: {
+    { stored, experimental, grant = "READ", revokeBeforeFirstPush = false }: {
       stored?: D;
       experimental?: ExperimentalOptions;
+      grant?: "READ" | "WRITE";
+      revokeBeforeFirstPush?: boolean;
     } = {},
   ) => {
     const owner = await Identity.fromPassphrase("refused write owner");
     const reader = await Identity.fromPassphrase("refused write reader");
     const ownerRuntime = open(owner);
     const space = await ownerRuntime.createSpace({
-      grants: { [reader.did()]: "READ" },
+      grants: { [reader.did()]: grant },
     });
     await ownerRuntime.editWithRetry((tx) => {
       ownerRuntime.getCell<S>(space, "source", undefined, tx).set(source);
@@ -151,6 +157,14 @@ describe("refused derived write", () => {
     const derived = readerRuntime.getCell<D>(space, "derived");
     await sourceCell.sync();
     await derived.sync();
+    if (revokeBeforeFirstPush) {
+      const factory = factories.get(readerRuntime)!;
+      factory.beforeTransact = async () => {
+        factory.beforeTransact = undefined;
+        await new ACLManager(ownerRuntime, space).set(reader.did(), "READ");
+        await ownerRuntime.storageManager.synced();
+      };
+    }
 
     const counts = { runs: 0, refusals: 0 };
     readerRuntime.telemetry.addEventListener("telemetry", (event) => {
@@ -184,6 +198,7 @@ describe("refused derived write", () => {
       overBudget = defer();
     };
     await settled();
+    const held = () => readerRuntime.localDerivation?.heldCount(space) ?? 0;
     return {
       ownerRuntime,
       readerRuntime,
@@ -192,49 +207,35 @@ describe("refused derived write", () => {
       derived,
       counts,
       settled,
+      held,
     };
   };
 
-  it("keeps the value a READ principal computes but cannot store, after one refused commit", async () => {
-    const { ownerRuntime, space, derived, counts } = await readerDerives(
+  it("holds the value a READ principal computes but cannot store, and pushes nothing", async () => {
+    const { ownerRuntime, space, derived, counts, held } = await readerDerives(
       2,
       (n: number) => n * 2,
-      { experimental: { localFold: true } },
     );
 
-    expect(counts.refusals).toBe(1);
-    expect(derived.get()).toBe(4);
-    // The second run reads the kept value and has nothing to write.
-    expect(counts.runs).toBe(2);
-    const stored = ownerRuntime.getCell<number>(space, "derived");
-    await stored.sync();
-    expect(stored.get()).toBeUndefined();
-  });
-
-  it("reverts the write after one refused commit and runs no further, when `localFold` is off", async () => {
-    const { ownerRuntime, space, derived, counts } = await readerDerives(
-      2,
-      (n: number) => n * 2,
-      { experimental: { localFold: false } },
-    );
-
-    // The refusal names a grant no re-run can supply, so the run takes no
-    // retry, and the revert of its own write does not run it again.
-    expect(counts.refusals).toBe(1);
+    expect(counts.refusals).toBe(0);
     expect(counts.runs).toBe(1);
-    expect(derived.get()).toBeUndefined();
+    expect(derived.get()).toBe(4);
+    expect(held()).toBe(1);
     const stored = ownerRuntime.getCell<number>(space, "derived");
     await stored.sync();
     expect(stored.get()).toBeUndefined();
   });
 
-  it("runs again, and is refused again, when an input changes while `localFold` is off", async () => {
-    const { ownerRuntime, readerRuntime, space, counts, settled } =
-      await readerDerives(
-        2,
-        (n: number) => n * 2,
-        { experimental: { localFold: false } },
-      );
+  it("replaces the held value when an input changes, and still pushes nothing", async () => {
+    const {
+      ownerRuntime,
+      readerRuntime,
+      space,
+      derived,
+      counts,
+      settled,
+      held,
+    } = await readerDerives(2, (n: number) => n * 2);
     expect(counts.runs).toBe(1);
 
     await ownerRuntime.editWithRetry((tx) => {
@@ -245,88 +246,224 @@ describe("refused derived write", () => {
     await settled();
 
     expect(counts.runs).toBe(2);
-    expect(counts.refusals).toBe(2);
+    expect(counts.refusals).toBe(0);
+    expect(derived.get()).toBe(6);
+    // The newer derivation wrote the older one's document whole, so it
+    // stands in for it.
+    expect(held()).toBe(1);
   });
 
-  it("reads a kept value as unconfirmed, beside the source it was computed from read as confirmed", async () => {
+  it("reads a held document as absent and unconfirmed through a confirmed read, beside the source it was computed from read as confirmed", async () => {
+    // A confirmed read reads the durable view, which the held derivation is
+    // kept out of; the layer standing over the document is what leaves it
+    // unconfirmed.
+
     const { readerRuntime, space, derived } = await readerDerives(
       2,
       (n: number) => n * 2,
-      { experimental: { localFold: true } },
     );
     const source = readerRuntime.getCell<number>(space, "source");
     await source.sync();
 
+    expect(derived.get()).toBe(4);
     expect(
       readConfirmed(readerRuntime, space, (tx) => derived.withTx(tx).get()),
     )
-      .toEqual({ value: 4, confirmed: false });
+      .toEqual({ value: undefined, confirmed: false });
     expect(readConfirmed(readerRuntime, space, (tx) => source.withTx(tx).get()))
       .toMatchObject({ value: 2, confirmed: true });
   });
 
-  it("stores the whole document written over a kept value once the principal may write", async () => {
-    // The second write is a change to one field of the kept value, and the
-    // store holds no value to apply such a patch to.
-
-    const { ownerRuntime, readerRuntime, space, reader, counts, settled } =
-      await readerDerives(
-        { n: 2 },
-        ({ n }: { n: number }) => ({ doubled: n * 2, from: "reader" }),
-        { experimental: { localFold: true } },
-      );
-    expect(counts.refusals).toBe(1);
+  it("stores the value once the principal is granted WRITE", async () => {
+    const {
+      ownerRuntime,
+      readerRuntime,
+      space,
+      reader,
+      derived,
+      counts,
+      settled,
+      held,
+    } = await readerDerives(2, (n: number) => n * 2);
+    expect(held()).toBe(1);
 
     await new ACLManager(ownerRuntime, space).grant(reader.did(), "WRITE");
-    await ownerRuntime.editWithRetry((tx) => {
-      ownerRuntime.getCell<{ n: number }>(space, "source", undefined, tx)
-        .set({ n: 3 });
-    });
     await ownerRuntime.storageManager.synced();
     await readerRuntime.storageManager.pullOpenSpacesToHead();
     await settled();
     await readerRuntime.storageManager.synced();
 
-    expect(counts.refusals).toBe(1);
-    const stored = ownerRuntime.getCell<unknown>(space, "derived");
+    // The grant released the held derivation and ran its writer again,
+    // which committed what it computed.
+    expect(counts.refusals).toBe(0);
+    expect(counts.runs).toBe(2);
+    expect(held()).toBe(0);
+    expect(derived.get()).toBe(4);
+    const stored = ownerRuntime.getCell<number>(space, "derived");
     await ownerRuntime.storageManager.pullOpenSpacesToHead();
     await stored.sync();
-    expect(stored.get()).toEqual({ doubled: 6, from: "reader" });
+    expect(stored.get()).toBe(4);
   });
 
-  it("refuses a write over a kept value when the store changed the document since", async () => {
-    // The reader's change is to `doubled` alone, and the owner's concurrent
-    // one to `from` alone, so only a read of the whole document can conflict.
+  describe("a push decided by an access list the store no longer holds", () => {
+    // The reader's replica reads WRITE off its copy of the access list and
+    // pushes the derivation, and the store, which has taken the revocation
+    // by then, refuses it for lack of a grant.
 
-    const { ownerRuntime, readerRuntime, space, reader, derived, counts } =
-      await readerDerives(
-        { n: 2 },
-        ({ n }: { n: number }) => ({ doubled: n * 2, from: "reader" }),
+    it("reverts the refused write and runs no further, when `localFold` is off", async () => {
+      const { ownerRuntime, space, derived, counts, held } =
+        await readerDerives(
+          2,
+          (n: number) => n * 2,
+          {
+            experimental: { localFold: false },
+            grant: "WRITE",
+            revokeBeforeFirstPush: true,
+          },
+        );
+
+      // The refusal names a grant no re-run can supply, so the run takes no
+      // retry, and the revert of its own write does not run it again.
+      expect(counts.refusals).toBe(1);
+      expect(counts.runs).toBe(1);
+      expect(derived.get()).toBeUndefined();
+      expect(held()).toBe(0);
+      const stored = ownerRuntime.getCell<number>(space, "derived");
+      await stored.sync();
+      expect(stored.get()).toBeUndefined();
+    });
+
+    it("holds the next derivation once an input changes, when `localFold` is off", async () => {
+      const {
+        ownerRuntime,
+        readerRuntime,
+        space,
+        derived,
+        counts,
+        settled,
+        held,
+      } = await readerDerives(
+        2,
+        (n: number) => n * 2,
         {
-          stored: { doubled: 0, from: "owner" },
-          experimental: { localFold: true },
+          experimental: { localFold: false },
+          grant: "WRITE",
+          revokeBeforeFirstPush: true,
         },
       );
-    expect(counts.refusals).toBe(1);
-    expect(derived.get()).toEqual({ doubled: 4, from: "reader" });
+      expect(counts.refusals).toBe(1);
 
-    await new ACLManager(ownerRuntime, space).grant(reader.did(), "WRITE");
-    factories.get(readerRuntime)!.beforeTransact = async () => {
-      factories.get(readerRuntime)!.beforeTransact = undefined;
       await ownerRuntime.editWithRetry((tx) => {
-        ownerRuntime.getCell<{ from: string }>(space, "derived", undefined, tx)
-          .key("from").set("concurrent");
+        ownerRuntime.getCell<number>(space, "source", undefined, tx).set(3);
       });
       await ownerRuntime.storageManager.synced();
-    };
-    const tx = readerRuntime.edit();
-    derived.withTx(tx).key("doubled").set(6);
-    const result = await tx.commit().settled;
+      await readerRuntime.storageManager.pullOpenSpacesToHead();
+      await settled();
 
-    expect(result.error?.name).toBe("ConflictError");
-    const stored = ownerRuntime.getCell<unknown>(space, "derived");
-    await ownerRuntime.storageManager.pullOpenSpacesToHead();
-    await stored.sync();
-    expect(stored.get()).toEqual({ doubled: 0, from: "concurrent" });
+      expect(counts.runs).toBe(2);
+      expect(counts.refusals).toBe(1);
+      expect(derived.get()).toBe(6);
+      expect(held()).toBe(1);
+    });
+
+    it("keeps the refused write as a fold, when `localFold` is on", async () => {
+      const { ownerRuntime, space, derived, counts, held } =
+        await readerDerives(
+          2,
+          (n: number) => n * 2,
+          {
+            experimental: { localFold: true },
+            grant: "WRITE",
+            revokeBeforeFirstPush: true,
+          },
+        );
+
+      expect(counts.refusals).toBe(1);
+      expect(counts.runs).toBe(1);
+      expect(derived.get()).toBe(4);
+      expect(held()).toBe(0);
+      const stored = ownerRuntime.getCell<number>(space, "derived");
+      await stored.sync();
+      expect(stored.get()).toBeUndefined();
+    });
+
+    it("stores the whole document written over a kept value once the principal may write", async () => {
+      // The second write is a change to one field of the kept value, and the
+      // store holds no value to apply such a patch to.
+
+      const { ownerRuntime, readerRuntime, space, reader, counts, settled } =
+        await readerDerives(
+          { n: 2 },
+          ({ n }: { n: number }) => ({ doubled: n * 2, from: "reader" }),
+          {
+            experimental: { localFold: true },
+            grant: "WRITE",
+            revokeBeforeFirstPush: true,
+          },
+        );
+      expect(counts.refusals).toBe(1);
+
+      await new ACLManager(ownerRuntime, space).grant(reader.did(), "WRITE");
+      await ownerRuntime.editWithRetry((tx) => {
+        ownerRuntime.getCell<{ n: number }>(space, "source", undefined, tx)
+          .set({ n: 3 });
+      });
+      await ownerRuntime.storageManager.synced();
+      await readerRuntime.storageManager.pullOpenSpacesToHead();
+      await settled();
+      await readerRuntime.storageManager.synced();
+
+      expect(counts.refusals).toBe(1);
+      const stored = ownerRuntime.getCell<unknown>(space, "derived");
+      await ownerRuntime.storageManager.pullOpenSpacesToHead();
+      await stored.sync();
+      expect(stored.get()).toEqual({ doubled: 6, from: "reader" });
+    });
+
+    it("refuses a write over a kept value when the store changed the document since", async () => {
+      // The reader's change is to `doubled` alone, and the owner's concurrent
+      // one to `from` alone, so only a read of the whole document can
+      // conflict.
+
+      const { ownerRuntime, readerRuntime, space, reader, derived, counts } =
+        await readerDerives(
+          { n: 2 },
+          ({ n }: { n: number }) => ({ doubled: n * 2, from: "reader" }),
+          {
+            stored: { doubled: 0, from: "owner" },
+            experimental: { localFold: true },
+            grant: "WRITE",
+            revokeBeforeFirstPush: true,
+          },
+        );
+      expect(counts.refusals).toBe(1);
+      expect(derived.get()).toEqual({ doubled: 4, from: "reader" });
+
+      await new ACLManager(ownerRuntime, space).grant(reader.did(), "WRITE");
+      await ownerRuntime.storageManager.synced();
+      await readerRuntime.storageManager.pullOpenSpacesToHead();
+      factories.get(readerRuntime)!.beforeTransact = async () => {
+        factories.get(readerRuntime)!.beforeTransact = undefined;
+        await ownerRuntime.editWithRetry((tx) => {
+          ownerRuntime.getCell<{ from: string }>(
+            space,
+            "derived",
+            undefined,
+            tx,
+          )
+            .key("from").set("concurrent");
+        });
+        await ownerRuntime.storageManager.synced();
+      };
+      const tx = readerRuntime.edit();
+      derived.withTx(tx).key("doubled").set(6);
+      const result = await tx.commit().settled;
+
+      expect(result.error?.name).toBe("ConflictError");
+      const stored = ownerRuntime.getCell<unknown>(space, "derived");
+      await ownerRuntime.storageManager.pullOpenSpacesToHead();
+      await stored.sync();
+      expect(stored.get()).toEqual({ doubled: 0, from: "concurrent" });
+    });
   });
 });
