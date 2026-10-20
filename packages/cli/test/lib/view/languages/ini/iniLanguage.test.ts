@@ -66,18 +66,31 @@ describe("iniLanguage", () => {
     expect(languageForFile("gvisor/.codespellrc").id).toBe("ini");
     expect(languageForFile(".coveragerc").id).toBe("ini");
     expect(languageForFile(".editorconfig").id).toBe("plain-text");
-    expect(languageForFile("ansible/ansible.cfg").id).toBe("plain-text");
+    expect(languageForFile("ansible/ansible.cfg").id).toBe("ini");
+    expect(languageForFile("setup.cfg").id).toBe("ini");
+    expect(languageForFile("tools.cfg").id).toBe("plain-text");
 
-    expect(languageForSource("ansible/ansible.cfg", CONFIGURATION).id)
-      .toBe("ini");
+    expect(languageForSource("tools.cfg", CONFIGURATION).id).toBe("ini");
     expect(languageForSource("setup.cfg", "\n# tools\n[flake8]\n").id)
       .toBe("ini");
     expect(languageForSource("config.cfg", '{"a": [1]}').id).toBe("json");
     for (
-      const array of ["[1, 2]", '[\n  "a"\n]', "[[1]]", "[{}]", "[-1]", "[]"]
+      const array of [
+        "[1, 2]",
+        '[\n  "a"\n]',
+        "[[1]]",
+        "[{}]",
+        "[-1]",
+        "[]",
+        "[true, false]",
+        "[null]",
+        "[ false ]",
+      ]
     ) {
       expect(languageForSource("config.cfg", array).id).toBe("plain-text");
     }
+    expect(languageForSource("config.cfg", "[nullable]\nkey=1").id)
+      .toBe("ini");
     expect(
       languageForSource("tlaplus/LeaseOps.cfg", "\\* model\nSPECIFICATION Spec")
         .id,
@@ -271,6 +284,15 @@ describe("iniLanguage", () => {
       .toEqual([INVENTORY.indexOf("[toolshed]")]);
     expect(document.definitions.get("ocean")?.map((d) => d.startLine))
       .toEqual([5, 8]);
+  });
+
+  it("keeps a carriage return that no line feed follows in the last line", () => {
+    const source = "[a]\nk = v\r";
+    const document = iniLanguage.parseDocument(source);
+
+    expect(document.flatStructure.map((node) => node.endOffset))
+      .toEqual([source.length, source.length]);
+    expect(verbatim(document.lines)).toBe(source);
   });
 
   it("ends lines only where the pager does, at a line feed", () => {

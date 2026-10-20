@@ -459,12 +459,14 @@ read-only and suppress unified-diff auto-detection. An explicit language takes
 priority when both options are present. Use `--diff` instead when the pipe is a
 unified diff.
 
-INI covers `.ini` files, Ansible configuration and inventories, and the
-configuration files of Python tools such as `.coveragerc`, `.flake8`,
-`pylintrc`, and `.codespellrc`. A `.cfg` file is INI when its first line other
-than blank lines and comments heads a section. A line in an Ansible inventory
-that names a host and then sets `name=value` variables colors the host and each
-variable. The structure tree lists sections with the keys and hosts in each.
+INI covers `.ini` files, which include Ansible inventories with that suffix,
+Ansible's `ansible.cfg`, and the configuration files of Python tools such as
+`setup.cfg`, `.coveragerc`, `.flake8`, `pylintrc`, and `.codespellrc`. Another
+`.cfg` file is INI when its first line other than blank lines and comments heads
+a section whose name does not start the way a JSON array's first value does. A
+line in an Ansible inventory that names a host and then sets `name=value`
+variables colors the host and each variable. The structure tree lists sections
+with the keys and hosts in each.
 
 The binary language handles known binary filenames, input containing a NUL byte,
 and input that is not valid UTF-8. It starts in a read-only rendered view with
@@ -487,9 +489,9 @@ Automatic content detection is limited to binary input, structurally identified
 raw unified diffs, and standard Git commit output. A raw diff starts at the
 first nonblank line. Recognized shebangs, XML declarations, and transformed
 compiler headers remain explicit selectors. A shared extension such as `.cfg`
-consults the source for the one pattern its metadata names. JSON-, YAML-,
-Markdown-, Python-, and other language-shaped source is otherwise not guessed
-from its syntax.
+consults the source for the pattern each language's metadata pairs with it.
+JSON-, YAML-, Markdown-, Python-, and other language-shaped source is otherwise
+not guessed from its syntax.
 
 A diff shows its whole-diff change totals at the top right corner of its first
 line: the added line count and the removed line count, colored like additions

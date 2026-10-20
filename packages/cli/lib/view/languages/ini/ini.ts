@@ -76,7 +76,7 @@ class Scanner {
     for (let start = 0; start <= text.length;) {
       const feed = text.indexOf("\n", start);
       const next = feed < 0 ? text.length : feed;
-      const end = text[next - 1] === "\r" ? next - 1 : next;
+      const end = feed > start && text[feed - 1] === "\r" ? feed - 1 : next;
       this.#line(text.slice(start, end), start);
       start = next + 1;
     }
