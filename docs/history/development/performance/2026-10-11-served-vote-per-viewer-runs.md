@@ -183,10 +183,12 @@ the first two. A session's walk re-traverses the view-bearing documents under
 the view's schema, whose `anyOf` over vnode children is taken at every node,
 so one walk visits the schema thousands of times (`slow-traverse` reports of
 100 to 400 ms with 3,000 to 5,000 schema visits and 4,000 to 5,700 `anyOf`
-branches each; 132 of them in one benchmark run). These are the 100 to 340 ms
-walks the earlier records saw on the serving runtime's loads, now on the
-clients' sessions: the read-through took them off the serving session, and
-every viewing session still pays them.
+branches each; 132 of them in one benchmark run). Those warnings were not
+correlated to individual session refreshes or realms, so they do not establish
+that each viewing session pays a traversal of that width. The
+[follow-up frequency investigation](2026-10-19-served-vote-fan-out.md) separates
+memory-server refresh roots from serving-runtime and client traversals and
+finds many small traversals inside a refresh.
 
 The CPU profile of that thread over the burst, by file: `traverse.ts` 20%,
 `engine.ts` 7% (the commits and the conflict scans behind the rejections),

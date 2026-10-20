@@ -83,11 +83,12 @@ what the main thread does per commit per viewing session:
 
 - `memory/refresh/phase/walk` and the `memory/refresh/walk/<phase>` rows: the
   re-walk of a session's tracked documents under its schema, 74 ms a walk on
-  the client arm with rendered views, 100 to 400 ms in the `slow-traverse`
-  warnings, whose counters put the cost in the schema traversal
-  (`traverseSchema` near 5,800 and `anyOfBranches` near 6,600 for one
-  document of the poll's view). Every viewing session pays it on every flush
-  pass that reaches it, on every arm.
+  client arm with rendered views in the original capture. The later
+  [frequency investigation](../history/development/performance/2026-10-19-served-vote-fan-out.md)
+  found many small traversals inside these walks. The 100–400 ms
+  `slow-traverse` warnings alone do not establish which realm or phase paid
+  them. Attribute root evaluations and their frequency before choosing a
+  traversal optimization.
 - `send/encode`: the frame encode behind each walk, 1.2 s of a burst on the
   loop-off arm's main thread.
 - `memory/flush/refresh` against `memory/flush/queue`: the flush passes these
@@ -121,17 +122,12 @@ recipe below, decide which change to make:
    Sum them over a burst per arm.
 2. **How much of the work is the same across sessions?** Five sessions hold
    the same view of the same documents under different identities. The
-   evaluation cache in `packages/memory/v2/query.ts` already shares an entry
-   across identities when the evaluation's whole reach resolved under the
-   `space` scope, and keys it to the evaluating identity once it touched a
-   session- or user-scoped instance (the identity-bound invariant of
-   `key-vocabulary.md` §5, which `assertSchemaMemoIdentity` enforces for the
-   inner schema memos). So the count to take, per flush pass, is how many of
-   the walks made resolved space-pure and were served from a shared entry,
-   how many were identity-keyed and why (which scoped instance the poll's
-   view reaches), and the distinct frame payloads against the frames
-   encoded. Identity-keyed walks whose scoped reach is one small instance
-   are a sharing lever; walks that are space-pure already are not.
+   initial `trackGraph` evaluation cache in `packages/memory/v2/query.ts`
+   can share space-pure results across identities. Incremental refresh does
+   not use that cache. Count repeated document/path/schema tuples during
+   refresh, then compare their versions, scoped reach and evaluation context
+   before calling those repetitions shareable. Count distinct frame payloads
+   against frames encoded separately.
 3. **Does a commit re-walk what it did not touch?** Compare the documents a
    pass re-walks with the commit's own writes; the refresh has an
    incremental path (`refreshed.updates`, `changedMisses`), and the question

@@ -568,10 +568,10 @@ export class EngineWaveCommitSink implements WaveCommitSink {
    */
   #report(engine: Engine, batch: WaveSpaceCommit, seq: number): void {
     if (this.#reportCommit === undefined) return;
-    const record = selectCommitsSince(engine, { fromSeq: seq - 1, limit: 1 })
-      .find((entry) => entry.seq === seq);
-    if (record === undefined) return;
     try {
+      const record = selectCommitsSince(engine, { fromSeq: seq - 1, limit: 1 })
+        .find((entry) => entry.seq === seq);
+      if (record === undefined) return;
       this.#reportCommit(
         batch.home
           ? {

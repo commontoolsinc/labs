@@ -19,7 +19,10 @@ import {
   Runtime,
   type RuntimeProgram,
 } from "@commonfabric/runner";
-import type { ExecutorHost } from "@commonfabric/runner/executor/host";
+import {
+  type ExecutorHost,
+  LifecycleVerbFailure,
+} from "@commonfabric/runner/executor/host";
 import {
   type ServingMemoryServer,
   startServingMemoryServer,
@@ -867,6 +870,25 @@ export default pattern(() => {
   });
 
   describe("descriptors", () => {
+    it("retains completed timings and refusal identity when compilation fails", async () => {
+      const runner = servedLifecycleRunner(host, serviceSigner);
+      const failure = await runner.runLifecycleVerb(space, {
+        name: "upload",
+        request: { program: BROKEN_PROGRAM },
+      }).then(() => {
+        throw new Error("expected compilation to fail");
+      }, (error) => error);
+      expect(failure).toBeInstanceOf(LifecycleVerbFailure);
+      expect(failure.code).toBe("compile-failed");
+      expect(failure.name).toBe("ServedLifecycleRefusal");
+      expect(failure.timings.map((timing: { phase: string }) => timing.phase))
+        .toEqual([
+          "upload.session",
+          "upload.queue",
+          "upload.run",
+        ]);
+    });
+
     it("runs the verbs their descriptors name through the host, and demands the piece's root when asked", async () => {
       const runner = servedLifecycleRunner(host, serviceSigner);
       const uploaded = await runner.runLifecycleVerb(space, {

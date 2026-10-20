@@ -55,6 +55,7 @@ import {
   type ServingLoopStats,
 } from "./stats.ts";
 
+export { LifecycleVerbFailure } from "./serving-port-protocol.ts";
 export type { LifecycleVerb } from "./space-server.ts";
 export type {
   LifecyclePhaseTiming,

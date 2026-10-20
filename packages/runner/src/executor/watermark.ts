@@ -118,47 +118,19 @@ export const waitForSettled = (
 };
 
 /**
- * Resolve once the serving runtime has reacted to every authored commit at
- * or below `head`, the store's sequence as a client read it: when W reaches
- * `head`, or when this replica holds the watermark document at a revision
- * committed at `head` or past it, which says the head commit is the loop's
- * own bookkeeping write of W and not an authored commit W has yet to cover.
- * The loop keeps its bookkeeping commits above W by design (space-server.ts,
- * `#coverageHead`), so on a quiet space W rests below the head and a wait on
- * `W ≥ head` alone would never resolve there. The second condition can be
- * met one cycle early, by an authored commit that landed between the drain
- * the bookkeeping write covered and that write itself; the next cycle covers
- * it. Rides the ordinary subscription like `waitForSettled`, and like it
- * carries no deadline of its own.
+ * Resolve once the serving runtime has covered every authored commit at or
+ * below a captured store head. The server identifies the last authored commit
+ * in that interval; a watermark document's own revision is not a coverage
+ * proof. Bookkeeping tails therefore require no successor watermark write.
+ * Servers that do not advertise server execution need no serving wait.
  */
-export const waitForSettledThroughHead = (
+export const waitForSettledThroughHead = async (
   runtime: Runtime,
   space: MemorySpace,
   head: number,
 ): Promise<void> => {
-  const cell = watermarkCell(runtime, space);
-  const replica = runtime.storageManager.open(space).replica;
-  const watermarkRevisionSeq = () =>
-    replica.confirmedDocumentSeq(
-      SERVER_EXECUTION_WATERMARK_DOC_ID as Parameters<
-        typeof replica.confirmedDocumentSeq
-      >[0],
-      "space",
-    );
-  return new Promise<void>((resolve) => {
-    // The same synchronous-fire handling as `waitForSettled`: the sink may
-    // settle before its cancel exists, and the cancellation is then replayed.
-    const state: { cancel?: () => void; done?: boolean } = {};
-    const settle = () => {
-      if (state.done === true) return;
-      state.done = true;
-      state.cancel?.();
-      resolve();
-    };
-    state.cancel = cell.sink((value) => {
-      const current = typeof value?.seq === "number" ? value.seq : 0;
-      if (current >= head || watermarkRevisionSeq() >= head) settle();
-    });
-    if (state.done === true) state.cancel();
-  });
+  const authoredSeq = await runtime.storageManager.open(space)
+    .serverAuthoredSeq?.(head);
+  if (authoredSeq === undefined) return;
+  await waitForSettled(runtime, space, authoredSeq);
 };

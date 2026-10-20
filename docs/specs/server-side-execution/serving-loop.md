@@ -379,12 +379,14 @@ processes* (deploy overlap, partition) it holds via the lease:
   exactly these three fields — prior art, not substrate.
 - **`holder` is a PER-PROCESS identity (DR1, RULED 2026-08-03):**
   the SpaceServer's service identity plus a process-instance
-  component minted at PROCESS START — stable across every renew and
-  reacquire within one process lifetime (it stays a nameable,
+  component minted at process start, or at each serving-worker generation
+  when the loop runs in a worker. Both realms adopt that component before
+  leases are acquired. A replacement worker waits for its predecessor's
+  teardown and lease release and adopts a fresh component. Within a serving
+  generation it is stable across every renew and reacquire (it stays a nameable,
   attestable identity, so protocol.md §1's "the envelope principal
-  IS the lease holder" reads literally), fresh whenever the process
-  is genuinely new. The equality check below thereby fences every
-  CROSS-process succession (deploy overlap, a successor host) for
+  IS the lease holder" reads literally). The equality check below fences
+  worker-generation succession as well as every CROSS-process succession (deploy overlap, a successor host) for
   free. The one residue — a same-process reacquire after a pause
   that outlived the TTL (a runtime GC pause is the canonical cause;
   nothing to do with the deferred session-data GC of scopes.md §8) —

@@ -15,10 +15,11 @@ import {
 } from "@commonfabric/identity";
 import type { DID, MemorySpace } from "@commonfabric/memory/interface";
 import type { Runtime, RuntimeProgram } from "@commonfabric/runner";
-import type {
-  LifecyclePhaseTiming,
-  LifecycleVerb,
-  LifecycleVerbRun,
+import {
+  type LifecyclePhaseTiming,
+  type LifecycleVerb,
+  LifecycleVerbFailure,
+  type LifecycleVerbRun,
 } from "@commonfabric/runner/executor/host";
 import { PiecesController } from "./pieces-controller.ts";
 import {
@@ -247,36 +248,40 @@ export async function runServedLifecycleVerb(
 ): Promise<LifecycleVerbRun> {
   const timings: LifecyclePhaseTiming[] = [];
   const lap = verbTimer(descriptor.name, timings);
-  const session = createSession({
-    identity: serviceIdentity,
-    spaceDid: space as DID,
-  });
-  lap("session");
-  const verb = buildServedLifecycleVerb(space, descriptor, session);
-  const confirm = verb.confirm;
-  const receipt = await host.runLifecycleVerb<unknown>(space, {
-    ...verb,
-    run: async (runtime) => {
-      lap("queue");
-      try {
-        return await verb.run(runtime);
-      } finally {
-        lap("run");
-      }
-    },
-    ...(confirm === undefined ? {} : {
-      confirm: async (runtime: Runtime, receipt: unknown) => {
-        lap("commit");
+  try {
+    const session = createSession({
+      identity: serviceIdentity,
+      spaceDid: space as DID,
+    });
+    lap("session");
+    const verb = buildServedLifecycleVerb(space, descriptor, session);
+    const confirm = verb.confirm;
+    const receipt = await host.runLifecycleVerb<unknown>(space, {
+      ...verb,
+      run: async (runtime) => {
+        lap("queue");
         try {
-          await confirm(runtime, receipt);
+          return await verb.run(runtime);
         } finally {
-          lap("confirm");
+          lap("run");
         }
       },
-    }),
-  });
-  if (confirm === undefined) lap("commit");
-  return { receipt, timings };
+      ...(confirm === undefined ? {} : {
+        confirm: async (runtime: Runtime, receipt: unknown) => {
+          lap("commit");
+          try {
+            await confirm(runtime, receipt);
+          } finally {
+            lap("confirm");
+          }
+        },
+      }),
+    });
+    if (confirm === undefined) lap("commit");
+    return { receipt, timings };
+  } catch (error) {
+    throw new LifecycleVerbFailure(error, timings);
+  }
 }
 
 /**

@@ -369,6 +369,12 @@ export async function seedTopicBoard(
     apiUrl: options.apiUrl,
     identity: options.identity,
   });
+  const failedIntents: string[] = [];
+  const stopOutcomes = cc.runtime.subscribeEventIntentOutcomes((outcome) => {
+    failedIntents.push(
+      `${outcome.eventId}: ${outcome.kind}: ${outcome.reason}`,
+    );
+  });
   let releaseBoard: (() => void) | undefined;
   try {
     await cc.ensureDefaultPattern();
@@ -434,6 +440,11 @@ export async function seedTopicBoard(
       // has its consequence stored, which is one wait at the end rather than
       // one per send.
       await cc.runtime.speculationOverlay?.waitForIntentQuiescence();
+      if (failedIntents.length > 0) {
+        throw new Error(
+          `Topic seed events failed:\n${failedIntents.join("\n")}`,
+        );
+      }
     } else {
       // The board's crossref pivot is what every topic reads its backlinks
       // from, and a reader that opens one topic runs that topic, not the
@@ -450,6 +461,7 @@ export async function seedTopicBoard(
       topics,
     };
   } finally {
+    stopOutcomes();
     releaseBoard?.();
     await cc.dispose();
   }

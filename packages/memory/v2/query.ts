@@ -2062,6 +2062,8 @@ export const refreshTrackedGraph = (
   let rootEvaluations = 0;
   let updateCount = 0;
   let reads = 0;
+  let walked: EngineObjectManager | undefined;
+  let readCountBefore = 0;
   const phases = walkPhaseClock(() =>
     JSON.stringify({
       space,
@@ -2120,7 +2122,7 @@ export const refreshTrackedGraph = (
     }
     phases.enter("rewalk");
 
-    const manager = new EngineObjectManager(
+    const manager = walked = new EngineObjectManager(
       engine,
       state.branch,
       state.manager.principal,
@@ -2128,7 +2130,7 @@ export const refreshTrackedGraph = (
     );
     const sharedMemo = createSchemaMemo();
     const stats = createQueryTraversalStats();
-    const readCountBefore = manager.readCount;
+    readCountBefore = manager.readCount;
 
     const changedMisses = new Set<string>();
     const recorder = attributedRecorderFor(missesView(state), changedMisses);
@@ -2266,7 +2268,6 @@ export const refreshTrackedGraph = (
     state.manager.mergeFrom(manager);
 
     stats.managerReads = manager.readCount - readCountBefore;
-    reads = stats.managerReads;
     updateCount = updates.size;
     outcome = "refreshed";
 
@@ -2277,6 +2278,7 @@ export const refreshTrackedGraph = (
       stats,
     };
   } finally {
+    reads = (walked?.readCount ?? readCountBefore) - readCountBefore;
     phases.close();
   }
 };

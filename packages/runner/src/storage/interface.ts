@@ -955,11 +955,17 @@ export interface IStorageProvider {
   /**
    * The server's commit sequence for this space as of one ordered round
    * trip, which applies every frame the server had published before it, as
-   * `pullToServerHead` does. It is the sequence a space's watermark is held
-   * against to know the serving runtime has reacted to everything committed
-   * so far.
+   * `pullToServerHead` does. To wait for serving coverage, resolve the authored
+   * boundary through `serverAuthoredSeq`; the head can include bookkeeping
+   * commits beyond the watermark.
    */
   serverHeadSeq?(): Promise<number>;
+
+  /**
+   * Highest authored commit at or below `head`, or undefined when the server
+   * does not advertise server execution. Bookkeeping commits are excluded.
+   */
+  serverAuthoredSeq?(head: number): Promise<number | undefined>;
 
   /** List live space-scoped entity identifiers without loading their values. */
   listEntityIds?(): Promise<string[] | undefined>;

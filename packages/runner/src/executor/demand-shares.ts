@@ -40,10 +40,12 @@ export class DemandShareCache {
 
   /** Forgets `sessionId`'s share in `space`. */
   forget(space: string, sessionId: string): void {
+    const stale = this.#stale.get(space);
+    stale?.delete(sessionId);
+    if (stale?.size === 0) this.#stale.delete(space);
     const shares = this.#shares.get(space);
     if (shares === undefined) return;
     shares.delete(sessionId);
-    this.#stale.get(space)?.delete(sessionId);
     if (shares.size === 0) {
       this.#shares.delete(space);
       this.#stale.delete(space);
@@ -70,12 +72,19 @@ export class DemandShareCache {
     }
     const allStale = this.#allStale.has(space);
     const stale = this.#stale.get(space);
+    // Consume only this pass's invalidations. Notices arriving during the
+    // read belong to the next pass, including a change to the same session.
+    this.#allStale.delete(space);
+    this.#stale.delete(space);
     const wanted: string[] = [];
     const missing: string[] = [];
     for (const [sessionId, session] of sessions) {
       if (
         excludePrincipal !== undefined && session.principal === excludePrincipal
       ) {
+        if (allStale || stale?.has(sessionId)) {
+          this.noteChanged(space, sessionId);
+        }
         continue;
       }
       wanted.push(sessionId);
@@ -87,9 +96,16 @@ export class DemandShareCache {
       if (!sessions.has(sessionId)) shares.delete(sessionId);
     }
     if (missing.length > 0) {
-      const fresh = await read(missing);
+      let fresh: SessionDemand[];
+      try {
+        fresh = await read(missing);
+      } catch (error) {
+        for (const sessionId of missing) this.noteChanged(space, sessionId);
+        throw error;
+      }
       const returned = new Set<string>();
       for (const share of fresh) {
+        if (!sessions.has(share.sessionId)) continue;
         shares.set(share.sessionId, share);
         returned.add(share.sessionId);
       }
@@ -97,17 +113,6 @@ export class DemandShareCache {
         if (!returned.has(sessionId)) shares.delete(sessionId);
       }
     }
-    // A share this pass did not refresh — an excluded principal's — stays
-    // stale for the pass that includes it.
-    const refreshed = new Set(missing);
-    const remaining = new Set<string>();
-    for (const sessionId of shares.keys()) {
-      if (refreshed.has(sessionId)) continue;
-      if (allStale || stale?.has(sessionId)) remaining.add(sessionId);
-    }
-    this.#allStale.delete(space);
-    if (remaining.size === 0) this.#stale.delete(space);
-    else this.#stale.set(space, remaining);
     const result: SessionDemand[] = [];
     for (const sessionId of wanted) {
       const share = shares.get(sessionId);

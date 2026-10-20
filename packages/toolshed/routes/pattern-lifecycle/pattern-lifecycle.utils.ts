@@ -28,7 +28,10 @@ import type {
   ServedSetSourceReceipt,
 } from "@commonfabric/piece/ops";
 import type { RuntimeProgram } from "@commonfabric/runner";
-import type { LifecyclePhaseTiming } from "@commonfabric/runner/executor/host";
+import {
+  type LifecyclePhaseTiming,
+  LifecycleVerbFailure,
+} from "@commonfabric/runner/executor/host";
 import {
   authorizeSpaceWriter,
   type SpaceAuthorityDeps,
@@ -195,6 +198,9 @@ async function runServedVerb<Verb extends ServedLifecycleVerbDescriptor>(
       body: run.receipt as ServedLifecycleReceipts[Verb["name"]],
     };
   } catch (error) {
+    if (error instanceof LifecycleVerbFailure) {
+      for (const timing of error.timings) timings?.push(timing);
+    }
     const refusal = servedRefusalOf(error);
     if (refusal !== undefined) {
       return refuse(

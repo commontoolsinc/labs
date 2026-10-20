@@ -7483,9 +7483,10 @@ export class Server {
     try {
       // `stats` is diagnostics, not wire: split it off here so the
       // response carries exactly the declared result shape.
+      const queryEngine = engine ?? await this.#openEngine(space);
       const { stats, ...result } = queryGraph(
         space,
-        engine ?? await this.#openEngine(space),
+        queryEngine,
         query,
         reuse,
         {
@@ -7499,6 +7500,16 @@ export class Server {
         roots: query.roots.length,
         ...rootAttributionOf(stats),
       });
+      if (query.includeAuthoredSeq === true) {
+        return {
+          ...result,
+          authoredSeq: Engine.authoredSeqThrough(
+            queryEngine,
+            query.atSeq ?? result.serverSeq,
+            query.branch,
+          ),
+        };
+      }
       return result;
     } finally {
       // The insert precedes the snapshot mapping, so enforcement must
@@ -8994,6 +9005,8 @@ export class Server {
     sessionIds: readonly string[],
     options: { excludePrincipal?: string } = {},
   ): SessionDemand[] {
+    // Prune once for the batch before the targeted, non-pruning lookups.
+    this.#sessions.sessionsForSpace(space);
     const demand: SessionDemand[] = [];
     for (const sessionId of sessionIds) {
       const session = this.#sessions.peek(space, sessionId);

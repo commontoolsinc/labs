@@ -95,6 +95,23 @@ export type LifecycleVerbRun = {
   timings: LifecyclePhaseTiming[];
 };
 
+/** A failed lifecycle verb, retaining the phases completed before failure. */
+export class LifecycleVerbFailure extends Error {
+  readonly timings: LifecyclePhaseTiming[];
+  readonly code: string | undefined;
+
+  constructor(cause: unknown, timings: LifecyclePhaseTiming[]) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.timings = [...timings];
+    this.name = cause instanceof Error ? cause.name : "Error";
+    if (cause instanceof Error) this.stack = cause.stack;
+    const code = cause instanceof Error
+      ? (cause as { code?: unknown }).code
+      : undefined;
+    this.code = typeof code === "string" ? code : undefined;
+  }
+}
+
 /**
  * What the serving loop's realm logged: its loggers' counts and timing
  * statistics, which are the process's own where the loop runs on the main
@@ -270,6 +287,7 @@ type PortFault = {
   readonly message: string;
   readonly stack: string | undefined;
   readonly code: string | undefined;
+  readonly timings?: LifecyclePhaseTiming[];
 };
 
 type Envelope =
@@ -298,6 +316,9 @@ const faultOf = (error: unknown): PortFault => {
     message: error.message,
     stack: error.stack,
     code: typeof code === "string" ? code : undefined,
+    ...(error instanceof LifecycleVerbFailure
+      ? { timings: error.timings }
+      : {}),
   };
 };
 
@@ -312,7 +333,9 @@ const errorOf = (fault: PortFault): Error => {
     : Object.assign(new Error(fault.message), { name: fault.name });
   if (fault.stack !== undefined) error.stack = fault.stack;
   if (fault.code !== undefined) Object.assign(error, { code: fault.code });
-  return error;
+  return fault.timings === undefined
+    ? error
+    : new LifecycleVerbFailure(error, fault.timings);
 };
 
 /**
@@ -515,7 +538,10 @@ export class PortEndpoint<
     Promise.resolve(outcome).then(
       (result) => {
         done();
-        this.#post({ t: "ok", id, result });
+        const failure = this.#post({ t: "ok", id, result });
+        if (failure !== undefined) {
+          this.#post({ t: "err", id, fault: faultOf(failure) });
+        }
       },
       (error) => {
         done();

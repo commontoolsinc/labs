@@ -779,13 +779,12 @@ constant when comparing replication flags.
 A burst's measured interval ends when every client's own vote list, read at
 that runtime's quiescence and woken by the list's own changes, holds exactly
 the round's rows: each voter's vote on each option at the value cast this
-round, and no other row. That is the moment each client's view is settled,
-whichever arm served it, and a list still holding a stale row never matches,
-however its counts come out. The voters' idle and the harness's budgeted
-`settle()` can each return before the other voters' pushed votes have reached
-a client, so neither defines the interval; the burst waits for both outside it,
-and then every replica must contain the expected vote count and color
-distribution for every option, or the run fails.
+round, and no other row. The predicate runs after that client's `idle()` inside
+the timed burst. The rows are locally visible and may include speculation; this
+endpoint is not a proof of durable serving coverage. Outside the interval,
+`afterBurst()` waits for event consequences and the harness's budgeted `settle()`.
+Then every replica must contain the expected vote count and color distribution
+for every option, or the run fails.
 
 Four things follow from that shape:
 

@@ -93,4 +93,78 @@ describe("waitForSettledThroughHead()", () => {
     const engine = await server.engineForSpace(space);
     expect(readWatermarkSeq(engine)).toBeGreaterThanOrEqual(authoredSeq);
   });
+
+  it("bounds the authored sequence by the captured head", async () => {
+    const head = await authoredWrite(1);
+    await waitForSettled(runtime, space, head);
+    const later = await authoredWrite(2);
+    expect(later).toBeGreaterThan(head);
+    const authored = await runtime.storageManager.open(space)
+      .serverAuthoredSeq!(head);
+    expect(authored).toBeGreaterThan(0);
+    expect(authored).toBeLessThanOrEqual(head);
+    expect(await runtime.storageManager.open(space).serverAuthoredSeq!(0)).toBe(
+      0,
+    );
+  });
+
+  it("keeps waiting when a watermark revision follows an uncovered authored commit", async () => {
+    const subscribed = Promise.withResolvers<void>();
+    let fire: (value: { seq: number }) => void = () => {};
+    let cancels = 0;
+    const client = {
+      storageManager: {
+        open: () => ({
+          serverAuthoredSeq: (head: number) => {
+            expect(head).toBe(43);
+            return Promise.resolve(42);
+          },
+          replica: { confirmedDocumentSeq: () => 43 },
+        }),
+      },
+      getCellFromLink: () => ({
+        sink: (callback: typeof fire) => {
+          fire = callback;
+          callback({ seq: 41 });
+          subscribed.resolve();
+          return () => {
+            cancels++;
+          };
+        },
+      }),
+    } as unknown as Runtime;
+    const waiting = waitForSettledThroughHead(client, space, 43);
+    await subscribed.promise;
+    expect(cancels).toBe(0);
+    fire({ seq: 42 });
+    await waiting;
+    expect(cancels).toBe(1);
+  });
+
+  it("resolves across a bookkeeping tail longer than one commit", async () => {
+    const client = {
+      storageManager: {
+        open: () => ({ serverAuthoredSeq: () => Promise.resolve(41) }),
+      },
+      getCellFromLink: () => ({
+        sink: (callback: (value: { seq: number }) => void) => {
+          callback({ seq: 41 });
+          return () => {};
+        },
+      }),
+    } as unknown as Runtime;
+    await waitForSettledThroughHead(client, space, 50);
+  });
+
+  it("does not subscribe when the server does not advertise serving", async () => {
+    const client = {
+      storageManager: {
+        open: () => ({ serverAuthoredSeq: () => Promise.resolve(undefined) }),
+      },
+      getCellFromLink: () => {
+        throw new Error("must not subscribe");
+      },
+    } as unknown as Runtime;
+    await waitForSettledThroughHead(client, space, 50);
+  });
 });

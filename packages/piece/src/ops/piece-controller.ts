@@ -3092,10 +3092,10 @@ class PiecePropIo implements PieceCellIo {
   async get(path?: CellPath) {
     // Under server execution the run that stores a handler's consequences is
     // the serving runtime's, and a send returns ahead of it. The read waits
-    // for every event this runtime fired to reach its terminal consequence
-    // here, so a caller that sent and then reads sees what the served run
-    // stored. A runtime that fired nothing has no overlay and waits for
-    // nothing.
+    // for every event this runtime fired to reach its first-order terminal
+    // consequence here. Child events the server fires may still be pending;
+    // this is not a barrier over their causal cascade. A runtime that fired
+    // nothing has no overlay and waits for nothing.
     await this.#cc.pieces().runtime.speculationOverlay
       ?.waitForIntentQuiescence();
     const targetCell = await this.#getTargetCell();

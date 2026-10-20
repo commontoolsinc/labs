@@ -934,6 +934,53 @@ describe("stage D seal-into-wave", () => {
     });
   });
 
+  it("keeps a durable wave successful when its admission readback fails", async () => {
+    const lease = liveLease();
+    const wave = newWave({ lease });
+    runtime.installSealDestination(wave);
+    const cell = runtime.getCell<{ value: number }>(
+      space,
+      "report-failure",
+      undefined,
+    );
+    const tx = runtime.edit();
+    stampWaveRunContext(tx, { actionId: "report-failure", kind: "derivation" });
+    cell.withTx(tx).set({ value: 42 });
+    expect((await tx.commit().settled).error).toBeUndefined();
+    runtime.clearSealDestination();
+    const sink = new EngineWaveCommitSink({
+      engineFor: () => engine,
+      sessionId: executionLeaseHolder(`service:${space}`),
+      reportCommit: () => {
+        throw new Error("unexpected report after readback failure");
+      },
+    });
+    const prepare = engine.database.prepare.bind(engine.database);
+    let failures = 0;
+    let outcome;
+    {
+      using _prepare = stub(
+        engine.database,
+        "prepare",
+        ((sql: string) => {
+          if (sql.includes("SELECT seq, branch, class, holder, session_id")) {
+            failures++;
+            throw new Error("readback failed after commit");
+          }
+          return prepare(sql);
+        }) as typeof engine.database.prepare,
+      );
+      outcome = await wave.commitWave(sink);
+    }
+    await wave.settled();
+    expect(failures).toBe(1);
+    expect(outcome.aborted).toBeUndefined();
+    expect(outcome.dispositions).toEqual([{ kind: "committed" }]);
+    expect(
+      Engine.read(engine, { id: cell.getAsNormalizedFullLink().id })?.value,
+    ).toEqual({ value: 42 });
+  });
+
   it("seals into the wave instead of committing; later txs read the layered view; the wave commits once", async () => {
     const lease = liveLease();
     const leasedWave = newWave({ lease });

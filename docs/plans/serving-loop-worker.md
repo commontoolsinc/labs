@@ -191,13 +191,15 @@ the loop only what the next drain and settle do not cover, which
 
 A worker that dies takes every serving runtime with it. The main thread's
 bridge treats its exit as a park of every space with the failure-park backoff
-the host already applies, and starts a fresh worker under a holder of its
-own. Once the dead worker is gone, the main thread releases the lease rows
+the host already applies. A rejected worker initialization enters the same
+recovery path. Once the dead worker is gone, the main thread releases the lease rows
 its holder held in every space it opened: a host leaves a space parked on
 another holder's live lease rather than contending for it, so a successor
 that waited out the rows' TTL would also wait for the next session, event,
-or demand change to activate the space. With the rows released, the
-successor acquires them as it activates, which is the recovery
+or demand change to activate the space. Replacement waits for both the backoff
+and teardown/lease release, then starts under a fresh holder unless the host
+has closed. With the rows released, the successor acquires them as it activates,
+which is the recovery
 `serving-loop.md` §6 specifies for a lost tenure. A main thread that closes
 closes the port, and the worker's host closes as it does today.
 

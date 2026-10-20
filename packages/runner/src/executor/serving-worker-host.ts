@@ -217,6 +217,9 @@ export class ServingWorker {
     generation.ready = bridge.init(init).then(({ lifetimeLock }) => {
       generation.lifetimeLock = lifetimeLock;
     });
+    generation.ready.catch((error) => {
+      this.#onWorkerFailed(generation, String(error));
+    });
     worker.onerror = (event) => {
       event.preventDefault();
       this.#onWorkerFailed(generation, event.message);
@@ -256,9 +259,12 @@ export class ServingWorker {
       "worker-failed",
       `the serving worker failed (${message}); starting another in ${delayMs}ms`,
     );
+    const terminating = this.#terminating;
     setTimeout(() => {
-      if (this.#closed) return;
-      this.#generation = this.#spawn();
+      terminating.then(() => {
+        if (this.#closed) return;
+        this.#generation = this.#spawn();
+      });
     }, delayMs);
   }
 }

@@ -1768,8 +1768,8 @@ the per-epic implementation notes).
 - **Toggle via.** The `SERVER_EXECUTION_WORKER` environment variable on
   toolshed, read by the serving-host bootstrap
   ([`packages/toolshed/lib/server-execution.ts`](../../packages/toolshed/lib/server-execution.ts)).
-  Only the literal `true` turns it on; `false` and unset leave it off, and
-  anything else warns and leaves it off. Meaningful only with the serving loop
+  Only the literal `true` turns it on; `false`, empty, and unset leave it off.
+  Other values warn and leave it off. Meaningful only with the serving loop
   running ([`serverExecution`](#serverexecution) on).
 - **Added by.** Bernhard Seefeld, in the change that moves the serving loop
   off the request thread.

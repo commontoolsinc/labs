@@ -2,13 +2,14 @@
 status: historical
 created: 2026-10-11
 archived: 2026-10-11
-reason: "Executed plan; its five stages were built and measured, stage 4 reverted on the measurement, and the record names where the remaining cost sits."
+reason: "Executed plan; stages 1–3 were built and measured, stage 4 was reverted, and stage 5 measured the flush deadline without building the proposed coalescing knob, and the record names where the remaining cost sits."
 ---
 
 # The serving cycle without server round trips
 
-The serving loop's cost on bursty input is not the derivations and not the
-commit. Over a 30-topic Topics seed the scheduler's runs amount to four to
+The plan's initial hypothesis was that waits around derivation and commit
+dominated the serving loop's cost on bursty input. That attribution was not yet
+established. Over a 30-topic Topics seed the scheduler's runs amount to four to
 five seconds of work, and the seed takes 60 s on the main thread and 30 s in
 the worker: 378 cycles at a 118 ms median on the main thread, 84 cycles at
 329 ms in the worker, with the settle alone at 102 and 133 ms
@@ -138,7 +139,8 @@ deadline as the multi-user latency bound; the OFF arm and clients.
    settle reaches the deadline, no probe completes, and no cycle proves
    coverage. Either piece alone did the same (167 and 128 behind). The
    publish and the drain stay inside the cycle, after the commit.
-5. [x] **Cadence and the number.** Measured, and the deadline stays at
+5. [x] **Cadence and the number.** The flush deadline was measured; the
+   proposed feed-coalescing knob was not built. The deadline stays at
    100 ms; the record is
    [`2026-10-11-serving-cycle-local-quiescence.md`](../development/performance/2026-10-11-serving-cycle-local-quiescence.md).
    The burst stayed an order of magnitude above the client arm, and the

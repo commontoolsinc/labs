@@ -114,6 +114,8 @@ type MirroredSession = {
 class SessionMirror {
   readonly #spaces = new Map<string, Map<string, MirroredSession>>();
 
+  constructor(readonly expired: (space: string, sessionId: string) => void) {}
+
   apply(event: SessionLifecycleEvent): void {
     let sessions = this.#spaces.get(event.space);
     if (sessions === undefined) {
@@ -149,8 +151,10 @@ class SessionMirror {
     for (const [sessionId, session] of sessions) {
       if (session.expiresAt !== null && session.expiresAt <= now) {
         sessions.delete(sessionId);
+        this.expired(space, sessionId);
       }
     }
+    if (sessions.size === 0) this.#spaces.delete(space);
     return sessions;
   }
 }
@@ -441,6 +445,7 @@ class PlaneMemoryServer implements HostMemoryServer {
     space: string,
     options: { excludePrincipal?: string } = {},
   ): ReturnType<HostMemoryServer["viewInterestsForSpace"]> {
+    this.#sessions.live(space);
     // The list crosses the port once, and again only after the server
     // reported a change that can move it (`ServingPlane`'s notices).
     return this.#viewInterests.interestsFor(
@@ -463,9 +468,12 @@ class PlaneMemoryServer implements HostMemoryServer {
  */
 export class ServingPlane {
   readonly #endpoint: ServingPlaneEndpoint;
-  readonly #sessions = new SessionMirror();
   readonly #demandShares = new DemandShareCache();
   readonly #viewInterests = new ViewInterestCache();
+  readonly #sessions = new SessionMirror((space, sessionId) => {
+    this.#demandShares.forget(space, sessionId);
+    this.#viewInterests.noteChanged(space);
+  });
   readonly #engines = new Map<string, Promise<Engine.Engine>>();
   readonly #transports = new Map<
     number,

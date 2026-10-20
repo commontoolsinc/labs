@@ -291,6 +291,11 @@ deno run --allow-read skills/perf-investigation/scripts/attribute-measures.ts \
 
 ### Attribute refresh frequency to its inputs
 
+When serving runs in a worker, `/api/health/stats` includes its `loggerCounts` and
+`timingStats` under `servingLoopRealm`. The top-level logger fields cover only
+the memory server's process; `servingLoop` holds executor counters rather than
+worker logger rows. Collect both realms to account for the serving loop's work.
+
 The memory server emits `memory/refresh/batch` for each space processed by a
 flush, with its dirty instance keys, derived-key count, and connection count.
 `memory/refresh/session/{touched,untouched}` details identify the session,
@@ -299,9 +304,11 @@ can process multiple batches; a touched session can refresh multiple graphs.
 Count these boundaries separately before dividing traversal counts by them.
 
 `memory/refresh/walk/total` details identify the graph's scope identity, affected
-and missed roots, root-evaluation count, manager reads, updates, and outcome.
-The `reads` and `updates` totals describe successful refreshes; a `failed`
-outcome may have done partial work. `memory/query/root` brackets root evaluations
+and missed document keys, root-evaluation count, manager reads, updates, and
+outcome.
+The affected and missed entries are document keys, not root selectors. `reads`
+includes partial work on a failed refresh; `updates` describes a successful
+refresh. `memory/query/root` brackets root evaluations
 during watch extension and incremental refresh, naming the document, selector
 path and schema hash, reads, and outcome.
 `traverse` carries the same document/path/schema vocabulary on clients and
@@ -319,7 +326,8 @@ keys fixed. The logger computes them lazily for emitted measures and retained
 slowest samples. Use `detailOfMeasure` from `utils/logger` to decode the suffix,
 then group by individual fields when `--detail` is too specific. No document
 values are included. Timing measures remain opt-in with `CF_TIMING_MEASURES=1`.
-For causal scheduler data, enable `setTriggerTraceEnabled(true)` and compare
+For causal scheduler data, enable both `setTriggerTraceEnabled(true)` and
+`setActionRunTraceEnabled(true)`, then compare
 `getTriggerTrace()` decisions and changed addresses with `getActionRunTrace()`;
 both histories are bounded, so check their retention before treating them as a
 whole-run count. A probe that drains or captures them belongs outside the

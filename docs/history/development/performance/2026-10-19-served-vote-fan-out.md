@@ -345,6 +345,8 @@ count × average milliseconds, not three-sample wall time:
 
 For reproduction, start a source toolshed at `http://localhost:8400` and a shell
 at `http://localhost:5173`, with `SHELL_URL=http://localhost:5173` on toolshed.
+`FRONTEND_URL` deliberately points to toolshed at port 8400: toolshed proxies
+the shell through that setting, as in the measured runs.
 Set `EXPERIMENTAL_SERVER_EXECUTION` consistently on toolshed, shell build, and
 measurement process. Set worker and store read-through to the same arm; keep
 `SERVER_EXECUTION_OVERLAP_COMMIT=false` and
@@ -440,3 +442,74 @@ forced on. The expression was restored afterward. Toolshed server-execution
 passed four tests and 17 steps, and piece served-lifecycle passed one test and
 29 steps. Executor and traversal runs used `test/clock-preload.ts` from the
 runner package, matching its test task.
+
+## Review follow-up, 2026-10-20
+
+The first published continuation was `0145a1665`. Review found several inherited
+correctness gaps that could undermine measurement: demand invalidations could
+be lost while a read was pending, detached sessions could leave stale demand or
+view-interest caches, and a failed worker could restart before its predecessor's
+lease release. These are corrected with regression tests. A successful wave
+stays successful if its post-commit admission readback fails, and an uncloneable
+port result now rejects its caller with a serializable error.
+
+Refresh diagnostics now include reads completed before a failed walk. Failed
+lifecycle verbs retain completed phase timings across the worker port and onto
+the request span without changing their refusal code. The profiling recipe
+explicitly enables both trigger and action-run histories and names the worker
+realm's `loggerCounts` field.
+
+The read-boundary helper no longer treats the watermark document's revision as
+proof of coverage. An empty-root graph query can request the highest authored
+sequence at or below a captured head, and the helper waits for the watermark
+value to cover that sequence. A server that does not advertise serving requires
+no watermark wait. Tests cover an uncovered authored commit followed by a newer
+watermark revision, a multi-commit bookkeeping tail, and exclusion of writes
+beyond the captured head.
+
+The vote endpoint remains local visible-row convergence, potentially including
+speculation. Its duplicate-row check now also verifies the array length. The
+seed rejects failed intent outcomes instead of treating quiescence alone as
+success. Neither change instruments the poll or Topics patterns.
+
+After those corrections, all six repository gates passed again. The executor
+list passed 57 tests and 725 steps both as committed and with overlap forced on;
+the expression was restored. The authored-boundary suite added one test group
+with six steps on the committed posture. Memory and traversal counts stayed at
+39/44 and 47/233. Toolshed server-execution plus lifecycle routes passed 5 tests
+and 36 steps, and piece served-lifecycle passed 1 test and 30 steps. The initial
+continuation's CI passed after retrying a manifest-download failure that had
+occurred before tests started.
+
+On the review-fix source, with the box otherwise idle, the repeated standard
+burst was 3.4 / 3.2 s OFF and 4.9 / 5.3 s worker. All exact-row checks passed.
+These are a new sitting, not a controlled comparison of the review fixes to
+`0145a1665`; both arms were slower than in the preceding sitting. They establish
+no speedup. Overlap and selective replication remained off.
+
+The untimed serving-side accounting bursts, count × average milliseconds:
+
+| Worker run | Waves / at deadline | Cycle | Settle | Commit | Demand pass | Publish | Handler | Scheduler settle |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 28 / 26 | 29 × 171.6 | 29 × 111.9 | 28 × 53.6 | 30 × 0.1 | 29 × 0.1 | 25 × 8.4 | 51 × 79.3 |
+| 2 | 24 / 23 | 26 × 148.4 | 26 × 103.1 | 24 × 42.3 | 27 × 0.4 | 26 × 0.1 | 25 × 6.5 | 51 × 59.9 |
+
+Both began and ended one commit behind the head and recorded no
+`watchRefresh/watchAddSync` calls. OFF has no serving loop for these rows.
+
+The 30-topic seeds were 26.67 / 28.06 s OFF and 43.75 / 40.08 s worker. All
+completed without a failed intent outcome. Their serving rows were:
+
+| Seed arm / run | Memory flush | Memory walk | Worker cycle | Worker settle | Worker commit |
+| --- | --- | --- | --- | --- | --- |
+| OFF 1 | 110 × 9.58 | 109 × 8.87 | — | — | — |
+| OFF 2 | 111 × 10.76 | 109 × 9.97 | — | — | — |
+| Worker 1 | 138 × 22.05 | 138 × 19.02 | 122 × 505.23 | 123 × 238.69 | 96 × 80.80 |
+| Worker 2 | 132 × 20.13 | 132 × 17.43 | 103 × 594.64 | 103 × 160.42 | 90 × 68.93 |
+
+The worker's watermark lag was 138 in the first run and one in the second.
+That variability remains open; successful intent outcomes do not establish
+whole-space watermark coverage. Raw outputs are `reviewed-burst-*` and
+`reviewed-seed-*` in the scratch directory used above. The browser and causal
+profile tables above describe the earlier capture source, not these review-fix
+runs.

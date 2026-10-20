@@ -938,10 +938,11 @@ const handlers: Record<
    * Resolve once the list the piece result holds at `path`, read as a map
    * from each element's values at the `keys` paths to its value at the
    * `valueKey` path, equals `expected`: the same keys and no others, each at
-   * its expected value in its string form. A path descends through a cell where an element holds
-   * one, so a key may name a field of the row's author. Read at this runtime's
-   * quiescence and woken by the cell's own changes, so it ends when this
-   * replica's view of the list is current, not when a message says so.
+   * its expected value in its string form. A path descends through a cell
+   * where an element holds one, so a key may name a field of the row's author.
+   * Read at this runtime's quiescence and woken by the cell's own changes.
+   * Visible rows can include speculation; this does not assert that the
+   * serving runtime has committed their consequences.
    */
   async waitForRows({ path, piece, keys, valueKey, expected }) {
     const target = await resultAt(piece);
@@ -954,7 +955,9 @@ const handlers: Record<
     const wanted = expected as Record<string, string>;
     const wantedKeys = Object.keys(wanted);
     await waitForCellValue<unknown>(controller().runtime, cell, (value) => {
-      if (!Array.isArray(value)) return false;
+      if (!Array.isArray(value) || value.length !== wantedKeys.length) {
+        return false;
+      }
       const found = new Map<string, string>();
       for (const element of value) {
         found.set(

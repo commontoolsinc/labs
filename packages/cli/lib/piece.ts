@@ -5114,7 +5114,7 @@ async function loadPieceForRead(
  * every authored commit at or below the server's head as of now, so a read
  * that follows a send, from this process or another, reads what the serving
  * runtime stored for it. Resolves at once in the OFF arm, where this runtime
- * runs what it reads, and against a server that reports no head.
+ * runs what it reads, and against a server that advertises no serving loop.
  */
 async function waitForServedHead(pieces: PiecesController): Promise<void> {
   if (pieces.runtime.experimental.serverExecution !== true) return;

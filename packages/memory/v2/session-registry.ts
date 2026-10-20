@@ -141,8 +141,8 @@ export type SessionState = {
 /**
  * A change to the sessions a {@link SessionRegistry} holds, as its observer
  * sees it. `opened` reports a session opened or resumed, with what the open
- * declared; `detached` reports its connection gone, and when the registry
- * forgets the session unless a resume comes first; `removed` reports it gone.
+ * declared; `detached` reports its connection gone; `removed` reports the
+ * session deleted, either explicitly or after its detach expiry lapses.
  */
 export type SessionLifecycleEvent =
   | {

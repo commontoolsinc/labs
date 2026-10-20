@@ -722,8 +722,15 @@ export default pattern(() => {
   });
 
   it("maps a compile failure to 422", async () => {
+    const attributes = new Map<string, unknown>();
+    const requestSpan: NonNullable<LifecycleDeps["requestSpan"]> = {
+      setAttribute(key, value) {
+        attributes.set(key, value);
+        return this;
+      },
+    };
     const broken = refused(
-      await processInstantiate(deps, alice.did(), {
+      await processInstantiate({ ...deps, requestSpan }, alice.did(), {
         space,
         program: {
           main: "/main.tsx",
@@ -733,6 +740,10 @@ export default pattern(() => {
     );
     expect(broken.status).toBe(422);
     expect(broken.code).toBe("compile-failed");
+    expect(attributes.get("cf.lifecycle.instantiate.run_ms")).toEqual(
+      expect.any(Number),
+    );
+    expect(attributes.has("cf.lifecycle.instantiate.confirm_ms")).toBe(false);
   });
 
   it("answers 500 with its own code when the verb fails for a reason it does not name", async () => {

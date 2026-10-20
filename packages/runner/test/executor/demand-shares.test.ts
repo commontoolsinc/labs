@@ -30,6 +30,52 @@ const live = (...entries: Array<[string, string | undefined]>) =>
   new Map(entries.map(([id, principal]) => [id, { principal }]));
 
 describe("demand-shares", () => {
+  for (const wholeSpace of [false, true]) {
+    it(`retains ${wholeSpace ? "space" : "session"} invalidations arriving during a read`, async () => {
+      const cache = new DemandShareCache();
+      const sessions = live(["a", undefined]);
+      const pending = Promise.withResolvers<SessionDemand[]>();
+      const first = cache.sharesFor(
+        space,
+        sessions,
+        undefined,
+        () => pending.promise,
+      );
+      cache.noteChanged(space, wholeSpace ? undefined : "a");
+      const old = share("a");
+      pending.resolve([old]);
+      expect(await first).toEqual([old]);
+      const next = share("a");
+      const r = reader({ a: next });
+      expect((await cache.sharesFor(space, sessions, undefined, r.read))[0])
+        .toBe(next);
+      expect(r.asked).toEqual([["a"]]);
+    });
+  }
+
+  it("retains invalidation when a refresh rejects", async () => {
+    const cache = new DemandShareCache();
+    const sessions = live(["a", undefined]);
+    await cache.sharesFor(
+      space,
+      sessions,
+      undefined,
+      reader({ a: share("a") }).read,
+    );
+    cache.noteChanged(space, "a");
+    await expect(
+      cache.sharesFor(
+        space,
+        sessions,
+        undefined,
+        () => Promise.reject(new Error("read failed")),
+      ),
+    ).rejects.toThrow("read failed");
+    const r = reader({ a: share("a") });
+    await cache.sharesFor(space, sessions, undefined, r.read);
+    expect(r.asked).toEqual([["a"]]);
+  });
+
   it("reads every live session's share once and hands the same objects to the next pass", async () => {
     const cache = new DemandShareCache();
     const shares = { a: share("a"), b: share("b") };

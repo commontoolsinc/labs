@@ -2939,6 +2939,22 @@ export const serverSeq = (engine: Engine): number => {
   return (engine.statements.selectServerSeq.get() as { seq: number }).seq;
 };
 
+/** Highest authored commit through a captured head, excluding bookkeeping. */
+export const authoredSeqThrough = (
+  engine: Engine,
+  throughSeq: number,
+  branch: BranchName = DEFAULT_BRANCH,
+): number => {
+  if (!Number.isSafeInteger(throughSeq) || throughSeq < 0) {
+    throw new Error("Authored commit boundary must be a nonnegative integer");
+  }
+  const row = engine.database.prepare(`
+SELECT COALESCE(MAX(seq), 0) AS seq FROM "commit"
+WHERE class = 'authored' AND seq <= :seq AND branch = :branch
+`).get({ seq: throughSeq, branch }) as { seq: number };
+  return row.seq;
+};
+
 /**
  * SQLite's `PRAGMA data_version` on this engine's connection. It differs
  * between two readings when another connection committed to the store in

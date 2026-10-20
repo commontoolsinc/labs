@@ -4400,6 +4400,13 @@ class Provider
     return this.#followReplacement((replica) => replica.serverHeadSeq());
   }
 
+  /** @inheritDoc */
+  serverAuthoredSeq(head: number): Promise<number | undefined> {
+    return this.#followReplacement((replica) =>
+      replica.serverAuthoredSeq(head)
+    );
+  }
+
   sqliteQuery(
     db: SqliteDbRef,
     sql: string,
@@ -5913,6 +5920,23 @@ export class SpaceReplica
     // unconditional round trip (it cannot be answered from the local replica),
     // unlike the entity-id listing calls, which a server may decline by flag.
     return (await session.queryGraph({ roots: [] })).serverSeq;
+  }
+
+  /** @inheritDoc */
+  async serverAuthoredSeq(head: number): Promise<number | undefined> {
+    const { client, session } = await this.#activeSessionHandle();
+    if (client.serverFlags?.serverExecution !== true) return undefined;
+    const { authoredSeq } = await session.queryGraph({
+      roots: [],
+      atSeq: head,
+      includeAuthoredSeq: true,
+    });
+    if (authoredSeq === undefined) {
+      throw new Error(
+        "The serving server does not report authored commit boundaries",
+      );
+    }
+    return authoredSeq;
   }
 
   /**
