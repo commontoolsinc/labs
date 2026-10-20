@@ -1341,24 +1341,31 @@ export class RoutedMemoryHost {
           requireRouted(session.space === parsed.space);
           if (
             body.type === "session.watch.set" ||
-            body.type === "session.watch.add"
+            body.type === "session.watch.add" ||
+            body.type === "session.watch.remove"
           ) {
-            requireRouted(Array.isArray(body.watches));
+            const listed = body.type === "session.watch.remove"
+              ? body.watchIds
+              : body.watches;
+            requireRouted(Array.isArray(listed));
             const watches = body.type === "session.watch.set"
               ? new Set<string>()
               : new Set(session.watches);
-            for (const watch of body.watches) {
-              const id = routedObject(watch).id;
+            for (const watch of listed) {
+              const id = body.type === "session.watch.remove"
+                ? watch
+                : routedObject(watch).id;
               routedIdentifier(id);
-              watches.add(id);
+              if (body.type === "session.watch.remove") watches.delete(id);
+              else watches.add(id);
             }
             const key = `${parsed.space} ${body.sessionId}`;
             // Only a `session.watch.set` replaces a session's holdings and
             // views. The Memory server reads `watches` alone from an add,
-            // so holdings or views named on one change nothing the session
-            // holds, and counting them would put the session's usage below
-            // what the server keeps for it. On either request they must
-            // still be lists.
+            // and `watchIds` alone from a removal, so holdings or views named
+            // on either change nothing the session holds, and counting them
+            // would put the session's usage below what the server keeps for
+            // it. On every request they must still be lists.
             const named = (field: unknown, held: number): number => {
               if (field === undefined) return held;
               const length = routedListLength(field);

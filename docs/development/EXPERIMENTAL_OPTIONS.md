@@ -1573,6 +1573,14 @@ the per-epic implementation notes).
 >   Older servers omit it, which parses as `false`, and a client then keeps its
 >   reports to itself rather than sending a message the server would refuse.
 >   It is permanent.
+> - **`watchRemoveV1`** is a build-inherent capability, hardwired to `true`.
+>   It advertises `session.watch.remove`, which removes watches by id and
+>   answers with only what changed (the memory protocol chapter's section
+>   4.3.9). Only the server advertises it; a client reads it from `hello.ok`
+>   and never offers it. Older servers omit it, which parses as `false`, and a
+>   client then removes a watch by replacing the session's watch set, and
+>   keeps the watches of documents nothing reads rather than releasing them.
+>   It is permanent.
 > - **`admissionNotice`** is a build-inherent capability, hardwired to `true`
 >   on both peers. It advertises the `session/admissible` push of the memory
 >   protocol chapter's section 4.2.2: a server tells a connection it refused a
@@ -1625,15 +1633,19 @@ the per-epic implementation notes).
   a high-RTT link this dominates cold-load wall-clock. With the flag on,
   refreshes overlap up to a bounded window (`CONCURRENT_WATCH_REFRESH_WINDOW`,
   currently 8) in `storage/v2.ts`, and the memory client issues the whole
-  watch-mutation family (`watch.set` + `watch.add`) in an ordered issue phase so
-  wire order is preserved and application stays ordered. Watch removals derive
-  a full replacement set from session state, so they wait for preceding
-  responses to be applied before constructing that set. Later acquisitions
-  remain behind the removal in wire order. Each removal therefore drains the
-  in-flight window: acquisitions issued after it wait until every earlier
-  response has applied and the removal has been sent. Operation-watch
-  cancellations pay that drain. Independent acquisitions still overlap, and
-  same-tick microtask coalescing is unchanged.
+  watch-mutation family (`watch.set`, `watch.add` and `watch.remove`) in an
+  ordered issue phase so wire order is preserved and application stays
+  ordered. Watch removals wait for preceding responses to be applied before
+  they are sent. A removal by id (`session.watch.remove`, to a server
+  advertising `watchRemoveV1`) waits so that the watch intent it updates
+  holds every earlier acquisition; a removal by replacement (`watch.set`, to
+  an older server) also derives the full remaining set from that state. Later
+  acquisitions remain behind the removal in wire order. Each removal therefore
+  drains the in-flight window: acquisitions issued after it wait until every
+  earlier response has applied and the removal has been sent. Operation-watch
+  cancellations and document release passes pay that drain. Independent
+  acquisitions still overlap, and same-tick microtask coalescing is
+  unchanged.
 - **Current default and planned end state.** Off by default. It is a spike
   pending live measurement on a real (estuary-latency) load; the window size is
   a tuning value. End state is either graduation to always-on with a settled

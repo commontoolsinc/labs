@@ -112,6 +112,7 @@ import {
   type ViewQuery,
   type WatchAddRequest,
   type WatchAddResult,
+  type WatchRemoveRequest,
   type WatchSetRequest,
   type WatchSetResult,
   type WatchSpec,
@@ -2074,6 +2075,26 @@ class Connection {
         }
         {
           const response = await this.#server.watchAdd(parsed);
+          this.#sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            response,
+          );
+        }
+        return;
+      case "session.watch.remove":
+        if (
+          !this.#requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
+        {
+          const response = await this.#server.watchRemove(parsed);
           this.#sendSessionResponse(
             parsed.space,
             parsed.sessionId,
@@ -6637,11 +6658,63 @@ export class Server {
     return await this.#watchSet(message);
   }
 
-  /** Helper for watchSet(), which stages and installs one watch union. */
+  /**
+   * Removes the named watches from a session and answers with the difference
+   * between what the session was delivered and the union that remains.
+   */
+  async watchRemove(
+    message: WatchRemoveRequest,
+  ): Promise<ResponseMessage<WatchSetResult>> {
+    const startedAt = performance.now();
+    try {
+      return await this.#watchRemove(message);
+    } finally {
+      timing.time(startedAt, "memory", "watchRemove", "total");
+    }
+  }
+
+  /** Helper for watchRemove(), which installs the union that remains. */
+  async #watchRemove(
+    message: WatchRemoveRequest,
+  ): Promise<ResponseMessage<WatchSetResult>> {
+    // Read when the request runs, which for a session with views is once the
+    // publication lock is held.
+    const remaining = (): WatchSetRequest => {
+      const removed = new Set(message.watchIds);
+      return {
+        type: "session.watch.set",
+        requestId: message.requestId,
+        space: message.space,
+        sessionId: message.sessionId,
+        watches: (this.#sessions.get(message.space, message.sessionId)
+          ?.watches ?? []).filter((watch) => !removed.has(watch.id)),
+      };
+    };
+    if (
+      (this.#sessions.get(message.space, message.sessionId)?.views.length ??
+        0) > 0
+    ) {
+      return await this.#withSpacePublicationLock(
+        message.space,
+        () => this.#watchSet(remaining(), "remove"),
+      );
+    }
+    return await this.#watchSet(remaining(), "remove");
+  }
+
+  /**
+   * Helper for watchSet(), watchAdd() and watchRemove(), which stages and
+   * installs one watch union. A `replace` delivers against the request's
+   * holdings, or in full; an `add` merges the request's watches into the
+   * session's and keeps the session's operation cursors; a `remove` keeps the
+   * cursors of the watches that remain. Both an `add` and a `remove` deliver
+   * against what the session was delivered.
+   */
   async #watchSet(
     message: WatchSetRequest,
-    incremental = false,
+    mode: "replace" | "add" | "remove" = "replace",
   ): Promise<ResponseMessage<WatchSetResult>> {
+    const incremental = mode === "add";
     const session = this.#sessions.get(message.space, message.sessionId);
     if (session === null) {
       return respondTypedError<WatchSetResult>(
@@ -6752,9 +6825,15 @@ export class Server {
 
     try {
       this.#assertRoutedAuthority(session);
-      const nextOperationCursors = incremental
-        ? new Map(session.operationCursors)
-        : new Map<string, OpCursor>();
+      const nextOperationCursors = mode === "replace"
+        ? new Map<string, OpCursor>()
+        : new Map(session.operationCursors);
+      if (mode === "remove") {
+        const kept = new Set(message.watches.map((watch) => watch.id));
+        for (const id of nextOperationCursors.keys()) {
+          if (!kept.has(id)) nextOperationCursors.delete(id);
+        }
+      }
       const evaluated: Awaited<ReturnType<Server["evaluateWatchSet"]>> & {
         demandGraphs?: typeof session.graphs;
         demandEntities?: typeof session.entities;
@@ -6786,11 +6865,12 @@ export class Server {
       // scope name alone cannot distinguish. Every other session's
       // frames are byte-identical to before.
       const keyed = session.leaseHolderReads === true;
-      // Additions diff against this session's delivery state. Replacements
-      // use the client's declared holdings, or supply the full union when
-      // it declares none. A re-established session can therefore recover
-      // missing documents without assuming that its client holds them.
-      const sync = incremental
+      // Additions and removals diff against this session's delivery state.
+      // Replacements use the client's declared holdings, or supply the full
+      // union when it declares none. A re-established session can therefore
+      // recover missing documents without assuming that its client holds
+      // them.
+      const sync = mode !== "replace"
         ? buildDiffSync(
           session.entities,
           entities,
@@ -6821,7 +6901,7 @@ export class Server {
       // A replacement that declares no holdings, or holding nothing, tells
       // the client every crossing again; any other frame tells it only the
       // new ones.
-      const resetCrossings = !incremental &&
+      const resetCrossings = mode === "replace" &&
         (message.holdings === undefined || message.holdings.length === 0);
       const newCrossings = this.#undeliveredCrossings(
         session,
@@ -6895,6 +6975,18 @@ export class Server {
         newCrossings.keys,
         resetCrossings,
       );
+      if (mode === "remove") {
+        // A crossing the remaining watches no longer follow is told again
+        // when a later watch follows it, so the client loads its target.
+        const followed = new Set(
+          [...graphs.values(), ...demandGraphs.values()].flatMap((graph) => [
+            ...syncCrossingsOf(graph).keys(),
+          ]),
+        );
+        for (const key of session.deliveredCrossings) {
+          if (!followed.has(key)) session.deliveredCrossings.delete(key);
+        }
+      }
       session.trackedIds = addOperationWatchTrackedIds(
         trackedIdsFromEntries(entities.values()),
         message.watches,
@@ -7031,7 +7123,7 @@ export class Server {
           this.#watchSet({
             ...message,
             type: "session.watch.set",
-          }, true),
+          }, "add"),
       );
     }
     const aclEngine = this.#aclMode() === "off"
@@ -10435,6 +10527,26 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       watches: parsed.watches as WatchSpec[],
+    };
+  }
+
+  if (
+    parsed.type === "session.watch.remove" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    Array.isArray(parsed.watchIds)
+  ) {
+    const watchIds = parsed.watchIds.filter((id: unknown): id is string =>
+      typeof id === "string"
+    );
+    if (watchIds.length !== parsed.watchIds.length) return null;
+    return {
+      type: "session.watch.remove",
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      watchIds,
     };
   }
 

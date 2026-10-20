@@ -10997,6 +10997,7 @@ export class Runner {
       }
     }
     this.#stopResult(resultCell);
+    void this.#runtime.releaseUnreadDocuments();
   }
 
   #stopResult<T>(resultCell: Cell<T>): void {

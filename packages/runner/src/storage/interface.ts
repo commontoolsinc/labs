@@ -255,6 +255,17 @@ export type StoreReadThrough = (
   address: { id: URI; scopeKey: ScopeKey },
 ) => SessionSyncUpsert | undefined;
 
+/**
+ * A stored document: its space and id, and the scope it is read in, with the
+ * scope instance when the read names one.
+ */
+export type StoredDocumentAddress = {
+  space: MemorySpace;
+  id: URI;
+  scope?: CellScope;
+  scopeKey?: ScopeKey;
+};
+
 export interface IStorageManager extends IStorageSubscriptionCapability {
   id: string;
 
@@ -656,6 +667,57 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
      * replica seen the doc" check are then per that INSTANCE. */
     identity?: ScopeKeyIdentity,
   ): boolean;
+
+  /**
+   * Returns the token that keeps a document loaded: while anything holds a
+   * strong reference to it, `releaseUnreadDocuments()` keeps the document.
+   * A cell that has loaded its document holds it. Each call for a document
+   * returns the same token while one is held. A read under `identity`, when it
+   * is not the manager's own, holds that identity's instance of a scoped
+   * document.
+   */
+  holdDocument?(
+    address: StoredDocumentAddress,
+    identity?: ScopeKeyIdentity,
+  ): object;
+
+  /**
+   * Adds a way for the manager to learn whether something reads a document;
+   * a document any of them reads keeps its watches through
+   * `releaseUnreadDocuments()` and stays loaded when its watches go. Returns
+   * a cancel that removes it.
+   */
+  addDocumentReader?(
+    reads: (address: StoredDocumentAddress) => boolean,
+  ): Cancel;
+
+  /**
+   * Removes the watches rooted at documents nothing keeps, and drops the
+   * documents those watches alone kept loaded. A document is kept while a
+   * reader (`addDocumentReader()`) reads it, while its hold token
+   * (`holdDocument()`) is reachable, while a sink on the replica names it,
+   * or while a local write to it is pending; a root loaded or read since
+   * the previous call began keeps its watch through this one. A later read
+   * of a dropped document loads it again. A space whose server does not
+   * advertise `watchRemoveV1` keeps every watch. Resolves once every space's
+   * session has answered.
+   */
+  releaseUnreadDocuments?(): Promise<void>;
+
+  /**
+   * How many documents this manager has dropped. A cell loaded before the
+   * count last moved checks on its next read whether its replica still holds
+   * its document, and loads it again only if it does not.
+   */
+  droppedDocuments?(): number;
+
+  /** Calls `observer` with each batch of documents a space's replica drops. */
+  subscribeDocumentsDropped?(
+    observer: (
+      space: MemorySpace,
+      addresses: readonly Omit<StoredDocumentAddress, "space">[],
+    ) => void,
+  ): Cancel;
 
   /**
    * Undo a `shouldPullDoc` reservation after the kicked sync FAILED, so a
