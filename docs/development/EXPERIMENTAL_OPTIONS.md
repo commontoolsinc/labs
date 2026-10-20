@@ -917,6 +917,11 @@ holds the measurements and the conditions for revisiting.
 - **Status on 2026-10-14.** Both arms are covered by
   `packages/runner/test/refused-derived-write.test.ts`, and the plumbing by
   `packages/runner/test/experimental-options.test.ts`.
+- **Status on 2026-10-20.** `packages/toolshed/test/loom-cold-reader.test.ts`
+  turns the flag on for its viewer runtimes. Its READ viewer runs the loom
+  root itself, and with the flag off that run settles only once every retry
+  budget is spent, which takes minutes; the test goes with whichever arm
+  wins.
 - **Path to removal.** Remove the env mapping, the runtime option and its
   authority and shell-source entries, the shell define, and the gate in the
   scheduler. If the fold loses, the fold machinery in
