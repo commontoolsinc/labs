@@ -399,10 +399,18 @@ describe("private inbox across runtimes", () => {
     if (SERVER_EXECUTION) {
       expect(sidecars.size).toBe(1);
       const [sidecar] = sidecars;
+      let entries: Record<string, unknown>[] = [];
       await harness.settleUntil(async () => {
-        const entries = await streamEntries(pointer.space, sidecar);
+        entries = await streamEntries(pointer.space, sidecar);
         return entries.length === 2 && entries.every(terminal);
       });
+      // A handler that threw, or an entry that was dropped, also leaves the
+      // pointer as it was, so each entry has to have run to completion.
+      expect(
+        entries.filter((entry) =>
+          entry.error !== undefined || entry.status !== undefined
+        ),
+      ).toEqual([]);
     }
     await harness.settle();
     return {
