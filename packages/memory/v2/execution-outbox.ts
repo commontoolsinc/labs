@@ -32,7 +32,6 @@
 // and is skipped at processing time).
 
 import type { FabricValue } from "@commonfabric/api";
-import { JsonCodecEngine } from "@commonfabric/data-model/codec-json";
 import type { Engine } from "./engine.ts";
 import {
   decodeTrustedMemoryBoundary,
@@ -202,7 +201,7 @@ ORDER BY id ASC
       ? {}
       : { targetStreamLink: JSON.parse(row.target_stream_link) }),
     eventId: row.event_id,
-    payload: decodeOutboxPayload(row.payload),
+    payload: decodeTrustedMemoryBoundary(row.payload),
     ...(row.acting_principal === null
       ? {}
       : { actingPrincipal: row.acting_principal }),
@@ -219,15 +218,6 @@ ORDER BY id ASC
     createdSeq: row.created_seq,
   }));
 };
-
-/**
- * Reads a stored payload: the memory boundary's encoding, or plain JSON when
- * the text lacks that encoding's tag.
- */
-const decodeOutboxPayload = (payload: string): FabricValue =>
-  JsonCodecEngine.seemsLikeEncoded(payload)
-    ? decodeTrustedMemoryBoundary(payload)
-    : JSON.parse(payload);
 
 /**
  * Delivery-ack retirement (FP1): delete one delivered row. Called only

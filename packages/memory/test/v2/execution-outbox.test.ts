@@ -59,8 +59,10 @@ describe("execution-outbox", () => {
       });
       expect(pending.payload).toBeUndefined();
     });
+  });
 
-    it("returns the value of a payload stored as plain JSON", () => {
+  describe("open()", () => {
+    it("rewrites a payload stored as plain JSON into the memory boundary's encoding", async () => {
       insertExecutionOutboxRows(engine, {
         branch: "",
         createdSeq: 1,
@@ -69,7 +71,14 @@ describe("execution-outbox", () => {
       engine.database.prepare(
         "UPDATE execution_outbox SET payload = :payload",
       ).run({ payload: JSON.stringify({ inbox: "of:inbox", count: 2 }) });
+      close(engine);
 
+      engine = await open({ url: toFileUrl(path) });
+
+      const stored = engine.database.prepare(
+        "SELECT payload FROM execution_outbox",
+      ).get() as { payload: string };
+      expect(stored.payload.startsWith("fvj1:")).toBe(true);
       const [pending] = selectPendingExecutionOutboxRows(engine, {
         branch: "",
       });
