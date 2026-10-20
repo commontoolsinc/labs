@@ -902,12 +902,11 @@ holds the measurements and the conditions for revisiting.
   §3.8.3. A principal may read a space it cannot write, and a reactive
   computation it runs there still writes its outputs. With the flag off, a
   write of that kind that the space refuses for lack of a grant is reverted
-  like any other rejection; the re-run then finds its input unchanged and
-  its output gone, writes again, and is refused again, for as long as the
-  scheduler's retry budget allows, and the replica reports a refusal for
-  each attempt. With the flag on, the replica keeps the write as a fold over
-  the document's confirmed value, so the re-run the refusal causes reads
-  what it computed and settles.
+  like any other rejection, the scheduler takes no retry on it, and the
+  revert does not run the computation again; it runs again when an input it
+  did not write changes, and is refused again. With the flag on, the replica
+  keeps the write as a fold over the document's confirmed value, and the
+  re-run the refusal causes reads what it computed and settles.
 - **Current default and planned end state.** Off by default. Set
   `EXPERIMENTAL_LOCAL_FOLD=true` or pass
   `RuntimeOptions.experimental.localFold: true` to keep refused derived
@@ -917,11 +916,14 @@ holds the measurements and the conditions for revisiting.
 - **Status on 2026-10-14.** Both arms are covered by
   `packages/runner/test/refused-derived-write.test.ts`, and the plumbing by
   `packages/runner/test/experimental-options.test.ts`.
-- **Status on 2026-10-20.** `packages/toolshed/test/loom-cold-reader.test.ts`
-  In its `serverExecution=false` arm, the READ viewer runs the loom
-  root itself, and with the flag off that run settles only once every retry
-  budget is spent, which takes minutes; the test goes with whichever arm
-  wins.
+- **Status on 2026-10-20.** A refused derived write the replica reverts takes
+  no scheduler retry, so a READ principal running a pattern locally settles
+  after one refusal per computation. Its derived state is not stored, the
+  panel list's result container among it, so such a principal sees a loom's
+  root without its panels; `packages/toolshed/test/loom-cold-reader.test.ts`
+  pins that beside the cases that render them: a WRITE viewer under local and
+  server execution, a READ viewer under server execution, and a READ viewer
+  under local execution with the flag on.
 - **Path to removal.** Remove the env mapping, the runtime option and its
   authority and shell-source entries, the shell define, and the gate in the
   scheduler. If the fold loses, the fold machinery in
