@@ -31,7 +31,7 @@ import type { RuntimeProgram } from "@commonfabric/runner";
 import {
   type LifecyclePhaseTiming,
   LifecycleVerbFailure,
-} from "@commonfabric/runner/executor/host";
+} from "@commonfabric/runner/executor/lifecycle-verb";
 import {
   authorizeSpaceWriter,
   type SpaceAuthorityDeps,

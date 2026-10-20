@@ -17,10 +17,10 @@ import type { DID, MemorySpace } from "@commonfabric/memory/interface";
 import type { Runtime, RuntimeProgram } from "@commonfabric/runner";
 import {
   type LifecyclePhaseTiming,
-  type LifecycleVerb,
   LifecycleVerbFailure,
   type LifecycleVerbRun,
-} from "@commonfabric/runner/executor/host";
+} from "@commonfabric/runner/executor/lifecycle-verb";
+import type { LifecycleVerb } from "@commonfabric/runner/executor/host";
 import { PiecesController } from "./pieces-controller.ts";
 import {
   confirmServedInstantiate,

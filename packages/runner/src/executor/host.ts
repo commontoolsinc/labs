@@ -55,12 +55,11 @@ import {
   type ServingLoopStats,
 } from "./stats.ts";
 
-export { LifecycleVerbFailure } from "./serving-port-protocol.ts";
 export type { LifecycleVerb } from "./space-server.ts";
 export type {
   LifecyclePhaseTiming,
   LifecycleVerbRun,
-} from "./serving-port-protocol.ts";
+} from "./lifecycle-verb.ts";
 
 /**
  * Thrown by {@link ExecutorHost.runLifecycleVerb} when this process cannot

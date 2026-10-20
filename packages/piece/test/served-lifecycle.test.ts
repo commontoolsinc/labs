@@ -19,10 +19,8 @@ import {
   Runtime,
   type RuntimeProgram,
 } from "@commonfabric/runner";
-import {
-  type ExecutorHost,
-  LifecycleVerbFailure,
-} from "@commonfabric/runner/executor/host";
+import type { ExecutorHost } from "@commonfabric/runner/executor/host";
+import { LifecycleVerbFailure } from "@commonfabric/runner/executor/lifecycle-verb";
 import {
   type ServingMemoryServer,
   startServingMemoryServer,

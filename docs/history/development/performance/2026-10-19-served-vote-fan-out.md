@@ -513,3 +513,22 @@ whole-space watermark coverage. Raw outputs are `reviewed-burst-*` and
 `reviewed-seed-*` in the scratch directory used above. The browser and causal
 profile tables above describe the earlier capture source, not these review-fix
 runs.
+
+CI on `a4fe2a1e9` caught a browser-startup regression in the lifecycle timing
+follow-up: importing the error envelope through the executor host pulled the
+SQLite module into the browser worker. The existing cold Topics navigation test
+failed in both execution arms with a login timeout. A temporary startup-task
+probe exposed the underlying `Deno is not defined` error. Moving the shared
+lifecycle result and failure types into a module without runtime dependencies
+removes that import path. The temporary probe was removed; the existing browser
+test passed on the corrected bundle with execution OFF and ON.
+
+The port's error-classification comment now distinguishes ordinary protocol
+faults (whose `ProtocolError` class the outbox uses) from timed lifecycle
+failures (whose envelope carries name/code for lifecycle routes and reconstructs
+the protocol error as its cause). A round-trip test covers both cases.
+
+All six repository gates passed after that import correction. The committed
+executor and authored-boundary suites passed 58 tests and 732 steps; memory,
+traversal, toolshed, and piece suite counts remained as recorded above. No
+serving-cycle, finish, or park behavior changed in this correction.
