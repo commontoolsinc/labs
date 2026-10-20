@@ -4997,8 +4997,11 @@ function subscribeToReferencedDocs<T>(
       // cover what it reads: a field the schema leaves untyped holds a value
       // that reads what it holds only once it is looked at.
       const delivered = project === undefined ? newValue : project(newValue);
+      // Each consumed document's labels are read so that this sink sees
+      // them, as the label above is: a write of a label alone, the value
+      // left as it was, runs the sink again with what it then consumes.
       const consumed = options.includeConsumedLabel
-        ? collectConsumedLabel(tx)
+        ? collectConsumedLabel(tx, { subscribe: true })
         : undefined;
       sink.cleanup = callback(delivered, cfcLabel, consumed);
 
