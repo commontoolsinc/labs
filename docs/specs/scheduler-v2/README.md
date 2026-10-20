@@ -634,9 +634,14 @@ runnable(N) = N.status ∈ {invalid, never-ran} ∧ live(N) ∧ eligible(N)
    with a bounded retry policy for transient failure classes.
 7. Under persistence, attach the observation to the transaction (§9.3).
 
-Retry counters belong to the action across registrations. A successful commit
-or a permanent or terminal refusal clears them even if its registration has
-retired; terminal refusals still reach the error channel. Waking consumers on
+Retry counters belong to the action across registrations. A successful commit,
+a permanent or terminal refusal, or a refusal for lack of a grant (an
+`AuthorizationError` carrying the server's permanent evidence) clears them
+even if its registration has retired; terminal refusals still reach the error
+channel. A grant refusal takes no attempt beyond the one refused, and the
+revert of the refused write is self-suppressed for its writer as P5
+suppresses the writer's own commit, so the writer runs again when another
+input changes rather than against the same refusal. Waking consumers on
 success requires the committing run's registration to remain active.
 
 The run path refreshes live subscriptions incrementally, including during

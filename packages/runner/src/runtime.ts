@@ -434,11 +434,11 @@ export interface ExperimentalOptions {
   /**
    * A reactive computation's write that the space refuses for lack of a
    * grant is kept as a local fold over the document's confirmed value
-   * (`docs/specs/memory-v2/03-commit-model.md` §3.8.3), so that the re-run
-   * reads what it computed and settles. When false, such a write is reverted
-   * like any other rejection, and the computation runs again against the
-   * same refusal until the scheduler's retry budget is spent. Defaults to
-   * off.
+   * (`docs/specs/memory-v2/03-commit-model.md` §3.8.3), so that the output
+   * reads as what the principal computed. When false, such a write is
+   * reverted like any other rejection. Either way the refusal takes no
+   * retry, and the computation runs again only when an input it did not
+   * write changes. Defaults to off.
    */
   localFold?: boolean | undefined;
 }

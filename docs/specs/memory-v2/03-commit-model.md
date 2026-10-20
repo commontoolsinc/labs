@@ -829,9 +829,10 @@ the refused write applied, held by that replica alone.
   granted WRITE. The commit also reads the whole document at the fold's `seq`,
   so that a change the server took to any part of it since conflicts, rather
   than being overwritten by the whole-document `set`.
-- The re-run the scheduler makes after the refusal reads the folded value and
-  so has nothing to write. Its computation settles instead of re-running
-  against the same refusal.
+- The scheduler takes no retry on the refusal, and the revert does not run
+  the computation again. The folded value stands as its result until an input
+  it did not write changes, and the run that change causes reads the folded
+  value and so has nothing to write.
 
 Event handlers are not folded. Their writes are acts rather than derivations,
 and a refusal of one is reverted and reported.
@@ -839,7 +840,9 @@ and a refusal of one is reverted and reported.
 The fold is gated by the `localFold` experimental flag
 ([registry](../../development/EXPERIMENTAL_OPTIONS.md#localfold)), off by
 default. Without it, a refused derived write is reverted as any other
-rejection is, and the computation runs again against the same refusal.
+rejection is. The computation is not retried, and the revert of its own
+write does not run it again; it runs again when an input it did not write
+changes, and is refused again while the grant is missing.
 
 ## 3.9 Commit Ordering
 

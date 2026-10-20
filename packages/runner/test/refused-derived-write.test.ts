@@ -204,28 +204,48 @@ describe("refused derived write", () => {
 
     expect(counts.refusals).toBe(1);
     expect(derived.get()).toBe(4);
-    // The second run reads the kept value and has nothing to write.
-    expect(counts.runs).toBe(2);
+    // The refusal takes no retry; the kept value stands as the run's result.
+    expect(counts.runs).toBe(1);
     const stored = ownerRuntime.getCell<number>(space, "derived");
     await stored.sync();
     expect(stored.get()).toBeUndefined();
   });
 
-  it("runs again against the same refusal, past the retry budget, when `localFold` is off", async () => {
-    const { ownerRuntime, space, counts } = await readerDerives(
+  it("reverts the write after one refused commit and runs no further, when `localFold` is off", async () => {
+    const { ownerRuntime, space, derived, counts } = await readerDerives(
       2,
       (n: number) => n * 2,
       { experimental: { localFold: false } },
     );
 
-    // Each re-run finds its write reverted, writes it again, and is refused
-    // again, so the reader never settles: `settled` resolved because the run
-    // count passed the retry budget, not because the reader went idle.
-    expect(counts.runs).toBeGreaterThan(MAX_RETRIES_FOR_REACTIVE);
-    expect(counts.refusals).toBeGreaterThan(1);
+    // The refusal names a grant no re-run can supply, so the run takes no
+    // retry, and the revert of its own write does not run it again.
+    expect(counts.refusals).toBe(1);
+    expect(counts.runs).toBe(1);
+    expect(derived.get()).toBeUndefined();
     const stored = ownerRuntime.getCell<number>(space, "derived");
     await stored.sync();
     expect(stored.get()).toBeUndefined();
+  });
+
+  it("runs again, and is refused again, when an input changes while `localFold` is off", async () => {
+    const { ownerRuntime, readerRuntime, space, counts, settled } =
+      await readerDerives(
+        2,
+        (n: number) => n * 2,
+        { experimental: { localFold: false } },
+      );
+    expect(counts.runs).toBe(1);
+
+    await ownerRuntime.editWithRetry((tx) => {
+      ownerRuntime.getCell<number>(space, "source", undefined, tx).set(3);
+    });
+    await ownerRuntime.storageManager.synced();
+    await readerRuntime.storageManager.pullOpenSpacesToHead();
+    await settled();
+
+    expect(counts.runs).toBe(2);
+    expect(counts.refusals).toBe(2);
   });
 
   it("reads a kept value as unconfirmed, beside the source it was computed from read as confirmed", async () => {

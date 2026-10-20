@@ -25,6 +25,7 @@ import {
 } from "../storage/local-read-policy.ts";
 import {
   isConflictRejection,
+  isPermanentAuthorizationRefusal,
   isPermanentRejection,
   isStorageTransactionInconsistent,
   isTerminalRejection,
@@ -266,11 +267,18 @@ export function watchReactiveActionCommit(state: {
     );
 
     // Permanent (precondition) and terminal (deterministic commit-rule refusal)
-    // rejections end the retry sequence even when its registration is retired.
-    // A later input-triggered run gets a fresh budget for transient failures.
-    // A terminal refusal is a verdict on the action's output and reaches the
-    // error channel (§7.6); a permanent lost idempotency race stays quiet.
-    if (isPermanentRejection(error) || isTerminalRejection(error)) {
+    // rejections, and a refusal for lack of a grant, end the retry sequence
+    // even when its registration is retired. A later input-triggered run gets
+    // a fresh budget for transient failures. A terminal refusal is a verdict
+    // on the action's output and reaches the error channel (§7.6); a permanent
+    // lost idempotency race stays quiet, and so does a grant refusal, which is
+    // a verdict on the principal rather than on what it computed: the replica
+    // reports the refused write, and the run comes back when an input it did
+    // not write changes.
+    if (
+      isPermanentRejection(error) || isTerminalRejection(error) ||
+      isPermanentAuthorizationRefusal(error)
+    ) {
       state.retries.delete(state.action);
       state.offBudgetRetries.delete(state.action);
       if (isTerminalRejection(error)) {
