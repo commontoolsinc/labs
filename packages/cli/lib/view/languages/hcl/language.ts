@@ -30,6 +30,7 @@ export const hclLanguage: Language = {
     filenamePatterns: [],
     aliases: ["opentofu", "tofu", "terraform", "tf"],
     interpreters: [],
+    signatures: [],
     sharedExtensions: [],
   },
 
