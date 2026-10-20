@@ -10,6 +10,7 @@ import {
   equals,
   pattern,
   type PerSession,
+  principalOf,
   type ReadonlyCell,
   Stream,
   UI,
@@ -260,7 +261,9 @@ export const FabriChatMessageRow = pattern<
       record === undefined
         ? undefined
         : { authorProfile: record.authorProfile, body: record.body },
-      myProfile.resolveAsCell(),
+      principalOf(myProfile, "represents-principal") !== undefined &&
+        principalOf(message, "authored-by") ===
+          principalOf(myProfile, "represents-principal"),
       kind,
       isOwner === true,
       ownersMayObliterate === true,

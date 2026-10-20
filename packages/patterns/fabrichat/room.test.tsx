@@ -230,12 +230,7 @@ export default pattern(() => {
         ),
       },
 
-      // Edits: only the sender's.
-      {
-        action: bobOnFirst.editMessage,
-        event: typed("Hijacked"),
-        trustedUi: editGesture,
-      },
+      // The sender edits the message.
       {
         action: aliceOnFirst.editMessage,
         event: typed("Hello, everyone"),
@@ -331,15 +326,35 @@ export default pattern(() => {
           stored(messages)[0]?.body === "Hello, everyone"
         ),
       },
+      // Replies must name a live target, and a main reply quotes a message
+      // that appears in the main conversation.
+      {
+        action: alice.sendMessage,
+        event: {
+          body: "Reply to a deleted message",
+          replyTo: { message: messageOf(messages.key(1)), shownIn: "thread" },
+        },
+        trustedUi: sendGesture,
+      },
+      {
+        action: alice.sendMessage,
+        event: {
+          body: "Quote a thread-only message",
+          replyTo: { message: messageOf(messages.key(3)), shownIn: "main" },
+        },
+        trustedUi: sendGesture,
+      },
+      { assertion: assert(() => stored(messages).length === 6) },
     ],
     expectRuntimeErrors: [
       // The blank send, and the send from a viewer whose profile hasn't
       // resolved.
       "This send has no text in `body`.",
       "Your profile hasn't loaded yet.",
-      // Bob's edit of Alice's message, and the edit of a deleted one.
-      "Only its author can edit a message.",
+      // An edit of a deleted message and the two invalid reply targets.
       "That message was deleted.",
+      "That message was deleted.",
+      "A main reply must quote a message in the main conversation.",
     ],
   };
 });

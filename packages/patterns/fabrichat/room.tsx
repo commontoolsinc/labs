@@ -44,9 +44,7 @@ import {
 import {
   addParticipant,
   type ParticipantRosterCell,
-  rosterProfiles,
 } from "../loom/participants.tsx";
-import { profileKeyOf } from "../system/private-inbox.tsx";
 import { type ShownIn, type ViewPlace, viewPlaces } from "./logic.ts";
 import {
   canActIn,
@@ -1171,7 +1169,10 @@ export const FabriChatRoomCore = pattern<
     manager,
     ownersMayObliterate: ownersMayObliterateGiven,
   } = input;
-  const composer = new Writable.perSession<ComposerState>({});
+  const composer = new Writable.perSession<ComposerState>({
+    draft: "",
+    threadDraft: "",
+  });
   const kind = computed((): ChatRoomKind => about?.get()?.kind ?? "group");
   // A room the manager created has `about`, and is its space's root; a
   // space's own chat, sharing its space, has none.
@@ -1218,8 +1219,10 @@ export const FabriChatRoomCore = pattern<
   // that root. A root room's `#default` is the room itself, so it reads only
   // its own; a space whose root isn't there yet lists none.
   const space = wish<{ participants?: ProfileCell[] }>({ query: "#default" });
-  const joined = computed(() =>
-    roster === undefined ? [] : rosterProfiles(roster)
+  // Keep the roster's backing array so readers with different profile access
+  // do not compete to materialize its links in shared state.
+  const joined = computed((): ProfileCell[] =>
+    roster === undefined ? [] : roster.get()?.items ?? []
   );
   const listed = computed((): ProfileCell[] =>
     ownSpace ? [...joined] : [...(space.result?.participants ?? []), ...joined]
@@ -1266,19 +1269,18 @@ export const FabriChatRoomCore = pattern<
       ...(role === undefined ? {} : { role }),
     };
   });
-  // Every message's rights for the reader, by the rule the handlers admit an
-  // act by, derived once for the whole list from each entry's author and
-  // whether it is live. The reader is the author of a message whose author's
-  // key is the reader's profile's: both are Home's `profileKeyOf()` of the
-  // profile's resolved link, which is what `equals()` compares.
+  // Display rights use the selected profile's attestation. Handlers check
+  // the authenticated actor, whose identity is available only in a handler.
   const messageRights = computed((): ChatMessageRights[] => {
     const profile = viewerProfileOf(myProfile);
-    const readerKey = profile === undefined ? undefined : profileKeyOf(profile);
+    const reader = profile === undefined
+      ? undefined
+      : principalOf(profile, "represents-principal");
     return facts.entries.map((entry) => ({
       message: entry.cell,
-      ...(canSend && readerKey !== undefined
+      ...(canSend && reader !== undefined
         ? rightsOf(
-          entry.authorKey === readerKey,
+          principalOf(entry.cell, "authored-by") === reader,
           entry.live,
           entry.authorKey !== undefined,
           kind,
@@ -1522,6 +1524,11 @@ export const FabriChatRoomCore = pattern<
         >
           <cf-submit-input
             data-ui-action={CHAT_SEND_ACTION}
+            value={composer.key("draft")}
+            onInput={action((event: { target?: { value?: string } }) =>
+              composer.key("draft").set(event.target?.value ?? "")
+            )}
+            clearOnSubmit={false}
             inputId="fabrichat-message"
             placeholder="Message"
             buttonText="Send"
@@ -1573,6 +1580,11 @@ export const FabriChatRoomCore = pattern<
           >
             <cf-submit-input
               data-ui-action={CHAT_SEND_ACTION}
+              value={composer.key("threadDraft")}
+              onInput={action((event: { target?: { value?: string } }) =>
+                composer.key("threadDraft").set(event.target?.value ?? "")
+              )}
+              clearOnSubmit={false}
               inputId="fabrichat-thread-message"
               placeholder="Reply in thread"
               buttonText="Reply"

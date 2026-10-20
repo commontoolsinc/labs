@@ -34,6 +34,7 @@ import {
   type FabricEpochNsec,
   getEntityId,
   handler,
+  principalOf,
   spaceAccess,
   spaceOf,
   type Stream,
@@ -469,14 +470,10 @@ export const isDeleted = (
 export const isOwnerOf = (cell: Cell<unknown>): boolean =>
   spaceAccess(cell) === "OWNER";
 
-/** Whether `profile` is the profile `record`'s author sent it under. */
-const isAuthorOf = (
-  record: RightsFacts | undefined,
-  profile: ProfileCell | undefined,
-): boolean => {
-  const author = record?.authorProfile;
-  return author !== undefined && profile !== undefined &&
-    equals(author, profile);
+/** Whether the authenticated actor wrote the record's current contents. */
+const isActorAuthor = (record: Cell<unknown>): boolean => {
+  const actor = currentPrincipal();
+  return actor !== undefined && principalOf(record, "authored-by") === actor;
 };
 
 /** What one person may do to one message. */
@@ -499,7 +496,7 @@ export const NO_MESSAGE_RIGHTS: MessageRights = {
 };
 
 /**
- * What the person acting under `profile` may do to the message `record` in a
+ * What a person may do to the message `record`, given `isAuthor`, in a
  * room of `kind`, given whether they hold OWNER in the room's space and
  * whether the room lets its OWNERs obliterate. Only the message's author may
  * edit or delete it, and in a direct room they may obliterate it too. An OWNER
@@ -512,13 +509,13 @@ export const NO_MESSAGE_RIGHTS: MessageRights = {
  */
 export const messageRightsOf = (
   record: RightsFacts | undefined,
-  profile: ProfileCell | undefined,
+  isAuthor: boolean,
   kind: ChatRoomKind,
   isOwner: boolean,
   ownersMayObliterate: boolean,
 ): MessageRights =>
   rightsOf(
-    isAuthorOf(record, profile),
+    isAuthor,
     !isDeleted(record),
     record?.authorProfile !== undefined,
     kind,
@@ -601,6 +598,12 @@ export interface ComposerState {
 
   /** The thread shown beside the conversation, by its root. */
   thread?: MessageCell;
+
+  /** The main composer's unsent text. */
+  draft?: string;
+
+  /** The thread composer's unsent text. */
+  threadDraft?: string;
 }
 
 /** The cell holding a session's composer state. */
@@ -812,10 +815,10 @@ const resolvedProfile = (
   return profile?.get() === undefined ? undefined : profile;
 };
 
-/** The text an event sends: its `body`, or a rendered control's, trimmed. */
+/** The text an event sends, exactly as submitted. */
 const textOf = (event: RoomStreamEvent): string => {
   const text = event?.body ?? event?.target?.value;
-  return typeof text === "string" ? text.trim() : "";
+  return typeof text === "string" ? text : "";
 };
 
 /**
@@ -927,10 +930,19 @@ const sendInto = (
   const profile = resolvedProfile(myProfile);
   if (profile === undefined) throw new Error(NO_PROFILE);
   const body = textOf(event);
-  if (body === "") throw new Error("This send has no text in `body`.");
+  if (body.trim() === "") throw new Error("This send has no text in `body`.");
   const target = reply?.resolveAsCell();
   if (target !== undefined && !isInRoomOf(messages, target)) {
     throw new Error(NOT_IN_ROOM);
+  }
+  if (target !== undefined) {
+    const replied = target.get();
+    if (isDeleted(replied)) throw new Error(DELETED);
+    if (shownIn === "main" && replied.replyTo?.shownIn === "thread") {
+      throw new Error(
+        "A main reply must quote a message in the main conversation.",
+      );
+    }
   }
   // A message may link only a list that exists, so the list is made before
   // the message links it.
@@ -974,6 +986,9 @@ export const commitComposerSend = handler<RoomStreamEvent, ComposerSendState>(
     const reply = link?.get() === undefined ? undefined : link;
     sendInto(event, myProfile, messages, reply, "main", joined);
     if (reply !== undefined) composer.key("replyTo").set(undefined);
+    if (composer.key("draft").get() === textOf(event)) {
+      composer.key("draft").set("");
+    }
   },
 );
 
@@ -986,6 +1001,9 @@ export const commitThreadSend = handler<RoomStreamEvent, ThreadSendState>(
     const link = composer.get()?.thread;
     const reply = link?.get() === undefined ? undefined : link;
     sendInto(event, myProfile, messages, reply, shownIn, joined);
+    if (composer.key("threadDraft").get() === textOf(event)) {
+      composer.key("threadDraft").set("");
+    }
   },
 );
 
@@ -1011,11 +1029,11 @@ export const commitEdit = handler<RoomStreamEvent, EditState>(
     const target = messageInRoom(room, event?.message ?? message);
     const current = target.get();
     if (isDeleted(current)) throw new Error(DELETED);
-    if (!isAuthorOf(current, profile)) {
+    if (!isActorAuthor(target)) {
       throw new Error("Only its author can edit a message.");
     }
     const body = textOf(event);
-    if (body === "") throw new Error("This edit has no text in `body`.");
+    if (body.trim() === "") throw new Error("This edit has no text in `body`.");
     target.key("body").set(body);
     target.key("editedAt").set(now());
     const editing = composer.get()?.editing;
@@ -1038,7 +1056,7 @@ export const commitDelete = handler<RoomStreamEvent, MessageActState>(
     const current = target.get();
     // Deleted already: there is nothing to delete.
     if (isDeleted(current)) return;
-    if (!isAuthorOf(current, profile)) {
+    if (!isActorAuthor(target)) {
       throw new Error("Only its author can delete a message.");
     }
     leaveTombstone(target, !FABRICHAT_POLICY.deletionIsObliteration);
@@ -1051,14 +1069,14 @@ export const commitDelete = handler<RoomStreamEvent, MessageActState>(
  * author, labeled with whoever obliterated it.
  */
 export const commitObliterate = handler<RoomStreamEvent, ObliterateState>(
-  (event, { myProfile, room, message, kind, ownersMayObliterate }) => {
+  (event, { room, message, kind, ownersMayObliterate }) => {
     const target = messageInRoom(room, event?.message ?? message);
     const current = target.get();
     // Obliterated already, its author gone: there is nothing to remove.
     if (isDeleted(current) && current?.authorProfile === undefined) return;
     const rights = messageRightsOf(
       current,
-      resolvedProfile(myProfile),
+      isActorAuthor(target),
       kind,
       isOwnerOf(target),
       ownersMayObliterate === true,
@@ -1152,7 +1170,7 @@ export const commitDeleteReaction = handler<
     const record = removed.get();
     // One no longer there, which reads as none, removes nothing.
     if (record === undefined) return;
-    if (!equals(record.reactorProfile, profile)) {
+    if (!isActorAuthor(removed)) {
       throw new Error("Only the person who reacted can remove a reaction.");
     }
     list.removeByValue(removed);
