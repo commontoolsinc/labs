@@ -1,17 +1,14 @@
 /**
- * Decides an owner's release of the confidentiality stored at one path of a
- * document: which stored clauses go, whether the acting principal may release
- * each of them, and what the document's label map and stored schema hold once
- * they are gone. Pure: the transaction method that persists a release reads
- * the stored envelope, calls {@link planConfidentialityRelease}, and writes the
- * result.
+ * Decides an owner release (spec §8.12.7 route 2c) of the confidentiality
+ * stored at one path of a document: which stored clauses go, whether the
+ * acting principal may release each of them, and what the document's label
+ * map and stored schema hold once they are gone. Pure: the transaction method
+ * that persists a release reads the stored envelope, calls
+ * {@link planConfidentialityRelease}, and writes the result.
  *
- * A release is an in-place widening of a stored label. Spec §8.12.7 route 2b
- * sanctions that for the declared component only, as an intent-gated
- * declassification event, and §8.12.8 freezes a still-existing path's `shape`
- * entry at its creation. A release here reaches every component at the path —
- * declared, derived (`shape` and `value` entries alike), and link-carried —
- * which is a case the specification does not yet state.
+ * The route reaches every component at the path — declared, derived (`shape`
+ * and `value` entries alike, the existence entry §8.12.8 otherwise freezes),
+ * and link-carried — and nothing at any other path.
  */
 
 import { debugStr } from "@commonfabric/data-model";
@@ -101,9 +98,11 @@ const openActorCommitments = (atom: CfcConfClause, actor: string) =>
     : atom;
 
 /**
- * Whether `actor` may release `clause` on their own authority: every
- * alternative stands for `actor` alone in the sense the trusted host's
- * reviewed operations share (`isActorOwnedAlternative()`) — `actor` as
+ * Whether `actor` may release `clause` on their own authority, the
+ * specification's `canReleaseStoredClause` (§8.12.7): every alternative
+ * stands for `actor` alone in the sense the trusted host's reviewed
+ * operations share (`isActorOwnedAlternative()`, the specification's
+ * `standsForActor`) — `actor` as
  * `User`, `Context` or `Resource` subject or as the bare DID, or the space
  * whose DID is `actor`'s as `Space` or `PersonalSpace`, whose access list
  * `actor` writes — with a digest commitment to `actor`'s DID read as the DID.
@@ -163,7 +162,8 @@ const lowerSchemaAt = (
 
 /**
  * Plans the release of every confidentiality clause stored at `path` that
- * `keep` does not name. The clauses stored at a path are those of every
+ * `keep` does not name: the decision of the specification's `ownerReleaseAt`
+ * (§8.12.7), less the home-space check its caller makes. The clauses stored at a path are those of every
  * payload label-map entry at exactly that path, whatever its origin or
  * observation class, together with those the stored schema declares there.
  * Clauses at other paths, an ancestor's that covers this one among them, are

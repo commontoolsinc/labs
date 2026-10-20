@@ -297,13 +297,13 @@ decision is `planConfidentialityRelease()` in
   after. Reads journaled before the release keep the label they consumed, so
   what was released is what later reads see.
 
-This is §4's rewrite event with two differences. The release reaches the
-derived and link-carried components as well as the declared one, which
-§8.12.8 does not provide for while the path exists. And it is gated by the
-authenticated owner's explicit command rather than by a consumed intent, the
-reduced-evidence form §4 item 1 describes. The specification at the pinned
-commit states neither, so the release is the deviation recorded in
-[`cfc-conformance-statement.md`](cfc-conformance-statement.md) §8.
+This is §8.12.7 route 2c, the owner release, which differs from §4's
+rewrite event in two ways: it reaches the derived and link-carried components
+as well as the declared one, the frozen existence entry of §8.12.8 included,
+and its request is the authenticated owner's explicit command rather than a
+consumed intent, the reduced-evidence form §4 item 1 describes.
+[`cfc-conformance-statement.md`](cfc-conformance-statement.md) §8 records how
+the runtime answers the route.
 
 ## 4. The rewrite event (specify now, build later)
 

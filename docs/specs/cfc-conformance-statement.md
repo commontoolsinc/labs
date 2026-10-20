@@ -13,7 +13,7 @@ answer, the section says "not established" and what would establish it.
 
 The statement is written against the specification at the commit the spec
 snapshot at `packages/runner/src/cfc/kernel/spec-snapshot.json` records,
-`9e751d58`. It describes the runtime's shipped defaults: the dial values
+`0c12ccf3`. It describes the runtime's shipped defaults: the dial values
 `RUNTIME_CFC_DIAL_DEFAULTS` in `cfc/posture-report.ts` applies to every
 `Runtime`, and `presetCfcOptions` in `runtime-presets.ts` pins for every host
 preset. A host that sets a dial lower is described by
@@ -270,6 +270,11 @@ statement.
   empty: an under-claim of integrity, the fail-safe direction, stated in
   [`cfc-transformed-by-input-witnesses.md`](cfc-transformed-by-input-witnesses.md)
   under "What fails closed".
+- A schema declaration carrying `TransformedBy` is admitted as declared,
+  where §15.4 requires the runtime to refuse or strip the atom at admission.
+  The input-witness reader takes no witness from it (§8.10.2.2); whether any
+  other integrity consumer reads it as a claim is not established, and if
+  one does, the declaration over-claims integrity, an under-taint.
 - The atom carries an input-witness summary in place of the pseudocode's
   `inputs` array, the conservative summary §8.9.3 permits; `SC-43` in
   [`cfc-spec-changes.md`](cfc-spec-changes.md) is the open ruling.
@@ -438,6 +443,18 @@ enforce`. [`cfc-template-population.md`](cfc-template-population.md),
 [`cfc-label-metadata-confidentiality.md`](cfc-label-metadata-confidentiality.md)
 are the designs.
 
+An owner release (§8.12.7 route 2c) is the one operation that lowers a
+still-existing path's existence entry. `releaseCellConfidentiality` in
+`cfc/confidentiality-release.ts` is the host operation, the transaction's
+`releaseCfcConfidentiality` in `storage/extended-storage-transaction.ts` the
+privileged write, and `planConfidentialityRelease` in
+`cfc/confidentiality-release-plan.ts` the decision. It implements the route as
+stated, its recommended refusal of a request the path would still show an
+unkept clause after included; the request is an authenticated host command
+and the record a create-only receipt
+([`cfc-persisted-declassification.md`](cfc-persisted-declassification.md)
+§3.3).
+
 **Residuals, with direction.**
 
 - Containers outside the wildcard scope: schemas mixing named `properties`
@@ -458,21 +475,6 @@ are the designs.
   counts as one under this runtime's presence semantics is not established.
 - Entries written before classification existed are folded into existence
   conservatively, an over-taint the same section states.
-- An owner's release lowers a stored label in place: `releaseCfcConfidentiality`
-  in `storage/extended-storage-transaction.ts`, deciding through
-  `planConfidentialityRelease` in `cfc/confidentiality-release-plan.ts`, and
-  reached only from the host operation `releaseCellConfidentiality` in
-  `cfc/confidentiality-release.ts`. It removes every clause the caller does not
-  keep from every component at one path, the frozen existence entry included, and from the
-  stored schema's declaration there. §8.12.8 freezes that entry while the path
-  exists, and §8.12.7 route 2b admits an in-place widening of the declared
-  component only as an intent-gated event; the specification does not state
-  this release, so it is an under-taint for the clauses it removes. It is
-  bounded to clauses whose every alternative names the acting principal, in a
-  document of that principal's own space, and each release commits with a
-  create-only receipt; reads journaled before it keep the label they consumed
-  ([`cfc-persisted-declassification.md`](cfc-persisted-declassification.md)
-  §3.3).
 - Cross-space label metadata: commitments are probe-able; `Space` ids,
   `Policy` and `Context` names and hashes, and authorship subjects stay
   public; declared entries and carried-forward entries persist verbatim;
