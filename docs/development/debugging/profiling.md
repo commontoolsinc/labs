@@ -289,6 +289,48 @@ deno run --allow-read skills/perf-investigation/scripts/attribute-measures.ts \
   /tmp/measures.json --key=tx/read --chains     # the full chains
 ```
 
+### Attribute refresh frequency to its inputs
+
+The memory server emits `memory/refresh/batch` for each space processed by a
+flush, with its dirty instance keys, derived-key count, and connection count.
+`memory/refresh/session/{touched,untouched}` details identify the session,
+sequence interval, dirty count, graph count, and tracked-document count. A flush
+can process multiple batches; a touched session can refresh multiple graphs.
+Count these boundaries separately before dividing traversal counts by them.
+
+`memory/refresh/walk/total` details identify the graph's scope identity, affected
+and missed roots, root-evaluation count, manager reads, updates, and outcome.
+The `reads` and `updates` totals describe successful refreshes; a `failed`
+outcome may have done partial work. `memory/query/root` brackets root evaluations
+during watch extension and incremental refresh, naming the document, selector
+path and schema hash, reads, and outcome.
+`traverse` carries the same document/path/schema vocabulary on clients and
+servers, with schema-call and memo-hit counts. Its outcome distinguishes a
+returned validation failure from a thrown exception. Keep the process or worker
+name beside every row; equal keys across realms are different work.
+
+`memory/refresh/conflict` names rejected commits whose operations and read sets
+are staged for catch-up. A dirty key is an invalidation, not proof of a changed
+server version. Batches coalesce these invalidations with writes, so conflict
+events and batches do not have a one-to-one relationship.
+
+Occurrence details are JSON in the measure's detail suffix, leaving aggregate
+keys fixed. The logger computes them lazily for emitted measures and retained
+slowest samples. Use `detailOfMeasure` from `utils/logger` to decode the suffix,
+then group by individual fields when `--detail` is too specific. No document
+values are included. Timing measures remain opt-in with `CF_TIMING_MEASURES=1`.
+For causal scheduler data, enable `setTriggerTraceEnabled(true)` and compare
+`getTriggerTrace()` decisions and changed addresses with `getActionRunTrace()`;
+both histories are bounded, so check their retention before treating them as a
+whole-run count. A probe that drains or captures them belongs outside the
+workload.
+
+Save `performance.timeOrigin` with each realm's measures and the CPU profiler's
+clock alignment. Do not concatenate worker-relative timestamps or infer CPU
+from summed durations. Asynchronous intervals can overlap without a caller
+relationship; explicit session, document, and identity fields constrain what
+interval attribution alone can establish.
+
 ### Keep asking until the shape stops changing
 
 Each answer here suggests the next question, and the investigation is not

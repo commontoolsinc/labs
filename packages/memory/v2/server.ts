@@ -8138,6 +8138,7 @@ export class Server {
             // branch).
             const batchDirtyIds = dirtyIds;
             const startedAt = performance.now();
+            const refreshFromSeq = session.lastSyncedSeq;
             // Per-session refresh rows (`memory/refresh/session/{untouched,
             // touched}`) and, for a touched session, the phase rows
             // (`memory/refresh/phase/{walk,diff,tracked,frame}`):
@@ -8428,7 +8429,18 @@ export class Server {
               session.lastSyncedSeq = toSeq;
               return message;
             } finally {
-              timing.time(
+              timing.timeDetailed(
+                () =>
+                  JSON.stringify({
+                    space,
+                    session: sessionId,
+                    fromSeq: refreshFromSeq,
+                    toSeq: session.lastSyncedSeq,
+                    dirty: batchDirtyIds.size,
+                    graphs: session.graphs.size,
+                    tracked: session.trackedIds.size,
+                    views: session.views.length,
+                  }),
                 startedAt,
                 "memory",
                 "refresh",
@@ -9504,6 +9516,7 @@ export class Server {
     session: SessionState,
     commit: ClientCommit,
   ): void {
+    const startedAt = performance.now();
     session.pendingCaughtUpLocalSeq = Math.max(
       session.pendingCaughtUpLocalSeq,
       commit.localSeq,
@@ -9529,6 +9542,22 @@ export class Server {
       addInstanceKey(read.id, read.scope);
     }
     this.markSpaceDirty(space, ids);
+    timing.timeDetailed(
+      () =>
+        JSON.stringify({
+          space,
+          session: session.id,
+          localSeq: commit.localSeq,
+          dirty: [...ids],
+          operations: commit.operations.length,
+          confirmedReads: commit.reads.confirmed.length,
+          pendingReads: commit.reads.pending.length,
+        }),
+      startedAt,
+      "memory",
+      "refresh",
+      "conflict",
+    );
   }
 
   async flushSessions(spaces?: Iterable<string>): Promise<void> {
@@ -9759,6 +9788,7 @@ export class Server {
               "memory.fanout",
               { root: true },
               async (span) => {
+                const startedAt = performance.now();
                 span.setAttribute("space.did", space);
                 span.setAttribute("subscriber.count", this.#connections.size);
                 span.setAttribute("dirty.count", dirtyIds?.size ?? 0);
@@ -9805,6 +9835,19 @@ export class Server {
                     }
                   }
                 } finally {
+                  timing.timeDetailed(
+                    () =>
+                      JSON.stringify({
+                        space,
+                        dirty: dirtyIds === undefined ? null : [...dirtyIds],
+                        derived: derivedDirty?.size ?? 0,
+                        connections: this.#connections.size,
+                      }),
+                    startedAt,
+                    "memory",
+                    "refresh",
+                    "batch",
+                  );
                   span.end();
                 }
               },

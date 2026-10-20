@@ -18,9 +18,10 @@ need that the records do not carry.
 
 ## Where the branch stands
 
-The work is on `claude/clever-franklin-crfiah`, as
-[commonfabric/labs#8691](https://github.com/commonfabric/labs/pull/8691). The
-PR body is the summary of the whole arc; its sections map onto the records.
+The continuation is on `codex/served-vote-fan-out`. Its source branch is
+`claude/clever-franklin-crfiah`,
+[commonfabric/labs#8691](https://github.com/commonfabric/labs/pull/8691). Keep the
+continuation PR body current as the arc summary, with a section per record.
 Read, in this order, before changing anything:
 
 1. `AGENTS.md`, `docs/development/DEVELOPMENT.md`,
@@ -286,12 +287,21 @@ Before a push: repo-wide `deno fmt --check`, `deno lint`, `deno task check`,
 
 ## Stages
 
-1. [ ] Answer the four measurement questions on the worker arm and the
-       loop-off arm, with the probe, and write the answers into a record.
-2. [ ] Build the change the answers select, behind nothing where it is a
+1. [x] Answer the four measurement questions on the worker arm and the
+       loop-off arm, with the probe, and write the answers into a
+       [record](../history/development/performance/2026-10-19-served-vote-fan-out.md).
+2. [ ] Explain execution frequency before selecting another optimization.
+       Compare one and five clients against one server on both arms, keeping
+       client computations, effects, server instance runs, conflict repairs,
+       affected documents, and root-selector evaluations separate. Capture
+       logger measures with occurrence details alongside each realm's CPU
+       profile; the [profiling guide](../development/debugging/profiling.md)
+       describes the refresh fields and clock boundaries. Keep selective
+       replication off and the browser measurement as a separate series.
+3. [ ] Build the change the answers select, behind nothing where it is a
        pure cost reduction and behind a registry entry where it changes what
        a session receives.
-3. [ ] Measure the burst on both arms and the seed, twice each, and record
+4. [ ] Measure the burst on both arms and the seed, twice each, and record
        them beside the serving-side rows.
-4. [ ] Revisit the overlap's default under the worker once the floor has
+5. [ ] Revisit the overlap's default under the worker once the floor has
        moved, and the worker plan's stage 6.
