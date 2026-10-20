@@ -765,7 +765,8 @@ not attribute the process-wide schema registry or engine caches to sessions.
 An old schema in a session does not prove the client runs old code: a current
 client can retain a historical subscription. A restart or session eviction
 removes the attribution evidence. No registered memory server returns 503;
-an unknown space or document returns an empty report without opening the space.
+an unknown space returns an empty report without opening it. A missing document
+can still match retained watches or absence records.
 
 ### Alerting on a write storm
 
