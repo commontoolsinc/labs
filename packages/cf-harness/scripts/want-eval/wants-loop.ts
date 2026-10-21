@@ -8,8 +8,8 @@
  * loop runs every probe ask as a want said now, the way the Weaver files
  * one, three times over: before the marker is filed, while it is kept, and
  * after it is archived. Each run's job is read back from the runner: its
- * request says whether the service briefed the job with the marker
- * (`context.briefed`, and the marker's words under the briefing heading in
+ * request says whether the service eligible the job with the marker
+ * (`context.eligible`, and the marker's words under the eligible wants heading in
  * its instructions), and its answer is scored by the marker's check. The
  * marker is archived in a `finally`, so a run that stops partway leaves no
  * marker kept; no other want is touched.
@@ -46,10 +46,10 @@ import {
 } from "./runner-socket.ts";
 import { defaultRunsRoot, recordOf, rootRunOf } from "./runs.ts";
 import {
-  briefingOf,
-  briefs,
   checkMarker,
-  judgeBriefing,
+  eligibleOf,
+  judgeEligible,
+  listsEligible,
   type LoopRun,
   type Marker,
   parseCases,
@@ -190,7 +190,7 @@ const measured = async (
     };
   } catch (error) {
     // A job that failed before its run directory existed still has a state,
-    // an answer and a briefing worth a row.
+    // an answer and a eligible wants worth a row.
     return {
       modelTurns: 0,
       totalTokens: 0,
@@ -236,7 +236,7 @@ const runProbe = async (
   const snapshot = await runnerJobOf(SOCKET, job);
   const result = isObjectNotArray(snapshot.result) ? snapshot.result : {};
   const answer = typeof result.answer === "string" ? result.answer : "";
-  const briefing = briefingOf(snapshot.request);
+  const eligibleWants = eligibleOf(snapshot.request);
   const { modelTurns, totalTokens, note } = await measured(job);
   return {
     marker: marker.id,
@@ -249,9 +249,9 @@ const runProbe = async (
     modelTurns,
     totalTokens,
     answer,
-    briefing,
-    markerBriefed: briefs(briefing, markerWant),
-    briefingVerdict: judgeBriefing(phase, briefing, {
+    eligibleWants,
+    markerEligible: listsEligible(eligibleWants, markerWant),
+    eligibleVerdict: judgeEligible(phase, eligibleWants, {
       id: markerWant,
       words: marker.words,
     }),
@@ -267,7 +267,7 @@ const runPhase = async (
   runs: LoopRun[],
 ): Promise<void> => {
   // One at a time: a probe's own want is a current want until its job is
-  // marked started, so probes filed together could brief one another.
+  // marked started, so probes filed together could list one another as eligible.
   for (let attempt = 1; attempt <= repeat; attempt++) {
     for (const probe of cases.probes) {
       const run = await runProbe(marker, markerWant, phase, probe, attempt);

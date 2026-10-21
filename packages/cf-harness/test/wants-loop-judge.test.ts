@@ -1,11 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
-  BRIEFING_HEADING,
-  briefingOf,
-  briefs,
   checkMarker,
-  judgeBriefing,
+  ELIGIBLE_HEADING,
+  eligibleOf,
+  judgeEligible,
+  listsEligible,
   type LoopRun,
   type MarkerCheck,
   parseCases,
@@ -14,18 +14,18 @@ import {
   summaryTable,
 } from "../scripts/want-eval/wants-loop-judge.ts";
 
-/** A job request as the runner holds it, briefed with `words`. */
-const requestBriefing = (
-  briefed: unknown,
+/** A job request as the runner holds it, eligible with `words`. */
+const requestWithEligible = (
+  eligible: unknown,
   ...words: string[]
 ): Record<string, unknown> => ({
   instructions: [
     "Answer briefly.",
     ...(words.length > 0
-      ? ["", BRIEFING_HEADING, ...words.map((w) => `- ${w}`)]
+      ? ["", ELIGIBLE_HEADING, ...words.map((w) => `- ${w}`)]
       : []),
   ].join("\n"),
-  context: briefed === undefined ? {} : { briefed },
+  context: eligible === undefined ? {} : { eligible },
 });
 
 const MARKER = "Always answer me in French.";
@@ -34,7 +34,7 @@ const MARKER = "Always answer me in French.";
 const runOf = (
   phase: Phase,
   pass: boolean,
-  briefingOk = true,
+  eligibleOk = true,
   marker = "french",
 ): LoopRun => ({
   marker,
@@ -47,9 +47,9 @@ const runOf = (
   modelTurns: 2,
   totalTokens: 1000,
   answer: "",
-  briefing: { briefed: [], heading: false, listed: [] },
-  markerBriefed: phase === "during",
-  briefingVerdict: { pass: briefingOk, detail: "" },
+  eligibleWants: { eligible: [], heading: false, listed: [] },
+  markerEligible: phase === "during",
+  eligibleVerdict: { pass: eligibleOk, detail: "" },
   check: { pass, detail: "" },
 });
 
@@ -136,12 +136,12 @@ describe("wants-loop-judge", () => {
     });
   });
 
-  describe("briefingOf()", () => {
-    it("returns the briefed ids and the words listed under the heading", () => {
-      const request = requestBriefing(["w1", "w2"], MARKER, "Walk more.");
+  describe("eligibleOf()", () => {
+    it("returns the eligible ids and the words listed under the heading", () => {
+      const request = requestWithEligible(["w1", "w2"], MARKER, "Walk more.");
 
-      expect(briefingOf(request)).toEqual({
-        briefed: ["w1", "w2"],
+      expect(eligibleOf(request)).toEqual({
+        eligible: ["w1", "w2"],
         heading: true,
         listed: [MARKER, "Walk more."],
       });
@@ -149,115 +149,139 @@ describe("wants-loop-judge", () => {
 
     it("returns the listed words only up to the first line that is not one", () => {
       const request = {
-        instructions: [BRIEFING_HEADING, `- ${MARKER}`, "", "- Not a want."]
+        instructions: [ELIGIBLE_HEADING, `- ${MARKER}`, "", "- Not a want."]
           .join("\n"),
-        context: { briefed: ["w1"] },
+        context: { eligible: ["w1"] },
       };
 
-      expect(briefingOf(request).listed).toEqual([MARKER]);
+      expect(eligibleOf(request).listed).toEqual([MARKER]);
     });
 
-    it("returns no heading and nothing listed when the instructions have no briefing", () => {
-      expect(briefingOf(requestBriefing([]))).toEqual({
-        briefed: [],
+    it("returns no heading and nothing listed when the instructions have no eligibleWants", () => {
+      expect(eligibleOf(requestWithEligible([]))).toEqual({
+        eligible: [],
         heading: false,
         listed: [],
       });
     });
 
-    it("returns `undefined` for the briefed ids when the request has no list", () => {
-      expect(briefingOf(requestBriefing(undefined)).briefed).toBeUndefined();
-      expect(briefingOf(undefined).briefed).toBeUndefined();
+    it("returns `undefined` for the eligible ids when the request has no list", () => {
+      expect(eligibleOf(requestWithEligible(undefined)).eligible)
+        .toBeUndefined();
+      expect(eligibleOf(undefined).eligible).toBeUndefined();
     });
   });
 
-  describe("briefs()", () => {
+  describe("listsEligible()", () => {
     it("returns true for an id listed bare or as `want:<id>`", () => {
-      expect(briefs(briefingOf(requestBriefing(["w1"])), "w1")).toBe(true);
-      expect(briefs(briefingOf(requestBriefing(["want:w1"])), "w1")).toBe(
+      expect(listsEligible(eligibleOf(requestWithEligible(["w1"])), "w1")).toBe(
         true,
       );
+      expect(listsEligible(eligibleOf(requestWithEligible(["want:w1"])), "w1"))
+        .toBe(
+          true,
+        );
     });
 
     it("returns false for an id not listed, an unfiled want, and a missing list", () => {
-      expect(briefs(briefingOf(requestBriefing(["w2"])), "w1")).toBe(false);
-      expect(briefs(briefingOf(requestBriefing(["w1"])), undefined)).toBe(
+      expect(listsEligible(eligibleOf(requestWithEligible(["w2"])), "w1")).toBe(
         false,
       );
-      expect(briefs(briefingOf(requestBriefing(undefined)), "w1")).toBe(false);
+      expect(listsEligible(eligibleOf(requestWithEligible(["w1"])), undefined))
+        .toBe(
+          false,
+        );
+      expect(listsEligible(eligibleOf(requestWithEligible(undefined)), "w1"))
+        .toBe(
+          false,
+        );
     });
   });
 
-  describe("judgeBriefing()", () => {
+  describe("judgeEligible()", () => {
     const marker = { id: "w1", words: MARKER };
 
     describe("during", () => {
-      it("passes a job briefed with the marker's id and words", () => {
-        const briefing = briefingOf(requestBriefing(["w0", "w1"], MARKER));
+      it("passes a job eligible with the marker's id and words", () => {
+        const eligibleWants = eligibleOf(
+          requestWithEligible(["w0", "w1"], MARKER),
+        );
 
-        expect(judgeBriefing("during", briefing, marker).pass).toBe(true);
+        expect(judgeEligible("during", eligibleWants, marker).pass).toBe(true);
       });
 
-      it("fails a job whose briefed ids leave the marker out", () => {
-        const briefing = briefingOf(requestBriefing(["w0"], MARKER));
+      it("fails a job whose eligible ids leave the marker out", () => {
+        const eligibleWants = eligibleOf(requestWithEligible(["w0"], MARKER));
 
-        expect(judgeBriefing("during", briefing, marker).pass).toBe(false);
+        expect(judgeEligible("during", eligibleWants, marker).pass).toBe(false);
       });
 
-      it("fails a job briefed with the id but not the words", () => {
-        const briefing = briefingOf(requestBriefing(["w1"], "Walk more."));
+      it("fails a job eligible with the id but not the words", () => {
+        const eligibleWants = eligibleOf(
+          requestWithEligible(["w1"], "Walk more."),
+        );
 
-        expect(judgeBriefing("during", briefing, marker).pass).toBe(false);
+        expect(judgeEligible("during", eligibleWants, marker).pass).toBe(false);
       });
 
-      it("fails a job with no briefing at all", () => {
-        const briefing = briefingOf(requestBriefing(undefined));
+      it("fails a job with no eligibleWants at all", () => {
+        const eligibleWants = eligibleOf(requestWithEligible(undefined));
 
-        expect(judgeBriefing("during", briefing, marker)).toEqual({
+        expect(judgeEligible("during", eligibleWants, marker)).toEqual({
           pass: false,
-          detail: "request has no context.briefed",
+          detail: "request has no context.eligible",
         });
       });
     });
 
     describe("before and after", () => {
-      it("passes a job briefed with other wants only", () => {
-        const briefing = briefingOf(requestBriefing(["w0"], "Walk more."));
+      it("passes a job eligible with other wants only", () => {
+        const eligibleWants = eligibleOf(
+          requestWithEligible(["w0"], "Walk more."),
+        );
 
-        expect(judgeBriefing("after", briefing, marker).pass).toBe(true);
+        expect(judgeEligible("after", eligibleWants, marker).pass).toBe(true);
         expect(
-          judgeBriefing("before", briefing, { id: undefined, words: MARKER })
+          judgeEligible("before", eligibleWants, {
+            id: undefined,
+            words: MARKER,
+          })
             .pass,
         ).toBe(true);
       });
 
-      it("passes a job briefed with nothing", () => {
+      it("passes a job eligible with nothing", () => {
         expect(
-          judgeBriefing("after", briefingOf(requestBriefing([])), marker).pass,
+          judgeEligible("after", eligibleOf(requestWithEligible([])), marker)
+            .pass,
         ).toBe(true);
       });
 
-      it("fails a job still briefed with the archived marker", () => {
+      it("fails a job still eligible with the archived marker", () => {
         expect(
-          judgeBriefing(
+          judgeEligible(
             "after",
-            briefingOf(requestBriefing(["w1"], MARKER)),
+            eligibleOf(requestWithEligible(["w1"], MARKER)),
             marker,
           ).pass,
         ).toBe(false);
         expect(
-          judgeBriefing(
+          judgeEligible(
             "after",
-            briefingOf(requestBriefing([], MARKER)),
+            eligibleOf(requestWithEligible([], MARKER)),
             marker,
           )
             .pass,
         ).toBe(false);
       });
 
-      it("fails a job with no briefed list", () => {
+      it("fails a job with no eligible list", () => {
         expect(
-          judgeBriefing("after", briefingOf(requestBriefing(undefined)), marker)
+          judgeEligible(
+            "after",
+            eligibleOf(requestWithEligible(undefined)),
+            marker,
+          )
             .pass,
         ).toBe(false);
       });
@@ -265,7 +289,7 @@ describe("wants-loop-judge", () => {
   });
 
   describe("summarize()", () => {
-    it("returns pass and briefing counts by phase, and a closed loop", () => {
+    it("returns pass and eligibleWants counts by phase, and a closed loop", () => {
       const [summary] = summarize([
         runOf("before", false),
         runOf("before", false),
@@ -279,10 +303,10 @@ describe("wants-loop-judge", () => {
       expect(summary.phases.during).toMatchObject({
         runs: 2,
         passes: 1,
-        briefed: 2,
-        briefingOk: 2,
+        eligible: 2,
+        eligibleOk: 2,
       });
-      expect(summary.phases.after.briefed).toBe(0);
+      expect(summary.phases.after.eligible).toBe(0);
       expect(summary.closed).toBe(true);
     });
 
@@ -306,7 +330,7 @@ describe("wants-loop-judge", () => {
       expect(summary.closed).toBe(false);
     });
 
-    it("returns an open loop when a briefing was not as expected", () => {
+    it("returns an open loop when a eligibleWants was not as expected", () => {
       const [summary] = summarize([
         runOf("before", false),
         runOf("during", true, false),

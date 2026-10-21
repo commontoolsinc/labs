@@ -1,7 +1,7 @@
 /**
  * What the wants loop decides without a live service: how its cases are
  * written, whether an answer shows a marker want's effect, whether a job was
- * briefed with the marker, and how the runs add up to a table.
+ * eligible with the marker, and how the runs add up to a table.
  * `wants-loop.ts` does the filing and the reading.
  *
  * A marker want is one whose effect on an answer can be checked without a
@@ -13,11 +13,11 @@
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 /**
- * The line the service opens a job's briefing with, in the job's
+ * The line the service opens a job's eligible wants with, in the job's
  * instructions, ahead of one `- <words>` line for each of the person's
  * current wants.
  */
-export const BRIEFING_HEADING =
+export const ELIGIBLE_HEADING =
   "The person's current wants, in their own words, from their wants list:";
 
 /** How a marker's effect is read off an answer. */
@@ -56,15 +56,15 @@ export interface Verdict {
   detail: string;
 }
 
-/** What a job's request says it was briefed with. */
-export interface Briefing {
+/** What a job's request says it was eligible with. */
+export interface EligibleWants {
   /**
-   * The want ids in the request's `context.briefed`, or `undefined` where
+   * The want ids in the request's `context.eligible`, or `undefined` where
    * the request carries no such list, which is not the same as an empty one.
    */
-  briefed: string[] | undefined;
+  eligible: string[] | undefined;
 
-  /** Whether the instructions carry the briefing heading. */
+  /** Whether the instructions carry the eligible wants heading. */
   heading: boolean;
 
   /** The `- <words>` lines under the heading, without their dash. */
@@ -83,12 +83,12 @@ export interface LoopRun {
   modelTurns: number;
   totalTokens: number;
   answer: string;
-  briefing: Briefing;
+  eligibleWants: EligibleWants;
 
-  /** Whether the run's `context.briefed` names the marker's want. */
-  markerBriefed: boolean;
+  /** Whether the run's `context.eligible` names the marker's want. */
+  markerEligible: boolean;
 
-  briefingVerdict: Verdict;
+  eligibleVerdict: Verdict;
   check: Verdict;
 }
 
@@ -96,8 +96,8 @@ export interface LoopRun {
 export interface PhaseSummary {
   runs: number;
   passes: number;
-  briefed: number;
-  briefingOk: number;
+  eligible: number;
+  eligibleOk: number;
   meanSeconds: number;
   meanTurns: number;
   meanTokens: number;
@@ -109,7 +109,7 @@ export interface MarkerSummary {
   phases: Record<Phase, PhaseSummary>;
 
   /**
-   * Whether the loop closed: every briefing as expected, and the marker's
+   * Whether the loop closed: every eligible wants as expected, and the marker's
    * check passing more often while it was kept than before or after.
    */
   closed: boolean;
@@ -288,19 +288,19 @@ export const checkMarker = (check: MarkerCheck, answer: string): Verdict => {
 
 /**
  * What a job's request, as the runner's snapshot holds it, says it was
- * briefed with.
+ * eligible with.
  */
-export const briefingOf = (request: unknown): Briefing => {
+export const eligibleOf = (request: unknown): EligibleWants => {
   const fields = isObjectNotArray(request) ? request : {};
   const instructions = typeof fields.instructions === "string"
     ? fields.instructions
     : "";
   const context = isObjectNotArray(fields.context) ? fields.context : {};
-  const briefed = Array.isArray(context.briefed)
-    ? context.briefed.map((id) => String(id))
+  const eligible = Array.isArray(context.eligible)
+    ? context.eligible.map((id) => String(id))
     : undefined;
   const lines = instructions.split("\n");
-  const at = lines.indexOf(BRIEFING_HEADING);
+  const at = lines.indexOf(ELIGIBLE_HEADING);
   const listed: string[] = [];
   if (at >= 0) {
     for (const line of lines.slice(at + 1)) {
@@ -308,43 +308,47 @@ export const briefingOf = (request: unknown): Briefing => {
       listed.push(line.slice(2));
     }
   }
-  return { briefed, heading: at >= 0, listed };
+  return { eligible, heading: at >= 0, listed };
 };
 
 /**
- * Whether a briefing names the want `id`, which is `undefined` before the
+ * Whether a eligible wants names the want `id`, which is `undefined` before the
  * want is filed. A want's id may be listed bare or as Moments names its
  * subject, `want:<id>`.
  */
-export const briefs = (briefing: Briefing, id: string | undefined): boolean =>
-  id !== undefined && briefing.briefed !== undefined &&
-  (briefing.briefed.includes(id) || briefing.briefed.includes(`want:${id}`));
+export const listsEligible = (
+  eligibleWants: EligibleWants,
+  id: string | undefined,
+): boolean =>
+  id !== undefined && eligibleWants.eligible !== undefined &&
+  (eligibleWants.eligible.includes(id) ||
+    eligibleWants.eligible.includes(`want:${id}`));
 
 /**
- * Whether a run's briefing is the one its phase calls for. While the marker
- * is kept, the job is briefed with it: its id in `context.briefed`, and its
+ * Whether a run's eligible wants is the one its phase calls for. While the marker
+ * is kept, the job is eligible with it: its id in `context.eligible`, and its
  * words under the heading. Before it is filed and after it is archived, it
- * is in neither. Other wants the person keeps may be briefed in any phase.
- * A request without `context.briefed` fails every phase, since the service
+ * is in neither. Other wants the person keeps may be eligible in any phase.
+ * A request without `context.eligible` fails every phase, since the service
  * records the list even when it is empty.
  */
-export const judgeBriefing = (
+export const judgeEligible = (
   phase: Phase,
-  briefing: Briefing,
+  eligibleWants: EligibleWants,
   marker: { id: string | undefined; words: string },
 ): Verdict => {
-  if (briefing.briefed === undefined) {
-    return { pass: false, detail: "request has no context.briefed" };
+  if (eligibleWants.eligible === undefined) {
+    return { pass: false, detail: "request has no context.eligible" };
   }
-  const named = briefs(briefing, marker.id);
-  const listed = briefing.listed.includes(marker.words);
-  const seen = `id ${named ? "briefed" : "not briefed"}, words ${
+  const named = listsEligible(eligibleWants, marker.id);
+  const listed = eligibleWants.listed.includes(marker.words);
+  const seen = `id ${named ? "eligible" : "not eligible"}, words ${
     listed ? "listed" : "not listed"
-  }, ${briefing.briefed.length} briefed`;
+  }, ${eligibleWants.eligible.length} eligible`;
   if (phase === "during") {
     return {
-      pass: named && listed && briefing.heading,
-      detail: briefing.heading ? seen : `${seen}, no heading`,
+      pass: named && listed && eligibleWants.heading,
+      detail: eligibleWants.heading ? seen : `${seen}, no heading`,
     };
   }
   return { pass: !named && !listed, detail: seen };
@@ -359,8 +363,8 @@ const mean = (values: number[]): number =>
 const phaseSummary = (runs: LoopRun[]): PhaseSummary => ({
   runs: runs.length,
   passes: runs.filter((run) => run.check.pass).length,
-  briefed: runs.filter((run) => run.markerBriefed).length,
-  briefingOk: runs.filter((run) => run.briefingVerdict.pass).length,
+  eligible: runs.filter((run) => run.markerEligible).length,
+  eligibleOk: runs.filter((run) => run.eligibleVerdict.pass).length,
   meanSeconds: mean(runs.map((run) => run.seconds)),
   meanTurns: mean(runs.map((run) => run.modelTurns)),
   meanTokens: mean(runs.map((run) => run.totalTokens)),
@@ -384,7 +388,7 @@ export const summarize = (runs: LoopRun[]): MarkerSummary[] =>
       phases,
       closed: complete &&
         PHASES.every((phase) =>
-          phases[phase].briefingOk === phases[phase].runs
+          phases[phase].eligibleOk === phases[phase].runs
         ) &&
         rate(phases.during) > rate(phases.before) &&
         rate(phases.during) > rate(phases.after),
@@ -394,12 +398,12 @@ export const summarize = (runs: LoopRun[]): MarkerSummary[] =>
 /** The summary table: one row per marker and phase. */
 export const summaryTable = (summaries: MarkerSummary[]): string =>
   [
-    "| marker | phase | check passed | marker briefed | briefing as expected | wall (mean) | turns (mean) | tokens (mean) |",
+    "| marker | phase | check passed | marker eligible | eligibleWants as expected | wall (mean) | turns (mean) | tokens (mean) |",
     "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ...summaries.flatMap((summary) =>
       PHASES.map((phase) => {
         const p = summary.phases[phase];
-        return `| ${summary.marker} | ${phase} | ${p.passes}/${p.runs} | ${p.briefed}/${p.runs} | ${p.briefingOk}/${p.runs} | ${p.meanSeconds} s | ${p.meanTurns} | ${p.meanTokens} |`;
+        return `| ${summary.marker} | ${phase} | ${p.passes}/${p.runs} | ${p.eligible}/${p.runs} | ${p.eligibleOk}/${p.runs} | ${p.meanSeconds} s | ${p.meanTurns} | ${p.meanTokens} |`;
       })
     ),
     "",
@@ -411,13 +415,13 @@ export const summaryTable = (summaries: MarkerSummary[]): string =>
 /** One row of the per-run table. */
 export const runRow = (run: LoopRun): string =>
   `| ${run.marker} | ${run.phase} | ${run.probe} #${run.attempt} | ${run.job} | ${run.state} | ${
-    run.briefingVerdict.pass ? "ok" : "WRONG"
-  } (${run.briefingVerdict.detail}) | ${
+    run.eligibleVerdict.pass ? "ok" : "WRONG"
+  } (${run.eligibleVerdict.detail}) | ${
     run.check.pass ? "pass" : "fail"
   } (${run.check.detail}) | ${run.seconds} s | ${run.modelTurns} | ${run.totalTokens} |`;
 
 /** The per-run table's header. */
 export const RUN_TABLE_HEADER = [
-  "| marker | phase | probe | job | state | briefing | check | wall | turns | tokens |",
+  "| marker | phase | probe | job | state | eligibleWants | check | wall | turns | tokens |",
   "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
 ].join("\n");
