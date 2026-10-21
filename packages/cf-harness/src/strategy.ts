@@ -6,7 +6,7 @@ import { type RunShape, sendsSection } from "./prompt-sections.ts";
  */
 
 const FAST_REPLY_GUIDANCE =
-  "Take the shortest path to an answer: what you already hold, or one or two lookups. When they do not settle it, say what you found and what you did not check, rather than searching further.";
+  "Answer directly when you can, without research. When you cannot, make the one tool call that best matches what they asked and answer from its result, without chaining further calls, delegating or researching. If that does not settle it, say what you found and what a fuller run would check.";
 
 const PERSONAL_EXHAUSTIVE_GUIDANCE =
   "Search every source of the person's own data that could hold the answer, and vary the wording: names, senders, dates, and the words they would have used. Stop when another search stops turning up anything new, not after a fixed number of tries. Absence holds only for what you searched: an unavailable or failed source is unknown, not empty, so name the sources you checked and any you could not read.";
