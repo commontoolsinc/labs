@@ -2053,23 +2053,24 @@ classifier that throws falls back to every tag. The tags, the path that chose
 them (`rule`, `assumed`, `fallback`), and the classification's wall time are
 recorded as `taskClassification` in `run-state.json` and `run-report.json`.
 `scripts/task-classification-eval.ts` scores the rule against a cheap-model
-classifier over the playtest asks, by hand. Only an `author` task, or a run at
-`deep` depth, gets the opening research pass. `src/prompt-sections.ts` says, in
-one table, which tags and depths each conditional part of the prompt reaches.
-The parent's orientation follows the tags: `pieces` and `author` add the
-code-authoring framing (reading docs and skills, repairing code, acquiring a
-skill by its id), `pieces` a short held-pieces block (the input cells are the
-pieces of the loom the person is in; `describe_handle`, `read_value`, and
-`call_verb` read and act on them) where any other task gets one sentence saying
-handles may be held, `author` alone the piece-targeting guidance, the
-instruction to verify an effect, and the revision-verification guidance,
-`pieces` and `find` the held-handle and grant guidance, `find` and `author` the
-findable and pattern-index guidance, `author` what research is (a private pass
-that reports what to run and cannot execute) and the opening-research rule,
-`act`, `pieces` and `author` delegation, `find` and `act` the Weaver command
-guidance, and `act` the browser guidance. The tool allow-list does not narrow,
-so a task given too few tags can still reach what it needs; a run with no
-classification carries all of the orientation.
+classifier over the playtest asks, by hand. Of classified runs, only an `author`
+task, or a run at `deep` depth, gets the opening research pass; a run that was
+never classified, such as an interactive session, gets it whenever it is
+otherwise eligible. `src/prompt-sections.ts` says, in one table, which tags and
+depths each conditional part of the prompt reaches. The parent's orientation
+follows the tags: `pieces` and `author` add the code-authoring framing (reading
+docs and skills, repairing code, acquiring a skill by its id), `pieces` a short
+held-pieces block (the input cells are the pieces of the loom the person is in;
+`describe_handle`, `read_value`, and `call_verb` read and act on them) where any
+other task gets one sentence saying handles may be held, `author` alone the
+piece-targeting guidance, the instruction to verify an effect, and the
+revision-verification guidance, `pieces` and `find` the held-handle and grant
+guidance, `find` and `author` the findable and pattern-index guidance, `author`
+what research is (a private pass that reports what to run and cannot execute)
+and the opening-research rule, `act`, `pieces` and `author` delegation, `find`
+and `act` the Weaver command guidance, and `act` the browser guidance. The tool
+allow-list does not narrow, so a task given too few tags can still reach what it
+needs; a run with no classification carries all of the orientation.
 
 The caller chooses the run's depth before it starts, with `--depth quick`,
 `standard` (the default) or `deep`; the tags say what kind of work a task is,
