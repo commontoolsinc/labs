@@ -94,13 +94,14 @@ const toByteArray = (value: unknown): Uint8Array | undefined => {
 
 /**
  * Indicates whether `name` may name the file a blob holds, which is so of any
- * non-empty string. A download only ever offers the name as one to save under,
- * encoded so that no character of it can reach the header as itself (see
+ * non-empty string of well-formed Unicode, one with no unpaired surrogate. A
+ * download only ever offers the name as one to save under, encoded so that no
+ * character of it can reach the header as itself (see
  * {@link contentDispositionFor}), so the store holds a name to no rule of a
- * file system's.
+ * file system's. The encoding is what needs it well-formed.
  */
 const isFileName = (name: unknown): name is string =>
-  typeof name === "string" && name.length > 0;
+  typeof name === "string" && name.length > 0 && name.isWellFormed();
 
 /**
  * Returns `value` as blob contents if its body is a `FabricBytes`, the one form

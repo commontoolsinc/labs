@@ -2384,8 +2384,9 @@ export type UploadBlobRequest = BaseRequest & {
   name?: string;
 
   /**
-   * The extension the stored blob is served under, defaulting to `bin`.
-   * A leading dot is stripped.
+   * The extension the stored blob is served under. A leading dot is stripped.
+   * With none, the store chooses one: the extension of `name`, or else one for
+   * the media type, or else `bin`.
    */
   suffix?: string;
 };

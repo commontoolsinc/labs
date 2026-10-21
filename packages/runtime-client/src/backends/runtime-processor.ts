@@ -3825,14 +3825,14 @@ export class RuntimeProcessor {
     if (!isDID(request.space)) {
       throw new Error("uploadBlob requires a space DID");
     }
-    const suffix = (request.suffix ?? "bin").replace(/^\./, "") || "bin";
+    // With no suffix, the upload names no blob in its path, and the store
+    // chooses the suffix itself.
+    const suffix = request.suffix?.replace(/^\./, "");
+    const blobPath = suffix ? `/upload.${encodeURIComponent(suffix)}` : "";
     // The blob belongs to the named space, so it uploads to — and its
     // returned URL resolves against — THAT space's host.
     const host = this.#runtime.hostForSpace(request.space);
-    const target = new URL(
-      `/${request.space}/blobs/upload.${encodeURIComponent(suffix)}`,
-      host,
-    );
+    const target = new URL(`/${request.space}/blobs${blobPath}`, host);
     // The envelope's decode already produced this; `request.body` is a
     // `FabricBytes` by the time it arrives, and a handler owns the values its
     // request carries per `BaseRequest`, so nothing else is reading it. The

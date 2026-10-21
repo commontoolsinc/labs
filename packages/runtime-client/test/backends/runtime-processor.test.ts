@@ -4014,8 +4014,10 @@ describe("runtime-processor", () => {
 
     it("posts the file's name with the contents when the request names one", async () => {
       const originalFetch = globalThis.fetch;
+      let requestedUrl: string | undefined;
       let requestedPayload: unknown;
-      const blobFetch: RuntimeFetch = (_input, init) => {
+      const blobFetch: RuntimeFetch = (input, init) => {
+        requestedUrl = input.toString();
         requestedPayload = decodeMemoryBoundary(init?.body as string);
         return Promise.resolve(
           Response.json({ id: "fid1:test", url: "blobs/test.png" }, {
@@ -4045,6 +4047,11 @@ describe("runtime-processor", () => {
         body: new FabricBytes(new Uint8Array([1, 2, 3])),
         name: "photo.png",
       });
+      // The request names no suffix, so the path names no blob, and the store
+      // takes the suffix from the name.
+      expect(requestedUrl).toBe(
+        "http://toolshed.test/did:key:test-space/blobs",
+      );
     });
 
     it("throws for a request whose name is not a string", async () => {

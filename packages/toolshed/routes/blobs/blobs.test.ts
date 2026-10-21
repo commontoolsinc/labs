@@ -427,11 +427,11 @@ describe("Blob Routes", () => {
       expect((await post.json()).url).toBe(`blobs/${hash}.pdf`);
     });
 
-    it("returns 400 for an upload whose name is not a non-empty string", async () => {
+    it("returns 400 for an upload whose name is not a non-empty well-formed string", async () => {
       const identity = await Identity.fromPassphrase(
         "toolshed-blob-named-invalid",
       );
-      const names: FabricValue[] = ["", 7, ["photo.gif"]];
+      const names: FabricValue[] = ["", "\ud800.gif", 7, ["photo.gif"]];
       for (const name of names) {
         const post = await uploadTo(`/${identity.did()}/blobs/image.gif`, {
           type: "image/gif",

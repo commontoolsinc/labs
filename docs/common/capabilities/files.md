@@ -63,12 +63,15 @@ a cell.
 - A blob is addressed by the hash of its media type, its bytes, and the name
   it was stored with, if any, so the same file uploaded twice under the same
   name has the same id, and under two names has two. The URL is that id plus a
-  short suffix: the file name's last extension when it is one to eight letters
-  or digits, otherwise one chosen from the media type, or `bin`. Two uploads
+  short suffix: the last extension of the name the upload is posted under,
+  which `cf-file-input` takes from the file's name, or, for an upload posted
+  under none, of the blob's name, when that extension is one to eight letters
+  or digits; otherwise one chosen from the media type, or `bin`. Two uploads
   with the same id share a URL when they get the same suffix and have two URLs
   when they do not. Each URL is immutable and cacheable forever.
-- A name is any non-empty string. The download's `Content-Disposition` is
-  `inline` for a type served as itself, and `attachment` for every other.
+- A name is any non-empty string of well-formed Unicode. The download's
+  `Content-Disposition` is `inline` for a type served as itself, and
+  `attachment` for every other.
 - The bytes stay in the space's own store beside its cells. There is no
   offload to an object store, and no signed or expiring URL.
 - GIF, JPEG, PNG, and WebP are served as their own media type, so an `<img>`
