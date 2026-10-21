@@ -3872,7 +3872,8 @@ export class SpaceSession {
    * `request`'s latest send, and rejects with the server's error when that
    * response is one. A send lost with its connection is followed by the
    * restore that sends the request again, so the mutation waits for that
-   * send and then for its response.
+   * send and then for its response. The session's close ends either wait,
+   * and the mutation rejects with the close error.
    */
   async #applyWatchResponse<R, T>(
     request: WatchRequest<R>,
@@ -3883,7 +3884,11 @@ export class SpaceSession {
         const { response, resent } = request;
         let result: R;
         try {
-          result = await response;
+          // The session's close rejects `resent`, which ends this wait too.
+          result = await Promise.race([
+            response,
+            resent.promise.then(() => response),
+          ]);
         } catch (error) {
           if (response !== request.response) continue;
           if (request.verdict !== undefined) {
@@ -3902,8 +3907,8 @@ export class SpaceSession {
   }
 
   /**
-   * Fails every watch mutation waiting for its request to be sent again with
-   * `error`, as the session closes.
+   * Fails every watch mutation still waiting for a response with `error`, as
+   * the session closes.
    */
   #endWatchRequests(error: Error): void {
     for (const request of this.#unappliedWatchRequests) {
