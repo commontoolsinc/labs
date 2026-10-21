@@ -272,32 +272,38 @@ Before a push: repo-wide `deno fmt --check`, `deno lint`, `deno task check`,
   residual wait without a probe.
 - The overlap's default is off and the decision rule is the served-vote
   record's: it is a worker-arm lever when the fan-out floor moves.
+- A root evaluation's schema hash names the schema and not the reader that
+  declared it, so the 44 schemas one path is tracked under cannot yet be
+  mapped to the pattern's reads; a dump of a session's tracked selectors with
+  their schemas is what the census's first two removals need before they
+  are built.
 
 ## Stages
 
 1. [x] Answer the four measurement questions on the worker arm and the
        loop-off arm, with the probe, and write the answers into a
        [record](../history/development/performance/2026-10-19-served-vote-fan-out.md).
-2. [ ] Explain execution frequency before selecting another optimization.
-       The counts are in the record: one and five clients against one server
-       on both arms, with client computations, effects, server instance runs,
-       conflict repairs, affected documents, and root-selector evaluations
-       kept separate, captured as logger measures with occurrence details
-       beside each realm's CPU profile (the
-       [profiling guide](../development/debugging/profiling.md) describes
-       the refresh fields and clock boundaries). What remains is the
-       classification those counts call for, one kind of work at a time: a
-       client computation that still runs under serving, a serving instance
-       run, a memory root evaluation. For each, which notification or demand
-       requires it, which is a duplicate of work another realm or session
-       already did, and which can be removed outright. The leaves have been
-       timed; this stage is about taking work out, not making a leaf faster,
-       and it ends with a list of removable work and the invariant each
-       removal has to keep. Keep selective replication off and the browser
-       measurement as a separate series.
-3. [ ] Build the change the answers select, behind nothing where it is a
-       pure cost reduction and behind a registry entry where it changes what
-       a session receives.
+2. [x] Explain execution frequency before selecting another optimization.
+       The [work census](../history/development/performance/2026-10-21-served-vote-work-census.md)
+       counts one burst on all three arms and names the multipliers: the
+       per-session walk (×4 on every server-side count), a path tracked
+       under up to 44 schemas (92% of root evaluations), selectors that fail
+       the same way every burst (a quarter to a third of traversals), a
+       vote's cascade cut into 2.7 waves (each a flush pass, five walks and
+       five frames), and, under serving, every client re-running every
+       served action (61% of a client's runs). It ends with seven removals
+       and the invariant each keeps.
+3. [ ] Build the removals the census selects, cheapest and least entangled
+       first: one root evaluation per (document, path) per walk with its
+       schemas validated against it, and a memo for a selector that failed
+       against a document version (the memory server, every arm); then the
+       client integrating a served value as a result rather than a trigger
+       (the client, under serving); then the serving loop's wave and flush
+       coalescing and the bookkeeping-only commits that skip the walk. Each
+       lands behind nothing where it is a pure cost reduction and behind a
+       registry entry where it changes what a session receives, and each is
+       measured against the census's counts before its headline: a removal
+       that does not move its count did not remove the work.
 4. [ ] Measure the burst on both arms and the seed, twice each, and record
        them beside the serving-side rows.
 5. [ ] Revisit the overlap's default under the worker once the floor has
