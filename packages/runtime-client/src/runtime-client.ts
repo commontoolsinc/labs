@@ -1758,12 +1758,14 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   /**
    * Uploads a blob to the given space. `body` is given as a view or as a whole
    * buffer, and is copied into the immutable value that crosses, so the caller
-   * may keep using it.
+   * may keep using it. `name`, when given, is the name of the file the bytes
+   * came from, which the stored blob keeps (see `UploadBlobRequest`).
    */
   async uploadBlob(options: {
     space: DID;
     contentType: string;
     body: Uint8Array | ArrayBufferLike;
+    name?: string;
     suffix?: string;
   }): Promise<UploadBlobResponse> {
     return await this.#conn.request<RequestType.UploadBlob>({
@@ -1771,6 +1773,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       space: options.space,
       contentType: options.contentType,
       body: new FabricBytes(options.body),
+      name: options.name,
       suffix: options.suffix,
     });
   }

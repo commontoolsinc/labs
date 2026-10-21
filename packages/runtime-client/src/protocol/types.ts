@@ -2377,6 +2377,13 @@ export type UploadBlobRequest = BaseRequest & {
   body: FabricBytes;
 
   /**
+   * The name of the file the bytes came from, if they have one. The stored blob
+   * keeps it, hashed into the blob's id with the media type and the bytes, and
+   * a download of the blob is offered under it.
+   */
+  name?: string;
+
+  /**
    * The extension the stored blob is served under, defaulting to `bin`.
    * A leading dot is stripped.
    */

@@ -4004,9 +4004,46 @@ describe("runtime-processor", () => {
       );
       // The host is resolved for the REQUEST's space, not any init space.
       expect(hostForSpaceCalls).toEqual(["did:key:test-space"]);
-      expect(requestedPayload).toEqual({
+      // Strict, so that a request naming no file posts no `name` key at all:
+      // the blob's id is the hash of exactly what is posted.
+      expect(requestedPayload).toStrictEqual({
         type: "image/png",
         body: new FabricBytes(new Uint8Array([1, 2, 3])),
+      });
+    });
+
+    it("posts the file's name with the contents when the request names one", async () => {
+      const originalFetch = globalThis.fetch;
+      let requestedPayload: unknown;
+      const blobFetch: RuntimeFetch = (_input, init) => {
+        requestedPayload = decodeMemoryBoundary(init?.body as string);
+        return Promise.resolve(
+          Response.json({ id: "fid1:test", url: "blobs/test.png" }, {
+            status: 201,
+          }),
+        );
+      };
+      globalThis.fetch = blobFetch as typeof globalThis.fetch;
+      const processor = buildProcessor({
+        runtime: { hostForSpace: () => new URL("http://toolshed.test/base") },
+      });
+
+      try {
+        await processor.handleUploadBlob({
+          type: RequestType.UploadBlob,
+          space: "did:key:test-space" as never,
+          contentType: "image/png",
+          body: new FabricBytes(new Uint8Array([1, 2, 3])),
+          name: "photo.png",
+        });
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+
+      expect(requestedPayload).toStrictEqual({
+        type: "image/png",
+        body: new FabricBytes(new Uint8Array([1, 2, 3])),
+        name: "photo.png",
       });
     });
   });
