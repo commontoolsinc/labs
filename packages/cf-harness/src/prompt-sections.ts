@@ -1,6 +1,7 @@
 import type { HarnessRunDepth } from "./contracts/run-depth.ts";
 import type {
   HarnessTaskClassification,
+  HarnessTaskDomain,
   HarnessTaskTag,
 } from "./task-classification.ts";
 
@@ -37,14 +38,16 @@ export type PromptSection = typeof PROMPT_SECTIONS[number];
 /**
  * Which runs a section is sent to. A run gets the section when its task
  * carries any tag in `anyOf` (any tag at all, when `anyOf` is absent) and none
- * in `noneOf`, and its depth is one of `depth` (any, when absent). A task that
- * was never classified passes the tag conditions unless `unclassified` is
- * false: such a run carries all of its orientation, but not the blocks that
- * stand in for piece targeting. The depth conditions hold for every run.
+ * in `noneOf`, is in any domain in `domains` (any, when absent), and its depth
+ * is one of `depth` (any, when absent). A task that was never classified
+ * passes the tag and domain conditions unless `unclassified` is false: such a
+ * run carries all of its orientation, but not the blocks that stand in for
+ * piece targeting. The depth conditions hold for every run.
  */
 export interface SectionAudience {
   readonly anyOf?: readonly HarnessTaskTag[];
   readonly noneOf?: readonly HarnessTaskTag[];
+  readonly domains?: readonly HarnessTaskDomain[];
   readonly unclassified?: false;
   readonly depth?: readonly HarnessRunDepth[];
 }
@@ -53,6 +56,12 @@ export interface SectionAudience {
 export interface RunShape {
   /** The task's tags; absent when it was never classified. */
   readonly tags?: ReadonlySet<HarnessTaskTag>;
+
+  /**
+   * The task's domains; absent when it was never classified, or classified
+   * before tasks had domains, which passes every domain condition.
+   */
+  readonly domains?: ReadonlySet<HarnessTaskDomain>;
   readonly depth: HarnessRunDepth;
 }
 
@@ -63,9 +72,13 @@ export interface RunShape {
 export const PROMPT_SECTION_AUDIENCE: Readonly<
   Record<PromptSection, SectionAudience | readonly SectionAudience[]>
 > = {
-  // The opening research pass a fresh task gets before its first turn, which
-  // a deep run of any kind gets too, and what that pass is.
-  "opening-research": [{ anyOf: ["author"] }, { depth: ["deep"] }],
+  // The opening research pass a fresh task gets before its first turn, and
+  // what that pass is. It reads Common Fabric's docs, pattern index and
+  // source, so beyond authoring it serves a deep run about the fabric.
+  "opening-research": [
+    { anyOf: ["author"] },
+    { domains: ["fabric"], depth: ["deep"] },
+  ],
   "research-guidance": { anyOf: ["author"] },
   // Inspect held pieces, grants and retained research before asking.
   given: { anyOf: ["pieces", "find"] },
@@ -111,8 +124,11 @@ const reaches = (audience: SectionAudience, shape: RunShape): boolean => {
   }
   if (tags === undefined) return audience.unclassified !== false;
   const has = (tag: HarnessTaskTag) => tags.has(tag);
+  const { domains } = shape;
   return (audience.anyOf === undefined || audience.anyOf.some(has)) &&
-    !(audience.noneOf ?? []).some(has);
+    !(audience.noneOf ?? []).some(has) &&
+    (audience.domains === undefined || domains === undefined ||
+      audience.domains.some((domain) => domains.has(domain)));
 };
 
 /** Whether a run of `shape` is sent `section`. */
@@ -125,8 +141,23 @@ export const sendsSection = (
   return alternatives.some((one) => reaches(one, shape));
 };
 
-/** The tags a run's recorded classification gave it; none when it has none. */
-export const classifiedTags = (
-  classification: Pick<HarnessTaskClassification, "tags"> | undefined,
-): ReadonlySet<HarnessTaskTag> | undefined =>
-  classification === undefined ? undefined : new Set(classification.tags);
+/**
+ * The shape a run of `depth` has after its recorded classification: its tags
+ * and domains, or neither when it was never classified.
+ */
+export const classifiedShape = (
+  classification:
+    | Pick<HarnessTaskClassification, "tags" | "domains">
+    | undefined,
+  depth: HarnessRunDepth,
+): RunShape => ({
+  ...(classification !== undefined
+    ? {
+      tags: new Set(classification.tags),
+      ...(classification.domains !== undefined
+        ? { domains: new Set(classification.domains) }
+        : {}),
+    }
+    : {}),
+  depth,
+});

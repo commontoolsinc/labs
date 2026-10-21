@@ -224,9 +224,10 @@ import {
 import {
   classifyTask,
   type HarnessTaskClassification,
+  type HarnessTaskShape,
 } from "./task-classification.ts";
 import {
-  classifiedTags,
+  classifiedShape,
   type RunShape,
   sendsSection,
 } from "./prompt-sections.ts";
@@ -324,9 +325,16 @@ export interface CreateHarnessPromptLoopOptions
 
   /**
    * How far the caller wants the run taken; `standard` when absent. A deep
-   * run of any kind gets the opening research pass.
+   * run in the `fabric` domain gets the opening research pass, as an `author`
+   * task does at any depth.
    */
   depth?: HarnessRunDepth;
+
+  /**
+   * What the caller says about a fresh root task: its tags, its domains, or
+   * both, each taken in place of the classifier's.
+   */
+  taskShape?: HarnessTaskShape;
 
   /**
    * Reasoning effort for the `research` tool's private model turns. Research
@@ -3105,6 +3113,7 @@ export class CfHarnessPromptLoop {
   readonly #promptCacheMode?: "implicit" | "explicit";
   readonly #reasoningEffort?: string;
   readonly #depth: HarnessRunDepth;
+  readonly #taskShape: HarnessTaskShape;
   readonly #researchReasoningEffort?: string;
   readonly #compactThreshold?: number;
   readonly #subagentCompositionGuidance: boolean;
@@ -3253,6 +3262,7 @@ export class CfHarnessPromptLoop {
     this.#promptCacheMode = options.promptCacheMode;
     this.#reasoningEffort = options.reasoningEffort;
     this.#depth = options.depth ?? DEFAULT_HARNESS_RUN_DEPTH;
+    this.#taskShape = options.taskShape ?? {};
     this.#researchReasoningEffort = options.researchReasoningEffort;
     this.#compactThreshold = options.compactThreshold;
     this.#subagentCompositionGuidance = options.subagentCompositionGuidance ??
@@ -3743,14 +3753,14 @@ export class CfHarnessPromptLoop {
   #shapeOf(
     runState: Pick<HarnessRunState, "taskClassification">,
   ): RunShape {
-    const tags = classifiedTags(runState.taskClassification);
-    return { ...(tags !== undefined ? { tags } : {}), depth: this.#depth };
+    return classifiedShape(runState.taskClassification, this.#depth);
   }
 
   /**
-   * Tags a fresh root task with the kinds of work it calls for and records
-   * them on the run, before the host assembles the prompt the tags shape.
-   * The tags gate the opening research pass and the parent's browser
+   * Tags a fresh root task with the kinds of work it calls for and the
+   * domains it happens in, taking each part the caller stated in its task
+   * shape, and records them on the run, before the host assembles the prompt
+   * they shape. They gate the opening research pass and the parent's browser
    * guidance here.
    */
   async classifyTask(task: string): Promise<HarnessTaskClassification> {
@@ -3761,7 +3771,7 @@ export class CfHarnessPromptLoop {
       inputCells: runState.inputCells,
       browserHost: this.engine.browserHost !== undefined &&
         this.#allowedSubagentProfiles.has(BROWSER_SUBAGENT_PROFILE),
-    });
+    }, this.#taskShape);
     await this.engine.recordTaskClassification(classification);
     return classification;
   }

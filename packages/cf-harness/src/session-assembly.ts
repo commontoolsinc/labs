@@ -70,6 +70,7 @@ import {
   sendsSection,
 } from "./prompt-sections.ts";
 import type { HarnessRunDepth } from "./contracts/run-depth.ts";
+import type { HarnessTaskShape } from "./task-classification.ts";
 import type {
   SandboxAdditionalMountConfig,
   SandboxRuntimeChoice,
@@ -208,6 +209,9 @@ export interface HarnessSessionConfig {
 
   /** How far the caller wants the run taken; `standard` when absent. */
   depth?: HarnessRunDepth;
+
+  /** What the caller says about the task, in place of the classifier. */
+  taskShape?: HarnessTaskShape;
 
   /** Reasoning effort for the `research` tool's own model turns. */
   researchReasoningEffort?: string;
@@ -409,6 +413,7 @@ export const harnessSessionEngineOptions = (
       ? { reasoningEffort: config.reasoningEffort }
       : {}),
     ...(config.depth !== undefined ? { depth: config.depth } : {}),
+    ...(config.taskShape !== undefined ? { taskShape: config.taskShape } : {}),
     ...(config.researchReasoningEffort !== undefined
       ? { researchReasoningEffort: config.researchReasoningEffort }
       : {}),

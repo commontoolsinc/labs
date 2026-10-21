@@ -1193,6 +1193,57 @@ Deno.test("parseCfHarnessCliArgs reads a run depth, leaves an unnamed one to the
   );
 });
 
+Deno.test("parseCfHarnessCliArgs reads a caller's task tags and domains, none as no domain, and refuses a word it does not know or a shape on resume", async () => {
+  const parse = (argv: string[]) =>
+    parseCfHarnessCliArgs(["--prompt", "hi", ...argv], {
+      cwd: "/tmp/project",
+      env: {},
+    });
+
+  const stated = await parse([
+    "--task-tags",
+    "find, act",
+    "--task-domains",
+    "personal,web",
+  ]);
+  const none = await parse(["--task-domains", "none"]);
+  const unstated = await parse([]);
+
+  if ("help" in stated || "help" in none || "help" in unstated) {
+    throw new Error("expected config result");
+  }
+  assertEquals(stated.taskShape, {
+    tags: ["find", "act"],
+    domains: ["personal", "web"],
+  });
+  assertEquals(none.taskShape, { domains: [] });
+  assertEquals(unstated.taskShape, undefined);
+  await assertRejects(
+    () => parse(["--task-domains", "email"]),
+    Error,
+    "--task-domains names email; it takes fabric, personal, web, or none",
+  );
+  await assertRejects(
+    () => parse(["--task-tags", "research"]),
+    Error,
+    "--task-tags names research",
+  );
+  await assertRejects(
+    () => parse(["--task-tags", "none"]),
+    Error,
+    "--task-tags names none; it takes respond, find, act, pieces, author",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--resume-run", "run-earlier", "--task-domains", "web"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--task-tags and --task-domains are not supported with --resume-run",
+  );
+});
+
 Deno.test("parseCfHarnessCliArgs rejects an empty reasoning effort flag", async () => {
   await assertRejects(
     () =>

@@ -173,6 +173,28 @@ describe("local-jobs/lane", () => {
       });
     });
 
+    it("hands the harness the request's tags and domains, and neither where it names none", async () => {
+      const spec = await localJobSpecOf(
+        {
+          request: { ...REQUEST, tags: ["find"], domains: ["personal"] },
+        } as LocalJob,
+        ASK,
+        {},
+      );
+      const plain = await localJobSpecOf(
+        { request: REQUEST } as LocalJob,
+        ASK,
+        {},
+      );
+
+      expect(spec).toMatchObject({
+        taskTags: ["find"],
+        taskDomains: ["personal"],
+      });
+      expect("taskTags" in plain).toBe(false);
+      expect("taskDomains" in plain).toBe(false);
+    });
+
     it("runs the task at the request's depth and the profile's reasoning effort, and names neither where they do not", async () => {
       const spec = await localJobSpecOf(
         { request: { ...REQUEST, depth: "deep" } } as LocalJob,

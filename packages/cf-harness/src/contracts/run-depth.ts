@@ -5,9 +5,10 @@
  * says what kind of work it is, and the depth how far to take it. It selects
  * prompt sections and the opening research pass, and grants no authority.
  *
- * Only `deep` changes a run today: it gives a classified task of any kind the
- * opening research pass, which a run that was never classified already gets.
- * A `quick` run is a `standard` one until a section names `quick`.
+ * Only `deep` changes a run today: it gives a classified task in the `fabric`
+ * domain the opening research pass, which an `author` task gets at any depth
+ * and a run that was never classified already gets. A `quick` run is a
+ * `standard` one until a section names `quick`.
  */
 export const HARNESS_RUN_DEPTHS = ["quick", "standard", "deep"] as const;
 

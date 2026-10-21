@@ -23,7 +23,7 @@
  */
 
 import { parseArgs } from "@std/cli/parse-args";
-import { basename, join } from "@std/path";
+import { join } from "@std/path";
 import {
   recordUndeclaredFlags,
   refuseUndeclaredFlags,
@@ -34,10 +34,11 @@ import {
   instructionsFromSwift,
   judge,
   pieceOf,
+  RESULT_SCHEMA,
   row,
 } from "./judge.ts";
+import { callsIn, recordOf, rootRunOf, subagentsOf } from "./runs.ts";
 
-const RUNS = join(Deno.env.get("HOME") ?? "", ".cf-harness/agent-runs/local");
 const OWNER = "did:key:z6MkmPfWUUyFMehEAjTpYaR1U7MBaNuHnyB3y83DgTkPXJGq";
 
 const FLAGS = ["cases", "instructions", "only", "out", "api-url", "identity"];
@@ -55,17 +56,6 @@ const args = parseArgs(Deno.args, {
 });
 // A misspelled flag would otherwise run every case against the defaults.
 refuseUndeclaredFlags(undeclared, FLAGS, "`want-eval`");
-
-/** The result schema the Weaver asks a want's job for. */
-const RESULT_SCHEMA = {
-  type: "object",
-  required: ["answer", "offers"],
-  additionalProperties: false,
-  properties: {
-    answer: { type: "string", description: "A short reply for the tile." },
-    offers: { type: "array", maxItems: 8, items: { type: "object" } },
-  },
-};
 
 /** Runs a command through the service and returns its parsed reply. */
 const loom = async (
@@ -137,30 +127,6 @@ const readBack = async (focus: string, path: string): Promise<unknown> => {
   return JSON.parse(out.slice(Math.max(0, out.search(/^[[{"\d-]/m))));
 };
 
-/** The newest run directory of a job: the root run, not a subagent's. */
-const rootRunOf = async (job: string): Promise<string> => {
-  const root = join(RUNS, job.startsWith("job-") ? job : `job-${job}`);
-  const runs: { path: string; mtime: number }[] = [];
-  for await (const entry of Deno.readDir(join(root, "artifacts"))) {
-    if (!entry.isDirectory || entry.name.includes(".subagent.")) continue;
-    const path = join(root, "artifacts", entry.name);
-    runs.push({ path, mtime: (await Deno.stat(path)).mtime?.getTime() ?? 0 });
-  }
-  runs.sort((a, b) => b.mtime - a.mtime);
-  if (runs.length === 0) throw new Error(`no run recorded for ${job}`);
-  return runs[0].path;
-};
-
-/** Tool names the transcript at `path` called, in order. */
-const callsIn = async (path: string): Promise<string[]> => {
-  const transcript = JSON.parse(
-    await Deno.readTextFile(join(path, "transcript.json")),
-  ) as { toolCalls?: { function: { name: string } }[] }[];
-  return transcript.flatMap((message) =>
-    (message.toolCalls ?? []).map((call) => call.function.name)
-  );
-};
-
 const runCase = async (
   evalCase: EvalCase,
   instructions: string,
@@ -225,20 +191,12 @@ const runCase = async (
   }
   const seconds = Math.round((Date.now() - started) / 1000);
   const run = await rootRunOf(job);
-  const report = JSON.parse(
-    await Deno.readTextFile(join(run, "run-report.json")),
-  ) as {
+  const report = await recordOf(run, "run-report.json") as {
     modelTurns?: number;
     totalUsage?: { totalTokens?: number };
   };
   const rootCalls = await callsIn(run);
-  let subagents = 0;
-  let childCalls = 0;
-  for await (const entry of Deno.readDir(join(run, ".."))) {
-    if (!entry.name.startsWith(`${basename(run)}.subagent.`)) continue;
-    subagents += 1;
-    childCalls += (await callsIn(join(run, "..", entry.name))).length;
-  }
+  const { subagents, childCalls } = await subagentsOf(run);
   const answer = String(status.answer ?? "");
   const after = evalCase.check.kind === "answer-withholds"
     ? undefined

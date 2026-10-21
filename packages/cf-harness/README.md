@@ -1983,9 +1983,9 @@ Its `inspect_pattern` and `open_pattern_file` tools accept a bare pattern id or
 `cf:pattern:<id>`; index lookups and retained evidence use the bare id.
 
 Fresh CLI tasks tagged `author` (see task classification below), fresh CLI tasks
-of any kind run at `--depth deep`, and interactive sessions without retained
-research, request an opening `orient` pass for open-ended tasks. A task already
-selecting an implementation skips that automatic pass through attached
+in the `fabric` domain run at `--depth deep`, and interactive sessions without
+retained research, request an opening `orient` pass for open-ended tasks. A task
+already selecting an implementation skips that automatic pass through attached
 `patternRefs` or explicit markers in the request: `pattern:<space>/<slug>`,
 `cf:pattern:<id>`, or `skill:<id>`. A skill id names a registered skill or an
 `owner/repository/skill` address. Bare ids, paths, and prose such as "use the
@@ -2053,33 +2053,45 @@ classifier that throws falls back to every tag. The tags, the path that chose
 them (`rule`, `assumed`, `fallback`), and the classification's wall time are
 recorded as `taskClassification` in `run-state.json` and `run-report.json`.
 `scripts/task-classification-eval.ts` scores the rule against a cheap-model
-classifier over the playtest asks, by hand. Of classified runs, only an `author`
-task, or a run at `deep` depth, gets the opening research pass; a run that was
-never classified, such as an interactive session, gets it whenever it is
-otherwise eligible. `src/prompt-sections.ts` says, in one table, which tags and
-depths each conditional part of the prompt reaches. The parent's orientation
-follows the tags: `pieces` and `author` add the code-authoring framing (reading
-docs and skills, repairing code, acquiring a skill by its id), `pieces` a short
-held-pieces block (the input cells are the pieces of the loom the person is in;
-`describe_handle`, `read_value`, and `call_verb` read and act on them) where any
-other task gets one sentence saying handles may be held, `author` alone the
-piece-targeting guidance, the instruction to verify an effect, and the
-revision-verification guidance, `pieces` and `find` the held-handle and grant
-guidance, `find` and `author` the findable and pattern-index guidance, `author`
-what research is (a private pass that reports what to run and cannot execute)
-and the opening-research rule, `act`, `pieces` and `author` delegation, `find`
-and `act` the Weaver command guidance, and `act` the browser guidance. The tool
-allow-list does not narrow, so a task given too few tags can still reach what it
-needs; a run with no classification carries all of the orientation.
+classifier over the playtest asks, by hand. The classifier also names the
+domains a task's work happens in: `fabric` (held or authored pieces, the pattern
+index, how Common Fabric works), `personal` (the person's calendar, mail and
+messages), and `web`. Only a positive sign names one, so a question of general
+knowledge, or an operation in the person's application, has none; they and what
+chose them (`domainsPath`) are recorded beside the tags. Of classified runs,
+only an `author` task, or a `deep` run in the `fabric` domain, gets the opening
+research pass, since that pass reads Common Fabric's docs, pattern index and
+source; a run that was never classified, such as an interactive session, gets it
+whenever it is otherwise eligible. `src/prompt-sections.ts` says, in one table,
+which tags and depths each conditional part of the prompt reaches. The parent's
+orientation follows the tags: `pieces` and `author` add the code-authoring
+framing (reading docs and skills, repairing code, acquiring a skill by its id),
+`pieces` a short held-pieces block (the input cells are the pieces of the loom
+the person is in; `describe_handle`, `read_value`, and `call_verb` read and act
+on them) where any other task gets one sentence saying handles may be held,
+`author` alone the piece-targeting guidance, the instruction to verify an
+effect, and the revision-verification guidance, `pieces` and `find` the
+held-handle and grant guidance, `find` and `author` the findable and
+pattern-index guidance, `author` what research is (a private pass that reports
+what to run and cannot execute) and the opening-research rule, `act`, `pieces`
+and `author` delegation, `find` and `act` the Weaver command guidance, and `act`
+the browser guidance. The tool allow-list does not narrow, so a task given too
+few tags can still reach what it needs; a run with no classification carries all
+of the orientation.
 
 The caller chooses the run's depth before it starts, with `--depth quick`,
 `standard` (the default) or `deep`; the tags say what kind of work a task is,
-and the depth how far to take it. It selects prompt sections and grants no
-authority. An agent-runner local job takes `depth` from its request, and
+the domains where, and the depth how far to take it. A caller that knows more
+than the keyword rule can state the tags (`--task-tags`) or the domains
+(`--task-domains`, where `none` is no domain), each in place of the
+classifier's, which decides any part the caller leaves out; the record says
+`caller` for a part it stated. None of these grants authority. An agent-runner
+local job takes `depth`, `tags` and `domains` from its request, and
 `reasoningEffort` from its profile, which a request may lower but not raise.
 Only `deep` changes a run today, adding the opening research pass for a
-classified task of any kind. The effort applies to the job's own model calls and
-children on its model; research keeps its own effort setting.
+classified task in the `fabric` domain; an `author` task gets that pass at any
+depth. The effort applies to the job's own model calls and children on its
+model; research keeps its own effort setting.
 
 A tool descriptor is a contract: its name, its parameters with one-line
 descriptions, and a sentence or two on what the tool does and returns. Task tags

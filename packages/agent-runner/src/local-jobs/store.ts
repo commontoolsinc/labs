@@ -16,6 +16,10 @@
  */
 
 import type { HarnessRunDepth } from "@commonfabric/cf-harness/contracts/run-depth";
+import type {
+  HarnessTaskDomain,
+  HarnessTaskTag,
+} from "@commonfabric/cf-harness/task-classification";
 import { hashStringOf } from "@commonfabric/data-model";
 import { Database } from "@db/sqlite";
 
@@ -52,6 +56,12 @@ export interface LocalJobRequest {
 
   /** How far the caller wants the job taken; the harness's default when absent. */
   depth?: HarnessRunDepth;
+
+  /** The task's kinds of work, in place of the harness's classification. */
+  tags?: HarnessTaskTag[];
+
+  /** Where the task's work happens, in place of the harness's; `[]` is none. */
+  domains?: HarnessTaskDomain[];
 
   /**
    * The reasoning effort the job runs at, no more than its profile's; the
