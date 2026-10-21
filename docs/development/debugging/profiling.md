@@ -820,13 +820,16 @@ configure, so wiring it is a step on the host rather than a change here. Build
 it in SigNoz's query builder: a metric-based alert whose query is the metric
 `ct.memory.commits` filtered to `storm = 'true'`, aggregated within each
 series as `Rate`, which SigNoz picks on its own for a cumulative sum, and
-across series as `Sum` grouped by `space.did`, with the threshold "above 0 at
-least once in the last five minutes". It fires for the spaces with a
-storm-labelled commit in the trailing minute, so it raises as soon as the
-first such commit is exported and can stay raised for up to a minute after
-the server clears the storm, plus the collector's export delay either way; it
-needs no sustain of its own because the server has applied one, and it reads
-zero again once the labelled series stops moving. Do not write the rule in
+across series as `Sum` grouped by `space.did`, with the threshold "above 0"
+matched on the last value (SigNoz's `last` match type, evaluated every
+minute). It fires for the spaces with a storm-labelled commit in the trailing
+minute, so it raises as soon as the first such commit is exported and can stay
+raised for up to a minute after the server clears the storm, plus the
+collector's export delay either way; it needs no sustain of its own because
+the server has applied one, and it reads zero again once the labelled series
+stops moving. The other match types widen that bound: "at least once in the
+last five minutes" keeps the alert raised for five minutes after the last
+positive sample. Do not write the rule in
 SigNoz's PromQL layer. On this counter, which Deno's OpenTelemetry exports as
 a cumulative sum, its `rate()` and `increase()` over the quoted dotted name
 return a scaled running total rather than the change, so a space that stormed
