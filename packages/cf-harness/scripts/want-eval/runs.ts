@@ -56,3 +56,18 @@ export const recordOf = async (
   file: "run-report.json" | "run-state.json",
 ): Promise<Record<string, unknown>> =>
   JSON.parse(await Deno.readTextFile(join(run, file)));
+
+/** The transcripts of a root run and each subagent it spawned, root first. */
+export const transcriptsOf = async (run: string): Promise<unknown[]> => {
+  const paths = [run];
+  for await (const entry of Deno.readDir(join(run, ".."))) {
+    if (entry.name.startsWith(`${basename(run)}.subagent.`)) {
+      paths.push(join(run, "..", entry.name));
+    }
+  }
+  return await Promise.all(
+    paths.map(async (path) =>
+      JSON.parse(await Deno.readTextFile(join(path, "transcript.json")))
+    ),
+  );
+};

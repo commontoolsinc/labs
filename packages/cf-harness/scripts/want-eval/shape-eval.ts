@@ -21,7 +21,11 @@
  *     --cases packages/cf-harness/scripts/want-eval/shape-cases.json \
  *     --instructions <path to the Weaver's WantSaidNow.swift> \
  *     --out <directory> [--label baseline] [--variants default,deep] \
- *     [--only <case id>] [--instance-dir <loom instance directory>]
+ *     [--only <case id>] [--repeat N] [--instance-dir <loom instance directory>]
+ *
+ * `--repeat N` submits each case under each shape N times, since one run of
+ * an ask can take twice the tokens of another; the table then gives each
+ * case×shape's median tokens and their spread.
  */
 
 import { type IncomingMessage, request } from "@node/http";
@@ -34,6 +38,7 @@ import {
 } from "../../src/cli-flags.ts";
 import { instructionsFromSwift, RESULT_SCHEMA } from "./judge.ts";
 import { callsIn, recordOf, rootRunOf, subagentsOf } from "./runs.ts";
+import { median, spread } from "./shape-rubric.ts";
 
 const FLAGS = [
   "cases",
@@ -42,6 +47,7 @@ const FLAGS = [
   "label",
   "variants",
   "only",
+  "repeat",
   "instance-dir",
 ];
 const undeclared: string[] = [];
@@ -49,6 +55,7 @@ const args = parseArgs(Deno.args, {
   string: FLAGS,
   default: {
     label: "run",
+    repeat: "1",
     "instance-dir": join(
       Deno.env.get("HOME") ?? "",
       ".local/share/loom/instances/loom",
@@ -81,6 +88,7 @@ interface ShapeResult {
   errorCode?: string;
   seconds: number;
   tags: string[];
+  domains: string[];
   classificationPath?: string;
   openingResearch?: string;
   modelTurns: number;
@@ -168,7 +176,7 @@ const measure = async (
     totalUsage?: { totalTokens?: number };
   };
   const state = await recordOf(run, "run-state.json") as {
-    taskClassification?: { tags: string[]; path: string };
+    taskClassification?: { tags: string[]; path: string; domains?: string[] };
     openingResearch?: { status: string };
   };
   return {
@@ -181,6 +189,7 @@ const measure = async (
       : {}),
     seconds,
     tags: state.taskClassification?.tags ?? [],
+    domains: state.taskClassification?.domains ?? [],
     ...(state.taskClassification !== undefined
       ? { classificationPath: state.taskClassification.path }
       : {}),
@@ -237,20 +246,26 @@ if (instructions === undefined) {
 
 // Every job is submitted first: the runner queues them and runs as many at
 // once as its lane allows, and each is waited on through its own stream.
+const repeat = Number(args.repeat);
+if (!Number.isInteger(repeat) || repeat < 1) {
+  console.error(`--repeat must be a whole number from 1, not ${args.repeat}`);
+  Deno.exit(2);
+}
 const runs = await Promise.all(
   cases.flatMap((evalCase) =>
-    variants.map(async (variant) => {
-      const started = Date.now();
-      const job = await submit(
-        evalCase,
-        variant,
-        suite.variants[variant],
-        instructions,
-      );
-      await call("GET", `/jobs/${job}/events?after=0`);
-      const seconds = Math.round((Date.now() - started) / 1000);
-      return await measure(evalCase, variant, job, seconds);
-    })
+    variants.flatMap((variant) => Array.from({ length: repeat }, () => variant))
+      .map(async (variant) => {
+        const started = Date.now();
+        const job = await submit(
+          evalCase,
+          variant,
+          suite.variants[variant],
+          instructions,
+        );
+        await call("GET", `/jobs/${job}/events?after=0`);
+        const seconds = Math.round((Date.now() - started) / 1000);
+        return await measure(evalCase, variant, job, seconds);
+      })
   ),
 );
 
@@ -261,6 +276,20 @@ const table = [
   "| case | shape | state | tags | opening research | wall | turns | tokens | root tool calls | subagents (calls) | offers |",
   "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
   ...runs.map(row),
+  "",
+  "| case | shape | runs | median tokens | min–max |",
+  "| --- | --- | --- | --- | --- |",
+  ...cases.flatMap((evalCase) =>
+    variants.map((variant) => {
+      const tokens = runs.filter((result) =>
+        result.case === evalCase.id && result.variant === variant
+      ).map((result) => result.totalTokens);
+      const { min, max } = spread(tokens);
+      return `| ${evalCase.id} | ${variant} | ${tokens.length} | ${
+        median(tokens)
+      } | ${min}–${max} |`;
+    })
+  ),
   "",
   ...cases.flatMap((evalCase) => [
     `## ${evalCase.id}: ${evalCase.text}`,
