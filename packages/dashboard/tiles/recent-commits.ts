@@ -158,23 +158,30 @@ const HISTORY_QUERY = `query($owner: String!, $name: String!, $count: Int!) {
 
 /**
  * Returns the repository, as "owner/name", that a `repository` delivery
- * reports deleted, archived or transferred out of the organization.
+ * reports, and whether the delivery takes it out of the listing, by deleting,
+ * archiving or transferring it, or puts it back, by creating or unarchiving
+ * it. Returns `undefined` for any other delivery.
  */
-function goneRepo(delivery: GitHubDelivery): string | undefined {
+function repositoryChangeOf(
+  delivery: GitHubDelivery,
+): { repo: string; gone: boolean } | undefined {
   if (delivery.event !== "repository") return undefined;
   const payload = delivery.payload;
-  if (!isObjectNotArray(payload) || !GONE.has(String(payload.action))) {
+  if (!isObjectNotArray(payload) || typeof payload.action !== "string") {
     return undefined;
   }
+  const gone = GONE.has(payload.action);
+  if (!gone && !BACK.has(payload.action)) return undefined;
   const repository = payload.repository;
   return isObjectNotArray(repository) && typeof repository.full_name === "string"
-    ? repository.full_name
+    ? { repo: repository.full_name, gone }
     : undefined;
 }
 
 // The actions of a `repository` delivery that take a repository out of the
-// listing.
+// listing, and those that put one back.
 const GONE = new Set(["deleted", "archived", "transferred"]);
+const BACK = new Set(["created", "unarchived"]);
 
 // The commit a push names as the one a deleted branch was moved to.
 const DELETED = "0".repeat(40);
@@ -299,15 +306,27 @@ export class OrganizationCommits {
   #listing: Freshness;
 
   // The commit each repository's default branch was last delivered as pushed
-  // to, and when, by "owner/name" in lower case, until its commits are read
-  // starting at that commit, or a listing read since leaves it out.
-  #pushed = new Map<string, { after: string; at: number }>();
+  // to, and how many deliveries had arrived with it, by "owner/name" in lower
+  // case, until its commits are read starting at that commit, or a listing
+  // started after it leaves the repository out.
+  #pushed = new Map<string, { after: string; delivery: number }>();
+
+  // The repositories a delivery said left the organization, by "owner/name"
+  // in lower case, which are left out of every listing until one leaves them
+  // out itself.
+  #gone = new Set<string>();
+
+  // Whether a delivery has dropped commits since the last refresh.
+  #dropped = false;
+
+  #webhooks: GitHubWebhooks;
 
   /**
    * Constructs an instance holding no commits, which learns of pushes and of
    * changes to the organization's repositories from `webhooks`.
    */
   constructor(webhooks: GitHubWebhooks = githubWebhooks) {
+    this.#webhooks = webhooks;
     this.#listing = new Freshness(
       webhooks,
       (delivery) => delivery.event === "repository",
@@ -317,12 +336,23 @@ export class OrganizationCommits {
       if (push !== undefined && push.ref === `refs/heads/${push.defaultBranch}`) {
         this.#pushed.set(push.repo.toLowerCase(), {
           after: push.after,
-          at: Date.now(),
+          delivery: webhooks.deliveries,
         });
       }
-      // A repository that leaves the organization takes its pushes with it.
-      const gone = goneRepo(delivery);
-      if (gone !== undefined) this.#pushed.delete(gone.toLowerCase());
+      const change = repositoryChangeOf(delivery);
+      if (change === undefined) return;
+      const key = change.repo.toLowerCase();
+      if (change.gone) {
+        // A repository that leaves the organization takes its pushes and its
+        // commits with it.
+        this.#gone.add(key);
+        this.#pushed.delete(key);
+        for (const name of this.#held.keys()) {
+          if (name.toLowerCase() === key && this.#held.delete(name)) {
+            this.#dropped = true;
+          }
+        }
+      } else this.#gone.delete(key);
     });
   }
 
@@ -357,8 +387,11 @@ export class OrganizationCommits {
 
   /**
    * Lists the organization's repositories, unless the relay vouches for the
-   * last listing, and reads the commits of each one pushed to since its
-   * commits were read, or delivered as pushed to. A repository whose commits
+   * last listing and it holds every repository delivered as pushed to, and
+   * reads the commits of each one pushed to since its commits were read, or
+   * delivered as pushed to. A repository a delivery said left the
+   * organization is left out of every listing until one leaves it out
+   * itself. A repository whose commits
    * cannot be read keeps those it had. It is read again by the next refresh
    * when GitHub failed, and after its next push when GitHub refused the
    * request. Returns whether the commits held, or the repositories refused,
@@ -370,20 +403,27 @@ export class OrganizationCommits {
       this.#pushedUnlisted()
     ) {
       const listed = this.#listing.reading();
-      const listedAt = Date.now();
-      this.#repos = await organizationRepos(credential);
+      const listedAfter = this.#webhooks.deliveries;
+      const repos = await organizationRepos(credential);
       listed();
+      const names = new Set(repos.map((repo) => repo.name.toLowerCase()));
+      for (const key of this.#gone) if (!names.has(key)) this.#gone.delete(key);
+      this.#repos = repos.filter((repo) =>
+        !this.#gone.has(repo.name.toLowerCase())
+      );
       // A push to a repository this listing still leaves out is to one the
       // credential cannot see, or one the listing is behind, which the next
       // listing finds when its own push or the relay's vouching runs out.
-      const names = new Set(this.#repos.map((repo) => repo.name.toLowerCase()));
       for (const [key, pending] of this.#pushed) {
-        if (!names.has(key) && pending.at <= listedAt) this.#pushed.delete(key);
+        if (!names.has(key) && pending.delivery <= listedAfter) {
+          this.#pushed.delete(key);
+        }
       }
     }
     const repos = this.#repos;
     const listed = new Set(repos.map((repo) => repo.name));
-    let changed = false;
+    let changed = this.#dropped;
+    this.#dropped = false;
     for (const name of this.#held.keys()) {
       if (!listed.has(name)) {
         this.#held.delete(name);

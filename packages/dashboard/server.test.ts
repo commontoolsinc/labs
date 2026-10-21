@@ -1194,20 +1194,20 @@ boardTest("a relay delivery that changes a run source fetches it at once, and on
   }];
   await tick(tiles, sourceCtx);
 
-  assertEquals(onDelivery(delivered("other.yml"), tiles, sourceCtx), false);
+  assertEquals(onDelivery(delivered("other.yml"), tiles), false);
   await tick(tiles, sourceCtx);
   assertEquals(fetches, 1);
 
   using published = observeUpdate(() =>
     tileHtml("labs ci trust").includes("fetch 2")
   );
-  assertEquals(onDelivery(delivered("ci.yml"), tiles, sourceCtx), true);
+  assertEquals(onDelivery(delivered("ci.yml"), tiles), true);
   await tick(tiles, sourceCtx);
   await published.promise;
   assertEquals(fetches, 2);
 });
 
-boardTest("a relay delivery for a source whose tiles are all being collected fetches it once one of them is free", async () => {
+boardTest("a relay delivery for a source whose tiles are all being collected fetches it at once, and collects them from it once they are free", async () => {
   const delivered1 = runSource("test/delivered", "ci.yml", "main");
   const other = runSource("test/other", "ci.yml", "main");
   let deliveredFetches = 0;
@@ -1227,24 +1227,33 @@ boardTest("a relay delivery for a source whose tiles are all being collected fet
     },
     env: () => undefined,
   };
+  const tile = sourceTile("labs ci trust", [delivered1, other]);
+  let collections = 0;
   const tiles = [{
-    ...sourceTile("labs ci trust", [delivered1, other]),
+    ...tile,
     intervalMs: 600_000,
+    collect: (collectionCtx: Ctx) => {
+      collections++;
+      return tile.collect(collectionCtx);
+    },
   }];
   await tick(tiles, sourceCtx);
   blocking = true;
-  onDelivery(delivered("ci.yml", other.repo), tiles, sourceCtx);
+  onDelivery(delivered("ci.yml", other.repo), tiles);
   const busy = tick(tiles, sourceCtx);
   await blocked.promise;
 
-  onDelivery(delivered("ci.yml"), tiles, sourceCtx);
+  onDelivery(delivered("ci.yml"), tiles);
   await tick(tiles, sourceCtx);
-  assertEquals(deliveredFetches, 1);
+  assertEquals(deliveredFetches, 2);
+  assertEquals(collections, 2);
 
-  using published = observeUpdate(() => deliveredFetches === 2);
+  // Once free, the tile is collected from the other source's fetch, and then
+  // from the delivered source's snapshot it missed.
+  using collected = observeUpdate(() => collections === 4);
   release.resolve();
   await busy;
-  await published.promise;
+  await collected.promise;
   assertEquals(deliveredFetches, 2);
 });
 
@@ -1270,14 +1279,14 @@ boardTest("a relay delivery during a fetch of its source fetches the source agai
     intervalMs: 600_000,
   }];
   await tick(tiles, sourceCtx);
-  onDelivery(delivered("ci.yml"), tiles, sourceCtx);
+  onDelivery(delivered("ci.yml"), tiles);
   const second = tick(tiles, sourceCtx);
   await started.promise;
 
   using published = observeUpdate(() =>
     tileHtml("labs ci trust").includes("fetch 3")
   );
-  onDelivery(delivered("ci.yml"), tiles, sourceCtx);
+  onDelivery(delivered("ci.yml"), tiles);
   await tick(tiles, sourceCtx);
   assertEquals(fetches, 2);
   release.resolve();

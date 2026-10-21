@@ -407,6 +407,39 @@ describe("recent-commits", () => {
             expect(organization.current).toBe(true);
           });
 
+          it("leaves out a repository a delivery says was deleted, until a listing leaves it out itself", async () => {
+            const relay = new FakeRelay();
+            await relay.open();
+            const specs = {
+              name: "specs",
+              pushedAt: "2026-09-30T11:00:00Z",
+              commits: [commit(`${ORG}/specs`, "s", "2026-09-30T11:00:00Z")],
+            };
+            let repos = [labs(["l"]), specs];
+            restore = standIn(() => repos, calls);
+            const organization = new OrganizationCommits(relay.webhooks);
+            await organization.refresh(CREDENTIAL);
+            await relay.deliver("repository", {
+              action: "deleted",
+              repository: { full_name: `${ORG}/specs` },
+            });
+
+            expect(await organization.refresh(CREDENTIAL)).toBe(true);
+            expect(organization.commits.map((held) => held.sha)).toEqual(["l"]);
+
+            repos = [labs(["l"])];
+            await relay.deliver("repository", {
+              action: "created",
+              repository: { full_name: `${ORG}/specs` },
+            });
+            repos = [labs(["l"]), specs];
+            await organization.refresh(CREDENTIAL);
+            expect(organization.commits.map((held) => held.sha).sort()).toEqual([
+              "l",
+              "s",
+            ]);
+          });
+
           it("lists the repositories again once a repository delivery arrives", async () => {
             const relay = new FakeRelay();
             await relay.open();
