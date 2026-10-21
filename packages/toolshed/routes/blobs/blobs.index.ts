@@ -42,8 +42,6 @@ const SAFE_RESPONSE_TYPES = new Set([
   "image/webp",
 ]);
 const VALID_SUFFIX = /^[A-Za-z0-9]{1,8}$/;
-const MAX_FILE_NAME_BYTES = 255;
-const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
 
 class BlobPayloadTooLarge extends Error {
   constructor() {
@@ -95,15 +93,14 @@ const toByteArray = (value: unknown): Uint8Array | undefined => {
 };
 
 /**
- * Indicates whether `name` may name the file a blob holds: a non-empty string
- * of at most {@link MAX_FILE_NAME_BYTES} bytes as UTF-8, with no control
- * character in it. Nothing else about it is checked, so a name may hold a `/`
- * or start with a `.`; a download only ever offers it as a name to save under.
+ * Indicates whether `name` may name the file a blob holds, which is so of any
+ * non-empty string. A download only ever offers the name as one to save under,
+ * encoded so that no character of it can reach the header as itself (see
+ * {@link contentDispositionFor}), so the store holds a name to no rule of a
+ * file system's.
  */
 const isFileName = (name: unknown): name is string =>
-  typeof name === "string" && name.length > 0 &&
-  new TextEncoder().encode(name).byteLength <= MAX_FILE_NAME_BYTES &&
-  !CONTROL_CHARACTER.test(name);
+  typeof name === "string" && name.length > 0;
 
 /**
  * Returns `value` as blob contents if its body is a `FabricBytes`, the one form

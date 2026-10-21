@@ -427,11 +427,11 @@ describe("Blob Routes", () => {
       expect((await post.json()).url).toBe(`blobs/${hash}.pdf`);
     });
 
-    it("returns 400 for an upload whose name is not a file name", async () => {
+    it("returns 400 for an upload whose name is not a non-empty string", async () => {
       const identity = await Identity.fromPassphrase(
         "toolshed-blob-named-invalid",
       );
-      const names: FabricValue[] = ["", "line\nbreak", "x".repeat(256), 7];
+      const names: FabricValue[] = ["", 7, ["photo.gif"]];
       for (const name of names) {
         const post = await uploadTo(`/${identity.did()}/blobs/image.gif`, {
           type: "image/gif",
@@ -442,19 +442,30 @@ describe("Blob Routes", () => {
       }
     });
 
-    it("returns 201 for an upload whose name is 255 bytes as UTF-8", async () => {
+    it("serves a name holding control characters encoded in the header", async () => {
       const identity = await Identity.fromPassphrase(
-        "toolshed-blob-named-longest",
+        "toolshed-blob-named-control",
       );
       await bootstrapHomeSpace(identity);
-
-      const post = await uploadTo(`/${identity.did()}/blobs/image.gif`, {
+      const contents = {
         type: "image/gif",
         body: new FabricBytes(bytes),
-        name: "é".repeat(127) + "x",
-      });
+        name: "a\r\nSet-Cookie: x=1.gif",
+      };
+      const hash = hashOf(contents).toString().slice("fid1:".length);
 
+      const post = await uploadTo(
+        `/${identity.did()}/blobs/image.gif`,
+        contents,
+      );
       expect(post.status).toBe(201);
+
+      const get = await app.request(`/${identity.did()}/blobs/${hash}.gif`);
+      expect(get.headers.get("Set-Cookie")).toBeNull();
+      expect(get.headers.get("Content-Disposition")).toBe(
+        `inline; filename="a__Set-Cookie: x=1.gif"; ` +
+          `filename*=UTF-8''a%0D%0ASet-Cookie%3A%20x%3D1.gif`,
+      );
     });
 
     it("serves a stored blob whose name is not a file name with no `Content-Disposition`", async () => {
