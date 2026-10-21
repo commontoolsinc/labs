@@ -78,7 +78,13 @@ export interface LoopRun {
   probe: string;
   attempt: number;
   job: string;
+
+  /** The job's state as the runner reports it: `completed` when it ended well. */
   state: string;
+
+  /** Why the run's turns and tokens could not be read, when they could not. */
+  note?: string;
+
   seconds: number;
   modelTurns: number;
   totalTokens: number;
@@ -109,10 +115,14 @@ export interface MarkerSummary {
   phases: Record<Phase, PhaseSummary>;
 
   /**
-   * Whether the loop closed: every eligible wants as expected, and the marker's
-   * check passing more often while it was kept than before or after.
+   * Whether the loop closed: every run a completed job with an answer, every
+   * eligible wants as expected, and the marker's check passing more often
+   * while it was kept than before or after.
    */
   closed: boolean;
+
+  /** Why the loop did not close, empty when it did. */
+  reasons: string[];
 }
 
 /** Helper for `parseCases()`: `value` as a nonempty string, or a throw. */
@@ -373,6 +383,52 @@ const phaseSummary = (runs: LoopRun[]): PhaseSummary => ({
 const rate = (phase: PhaseSummary): number =>
   phase.runs === 0 ? 0 : phase.passes / phase.runs;
 
+/**
+ * Whether a run's answer can be scored: a job that failed, or ended with no
+ * answer, fails every marker's check for a reason that is not the marker's.
+ */
+export const answered = (run: LoopRun): boolean =>
+  run.state === "completed" && run.answer.trim() !== "";
+
+/**
+ * Helper for `summarize()`: why one marker's loop did not close. Pass rates
+ * are compared only when every run in every phase was answered, so a phase
+ * of failed jobs never makes the marker's phase look better by contrast.
+ */
+const openReasons = (
+  ofMarker: LoopRun[],
+  phases: Record<Phase, PhaseSummary>,
+): string[] => {
+  const reasons: string[] = [];
+  for (const phase of PHASES) {
+    const runs = ofMarker.filter((run) => run.phase === phase);
+    if (runs.length === 0) reasons.push(`${phase}: no runs`);
+    const unanswered = runs.filter((run) => !answered(run));
+    if (unanswered.length > 0) {
+      reasons.push(
+        `${phase}: ${unanswered.length}/${runs.length} runs failed or answered nothing (${
+          [...new Set(unanswered.map((run) => run.state))].join(", ")
+        })`,
+      );
+    }
+    if (phases[phase].eligibleOk !== phases[phase].runs) {
+      reasons.push(
+        `${phase}: eligible wants not as expected in ${
+          phases[phase].runs - phases[phase].eligibleOk
+        }/${phases[phase].runs} runs`,
+      );
+    }
+  }
+  if (reasons.length > 0) return reasons;
+  if (rate(phases.during) <= rate(phases.before)) {
+    reasons.push("during: check passed no more often than before");
+  }
+  if (rate(phases.during) <= rate(phases.after)) {
+    reasons.push("after: check passed as often as during");
+  }
+  return reasons;
+};
+
 /** Each marker's runs summed by phase, in the order the markers appear. */
 export const summarize = (runs: LoopRun[]): MarkerSummary[] =>
   [...new Set(runs.map((run) => run.marker))].map((marker) => {
@@ -382,17 +438,8 @@ export const summarize = (runs: LoopRun[]): MarkerSummary[] =>
       during: phaseSummary(ofMarker.filter((run) => run.phase === "during")),
       after: phaseSummary(ofMarker.filter((run) => run.phase === "after")),
     };
-    const complete = PHASES.every((phase) => phases[phase].runs > 0);
-    return {
-      marker,
-      phases,
-      closed: complete &&
-        PHASES.every((phase) =>
-          phases[phase].eligibleOk === phases[phase].runs
-        ) &&
-        rate(phases.during) > rate(phases.before) &&
-        rate(phases.during) > rate(phases.after),
-    };
+    const reasons = openReasons(ofMarker, phases);
+    return { marker, phases, closed: reasons.length === 0, reasons };
   });
 
 /** The summary table: one row per marker and phase. */
@@ -408,13 +455,17 @@ export const summaryTable = (summaries: MarkerSummary[]): string =>
     ),
     "",
     ...summaries.map((summary) =>
-      `- ${summary.marker}: loop ${summary.closed ? "closed" : "NOT closed"}`
+      `- ${summary.marker}: loop ${
+        summary.closed ? "closed" : `NOT closed: ${summary.reasons.join("; ")}`
+      }`
     ),
   ].join("\n");
 
 /** One row of the per-run table. */
 export const runRow = (run: LoopRun): string =>
-  `| ${run.marker} | ${run.phase} | ${run.probe} #${run.attempt} | ${run.job} | ${run.state} | ${
+  `| ${run.marker} | ${run.phase} | ${run.probe} #${run.attempt} | ${run.job} | ${run.state}${
+    run.note === undefined ? "" : ` (${run.note})`
+  } | ${
     run.eligibleVerdict.pass ? "ok" : "WRONG"
   } (${run.eligibleVerdict.detail}) | ${
     run.check.pass ? "pass" : "fail"

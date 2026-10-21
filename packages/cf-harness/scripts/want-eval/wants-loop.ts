@@ -45,6 +45,7 @@ import {
   runnerSocketOf,
 } from "./runner-socket.ts";
 import { defaultRunsRoot, recordOf, rootRunOf } from "./runs.ts";
+import { type MarkerKeeper, markerKeeper } from "./wants-loop-keeper.ts";
 import {
   checkMarker,
   eligibleOf,
@@ -244,7 +245,8 @@ const runProbe = async (
     probe: probe.id,
     attempt,
     job,
-    state: String(snapshot.state) + (note === undefined ? "" : ` (${note})`),
+    state: String(snapshot.state),
+    ...(note === undefined ? {} : { note }),
     seconds,
     modelTurns,
     totalTokens,
@@ -318,34 +320,36 @@ const archiveMarker = async (id: string): Promise<void> => {
   });
 };
 
-/** The marker want kept while its phases run, archived on any way out. */
-let kept: string | undefined;
+/** The keeper of the marker whose phases are running, for an interrupt. */
+let current: MarkerKeeper | undefined;
 
-/** Archives the kept marker, once, whichever way out reaches it first. */
-const archiveKept = async (): Promise<void> => {
-  const id = kept;
-  kept = undefined;
-  if (id !== undefined) await archiveMarker(id);
-};
-
-// An interrupted run ends without unwinding to a `finally`, so the kept
-// marker is archived here before it exits.
+// An interrupted run ends without unwinding to a `finally`, so the marker is
+// archived here before it exits, by the same cleanup the loop awaits: one
+// already under way is waited on, and a filing in flight is archived once it
+// returns.
 Deno.addSignalListener("SIGINT", () => {
-  archiveKept().finally(() => Deno.exit(130));
+  (current?.cleanup() ?? Promise.resolve()).catch((error) =>
+    console.error(
+      `archiving the marker failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    )
+  ).finally(() => Deno.exit(130));
 });
 
 const runs: LoopRun[] = [];
 console.log(RUN_TABLE_HEADER);
 for (const marker of markers) {
   await runPhase(marker, undefined, "before", runs);
+  const keeper = markerKeeper(() => fileMarker(marker), archiveMarker);
+  current = keeper;
   try {
-    kept = await fileMarker(marker);
-    const want = kept;
+    const want = await keeper.file();
     await runPhase(marker, want, "during", runs);
-    await archiveKept();
+    await keeper.cleanup();
     await runPhase(marker, want, "after", runs);
   } finally {
-    await archiveKept();
+    await keeper.cleanup();
   }
 }
 

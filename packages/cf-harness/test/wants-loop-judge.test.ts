@@ -46,11 +46,18 @@ const runOf = (
   seconds: 10,
   modelTurns: 2,
   totalTokens: 1000,
-  answer: "",
+  answer: "An answer.",
   eligibleWants: { eligible: [], heading: false, listed: [] },
   markerEligible: phase === "during",
   eligibleVerdict: { pass: eligibleOk, detail: "" },
   check: { pass, detail: "" },
+});
+
+/** A run of `phase` whose job ended `state` with no answer. */
+const unansweredOf = (phase: Phase, state: string): LoopRun => ({
+  ...runOf(phase, false),
+  state,
+  answer: "",
 });
 
 describe("wants-loop-judge", () => {
@@ -349,6 +356,43 @@ describe("wants-loop-judge", () => {
       expect(summary.closed).toBe(false);
     });
 
+    it("returns an open loop, saying why, when the jobs around a passing one failed with no answer", () => {
+      const [summary] = summarize([
+        unansweredOf("before", "failed"),
+        runOf("during", true),
+        unansweredOf("after", "failed"),
+      ]);
+
+      expect(summary.closed).toBe(false);
+      expect(summary.reasons).toEqual([
+        "before: 1/1 runs failed or answered nothing (failed)",
+        "after: 1/1 runs failed or answered nothing (failed)",
+      ]);
+    });
+
+    it("returns an open loop when a completed job answered nothing", () => {
+      const [summary] = summarize([
+        runOf("before", false),
+        runOf("during", true),
+        unansweredOf("after", "completed"),
+      ]);
+
+      expect(summary.closed).toBe(false);
+      expect(summary.reasons).toEqual([
+        "after: 1/1 runs failed or answered nothing (completed)",
+      ]);
+    });
+
+    it("returns an open loop when a passing run's job did not complete", () => {
+      const [summary] = summarize([
+        runOf("before", false),
+        { ...runOf("during", true), state: "interrupted" },
+        runOf("after", false),
+      ]);
+
+      expect(summary.closed).toBe(false);
+    });
+
     it("returns one summary per marker, in the order the markers appear", () => {
       const summaries = summarize([
         runOf("before", false, true, "over"),
@@ -377,6 +421,18 @@ describe("wants-loop-judge", () => {
       );
       expect(table).toContain("| french | after | 0/1 | 0/1 | 1/1 |");
       expect(table).toContain("- french: loop closed");
+    });
+
+    it("returns why a loop did not close", () => {
+      const table = summaryTable(summarize([
+        unansweredOf("before", "failed"),
+        runOf("during", true),
+        runOf("after", false),
+      ]));
+
+      expect(table).toContain(
+        "- french: loop NOT closed: before: 1/1 runs failed or answered nothing (failed)",
+      );
     });
   });
 
