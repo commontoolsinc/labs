@@ -4046,6 +4046,22 @@ describe("runtime-processor", () => {
         name: "photo.png",
       });
     });
+
+    it("throws for a request whose name is not a string", async () => {
+      const processor = buildProcessor({
+        runtime: { hostForSpace: () => new URL("http://toolshed.test/base") },
+      });
+
+      await expect(
+        processor.handleUploadBlob({
+          type: RequestType.UploadBlob,
+          space: "did:key:test-space" as never,
+          contentType: "image/png",
+          body: new FabricBytes(new Uint8Array([1, 2, 3])),
+          name: 7 as never,
+        }),
+      ).rejects.toThrow("uploadBlob requires a string as its name");
+    });
   });
 
   describe("`RuntimeProcessor` home pattern IPC", () => {
