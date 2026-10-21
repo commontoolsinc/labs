@@ -291,7 +291,7 @@ Before a push: repo-wide `deno fmt --check`, `deno lint`, `deno task check`,
        the same way every burst (a quarter to a third of traversals), a
        vote's cascade cut into 2.7 waves (each a flush pass, five walks and
        five frames), and, under serving, every client re-running every
-       served action (61% of a client's runs). It ends with seven removals
+       served action (about half of a client's runs). It ends with seven removals
        and the invariant each keeps.
 3. [ ] Build the removals the census selects, cheapest and least entangled
        first: one root evaluation per (document, path) per walk with its

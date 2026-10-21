@@ -92,10 +92,13 @@ One burst, the server's thread, counted from the measures:
 | frames received (`memory/frame/handle`) | 2,223 | 330 | 252 |
 | cumulative inbound queue wait | 186 s | 0.2 s | 0.06 s |
 
-Every root evaluation sits inside a session's walk inside a batch, and every
-traversal inside a root evaluation, one traversal per evaluation: the
-containment forest has no other callers of `traverse` on this thread. Four
-things multiply the counts.
+Every root evaluation sits inside a session's walk inside a batch, and a root
+evaluation traverses at most one document: 526 of the main-thread arm's
+18,124 root evaluations and 13,796 of the OFF arm's 60,713 traversed nothing,
+coverage or absence having answered them, and none traversed twice. The
+memory server's traversals have no other caller on this thread; the 600
+traversals outside any root on the main-thread arm are the serving runtimes'
+own. Four things multiply the counts.
 
 **The per-session walk.** A batch refreshes every session that tracks a dirty
 document, and the five sessions track the same view of the same documents, so
@@ -116,13 +119,15 @@ evaluations apiece in one burst. The same shape holds on the served arms
 over 1,966 distinct tuples.
 
 **Traversals that cannot succeed.** The failed traversals are the same every
-burst, 4,838 on the main-thread arm both times, and they fall on 43 tuples
-(67 on the OFF arm): the tally computation's `voters/<n>/name` path under six
-schemas, each of which fails validation every time it is evaluated, 125 times
-per tuple per burst on the main-thread arm and 350 on the OFF arm. A selector
-that does not match the document it is evaluated against is re-evaluated at
-every refresh of every session that tracks it, and it is a quarter to a third
-of all traversals.
+burst, 4,838 on the main-thread arm both times, and they fall on 638
+(document, path, schema) tuples over 128 documents and seven schemas; on the
+OFF arm 13,916 over 968 tuples, 240 documents and fourteen schemas. Most are
+a document's top-level path (488 of the 638 tuples), and 150 are the tally
+computation's `voters/<n>/name` under six schemas. A tuple fails once to 25
+times a burst on the main-thread arm and once to 75 on the OFF arm, with a
+median of one and five: a selector that does not match the document it is
+evaluated against is re-evaluated at every refresh of every session that
+tracks it, and the failures are a quarter to a third of all traversals.
 
 **A flush pass per derived commit, and frames to match.** On the served arms
 the loop commits a wave, the commit dirties the documents it wrote, and the
@@ -144,9 +149,10 @@ On the OFF arm the shape differs: five clients derive and write the same
 documents, so the server's inbound side takes 2,223 frames in a burst,
 commits, acknowledgments and watch adds, and the cumulative time those frames
 spent queued behind one another was 186 s, 84 ms a frame. The server's
-outbound side is ten passes, each a batch of 150 to 360 dirty keys walking
-all five sessions, 10,000 to 12,700 root evaluations a batch. It also
-repairs 966 conflicts a burst, re-dirtying the rejected commits' read sets.
+outbound side is ten passes over eight batches: five batches of 150 to 360
+dirty keys walking all five sessions at 9,400 to 12,700 root evaluations
+each, and three smaller ones of 570 to 2,650. It also repairs 966 conflicts a
+burst, re-dirtying the rejected commits' read sets.
 
 ## The serving loop
 
@@ -165,8 +171,11 @@ Twenty-five votes became 68 waves on the main thread and 31 in the worker,
 and all but one or three of them ended at the flush deadline rather than at
 quiescence. A vote's cascade (tally, ranking, cards, per-instance copies) runs
 over more than one wave when the deadline cuts it, and each cut is one more
-derived commit, with the flush pass, five session walks and five frames above
-behind it. The 154 distinct actions run 858 times, 5.6 runs each per burst:
+derived commit, which the memory server answers with a flush pass over the
+sessions tracking what it wrote. The wave count and the pass count are two
+multipliers, not one: 68 derived commits sat under 76 passes and 74 batches on
+the main-thread arm, 31 under 39 and 38 in the worker, the difference being
+the votes' own appends and the bookkeeping documents. The 154 distinct actions run 858 times, 5.6 runs each per burst:
 25 of them, the handler-adjacent lifts and maps, run exactly once per vote,
 and the rest run per instance and per re-trigger. On the worker arm the
 cycle is longer and the waves fewer, so the same 25 votes cost half the
@@ -182,7 +191,7 @@ Per client, one burst:
 | scheduler action runs, over distinct actions | 695 over 230 | 643 over 232 | 581 over 232 |
 | of them computations / effects | 446 / 249 | 393 / 250 | — |
 | runs of an action already run this burst | 465 (67%) | 411 (64%) | 349 (60%) |
-| runs of actions the serving side also ran | — | 393 (61%) | — |
+| runs of actions the serving side also ran | — | 336 to 393 (52 to 61%) | — |
 | trigger notifications, by type (last 400) | commit 267, revert 129, integrate 4 | commit 322, integrate 78 | commit 194, integrate 186 |
 | actions matched by those notifications | 594, 285, 8 | 751, 189 | 332, 550 |
 | rejected commits / rolled-back writes | 155 / 219 | 0 / 0 | 0 / 0 |
@@ -190,10 +199,11 @@ Per client, one burst:
 | watch-add round trips | 4, 4.97 s in all | 0 | 0 |
 | traversals, distinct tuples | 417, 127 | 405, 128 | — |
 
-**Under serving, the client still derives everything.** All 154 actions the
-serving side ran also ran on every client, 1,738 client runs of them against
-858 server runs in the main-thread burst. They are 61% of a client's runs and
-74% of its run time. The trigger trace says how they are reached: a served
+**Under serving, the client still derives everything.** Of the 154 actions
+the serving side ran, 144 also ran on every client: 1,738 client runs of them
+across the five clients against 858 server runs in the main-thread burst, 336
+to 393 runs per client. They are 54% of the clients' runs and 71% of their
+run time. The trigger trace says how they are reached: a served
 result arriving is an `integrate` notification, 78 of which matched 189
 actions, and each action that runs writes its result, which is a `commit`
 notification to the actions downstream, 322 of which matched 751. So a
@@ -224,11 +234,13 @@ burst used, and the hot one is the votes list under the view's schema, 14 to
 Reading across the tables, one vote on the main-thread served arm costs:
 
 - 2.7 waves, each a derived commit;
-- 3 flush passes, 13 session refreshes, 26 frames encoded and sent;
-- 725 root evaluations on the server, about 190 of them distinct, 55 of
-  which repeat per session and 192 of which end in validation failures;
+- 3 flush passes (one per derived commit, plus the vote's own append and the
+  bookkeeping documents), 13 session refreshes, 26 frames encoded and sent;
+- 725 root evaluations on the server, about 190 of them distinct, 550 of
+  which repeat a tuple another session evaluated in the same batch, and 194
+  traversals that end in validation failures;
 - 34 scheduler runs on the serving side, over the pattern's 154 actions;
-- 26 scheduler runs on each of five clients, 16 of them re-running an
+- 26 scheduler runs on each of five clients, 14 of them re-running an
   action the server ran for the same change.
 
 The multipliers are, in the order of the counts they drive: the number of
@@ -252,7 +264,8 @@ names the invariant the removal has to keep.
    validation result and its own coverage.
 2. **Remember a selector that failed against a document version** and skip it
    until that version changes. Removes a quarter to a third of traversals,
-   which are the same 43 to 67 tuples every burst. Invariant: a new version
+   the same 638 to 968 tuples every burst, most of them a document's top-level
+   path under a schema it does not satisfy. Invariant: a new version
    of the document re-validates every selector.
 3. **Share the space-pure part of a root evaluation across the sessions of
    one batch**, the candidate the fan-out plan already names. Removes up to
@@ -271,7 +284,8 @@ names the invariant the removal has to keep.
    still carries a consistent prefix, and the read-boundary wait still
    covers the authored commit.
 6. **Under serving, integrate a served value as the derivation's result
-   rather than as a trigger for it.** Removes 61% of each client's runs.
+   rather than as a trigger for it.** Removes about half of each client's
+   runs and seven tenths of their time.
    Invariant: the client's own in-flight intents keep their echo until the
    served consequence lands, and a client that renders a derived value never
    shows a stale one.
