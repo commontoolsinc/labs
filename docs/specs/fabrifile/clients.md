@@ -20,7 +20,7 @@ Adding a file is two steps, and the client does both:
 1. Store the bytes in the blob store of the store's space. The upload route is
    `POST /<space>/blobs/<name>`, whose body is `{ type, body, name }` encoded
    in the fabric JSON form, `type` the media type, `body` the bytes, and `name`
-   the file's name (see [named blobs](README.md#prerequisites)). It returns the
+   the file's name ([files](../../common/capabilities/files.md)). It returns the
    blob's `id`, and a URL relative to the space's path. `cf-file-input` does
    this step for a VDOM host.
 2. Send the store's `add`, with the blob reference `{ space, id }`, and the

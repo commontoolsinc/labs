@@ -17,7 +17,7 @@ the files it just stored:
 ```tsx
 // Shown for illustration only.
 interface UploadedFile {
-  id: string; // hash of the media type and bytes, prefixed `fid1:`
+  id: string; // hash of the name, media type and bytes, prefixed `fid1:`
   name: string;
   mediaType: string;
   size: number;
@@ -45,10 +45,13 @@ previews off, or handle `cf-remove` and read `allFiles` as the full list.
 
 ## Downloading
 
-A download is an anchor: `<a href={file.url} download={file.name}>`. The
-store serves no filename of its own, so the `download` attribute is what names
-the saved file. Browsers honor it only when the link is same-origin with the
-page; a space served from another host saves the file under its hash instead.
+A download is an anchor: `<a href={file.url} download={file.name}>`. A blob
+stored with a name, as `cf-file-input` stores every file it uploads, is served
+with a `Content-Disposition` header naming the file, so the saved file has that
+name whichever host serves the space. A blob stored with no name is served with
+no such header. There the `download` attribute is what names the saved file,
+and browsers honor it only when the link is same-origin with the page, so a
+space served from another host saves the file under its hash instead.
 
 `cf-file-download` is not for stored files. It takes the content as a string
 and builds the download in the browser, so using it means holding the bytes in
@@ -57,12 +60,15 @@ a cell.
 ## What the store provides
 
 - One upload holds at most 10 MB; the server returns 413 above that.
-- A blob is addressed by the hash of its media type and bytes, so the same
-  file uploaded twice has the same id. The URL is that id plus a short suffix:
-  the file name's last extension when it is one to eight letters or digits,
-  otherwise one chosen from the media type, or `bin`. Two uploads of the same
-  bytes share a URL when they get the same suffix and have two URLs when they
-  do not. Each URL is immutable and cacheable forever.
+- A blob is addressed by the hash of its media type, its bytes, and the name
+  it was stored with, if any, so the same file uploaded twice under the same
+  name has the same id, and under two names has two. The URL is that id plus a
+  short suffix: the file name's last extension when it is one to eight letters
+  or digits, otherwise one chosen from the media type, or `bin`. Two uploads
+  with the same id share a URL when they get the same suffix and have two URLs
+  when they do not. Each URL is immutable and cacheable forever.
+- A name is any non-empty string. The download's `Content-Disposition` is
+  `inline` for a type served as itself, and `attachment` for every other.
 - The bytes stay in the space's own store beside its cells. There is no
   offload to an object store, and no signed or expiring URL.
 - GIF, JPEG, PNG, and WebP are served as their own media type, so an `<img>`

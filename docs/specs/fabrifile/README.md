@@ -173,10 +173,6 @@ that a blob reference grants nothing on its own. See
 
 The design depends on runtime capabilities that don't exist yet:
 
-- **Named blobs.** A blob record holds an optional `name` beside its media
-  type and bytes, hashed into its id with them, and a download serves it as
-  the file's name (`Content-Disposition`). An upload names the blob, as
-  `cf-file-input` does with the chosen file's name.
 - **Renaming a blob, from a pattern.** `rename`, and an `add` that chooses a
   free name, store an existing blob's bytes and media type again under another
   name. That needs a way for a handler to do it without the bytes passing
