@@ -1,3 +1,4 @@
+import { sendsSection } from "./prompt-sections.ts";
 import type { HarnessTaskTag } from "./task-classification.ts";
 
 /** What research is, and when a fresh task gets its opening pass. */
@@ -56,31 +57,15 @@ export const orientationGuidance = (
     patternIndex: boolean;
     tags?: ReadonlySet<HarnessTaskTag>;
   },
-): string => {
-  const tagged = (...wanted: HarnessTaskTag[]) =>
-    tags === undefined || wanted.some((tag) => tags.has(tag));
-  return [
-    ...(tagged("author") ? [researchGuidance(patternIndex)] : []),
+): string =>
+  [
+    ...(sendsSection("research-guidance", tags)
+      ? [researchGuidance(patternIndex)]
+      : []),
     GOAL_GUIDANCE,
-    ...(tagged("pieces", "find") ? [GIVEN_GUIDANCE] : []),
-    ...(tagged("find", "author") ? [findableGuidance(patternIndex)] : []),
+    ...(sendsSection("given", tags) ? [GIVEN_GUIDANCE] : []),
+    ...(sendsSection("findable", tags) ? [findableGuidance(patternIndex)] : []),
     ACTION_PATH_GUIDANCE,
     EVIDENCE_GUIDANCE,
     RELEASE_REFUSAL_GUIDANCE,
   ].join("\n\n");
-};
-
-/** Whether a task with these tags is told how to delegate. */
-export const delegationGuided = (
-  tags: ReadonlySet<HarnessTaskTag> | undefined,
-): boolean =>
-  tags === undefined || tags.has("act") || tags.has("pieces") ||
-  tags.has("author");
-
-/**
- * Whether a task with these tags is framed as code to read and repair: work
- * on held pieces or patterns, and writing one.
- */
-export const codeWorkGuided = (
-  tags: ReadonlySet<HarnessTaskTag> | undefined,
-): boolean => tags === undefined || tags.has("pieces") || tags.has("author");

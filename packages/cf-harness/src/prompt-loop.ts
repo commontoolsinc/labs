@@ -224,6 +224,7 @@ import {
   classifyTask,
   type HarnessTaskClassification,
 } from "./task-classification.ts";
+import { classifiedTags, sendsSection } from "./prompt-sections.ts";
 import { createResearchRunner } from "./research/runner.ts";
 import { researchPatternRecords } from "./research/context.ts";
 import { REVISION_VERIFICATION_GUIDANCE } from "./revision-verification.ts";
@@ -3598,7 +3599,10 @@ export class CfHarnessPromptLoop {
     if (
       options.task === undefined || this.engine.resumedRun ||
       runState.lineage !== undefined || !this.#allowedToolIds.has("research") ||
-      runState.taskClassification?.tags.includes("author") === false ||
+      !sendsSection(
+        "opening-research",
+        classifiedTags(runState.taskClassification),
+      ) ||
       isClosedResearchTask(options.task, runState)
     ) {
       return undefined;
@@ -3828,7 +3832,10 @@ export class CfHarnessPromptLoop {
     const browserHost = this.#allowedSubagentProfiles.has(
         BROWSER_SUBAGENT_PROFILE,
       ) &&
-        initialRunState.taskClassification?.tags.includes("act") !== false
+        sendsSection(
+          "browser-host-parent",
+          classifiedTags(initialRunState.taskClassification),
+        )
       ? this.engine.browserHost
       : undefined;
     if (this.#requirePieceOutput || browserHost !== undefined) {
