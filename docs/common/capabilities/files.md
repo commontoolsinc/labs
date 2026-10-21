@@ -49,7 +49,7 @@ A download is an anchor: `<a href={file.url} download={file.name}>`. A blob
 stored with a name, as `cf-file-input` stores every file it uploads, is served
 with a `Content-Disposition` header naming the file, so the saved file has that
 name whichever host serves the space. A blob stored with no name is served with
-no such header. There the `download` attribute is what names the saved file,
+one naming no file. There the `download` attribute is what names the saved file,
 and browsers honor it only when the link is same-origin with the page, so a
 space served from another host saves the file under its hash instead.
 
@@ -69,9 +69,9 @@ a cell.
   or digits; otherwise one chosen from the media type, or `bin`. Two uploads
   with the same id share a URL when they get the same suffix and have two URLs
   when they do not. Each URL is immutable and cacheable forever.
-- A name is any non-empty string of well-formed Unicode. The download's
+- A name is any non-empty string of well-formed Unicode. Every download's
   `Content-Disposition` is `inline` for a type served as itself, and
-  `attachment` for every other.
+  `attachment` for every other, naming the file when the blob has a name.
 - The bytes stay in the space's own store beside its cells. There is no
   offload to an object store, and no signed or expiring URL.
 - GIF, JPEG, PNG, and WebP are served as their own media type, so an `<img>`

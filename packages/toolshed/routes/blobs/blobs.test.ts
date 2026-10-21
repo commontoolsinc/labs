@@ -96,7 +96,7 @@ describe("Blob Routes", () => {
     expect(get.status).toBe(200);
     expect(get.headers.get("Content-Type")).toBe("image/gif");
     expect(get.headers.get("X-Content-Type-Options")).toBe("nosniff");
-    expect(get.headers.get("Content-Disposition")).toBeNull();
+    expect(get.headers.get("Content-Disposition")).toBe("inline");
     expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
   });
 
@@ -271,6 +271,7 @@ describe("Blob Routes", () => {
     expect(get.status).toBe(200);
     expect(get.headers.get("Content-Type")).toBe("application/octet-stream");
     expect(get.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(get.headers.get("Content-Disposition")).toBe("attachment");
     expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
   });
 
@@ -470,7 +471,7 @@ describe("Blob Routes", () => {
       );
     });
 
-    it("serves a stored blob whose name is not a file name with no `Content-Disposition`", async () => {
+    it("serves a stored blob whose name is not a file name with a `Content-Disposition` naming no file", async () => {
       const identity = await Identity.fromPassphrase(
         "toolshed-blob-named-stored-invalid",
       );
@@ -488,7 +489,7 @@ describe("Blob Routes", () => {
       );
 
       expect(get.status).toBe(200);
-      expect(get.headers.get("Content-Disposition")).toBeNull();
+      expect(get.headers.get("Content-Disposition")).toBe("inline");
       expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
     });
   });
