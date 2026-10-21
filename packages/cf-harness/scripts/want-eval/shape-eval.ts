@@ -29,7 +29,6 @@
  * so one failure does not lose the others.
  */
 
-import { type IncomingMessage, request } from "@node/http";
 import { parseArgs } from "@std/cli/parse-args";
 import { ensureDir } from "@std/fs";
 import { join } from "@std/path";
@@ -45,6 +44,7 @@ import {
   rootRunOf,
   subagentsOf,
 } from "./runs.ts";
+import { runnerCall, runnerJobOf, runnerSocketOf } from "./runner-socket.ts";
 
 const FLAGS = [
   "cases",
@@ -105,43 +105,14 @@ interface ShapeResult {
   offers: number;
 }
 
-const SOCKET = join(args["instance-dir"], "agent-runner", "jobs.sock");
+const SOCKET = runnerSocketOf(args["instance-dir"]);
 
-/** One request to the runner's socket; `onEnd` gets the whole body. */
-const call = async (
-  method: string,
-  path: string,
-  body?: unknown,
-): Promise<{ status: number; text: string }> => {
-  const token = (await Deno.readTextFile(`${SOCKET}.token`)).trim();
-  return await new Promise((resolve, reject) => {
-    const req = request({
-      socketPath: SOCKET,
-      method,
-      path,
-      headers: {
-        authorization: `Bearer ${token}`,
-        "content-type": "application/json",
-      },
-    }, (response: IncomingMessage) => {
-      response.setEncoding("utf8");
-      let text = "";
-      response.on("data", (chunk: string) => text += chunk);
-      response.on("error", reject);
-      response.on("end", () => resolve({ status: response.statusCode!, text }));
-    });
-    req.on("error", reject);
-    if (body !== undefined) req.write(JSON.stringify(body));
-    req.end();
-  });
-};
+/** One request to the runner's socket, answered with its whole body. */
+const call = (method: string, path: string, body?: unknown) =>
+  runnerCall(SOCKET, method, path, body);
 
 /** A job the runner holds, as its snapshot. */
-const jobOf = async (id: string): Promise<Record<string, unknown>> => {
-  const { status, text } = await call("GET", `/jobs/${id}`);
-  if (status !== 200) throw new Error(`job ${id}: HTTP ${status} ${text}`);
-  return JSON.parse(text).job;
-};
+const jobOf = (id: string) => runnerJobOf(SOCKET, id);
 
 const submit = async (
   evalCase: ShapeCase,

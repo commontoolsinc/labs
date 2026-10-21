@@ -1,0 +1,29 @@
+{
+  "probes": [
+    {
+      "id": "capital",
+      "text": "What is the capital of Australia, and why was it chosen over Sydney?"
+    },
+    {
+      "id": "leap-year",
+      "text": "Why does a leap year have an extra day?"
+    }
+  ],
+  "markers": [
+    {
+      "id": "french",
+      "words": "Always answer me in French.",
+      "check": { "kind": "french" }
+    },
+    {
+      "id": "over",
+      "words": "Always end your answers to me with the word OVER, in capitals.",
+      "check": { "kind": "last-word", "word": "OVER" }
+    },
+    {
+      "id": "lowercase",
+      "words": "Always write your answers to me in lowercase letters only, with no capital letters at all.",
+      "check": { "kind": "lowercase" }
+    }
+  ]
+}

@@ -37,9 +37,8 @@ import {
   RESULT_SCHEMA,
   row,
 } from "./judge.ts";
+import { DEFAULT_OWNER, loomCommand } from "./loom-command.ts";
 import { callsIn, recordOf, rootRunOf, subagentsOf } from "./runs.ts";
-
-const OWNER = "did:key:z6MkmPfWUUyFMehEAjTpYaR1U7MBaNuHnyB3y83DgTkPXJGq";
 
 const FLAGS = ["cases", "instructions", "only", "out", "api-url", "identity"];
 const undeclared: string[] = [];
@@ -56,24 +55,6 @@ const args = parseArgs(Deno.args, {
 });
 // A misspelled flag would otherwise run every case against the defaults.
 refuseUndeclaredFlags(undeclared, FLAGS, "`want-eval`");
-
-/** Runs a command through the service and returns its parsed reply. */
-const loom = async (
-  command: string,
-  input: unknown,
-): Promise<Record<string, unknown>> => {
-  const child = new Deno.Command("loom", {
-    args: ["command", "run", "--json", command, "--args-json", "-"],
-    stdin: "piped",
-    stdout: "piped",
-    stderr: "piped",
-  }).spawn();
-  const writer = child.stdin.getWriter();
-  await writer.write(new TextEncoder().encode(JSON.stringify(input)));
-  await writer.close();
-  const { stdout } = await child.output();
-  return JSON.parse(new TextDecoder().decode(stdout));
-};
 
 /** Runs the `cf` command line from this checkout. */
 const cf = async (cfArgs: string[], input?: string): Promise<string> => {
@@ -155,8 +136,8 @@ const runCase = async (
     ? undefined
     : await readBack(evalCase.focus, evalCase.check.path);
   const started = Date.now();
-  const filed = await loom("wants.file", {
-    owner: OWNER,
+  const filed = await loomCommand("wants.file", {
+    owner: DEFAULT_OWNER,
     request_id: `want-eval-${crypto.randomUUID().slice(0, 8)}`,
     text: evalCase.text,
     now: true,
@@ -181,7 +162,7 @@ const runCase = async (
   // service, not a wait inside the system under test.
   let status: Record<string, unknown> = {};
   for (;;) {
-    status = ((await loom("agent.job-status", { jobId: job })).outputs ??
+    status = ((await loomCommand("agent.job-status", { jobId: job })).outputs ??
       {}) as Record<string, unknown>;
     const state = String(status.state);
     if (["completed", "failed", "cancelled", "interrupted"].includes(state)) {
