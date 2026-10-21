@@ -4067,7 +4067,9 @@ describe("runtime-processor", () => {
           body: new FabricBytes(new Uint8Array([1, 2, 3])),
           name: 7 as never,
         }),
-      ).rejects.toThrow("uploadBlob requires a string as its name");
+      ).rejects.toThrow(
+        "uploadBlob requires any name it is given to be a string",
+      );
     });
   });
 

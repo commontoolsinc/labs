@@ -3843,7 +3843,9 @@ export class RuntimeProcessor {
       throw new Error("uploadBlob requires bytes as its body");
     }
     if (request.name !== undefined && typeof request.name !== "string") {
-      throw new Error("uploadBlob requires a string as its name");
+      throw new Error(
+        "uploadBlob requires any name it is given to be a string",
+      );
     }
     // Blob upload payloads must preserve FabricBytes even when the wider
     // process is running with legacy memory JSON flags. A blob with no name
