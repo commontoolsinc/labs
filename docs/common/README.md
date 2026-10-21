@@ -52,7 +52,7 @@ on the Common Fabric runtime.
 - [concepts/types-and-schemas/writable.md](concepts/types-and-schemas/writable.md) — `Writable<>` and write access in type signatures
 - [concepts/types-and-schemas/default.md](concepts/types-and-schemas/default.md) — `Default<>` for input defaults
 - [concepts/types-and-schemas/unknown.md](concepts/types-and-schemas/unknown.md) — `unknown` for a reference you compare but never read through
-- [concepts/cfc-surprising-implications.md](concepts/cfc-surprising-implications.md) — counterintuitive consequences of Contextual Flow Control that designs keep getting wrong: reading is not the leak, patterns have no DOM, `cf-*` components are trusted
+- [concepts/cfc-surprising-implications.md](concepts/cfc-surprising-implications.md) — counterintuitive consequences of Contextual Flow Control that designs keep getting wrong: reading is not the leak, patterns cannot touch the DOM, `cf-*` components are trusted more than patterns
 - [concepts/glossary.md](concepts/glossary.md) — definitions of pattern, piece, cell, space, etc.
 
 ### patterns/ — authoring recipes

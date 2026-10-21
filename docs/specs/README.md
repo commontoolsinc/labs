@@ -77,8 +77,8 @@ is the procedure for changing either. The change list below is closed to new
 entries; a new gap is filed as a specs pull request.
 
 - [Surprising implications of CFC](../common/concepts/cfc-surprising-implications.md)
-  — the consequences designs most often get wrong, each marked as enforced
-  today or required by the specification only; start here
+  — what CFC implies for a pattern author used to React, the consequences
+  designs most often get wrong; start here
 - [CFC conformance statement](cfc-conformance-statement.md) — this runtime's
   answer to the specification's §18.6.4 checklist, with every known
   non-conformance and its direction
