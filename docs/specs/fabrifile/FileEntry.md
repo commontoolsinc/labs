@@ -9,7 +9,7 @@ interface BlobRef {
   /** The DID of the space whose blob store holds the bytes. */
   space: string;
 
-  /** The blob's id: `fid1:` and the hash of its media type and bytes. */
+  /** The blob's id: `fid1:` and the hash of its name, media type and bytes. */
   id: string;
 }
 
@@ -46,14 +46,17 @@ interface FileProfile {
 ## Fields
 
 - **`name`** is the name the store finds the entry by, unique within its store
-  (see [names](#names)). It is the one field that changes after the entry is
-  added, through the store's `rename`.
+  (see [names](#names)). It is always its blob's name too. It changes after
+  the entry is added only through the store's `rename`, which changes `blob`
+  with it.
 - **`mediaType`** is the media type the blob was stored with. The blob's id
   hashes the media type together with the bytes, so a blob has exactly one, and
   an entry MUST name that one. A reader decides how to show a file from
   `mediaType` alone, without fetching it.
 - **`blob`** names the bytes: the space whose blob store holds them, and the
-  blob's id. `blob.space` is the store's own space (see
+  blob's id. The blob is stored under the entry's `name`, so a rename names a
+  new blob, holding the same bytes and media type under the new name.
+  `blob.space` is the store's own space (see
   [`FileStoreOutput`](FileStoreOutput.md#add)). A reader fetches the bytes from
   that space's blob store. An entry holds no URL: a URL depends on where the
   reader's runtime reaches the blob store, and a blob reference doesn't.
@@ -67,8 +70,9 @@ interface FileProfile {
 - **`removedAt`** is set when the store's `remove` takes the entry out of the
   store (see [removed entries](#removed-entries)).
 
-`mediaType`, `blob`, `size`, `addedAt` and `addedBy` are fixed when the entry is
-added, and never change. A changed file is a new entry, with a new blob.
+`mediaType`, `size`, `addedAt` and `addedBy` are fixed when the entry is added,
+and never change, and neither do the bytes `blob` names. A changed file is a new
+entry.
 
 ## Names
 
@@ -99,7 +103,8 @@ removed entry SHOULD say that the file was removed, and SHOULD NOT fetch or show
 its bytes.
 
 The bytes stay in the blob store, which deletes nothing, and the blob reference
-still fetches them (see [privacy](README.md#privacy)). A removed entry is never
+still fetches them, under the name the entry had last (see
+[privacy](README.md#privacy)). A removed entry is never
 restored: adding the same blob again makes a new entry.
 
 ## Who wrote what
@@ -114,8 +119,8 @@ write it, even code a member runs in the store's space. A rename leaves
 An entry is an object pushed onto the store's list, a document of its own,
 identified by its cell. Anything that refers to a file, such as a chat message's
 attachment, holds a link to the entry and compares two with `equals()`. Two
-entries with the same blob are two files: the same bytes, added twice, under
-two names.
+entries can have the same blob, a removed one and one added later under the
+same name, and they are two files.
 
-An entry is never identified by its name, which changes, or by its blob, which
-two entries can share.
+An entry is never identified by its name or by its blob, which both change
+with a rename, and which a removed entry can share with a later one.

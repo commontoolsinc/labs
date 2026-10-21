@@ -41,8 +41,8 @@ the names of every entry in `entries`.
 
 Every record names its writers. The entry list's write policy names `add` and
 `remove`, and an entry's names `add`, `rename` and `remove`: `add` writes the
-whole entry, `rename` its `name`, and `remove` its `removedAt`. No other code
-can write either, even code a member runs in the store's space.
+whole entry, `rename` its `name` and `blob`, and `remove` its `removedAt`. No
+other code can write either, even code a member runs in the store's space.
 
 The handlers learn the principal they act for with `currentPrincipal()`, and an
 entry's adder from its `authored-by` label, which is how `remove` and `rename`

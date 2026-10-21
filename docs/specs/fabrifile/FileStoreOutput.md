@@ -118,7 +118,7 @@ These rules hold for every stream:
 | --- | --- |
 | [`add`](#add) | a new entry, for a blob already in the store's space |
 | [`remove`](#remove) | the entry taken out of the store, and marked removed |
-| [`rename`](#rename) | the entry's name changed |
+| [`rename`](#rename) | the entry's name changed, and its blob with it |
 
 ### `add`
 
@@ -128,8 +128,9 @@ number, onConflict?: "refuse" | "rename")`
 - `name: string` — The new entry's name. A name that isn't valid (see
   [names](FileEntry.md#names)) is refused, with `code: "invalid-name"`.
 - `mediaType: string` — The media type the blob was stored with.
-- `blob: BlobRef` — The blob holding the bytes. A `blob.space` other than the
-  store's own space is refused, with `code: "other-space"`.
+- `blob: BlobRef` — The blob holding the bytes, stored under `name`. A
+  `blob.space` other than the store's own space is refused, with
+  `code: "other-space"`.
 - `size: number` — The size of the file, in bytes.
 - `onConflict` — What to do when `name` is taken. With `"refuse"`, the default,
   the request is refused, with `code: "name-taken"`. With `"rename"`, the store
@@ -143,6 +144,13 @@ request's `name` exactly when the store chose a free one, so a client learns
 what became of its file from the outcome alone, without reading the entry, whose
 name a later `rename` can change. A client that tells a person where their file
 went names a `requestId`, since it can't know the event's own key.
+
+When the entry's name is not the name its blob was stored under, because the
+store chose a free one, or because the client stored the blob with no name, the
+store stores the blob's bytes and media type again under the entry's name, and
+the entry names that blob (see [named blobs](README.md#prerequisites)). An
+entry's blob always carries the entry's name.
+
 The store adds an entry with the request's fields, `addedAt` from the handler's
 clock, and `addedBy` the adder's profile, `wish({ query: "#profile" })`. An
 adder with no profile is refused, with `code: "not-permitted"`, so that no file
@@ -151,7 +159,7 @@ is stored unattributed. The outcome's `entry` links the new entry.
 The store takes `blob`, `mediaType` and `size` as the request states them, and
 can't yet check them against the blob store (see
 [prerequisites](README.md#prerequisites)). A client MUST name the blob it
-stored, with the media type and size it stored.
+stored, with the name, media type and size it stored.
 
 ### `remove`
 
@@ -179,3 +187,9 @@ store.
 
 Only the entry's adder, or a principal the store's space admits as OWNER, may
 rename it. Anyone else is refused, with `code: "not-permitted"`.
+
+The store stores the entry's bytes and media type again, as a blob under the new
+name, and changes the entry's `name` and `blob` together, in one transaction.
+The client sends only the new name: the new blob is the store's business, and a
+person sees only the rename. The blob the entry named before stays in the blob
+store (see [privacy](README.md#privacy)).

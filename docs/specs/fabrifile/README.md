@@ -86,9 +86,10 @@ provide, the document says so, under the heading "Prerequisites".
 - **Store.** A space's set of files: a `FileStore` piece, named by the space's
   root.
 - **Entry.** One file in a store: a [`FileEntry`](FileEntry.md).
-- **Blob.** The bytes of a file and their media type, kept by the space's blob
-  store as the document `cid:fid1:<hash>`, where `<hash>` is the hash of the
-  media type and the bytes. A blob is immutable, and nothing deletes one.
+- **Blob.** The bytes of a file, their media type, and optionally a name,
+  kept by the space's blob store as the document `cid:fid1:<hash>`, where
+  `<hash>` is the hash of all three. A blob is immutable, and nothing deletes
+  one. The same bytes under two names are two blobs.
 - **Blob reference.** The pair of a blob's space and its `fid1:` id, which is
   everything a reader needs to fetch the bytes.
 - **Name.** The string a store finds an entry by. Within one store, names are
@@ -115,9 +116,13 @@ provide, the document says so, under the heading "Prerequisites".
    valid as a file name on the common file systems (see
    [`FileEntry`](FileEntry.md#names)), so a program can mirror a store to a
    directory with one file per entry and no renaming.
-5. **An entry's bytes never change.** A blob is immutable, so an entry's blob
-   reference and media type are fixed when it is added. Its name can change. A
-   new version of a file is a new entry.
+5. **An entry's blob carries the entry's name.** An entry and its blob name
+   the file alike, so that the bytes, fetched by themselves, still say what
+   they are called. A blob is immutable, so renaming a file stores its bytes
+   again as a new blob under the new name, and the entry then names that blob.
+   The store does that itself, and a person renaming a file sees only the
+   rename. An entry's bytes and media type never change: a new version of a
+   file is a new entry.
 6. **Removing a file removes the entry, not the bytes.** The blob store deletes
    nothing, so a removed file's bytes stay reachable by anyone holding its
    blob reference (see [Privacy](#privacy)).
@@ -140,10 +145,15 @@ refuses reads no entry. The bytes are not, today:
   id can fetch it, and anyone can upload into a space
   ([files](../../common/capabilities/files.md#what-the-store-provides)). The
   bytes are only as private as their reference is secret.
-- **A reference is a hash of the content.** Anyone who already has a file can
-  compute its id, and so can learn whether a space holds it, by fetching it.
+- **A reference is a hash of the content.** Anyone who already has a file, and
+  knows its name, can compute its id, and so can learn whether a space holds
+  it, by fetching it.
+- **A blob says its name.** A download serves the blob's name with its bytes,
+  so whoever can fetch a blob learns what the file is called, as well as what
+  it holds.
 - **Removal doesn't revoke.** A removed entry's blob reference still fetches
   its bytes, and so do the copies of it that attachments and other links hold.
+  So does the blob a rename replaced, under the file's earlier name.
 
 Some of this no design can prevent: anyone who can read a file can keep and
 re-share its bytes, by reference or by copy. What the runtime can provide is
@@ -163,13 +173,22 @@ that a blob reference grants nothing on its own. See
 
 The design depends on runtime capabilities that don't exist yet:
 
+- **Named blobs.** A blob record holds an optional `name` beside its media
+  type and bytes, hashed into its id with them, and a download serves it as
+  the file's name (`Content-Disposition`). An upload names the blob, as
+  `cf-file-input` does with the chosen file's name.
+- **Renaming a blob, from a pattern.** `rename`, and an `add` that chooses a
+  free name, store an existing blob's bytes and media type again under another
+  name. That needs a way for a handler to do it without the bytes passing
+  through the pattern, such as a builtin that takes a blob reference and a
+  name, and returns the new blob's reference.
 - **Authorized blob reads.** A blob read is admitted only for a principal the
   blob's space admits, as a read of any other document of the space is, and a
   blob write likewise. Until then, everything under [Privacy](#privacy)
   holds.
 - **A blob reference a pattern can check.** The store takes a blob reference
   from a client, and can't yet confirm that the blob exists in its own space,
-  or that its stored media type is the one the request names (see
+  or that its stored media type and name are the ones the request names (see
   [`FileStoreOutput`](FileStoreOutput.md#add)).
 - **A blob URL a pattern can form.** A rendering needs a URL for a blob, such
   as an image's `src`. An upload returns one, relative to the toolshed's

@@ -18,15 +18,16 @@ loads no rendering code.
 Adding a file is two steps, and the client does both:
 
 1. Store the bytes in the blob store of the store's space. The upload route is
-   `POST /<space>/blobs/<name>`, whose body is `{ type, body }` encoded in the
-   fabric JSON form, `type` the media type and `body` the bytes. It returns the
+   `POST /<space>/blobs/<name>`, whose body is `{ type, body, name }` encoded
+   in the fabric JSON form, `type` the media type, `body` the bytes, and `name`
+   the file's name (see [named blobs](README.md#prerequisites)). It returns the
    blob's `id`, and a URL relative to the space's path. `cf-file-input` does
    this step for a VDOM host.
-2. Send the store's `add`, with the blob reference `{ space, id }`, the media
-   type and the size the client stored, and the file's name.
+2. Send the store's `add`, with the blob reference `{ space, id }`, and the
+   name, the media type and the size the client stored.
 
-A client MUST name, in `add`, the blob it stored, with the media type it stored
-it with, since the store can't yet check either (see
+A client MUST name, in `add`, the blob it stored, with the name and media type
+it stored it with, since the store can't yet check them (see
 [prerequisites](README.md#prerequisites)). A client SHOULD send `onConflict:
 "rename"` for a name the person didn't choose, such as a pasted image's, and
 `"refuse"` for a name they typed, so that they can choose another. Either way,
@@ -74,8 +75,9 @@ make that safe without renaming: a name is one path segment, and never `.`,
   checked it;
 - MUST detect two names that its file system treats as one, as a file system
   that ignores case does, rather than let one file replace the other;
-- SHOULD key what it has fetched by `blob.id`, which never changes for an
-  entry, so that a rename moves a file rather than fetching it again;
+- SHOULD key what it has fetched by entry, which a rename keeps, so that a
+  rename moves a file rather than fetching it again: a rename changes an
+  entry's `blob`, but never its bytes;
 - removes a file, or keeps it, when its entry leaves `entries`, as the program
   documents.
 
