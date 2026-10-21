@@ -440,6 +440,22 @@ describe("recent-commits", () => {
             ]);
           });
 
+          it("keeps listing a repository a transfer delivery names", async () => {
+            const relay = new FakeRelay();
+            await relay.open();
+            restore = standIn(() => [labs(["l"])], calls);
+            const organization = new OrganizationCommits(relay.webhooks);
+            await organization.refresh(CREDENTIAL);
+            await relay.deliver("repository", {
+              action: "transferred",
+              repository: { full_name: REPO },
+            });
+
+            await organization.refresh(CREDENTIAL);
+
+            expect(organization.commits.map((held) => held.sha)).toEqual(["l"]);
+          });
+
           it("lists the repositories again once a repository delivery arrives", async () => {
             const relay = new FakeRelay();
             await relay.open();

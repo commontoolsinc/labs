@@ -158,9 +158,10 @@ const HISTORY_QUERY = `query($owner: String!, $name: String!, $count: Int!) {
 
 /**
  * Returns the repository, as "owner/name", that a `repository` delivery
- * reports, and whether the delivery takes it out of the listing, by deleting,
- * archiving or transferring it, or puts it back, by creating or unarchiving
- * it. Returns `undefined` for any other delivery.
+ * reports, and whether the delivery takes it out of the listing, by deleting
+ * or archiving it, or puts it back, by creating or unarchiving it. Returns
+ * `undefined` for any other delivery, a transfer among them, whose direction
+ * the next listing shows.
  */
 function repositoryChangeOf(
   delivery: GitHubDelivery,
@@ -180,7 +181,7 @@ function repositoryChangeOf(
 
 // The actions of a `repository` delivery that take a repository out of the
 // listing, and those that put one back.
-const GONE = new Set(["deleted", "archived", "transferred"]);
+const GONE = new Set(["deleted", "archived"]);
 const BACK = new Set(["created", "unarchived"]);
 
 // The commit a push names as the one a deleted branch was moved to.
