@@ -367,6 +367,19 @@ describe("runHarnessJob()", () => {
       expect(plain.seen.maxModelTurns).not.toBe(6);
     });
 
+    it("gives the harness the spec's depth and reasoning effort, and neither when the spec names none", async () => {
+      const { seen } = await runScripted(
+        plainSpec({ depth: "deep", reasoningEffort: "low" }),
+        answering("Titan"),
+      );
+      const plain = await runScripted(plainSpec(), answering("Titan"));
+
+      expect(seen.loopOptions?.depth).toBe("deep");
+      expect(seen.loopOptions?.reasoningEffort).toBe("low");
+      expect(plain.seen.loopOptions?.depth).toBeUndefined();
+      expect(plain.seen.loopOptions?.reasoningEffort).toBeUndefined();
+    });
+
     it("leaves usage out of the report when the loop reports none", async () => {
       const { result } = await runScripted(plainSpec(), async (context) => {
         await answering("Titan")(context);

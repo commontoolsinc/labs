@@ -1,5 +1,4 @@
-import { sendsSection } from "./prompt-sections.ts";
-import type { HarnessTaskTag } from "./task-classification.ts";
+import { type RunShape, sendsSection } from "./prompt-sections.ts";
 
 /** What research is, and when a fresh task gets its opening pass. */
 const researchGuidance = (patternIndex: boolean): string =>
@@ -49,22 +48,21 @@ export const DELEGATION_GUIDANCE = [
 /**
  * Shared guidance for finding a feasible path before asking or giving up.
  * A run with no pattern index is not told to search one or to run what it
- * finds there. Given task tags, it carries the paragraphs those kinds of work
- * need and the ones every task needs; without them, all of it.
+ * finds there. It carries the paragraphs the run's shape calls for, as
+ * `PROMPT_SECTION_AUDIENCE` says, and the ones every task needs.
  */
 export const orientationGuidance = (
-  { patternIndex, tags }: {
-    patternIndex: boolean;
-    tags?: ReadonlySet<HarnessTaskTag>;
-  },
+  { patternIndex, shape }: { patternIndex: boolean; shape: RunShape },
 ): string =>
   [
-    ...(sendsSection("research-guidance", tags)
+    ...(sendsSection("research-guidance", shape)
       ? [researchGuidance(patternIndex)]
       : []),
     GOAL_GUIDANCE,
-    ...(sendsSection("given", tags) ? [GIVEN_GUIDANCE] : []),
-    ...(sendsSection("findable", tags) ? [findableGuidance(patternIndex)] : []),
+    ...(sendsSection("given", shape) ? [GIVEN_GUIDANCE] : []),
+    ...(sendsSection("findable", shape)
+      ? [findableGuidance(patternIndex)]
+      : []),
     ACTION_PATH_GUIDANCE,
     EVIDENCE_GUIDANCE,
     RELEASE_REFUSAL_GUIDANCE,

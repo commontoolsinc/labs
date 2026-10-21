@@ -65,6 +65,12 @@ export interface LocalJobProfile {
   model?: string;
 
   /**
+   * The reasoning effort a job runs at, and the most a request may ask for;
+   * the provider's default when absent, and then a request may name none.
+   */
+  reasoningEffort?: ReasoningEffort;
+
+  /**
    * Whether a job may declare a browser host. A job that does browses
    * through it: the lane adds `delegate_task` and the `browser` subagent
    * profile to that job alone, so a job without a host never gains them.
@@ -120,6 +126,7 @@ export type LocalJobProfiles = ReadonlyMap<string, LocalJobProfile>;
 export interface LocalJobNarrowing {
   tools?: readonly string[];
   maxModelTurns?: number;
+  reasoningEffort?: ReasoningEffort;
 
   /** The request's browser host declaration, when it made one. */
   browserHost?: unknown;
@@ -132,6 +139,28 @@ export interface LocalJobNarrowing {
 }
 
 const ROLES: readonly PromptSlotRole[] = ["direct-command", "context", "quote"];
+
+/**
+ * Reasoning efforts from least to most, as the providers the harness speaks
+ * to name them; a model may support only some of them.
+ */
+export const REASONING_EFFORTS = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+
+export type ReasoningEffort = typeof REASONING_EFFORTS[number];
+
+/** `value` as a reasoning effort, or undefined when it names none. */
+export const reasoningEffortOf = (
+  value: unknown,
+): ReasoningEffort | undefined =>
+  REASONING_EFFORTS.find((effort) => effort === value);
 
 /** The tool that spawns a subagent. */
 const DELEGATE_TOOL: BuiltinToolId = "delegate_task";
@@ -189,6 +218,7 @@ const profileOf = (name: string, value: unknown): LocalJobProfile => {
     loomRetrievalConfig,
     loomCommandsConfig,
     model,
+    reasoningEffort,
     browserHost,
     fabric,
     patternIndexUrl,
@@ -229,6 +259,10 @@ const profileOf = (name: string, value: unknown): LocalJobProfile => {
   }
   if (model !== undefined && typeof model !== "string") {
     fail("`model` must be a string");
+  }
+  const effort = reasoningEffortOf(reasoningEffort);
+  if (reasoningEffort !== undefined && effort === undefined) {
+    fail(`\`reasoningEffort\` must be one of ${REASONING_EFFORTS.join(", ")}`);
   }
   if (browserHost !== undefined && typeof browserHost !== "boolean") {
     fail("`browserHost` must be true or false");
@@ -305,6 +339,7 @@ const profileOf = (name: string, value: unknown): LocalJobProfile => {
       ? { loomCommandsConfig: loomCommandsConfig as string }
       : {}),
     ...(model !== undefined ? { model: model as string } : {}),
+    ...(effort !== undefined ? { reasoningEffort: effort } : {}),
     ...(browserHost === true ? { browserHost: true } : {}),
     ...(session !== undefined ? { fabric: session } : {}),
     ...(patternIndexUrl !== undefined
@@ -494,7 +529,7 @@ export const narrowLocalJobProfile = (
   profile: LocalJobProfile,
   narrowing: LocalJobNarrowing,
 ): { profile: LocalJobProfile } | { refusal: string } => {
-  const { tools, maxModelTurns, browserHost } = narrowing;
+  const { tools, maxModelTurns, reasoningEffort, browserHost } = narrowing;
   const beyond = tools?.filter((tool) => !profile.tools.includes(tool)) ?? [];
   if (beyond.length > 0) {
     return {
@@ -508,6 +543,23 @@ export const narrowLocalJobProfile = (
       refusal:
         `The profile allows at most ${profile.maxModelTurns} model turns.`,
     };
+  }
+  if (reasoningEffort !== undefined) {
+    if (profile.reasoningEffort === undefined) {
+      return {
+        refusal:
+          "The profile sets no reasoning effort, so a request may not name one.",
+      };
+    }
+    if (
+      REASONING_EFFORTS.indexOf(reasoningEffort) >
+        REASONING_EFFORTS.indexOf(profile.reasoningEffort)
+    ) {
+      return {
+        refusal:
+          `The profile allows at most \`${profile.reasoningEffort}\` reasoning effort.`,
+      };
+    }
   }
   if (browserHost !== undefined && profile.browserHost !== true) {
     return { refusal: "The profile does not admit a browser host." };
@@ -532,6 +584,7 @@ export const narrowLocalJobProfile = (
         : {}),
       ...(tools !== undefined ? { tools: [...tools] } : {}),
       ...(maxModelTurns !== undefined ? { maxModelTurns } : {}),
+      ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
       ...(browserHost !== undefined ? { browserHost: true } : {}),
     },
   };

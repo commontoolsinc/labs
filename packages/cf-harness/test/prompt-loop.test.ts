@@ -5,6 +5,7 @@ import {
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
+import type { HarnessRunDepth } from "../src/contracts/run-depth.ts";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { stub } from "@std/testing/mock";
@@ -3097,8 +3098,10 @@ describe("CfHarnessPromptLoop opening research", () => {
       runId: string,
       runIds: string[],
       artifactRoot?: string,
+      depth?: HarnessRunDepth,
     ) =>
       new CfHarnessPromptLoop({
+        ...(depth !== undefined ? { depth } : {}),
         engine: new CfHarnessEngine({
           sandboxRuntime: new FakeSandboxRuntime(),
           runId,
@@ -3172,6 +3175,25 @@ describe("CfHarnessPromptLoop opening research", () => {
 
       expect(classification).toMatchObject({ tags: ["find"], path: "assumed" });
       expect(runIds).toEqual([]);
+    });
+
+    it("runs opening research for a deep task of any kind, and not for the same task at standard depth", async () => {
+      const task = "weather in Brisbane";
+      const researched = async (depth: HarnessRunDepth) => {
+        const runIds: string[] = [];
+        const loop = classifiedLoop(`run-${depth}`, runIds, undefined, depth);
+        await loop.classifyTask(task);
+        const result = await loop.runPrompt({
+          prompt: task,
+          openingResearchTask: task,
+          promptSlotBinding: directPromptSlotBinding,
+        });
+        expect(result.runState.taskClassification?.tags).toEqual(["find"]);
+        return result.runState.openingResearch?.status;
+      };
+
+      expect(await researched("deep")).toBe("completed");
+      expect(await researched("standard")).toBeUndefined();
     });
 
     it("runs opening research for an author task", async () => {

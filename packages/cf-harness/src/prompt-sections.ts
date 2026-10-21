@@ -1,3 +1,4 @@
+import type { HarnessRunDepth } from "./contracts/run-depth.ts";
 import type {
   HarnessTaskClassification,
   HarnessTaskTag,
@@ -34,25 +35,37 @@ export const PROMPT_SECTIONS = [
 export type PromptSection = typeof PROMPT_SECTIONS[number];
 
 /**
- * Which tagged tasks a section is sent to. A task gets the section when it
+ * Which runs a section is sent to. A run gets the section when its task
  * carries any tag in `anyOf` (any tag at all, when `anyOf` is absent) and none
- * in `noneOf`. A task that was never classified gets it unless
- * `unclassified` is false: such a run carries all of its orientation, but not
- * the blocks that stand in for piece targeting.
+ * in `noneOf`, and its depth is one of `depth` (any, when absent). A task that
+ * was never classified passes the tag conditions unless `unclassified` is
+ * false: such a run carries all of its orientation, but not the blocks that
+ * stand in for piece targeting. The depth conditions hold for every run.
  */
 export interface SectionAudience {
   readonly anyOf?: readonly HarnessTaskTag[];
   readonly noneOf?: readonly HarnessTaskTag[];
   readonly unclassified?: false;
+  readonly depth?: readonly HarnessRunDepth[];
 }
 
-/** The kinds of work each section serves, in one place. */
+/** What decides which sections a run is sent. */
+export interface RunShape {
+  /** The task's tags; absent when it was never classified. */
+  readonly tags?: ReadonlySet<HarnessTaskTag>;
+  readonly depth: HarnessRunDepth;
+}
+
+/**
+ * The runs each section reaches, in one place. A section with a list of
+ * audiences reaches a run any one of them does.
+ */
 export const PROMPT_SECTION_AUDIENCE: Readonly<
-  Record<PromptSection, SectionAudience>
+  Record<PromptSection, SectionAudience | readonly SectionAudience[]>
 > = {
-  // The opening research pass a fresh task gets before its first turn, and
-  // what that pass is.
-  "opening-research": { anyOf: ["author"] },
+  // The opening research pass a fresh task gets before its first turn, which
+  // a deep run of any kind gets too, and what that pass is.
+  "opening-research": [{ anyOf: ["author"] }, { depth: ["deep"] }],
   "research-guidance": { anyOf: ["author"] },
   // Inspect held pieces, grants and retained research before asking.
   given: { anyOf: ["pieces", "find"] },
@@ -90,19 +103,26 @@ export const PROMPT_SECTION_AUDIENCE: Readonly<
   "loom-retrieval-tools": { anyOf: ["find", "act"] },
 };
 
-/**
- * Whether a run whose task carries `tags` is sent `section`; `undefined` tags
- * mean the task was never classified.
- */
-export const sendsSection = (
-  section: PromptSection,
-  tags: ReadonlySet<HarnessTaskTag> | undefined,
-): boolean => {
-  const audience = PROMPT_SECTION_AUDIENCE[section];
+/** Whether one audience takes in a run of `shape`. */
+const reaches = (audience: SectionAudience, shape: RunShape): boolean => {
+  const { tags, depth } = shape;
+  if (audience.depth !== undefined && !audience.depth.includes(depth)) {
+    return false;
+  }
   if (tags === undefined) return audience.unclassified !== false;
   const has = (tag: HarnessTaskTag) => tags.has(tag);
   return (audience.anyOf === undefined || audience.anyOf.some(has)) &&
     !(audience.noneOf ?? []).some(has);
+};
+
+/** Whether a run of `shape` is sent `section`. */
+export const sendsSection = (
+  section: PromptSection,
+  shape: RunShape,
+): boolean => {
+  const audience = PROMPT_SECTION_AUDIENCE[section];
+  const alternatives = "length" in audience ? audience : [audience];
+  return alternatives.some((one) => reaches(one, shape));
 };
 
 /** The tags a run's recorded classification gave it; none when it has none. */

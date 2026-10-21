@@ -7,8 +7,8 @@
  *
  * - `GET /health` — the lane is serving.
  * - `POST /jobs` — enqueue `{caller, profile, idempotencyKey, task,
- *   instructions?, context?, resultSchema, tools?, maxModelTurns?,
- *   browserHost?, inputs?, foreignSpaces?}`, where `inputs` maps a name to a
+ *   instructions?, context?, resultSchema, tools?, maxModelTurns?, depth?,
+ *   reasoningEffort?, browserHost?, inputs?, foreignSpaces?}`, where `inputs` maps a name to a
  *   piece address and `foreignSpaces` a space DID an input names to the
  *   origin serving it;
  *   answers `201` with the new job, or `200` with the one the key already
@@ -29,10 +29,18 @@
  * A refusal is `{ok: false, code, error}` with a 4xx status.
  */
 
+import {
+  HARNESS_RUN_DEPTHS,
+  parseHarnessRunDepth,
+} from "@commonfabric/cf-harness/contracts/run-depth";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import type { LocalJobBrowserHost } from "./browser-host.ts";
-import { narrowLocalJobProfile } from "./profiles.ts";
+import {
+  narrowLocalJobProfile,
+  REASONING_EFFORTS,
+  reasoningEffortOf,
+} from "./profiles.ts";
 import type { LocalJobProfiles } from "./profiles.ts";
 import {
   LOCAL_JOB_TERMINAL_STATES,
@@ -118,6 +126,8 @@ const enqueueRequestOf = (
     resultSchema,
     tools,
     maxModelTurns,
+    depth,
+    reasoningEffort,
     browserHost,
     inputs,
     foreignSpaces,
@@ -153,6 +163,20 @@ const enqueueRequestOf = (
   ) {
     return { error: "`maxModelTurns` must be a whole number of 1 or more." };
   }
+  const runDepth = parseHarnessRunDepth(depth);
+  if (depth !== undefined && runDepth === undefined) {
+    return {
+      error: `\`depth\` must be one of ${HARNESS_RUN_DEPTHS.join(", ")}.`,
+    };
+  }
+  const effort = reasoningEffortOf(reasoningEffort);
+  if (reasoningEffort !== undefined && effort === undefined) {
+    return {
+      error: `\`reasoningEffort\` must be one of ${
+        REASONING_EFFORTS.join(", ")
+      }.`,
+    };
+  }
   if (browserHost !== undefined && !isObjectNotArray(browserHost)) {
     return { error: "`browserHost` must be an object." };
   }
@@ -185,6 +209,8 @@ const enqueueRequestOf = (
       resultSchema,
       ...(tools !== undefined ? { tools: tools as string[] } : {}),
       ...(maxModelTurns !== undefined ? { maxModelTurns } : {}),
+      ...(runDepth !== undefined ? { depth: runDepth } : {}),
+      ...(effort !== undefined ? { reasoningEffort: effort } : {}),
       ...(browserHost !== undefined
         ? { browserHost: browserHost as Record<string, unknown> }
         : {}),

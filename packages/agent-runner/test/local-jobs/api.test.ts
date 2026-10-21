@@ -147,6 +147,26 @@ describe("local-jobs/api", () => {
       expect(kicked).toEqual(["kick"]);
     });
 
+    it("keeps the depth a request names on its job, and refuses a reasoning effort its profile does not set", async () => {
+      const { post } = apiWith();
+
+      const deep = await post("/jobs", { ...BODY, depth: "deep" });
+      const effort = await post("/jobs", {
+        ...BODY,
+        idempotencyKey: "weaver-ask:2",
+        reasoningEffort: "high",
+      });
+
+      expect(deep.status).toBe(201);
+      expect((await deep.json()).job.request.depth).toBe("deep");
+      expect(effort.status).toBe(400);
+      expect(await effort.json()).toMatchObject({
+        code: "beyond_profile",
+        error:
+          "The profile sets no reasoning effort, so a request may not name one.",
+      });
+    });
+
     it("returns 409 for a key that names a different request", async () => {
       const { post } = apiWith();
       await post("/jobs", BODY);
@@ -184,6 +204,11 @@ describe("local-jobs/api", () => {
       ["tools that are not names", { ...BODY, tools: [1] }],
       ["a turn count below one", { ...BODY, maxModelTurns: 0 }],
       ["a fractional turn count", { ...BODY, maxModelTurns: 1.5 }],
+      ["a depth it does not know", { ...BODY, depth: "medium" }],
+      [
+        "a reasoning effort it does not know",
+        { ...BODY, reasoningEffort: "extreme" },
+      ],
       ["inputs that are not an object", { ...BODY, inputs: ["/of:x"] }],
       ["an input that is not an address", { ...BODY, inputs: { focus: 1 } }],
       [

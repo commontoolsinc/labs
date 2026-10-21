@@ -64,7 +64,12 @@ import {
 import { REVISION_VERIFICATION_GUIDANCE } from "./revision-verification.ts";
 import { WEAVER_COMMAND_GUIDANCE } from "./tools/weaver-action.ts";
 import type { CreateHarnessPromptLoopOptions } from "./prompt-loop.ts";
-import { type PromptSection, sendsSection } from "./prompt-sections.ts";
+import {
+  type PromptSection,
+  type RunShape,
+  sendsSection,
+} from "./prompt-sections.ts";
+import type { HarnessRunDepth } from "./contracts/run-depth.ts";
 import type {
   SandboxAdditionalMountConfig,
   SandboxRuntimeChoice,
@@ -72,7 +77,6 @@ import type {
 } from "./sandbox/types.ts";
 import { loadHarnessSkillContext } from "./skills/registry.ts";
 import { persistHarnessRunSkillRegistry } from "./skills/run-registry.ts";
-import type { HarnessTaskTag } from "./task-classification.ts";
 import {
   AUTHOR_TOOL_GUIDANCE,
   LOOM_COMMANDS_TOOL_GUIDANCE,
@@ -201,6 +205,9 @@ export interface HarnessSessionConfig {
   allowedSubagentProfiles: readonly HarnessSubagentProfile[];
   browserAccess?: HarnessBrowserAccessLease;
   reasoningEffort?: string;
+
+  /** How far the caller wants the run taken; `standard` when absent. */
+  depth?: HarnessRunDepth;
 
   /** Reasoning effort for the `research` tool's own model turns. */
   researchReasoningEffort?: string;
@@ -401,6 +408,7 @@ export const harnessSessionEngineOptions = (
     ...(config.reasoningEffort !== undefined
       ? { reasoningEffort: config.reasoningEffort }
       : {}),
+    ...(config.depth !== undefined ? { depth: config.depth } : {}),
     ...(config.researchReasoningEffort !== undefined
       ? { researchReasoningEffort: config.researchReasoningEffort }
       : {}),
@@ -548,7 +556,7 @@ const CONTEXT_MESSAGE_SECTIONS: ReadonlyMap<string, PromptSection> = new Map([
 ]);
 
 /**
- * Fits a run's context messages to its task tags, as
+ * Fits a run's context messages to its shape, as
  * `PROMPT_SECTION_AUDIENCE` says. Piece targeting is replaced by the blocks
  * that stand in for it (how to work on held pieces, or that the run may hold
  * some) and kept beside them only where the task is sent it. A message that
@@ -557,20 +565,20 @@ const CONTEXT_MESSAGE_SECTIONS: ReadonlyMap<string, PromptSection> = new Map([
  */
 export const orientContextMessages = (
   messages: readonly string[],
-  tags: ReadonlySet<HarnessTaskTag> | undefined,
+  shape: RunShape,
 ): string[] =>
   messages.flatMap((message) => {
     if (message === PIECE_TARGETING_GUIDANCE) {
       return [
-        ...(sendsSection("held-pieces", tags) ? [HELD_PIECES_GUIDANCE] : []),
-        ...(sendsSection("may-hold-pieces", tags)
+        ...(sendsSection("held-pieces", shape) ? [HELD_PIECES_GUIDANCE] : []),
+        ...(sendsSection("may-hold-pieces", shape)
           ? [MAY_HOLD_PIECES_GUIDANCE]
           : []),
-        ...(sendsSection("piece-targeting", tags) ? [message] : []),
+        ...(sendsSection("piece-targeting", shape) ? [message] : []),
       ];
     }
     const section = CONTEXT_MESSAGE_SECTIONS.get(message);
-    return section === undefined || sendsSection(section, tags)
+    return section === undefined || sendsSection(section, shape)
       ? [message]
       : [];
   });

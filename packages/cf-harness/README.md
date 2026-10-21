@@ -1982,32 +1982,32 @@ Research is a private tool loop, not web search or a delegable child profile.
 Its `inspect_pattern` and `open_pattern_file` tools accept a bare pattern id or
 `cf:pattern:<id>`; index lookups and retained evidence use the bare id.
 
-Fresh CLI tasks tagged `author` (see task classification below), and interactive
-sessions without retained research, request an opening `orient` pass for
-open-ended tasks. A task already selecting an implementation skips that
-automatic pass through attached `patternRefs` or explicit markers in the
-request: `pattern:<space>/<slug>`, `cf:pattern:<id>`, or `skill:<id>`. A skill
-id names a registered skill or an `owner/repository/skill` address. Bare ids,
-paths, and prose such as "use the named skill X" remain open unless X uses a
-marker. Recognition uses the existing address parsers; it does not resolve
-references, acquire skills, or grant authority. The ordinary tools do that. The
-parent can still call `research` for an unresolved question. Subsequent chat
-turns reuse the retained findings and let the parent request targeted answers;
-they do not repeat orientation. It runs through the ordinary policy, artifacts,
-provenance, cancellation, and usage path before the first parent turn. A
-host-supplied user message puts the result immediately before the task. The
-result's `purpose` limits what `complete` means: a complete orientation
-establishes a supported approach; it does not claim that the application has
-been built. Both purposes can inspect pattern source, describe handles, and
-return examples. Orientation's `leads` are host-observed metadata, usable as
-search references for delegation, and remain separate from inspected `patterns`.
-Orientation's `refinedTask` restates the request as the intersection of what was
-asked and what research verified is possible, each part bound to the grant or
-confirmed pattern that serves it, with the parts nothing serves left under
-`missing`; the parent works, and writes a delegation's goal, from it. An
-orientation that omits it is still admitted. The current user goal accompanies
-narrower research questions and delegated tasks so they retain the original
-context.
+Fresh CLI tasks tagged `author` (see task classification below), fresh CLI tasks
+of any kind run at `--depth deep`, and interactive sessions without retained
+research, request an opening `orient` pass for open-ended tasks. A task already
+selecting an implementation skips that automatic pass through attached
+`patternRefs` or explicit markers in the request: `pattern:<space>/<slug>`,
+`cf:pattern:<id>`, or `skill:<id>`. A skill id names a registered skill or an
+`owner/repository/skill` address. Bare ids, paths, and prose such as "use the
+named skill X" remain open unless X uses a marker. Recognition uses the existing
+address parsers; it does not resolve references, acquire skills, or grant
+authority. The ordinary tools do that. The parent can still call `research` for
+an unresolved question. Subsequent chat turns reuse the retained findings and
+let the parent request targeted answers; they do not repeat orientation. It runs
+through the ordinary policy, artifacts, provenance, cancellation, and usage path
+before the first parent turn. A host-supplied user message puts the result
+immediately before the task. The result's `purpose` limits what `complete`
+means: a complete orientation establishes a supported approach; it does not
+claim that the application has been built. Both purposes can inspect pattern
+source, describe handles, and return examples. Orientation's `leads` are
+host-observed metadata, usable as search references for delegation, and remain
+separate from inspected `patterns`. Orientation's `refinedTask` restates the
+request as the intersection of what was asked and what research verified is
+possible, each part bound to the grant or confirmed pattern that serves it, with
+the parts nothing serves left under `missing`; the parent works, and writes a
+delegation's goal, from it. An orientation that omits it is still admitted. The
+current user goal accompanies narrower research questions and delegated tasks so
+they retain the original context.
 
 Orientation and the parent distinguish inputs already given, inputs findable
 within the granted scope, and actions the available capabilities cannot perform.
@@ -2053,21 +2053,29 @@ classifier that throws falls back to every tag. The tags, the path that chose
 them (`rule`, `assumed`, `fallback`), and the classification's wall time are
 recorded as `taskClassification` in `run-state.json` and `run-report.json`.
 `scripts/task-classification-eval.ts` scores the rule against a cheap-model
-classifier over the playtest asks, by hand. Only an `author` task gets the
-opening research pass. The parent's orientation follows the tags: `pieces` and
-`author` add the code-authoring framing (reading docs and skills, repairing
-code, acquiring a skill by its id), `pieces` a short held-pieces block (the
-input cells are the pieces of the loom the person is in; `describe_handle`,
-`read_value`, and `call_verb` read and act on them) where any other task gets
-one sentence saying handles may be held, `author` alone the piece-targeting
-guidance, the instruction to verify an effect, and the revision-verification
-guidance, `pieces` and `find` the held-handle and grant guidance, `find` and
-`author` the findable and pattern-index guidance, `author` what research is (a
-private pass that reports what to run and cannot execute) and the
-opening-research rule, `act`, `pieces` and `author` delegation, `find` and `act`
-the Weaver command guidance, and `act` the browser guidance. The tool allow-list
-does not narrow, so a task given too few tags can still reach what it needs; a
-run with no classification carries all of the orientation.
+classifier over the playtest asks, by hand. Only an `author` task, or a run at
+`deep` depth, gets the opening research pass. `src/prompt-sections.ts` says, in
+one table, which tags and depths each conditional part of the prompt reaches.
+The parent's orientation follows the tags: `pieces` and `author` add the
+code-authoring framing (reading docs and skills, repairing code, acquiring a
+skill by its id), `pieces` a short held-pieces block (the input cells are the
+pieces of the loom the person is in; `describe_handle`, `read_value`, and
+`call_verb` read and act on them) where any other task gets one sentence saying
+handles may be held, `author` alone the piece-targeting guidance, the
+instruction to verify an effect, and the revision-verification guidance,
+`pieces` and `find` the held-handle and grant guidance, `find` and `author` the
+findable and pattern-index guidance, `author` what research is (a private pass
+that reports what to run and cannot execute) and the opening-research rule,
+`act`, `pieces` and `author` delegation, `find` and `act` the Weaver command
+guidance, and `act` the browser guidance. The tool allow-list does not narrow,
+so a task given too few tags can still reach what it needs; a run with no
+classification carries all of the orientation.
+
+The caller chooses the run's depth before it starts, with `--depth quick`,
+`standard` (the default) or `deep`; the tags say what kind of work a task is,
+and the depth how far to take it. It selects prompt sections and grants no
+authority. An agent-runner local job takes `depth` from its request, and
+`reasoningEffort` from its profile, which a request may lower but not raise.
 
 A tool descriptor is a contract: its name, its parameters with one-line
 descriptions, and a sentence or two on what the tool does and returns. Task tags
