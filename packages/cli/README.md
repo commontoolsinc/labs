@@ -1760,17 +1760,17 @@ with `GET /jobs/<id>/events?after=<seq>`, a stream of server-sent events that
 ends after the job's terminal state. A request's `depth` (`quick`, `standard` or
 `deep`), `tags` and `domains` say how far to take the task, what kind of work it
 is and where it happens, each of the last two in place of the harness's
-classification (`domains: []` is none); they grant nothing. `reasoningEffort`
-may lower the profile's, never raise it. `GET /health` keeps `lanes.local` and
-`lanes.fabric` as booleans and adds `readiness.local` and `readiness.fabric`,
-each `{state, since, reason}`. States are `starting`, `up`, `down`, or
-`refused`; `since` is an ISO timestamp of the last state or reason change.
-`reason` is null for an up lane. Fabric remains `starting` until its first
-successful queue scan; `--local-only` leaves it `down` with that reason, and a
-failed start leaves it `refused` with the error. Observed queue scan or
-record-follow failures mark it `down`; a successful scan marks it `up`. An idle
-queue is healthy: this does not detect a subscription that silently stops
-delivering changes.
+classification. `domains: []` states no domain; `tags` must name at least one
+known tag. They grant nothing. `reasoningEffort` may lower the profile's, never
+raise it. `GET /health` keeps `lanes.local` and `lanes.fabric` as booleans and
+adds `readiness.local` and `readiness.fabric`, each `{state, since, reason}`.
+States are `starting`, `up`, `down`, or `refused`; `since` is an ISO timestamp
+of the last state or reason change. `reason` is null for an up lane. Fabric
+remains `starting` until its first successful queue scan; `--local-only` leaves
+it `down` with that reason, and a failed start leaves it `refused` with the
+error. Observed queue scan or record-follow failures mark it `down`; a
+successful scan marks it `up`. An idle queue is healthy: this does not detect a
+subscription that silently stops delivering changes.
 
 Health also lists `routes` as `{method, path}` entries (`:id` is a path
 parameter), the loaded `profileFile`, the resolved SQLite `storePath`, and

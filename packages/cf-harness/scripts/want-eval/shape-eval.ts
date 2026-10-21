@@ -228,9 +228,12 @@ const unmeasured = async (
     variant,
     job,
     state: String(snapshot.state ?? "unknown"),
-    errorCode: `unmeasured: ${
-      error instanceof Error ? error.message : String(error)
-    }`,
+    // The runner's own code says why the job failed; the read error only
+    // says why it could not be measured.
+    errorCode: [
+      ...(typeof snapshot.errorCode === "string" ? [snapshot.errorCode] : []),
+      `unmeasured: ${error instanceof Error ? error.message : String(error)}`,
+    ].join("; "),
     seconds,
     tags: [],
     modelTurns: 0,
