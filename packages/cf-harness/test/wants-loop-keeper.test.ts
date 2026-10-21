@@ -1,6 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { markerKeeper } from "../scripts/want-eval/wants-loop-keeper.ts";
+import {
+  archiveOnExitSignals,
+  markerKeeper,
+} from "../scripts/want-eval/wants-loop-keeper.ts";
 
 /**
  * A keeper whose filing and archiving each wait on a promise the test
@@ -29,79 +32,151 @@ const settled = async (promise: Promise<unknown>): Promise<boolean> => {
   return done;
 };
 
-describe("markerKeeper()", () => {
-  it("returns a cleanup that, asked again during an archive, waits for that archive", async () => {
-    const { keeper, filed, archive, archived } = keeperWithHeldCalls();
-    filed.resolve("w1");
-    await keeper.file();
+/** Runs the handler registered for `signal`, which must be there. */
+const fire = (handlers: Map<Deno.Signal, () => void>, signal: Deno.Signal) => {
+  const handler = handlers.get(signal);
+  if (handler === undefined) throw new Error(`no handler for ${signal}`);
+  handler();
+};
 
-    const first = keeper.cleanup();
-    const interrupt = keeper.cleanup();
+describe("wants-loop-keeper", () => {
+  describe("markerKeeper()", () => {
+    it("returns a cleanup that, asked again during an archive, waits for that archive", async () => {
+      const { keeper, filed, archive, archived } = keeperWithHeldCalls();
+      filed.resolve("w1");
+      await keeper.file();
 
-    expect(await settled(interrupt)).toBe(false);
-    expect(keeper.kept()).toBe("w1");
-    archive.resolve();
-    await interrupt;
-    await first;
-    expect(archived).toEqual(["w1"]);
-    expect(keeper.kept()).toBeUndefined();
+      const first = keeper.cleanup();
+      const interrupt = keeper.cleanup();
+
+      expect(await settled(interrupt)).toBe(false);
+      expect(keeper.kept()).toBe("w1");
+      archive.resolve();
+      await interrupt;
+      await first;
+      expect(archived).toEqual(["w1"]);
+      expect(keeper.kept()).toBeUndefined();
+    });
+
+    it("archives the want a filing in flight at cleanup returns", async () => {
+      const { keeper, filed, archive, archived } = keeperWithHeldCalls();
+      const filing = keeper.file();
+
+      const interrupt = keeper.cleanup();
+
+      expect(archived).toEqual([]);
+      filed.resolve("w1");
+      await filing;
+      archive.resolve();
+      await interrupt;
+      expect(archived).toEqual(["w1"]);
+    });
+
+    it("archives once however many times cleanup is asked", async () => {
+      const { keeper, filed, archive, archived } = keeperWithHeldCalls();
+      filed.resolve("w1");
+      archive.resolve();
+      await keeper.file();
+
+      await keeper.cleanup();
+      await keeper.cleanup();
+
+      expect(archived).toEqual(["w1"]);
+    });
+
+    it("archives nothing when nothing was filed or the filing failed", async () => {
+      const unfiled = keeperWithHeldCalls();
+      await unfiled.keeper.cleanup();
+      expect(unfiled.archived).toEqual([]);
+
+      const failing = keeperWithHeldCalls();
+      const filing = failing.keeper.file();
+      failing.filed.reject(new Error("refused"));
+      await expect(filing).rejects.toThrow("refused");
+      await failing.keeper.cleanup();
+      expect(failing.archived).toEqual([]);
+    });
+
+    it("keeps the want counted as kept when its archive fails", async () => {
+      const { keeper, filed, archive } = keeperWithHeldCalls();
+      filed.resolve("w1");
+      await keeper.file();
+
+      const cleanup = keeper.cleanup();
+      archive.reject(new Error("conflict"));
+
+      await expect(cleanup).rejects.toThrow("conflict");
+      expect(keeper.kept()).toBe("w1");
+    });
+
+    it("throws when asked to file after its cleanup began", async () => {
+      const { keeper } = keeperWithHeldCalls();
+      await keeper.cleanup();
+
+      expect(() => keeper.file()).toThrow("after its cleanup began");
+    });
   });
 
-  it("archives the want a filing in flight at cleanup returns", async () => {
-    const { keeper, filed, archive, archived } = keeperWithHeldCalls();
-    const filing = keeper.file();
+  describe("archiveOnExitSignals()", () => {
+    /** The handlers registered by signal, and the statuses exited with. */
+    const registered = (cleanup: () => Promise<void>) => {
+      const handlers = new Map<Deno.Signal, () => void>();
+      const exits = Promise.withResolvers<number>();
+      const reports: string[] = [];
+      archiveOnExitSignals(
+        cleanup,
+        (signal, handler) => handlers.set(signal, handler),
+        exits.resolve,
+        (message) => reports.push(message),
+      );
+      return { handlers, exited: exits.promise, reports };
+    };
 
-    const interrupt = keeper.cleanup();
+    it("registers a handler for SIGTERM, SIGINT and SIGHUP", () => {
+      const { handlers } = registered(() => Promise.resolve());
 
-    expect(archived).toEqual([]);
-    filed.resolve("w1");
-    await filing;
-    archive.resolve();
-    await interrupt;
-    expect(archived).toEqual(["w1"]);
-  });
+      expect([...handlers.keys()].sort()).toEqual([
+        "SIGHUP",
+        "SIGINT",
+        "SIGTERM",
+      ]);
+    });
 
-  it("archives once however many times cleanup is asked", async () => {
-    const { keeper, filed, archive, archived } = keeperWithHeldCalls();
-    filed.resolve("w1");
-    archive.resolve();
-    await keeper.file();
+    it("exits 143 on SIGTERM only after the cleanup has finished", async () => {
+      const archive = Promise.withResolvers<void>();
+      let archived = false;
+      const { handlers, exited } = registered(() =>
+        archive.promise.then(() => {
+          archived = true;
+        })
+      );
 
-    await keeper.cleanup();
-    await keeper.cleanup();
+      fire(handlers, "SIGTERM");
+      archive.resolve();
 
-    expect(archived).toEqual(["w1"]);
-  });
+      expect(await exited).toBe(143);
+      expect(archived).toBe(true);
+    });
 
-  it("archives nothing when nothing was filed or the filing failed", async () => {
-    const unfiled = keeperWithHeldCalls();
-    await unfiled.keeper.cleanup();
-    expect(unfiled.archived).toEqual([]);
+    it("exits 130 on SIGINT and 129 on SIGHUP", async () => {
+      const interrupted = registered(() => Promise.resolve());
+      fire(interrupted.handlers, "SIGINT");
+      expect(await interrupted.exited).toBe(130);
 
-    const failing = keeperWithHeldCalls();
-    const filing = failing.keeper.file();
-    failing.filed.reject(new Error("refused"));
-    await expect(filing).rejects.toThrow("refused");
-    await failing.keeper.cleanup();
-    expect(failing.archived).toEqual([]);
-  });
+      const hungUp = registered(() => Promise.resolve());
+      fire(hungUp.handlers, "SIGHUP");
+      expect(await hungUp.exited).toBe(129);
+    });
 
-  it("keeps the want counted as kept when its archive fails", async () => {
-    const { keeper, filed, archive } = keeperWithHeldCalls();
-    filed.resolve("w1");
-    await keeper.file();
+    it("reports a failed cleanup and exits all the same", async () => {
+      const { handlers, exited, reports } = registered(() =>
+        Promise.reject(new Error("conflict"))
+      );
 
-    const cleanup = keeper.cleanup();
-    archive.reject(new Error("conflict"));
+      fire(handlers, "SIGTERM");
 
-    await expect(cleanup).rejects.toThrow("conflict");
-    expect(keeper.kept()).toBe("w1");
-  });
-
-  it("throws when asked to file after its cleanup began", async () => {
-    const { keeper } = keeperWithHeldCalls();
-    await keeper.cleanup();
-
-    expect(() => keeper.file()).toThrow("after its cleanup began");
+      expect(await exited).toBe(143);
+      expect(reports).toEqual(["archiving the marker failed: conflict"]);
+    });
   });
 });

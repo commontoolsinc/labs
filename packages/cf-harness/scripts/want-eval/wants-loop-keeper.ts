@@ -59,3 +59,39 @@ export const markerKeeper = (
     kept: () => kept,
   };
 };
+
+/**
+ * The signals that end a run, each with the status it exits with: 128 and
+ * the signal's number, as a shell reports a process the signal killed.
+ */
+export const EXIT_SIGNALS: readonly (readonly [Deno.Signal, number])[] = [
+  ["SIGHUP", 129],
+  ["SIGINT", 130],
+  ["SIGTERM", 143],
+];
+
+/**
+ * Archives the marker on any of `EXIT_SIGNALS` before exiting with its
+ * status. A run a signal ends does not unwind to its `finally`, so each
+ * handler awaits the same cleanup the loop does: one already under way is
+ * waited on, and a filing in flight is archived once it returns. An archive
+ * that fails is reported through `report`, and the run exits all the same.
+ */
+export const archiveOnExitSignals = (
+  cleanup: () => Promise<void>,
+  listen: (signal: Deno.Signal, handler: () => void) => void,
+  exit: (code: number) => void,
+  report: (message: string) => void,
+): void => {
+  for (const [signal, code] of EXIT_SIGNALS) {
+    listen(signal, () => {
+      cleanup().catch((error) =>
+        report(
+          `archiving the marker failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        )
+      ).finally(() => exit(code));
+    });
+  }
+};

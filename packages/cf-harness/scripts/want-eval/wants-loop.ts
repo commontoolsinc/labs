@@ -32,20 +32,25 @@
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import { parseArgs } from "@std/cli/parse-args";
 import { ensureDir } from "@std/fs";
-import { dirname, join, resolve } from "@std/path";
+import { join, resolve } from "@std/path";
 import {
   recordUndeclaredFlags,
   refuseUndeclaredFlags,
 } from "../../src/cli-flags.ts";
 import { instructionsFromSwift, RESULT_SCHEMA } from "./judge.ts";
 import { DEFAULT_OWNER, loomCommand } from "./loom-command.ts";
+import { insideRepository } from "./out-dir.ts";
 import {
   runnerJobEnded,
   runnerJobOf,
   runnerSocketOf,
 } from "./runner-socket.ts";
 import { defaultRunsRoot, recordOf, rootRunOf } from "./runs.ts";
-import { type MarkerKeeper, markerKeeper } from "./wants-loop-keeper.ts";
+import {
+  archiveOnExitSignals,
+  type MarkerKeeper,
+  markerKeeper,
+} from "./wants-loop-keeper.ts";
 import {
   checkMarker,
   eligibleOf,
@@ -106,27 +111,6 @@ if (!Number.isInteger(repeat) || repeat < 1) {
 const owner = args.owner;
 const SOCKET = runnerSocketOf(args["instance-dir"]);
 
-/**
- * Whether `path`, or the nearest directory above it that exists, is inside a
- * git work tree. The answers written there can carry the owner's data.
- */
-const insideRepository = async (path: string): Promise<boolean> => {
-  let at = path;
-  for (;;) {
-    try {
-      if ((await Deno.stat(at)).isDirectory) break;
-    } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) throw error;
-    }
-    at = dirname(at);
-  }
-  const { stdout } = await new Deno.Command("git", {
-    args: ["-C", at, "rev-parse", "--is-inside-work-tree"],
-    stdout: "piped",
-    stderr: "null",
-  }).output();
-  return new TextDecoder().decode(stdout).trim() === "true";
-};
 if (await insideRepository(outDir)) {
   refuse(
     `--out ${outDir} is inside a git repository; answers can carry the ` +
@@ -320,22 +304,15 @@ const archiveMarker = async (id: string): Promise<void> => {
   });
 };
 
-/** The keeper of the marker whose phases are running, for an interrupt. */
+/** The keeper of the marker whose phases are running, for a signal. */
 let current: MarkerKeeper | undefined;
 
-// An interrupted run ends without unwinding to a `finally`, so the marker is
-// archived here before it exits, by the same cleanup the loop awaits: one
-// already under way is waited on, and a filing in flight is archived once it
-// returns.
-Deno.addSignalListener("SIGINT", () => {
-  (current?.cleanup() ?? Promise.resolve()).catch((error) =>
-    console.error(
-      `archiving the marker failed: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    )
-  ).finally(() => Deno.exit(130));
-});
+archiveOnExitSignals(
+  () => current?.cleanup() ?? Promise.resolve(),
+  Deno.addSignalListener,
+  Deno.exit,
+  console.error,
+);
 
 const runs: LoopRun[] = [];
 console.log(RUN_TABLE_HEADER);
