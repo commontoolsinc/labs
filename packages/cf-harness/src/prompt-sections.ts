@@ -31,6 +31,11 @@ export const PROMPT_SECTIONS = [
   "resolve-piece-tools",
   "loom-commands-tools",
   "loom-retrieval-tools",
+  "fast-reply",
+  "personal-exhaustive",
+  "web-research",
+  "material-bar",
+  "critique",
 ] as const;
 
 export type PromptSection = typeof PROMPT_SECTIONS[number];
@@ -114,6 +119,15 @@ export const PROMPT_SECTION_AUDIENCE: Readonly<
   },
   "loom-commands-tools": { anyOf: ["find", "act"] },
   "loom-retrieval-tools": { anyOf: ["find", "act"] },
+  // How far to take the work (`strategy.ts`): a quick run answers from what
+  // it holds or a lookup or two; a deep run searches the person's data or the
+  // web exhaustively where its task is, holds what it leaves to a bar, and
+  // reads its result back before it finishes.
+  "fast-reply": { depth: ["quick"] },
+  "personal-exhaustive": { domains: ["personal"], depth: ["deep"] },
+  "web-research": { domains: ["web"], depth: ["deep"] },
+  "material-bar": { depth: ["deep"] },
+  critique: { depth: ["deep"] },
 };
 
 /** Whether one audience takes in a run of `shape`. */
