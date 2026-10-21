@@ -29,6 +29,8 @@ a line for each new document to the index below.
 - [`view-scoped-client-replication.md`](view-scoped-client-replication.md) —
   visible renderer demand, server-observed input selection, and guarded local
   previews
+- [`document-release.md`](document-release.md) — when a runtime stops watching
+  a document nothing reads, what it drops, and how a later read loads it again
 
 - [`collaborative-fields.md`](collaborative-fields.md) — operation-based fields,
   CodeMirror's opt-in editor path, retained cursors and reset behavior, and

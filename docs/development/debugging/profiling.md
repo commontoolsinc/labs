@@ -789,6 +789,59 @@ schema-table compression and the hand-off to the transport;
 `memory.compression/send/encode` is the websocket compression that follows, on
 whichever side is sending.
 
+### Find sessions watching or caching a particular schema
+
+`GET /api/health/document-interests` accepts an exact `space` and `cid:` document
+`id` and inspects the co-hosted memory server's existing session indexes:
+
+```sh
+curl --get "$API_URL/api/health/document-interests" \
+  --data-urlencode "space=$SPACE_DID" \
+  --data-urlencode "id=$SCHEMA_DOCUMENT_ID"
+```
+
+Query the worker that serves this space; another worker can correctly report
+no matches.
+
+The HTTP route accepts only `cid:` IDs; mutable document IDs such as `of:` are
+rejected. The lookup uses the shared `space` scope and the main branch (the empty
+string); pass `branch` to inspect another branch. It opens no storage, evaluates
+no queries, serializes no document
+contents, and changes no watches or delivery state. Like `/api/health/stats`,
+this route is public today: toolshed applies no authentication or access gate
+to it. Anyone who can reach it can see which principals retain a named
+content-addressed document and whether their sessions are connected. The
+[security roadmap's Diagnostics item](../../plans/security-privacy-roadmap.md#e-private-operations)
+tracks the operator gate and the longer-term private-operations boundary.
+
+Each matching row identifies the `sessionId`, authenticated `principal`,
+optional delegated `actingPrincipal`, and owning `connectionId`. It distinguishes
+direct watch declarations (`directWatchCount`) from delivery-cache entries
+(`cached`) and graph-cache entries (`graphCount`), with separate view-demand
+cache fields. Graph entries can arise from following links or loading schema
+dependencies. Counts include absence records, so they attribute interest rather
+than measure retained bytes; shared object references are not separate copies.
+
+Use this lookup when an investigation needs session attribution for a known
+schema CID. Aggregate retention counts can reveal subscription accumulation,
+but cannot identify the sessions responsible for retaining that schema.
+
+The response includes detached sessions still held during their grace period
+and marks expired ones not yet pruned. Reading this diagnostic does not prune
+them. It reports `totalMatches` but returns at most 100 rows, or a smaller
+positive `limit`; `truncated` indicates omitted rows. It scans watch declarations
+and graph indexes on demand, so use it for a targeted investigation rather than
+automatic dashboard polling.
+
+This is a current snapshot of one process, not a history of requests or a heap
+census. It does not identify an app build, browser, or individual tab, and does
+not attribute the process-wide schema registry or engine caches to sessions.
+An old schema in a session does not prove the client runs old code: a current
+client can retain a historical subscription. A restart or session eviction
+removes the attribution evidence. No registered memory server returns 503;
+an unknown space returns an empty report without opening it. A missing document
+can still match retained watches or absence records.
+
 ### Alerting on a write storm
 
 A write storm is one space committed to far faster than any person drives it:

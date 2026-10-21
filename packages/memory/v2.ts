@@ -1194,6 +1194,16 @@ export type MemoryProtocolFlags = {
    */
   syncCrossingsV1: boolean;
 
+  /**
+   * Server capability: `session.watch.remove` removes watches by id and
+   * answers with the difference between what the session was delivered and
+   * the smaller union (04-protocol.md §4.3.9). Inherent to the build, so a
+   * server of this version always advertises it. Absent (an older server)
+   * parses to false: a client then removes a watch by replacing the whole
+   * watch set, and keeps a document's watches rather than releasing them.
+   */
+  watchRemoveV1: boolean;
+
   /** The peer can exchange versioned binary gzip message envelopes. */
   messageCompressionV1: boolean;
 
@@ -1364,6 +1374,7 @@ export type WireMemoryProtocolFlags = {
   operationCodecs?: readonly string[];
   syncSchemaTableV2?: boolean;
   syncCrossingsV1?: boolean;
+  watchRemoveV1?: boolean;
   messageCompressionV1?: boolean;
   sqliteCommitRowLabelEval?: boolean;
   sqliteQueryReader?: boolean;
@@ -2056,6 +2067,16 @@ export type WatchAddRequest = {
   watches: WatchSpec[];
 };
 
+export type WatchRemoveRequest = {
+  type: "session.watch.remove";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+
+  /** The ids of the watches to remove; an id the session lacks is ignored. */
+  watchIds: string[];
+};
+
 export type SessionAckRequest = {
   type: "session.ack";
   requestId: string;
@@ -2384,6 +2405,7 @@ export type ClientMessage =
   | SqliteRegisterDiskSourceRequest
   | WatchSetRequest
   | WatchAddRequest
+  | WatchRemoveRequest
   | SessionAckRequest
   | SessionCloseRequest
   | EventAttentionResolveRequest
@@ -2636,6 +2658,8 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // Build-inherent: this build's query walk reports the links it follows
   // out of a space, and its session frames carry them.
   syncCrossingsV1: true,
+  // Build-inherent: this build's server removes watches by id.
+  watchRemoveV1: true,
 });
 
 /**
@@ -2844,6 +2868,11 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const watchRemoveV1 = value.watchRemoveV1;
+  if (watchRemoveV1 !== undefined && typeof watchRemoveV1 !== "boolean") {
+    return null;
+  }
+
   return {
     modernCellRep: modernCellRep === true,
     genesisRoot: value.genesisRoot === true,
@@ -2900,6 +2929,9 @@ export const parseMemoryProtocolFlags = (
     // Absent (an older server) parses to false: a client then finds the
     // links out of a space by reading what it synced.
     syncCrossingsV1: syncCrossingsV1 === true,
+    // Absent (an older server) parses to false: a client then replaces the
+    // whole watch set to remove a watch.
+    watchRemoveV1: watchRemoveV1 === true,
     routedAuthV1: value.routedAuthV1 === true,
   };
 };
@@ -2942,6 +2974,7 @@ export const wireMemoryProtocolFlags = (
   sessionReportV1: flags.sessionReportV1,
   routedAuthV1: flags.routedAuthV1,
   syncCrossingsV1: flags.syncCrossingsV1,
+  watchRemoveV1: flags.watchRemoveV1,
 });
 
 /**

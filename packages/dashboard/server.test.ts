@@ -346,22 +346,22 @@ boardTest("simultaneous collector completions keep a red handoff's incident age"
 });
 
 boardTest("a tile stays wide through failures and keeps its last good view", async () => {
-  await tick([fake("recent main runs", () => {
+  await tick([fake("recent commits", () => {
     throw new Error("HTTP 404: Not Found");
   })]);
-  const firstFailure = tileHtml("recent main runs");
+  const firstFailure = tileHtml("recent commits");
   assert(firstFailure.startsWith(`unknown wide"`));
   assertStringIncludes(firstFailure, `<p class="big unknown">—</p>`);
   assertStringIncludes(firstFailure, `<p class="sub" title="not found">not found</p>`);
 
   const good: TileView = { status: "good", value: "passing", sub: "10 runs" };
-  await tick([fake("recent main runs", () => good)]);
-  assert(tileHtml("recent main runs").startsWith(`good wide"`));
+  await tick([fake("recent commits", () => good)]);
+  assert(tileHtml("recent commits").startsWith(`good wide"`));
 
-  await tick([fake("recent main runs", () => {
+  await tick([fake("recent commits", () => {
     throw new Error("error sending request for url");
   })]);
-  const html = tileHtml("recent main runs");
+  const html = tileHtml("recent commits");
   assert(html.startsWith(`unknown wide"`));
   assertStringIncludes(
     html,
@@ -852,7 +852,7 @@ boardTest("a multi-source tile stays active until every source update completes"
     env: () => undefined,
   };
   const tile: Tile = {
-    label: "recent main runs",
+    label: "recent commits",
     intervalMs: 0,
     runSources: [slowSource, fastSource],
     collect: () => {
@@ -867,7 +867,7 @@ boardTest("a multi-source tile stays active until every source update completes"
   let client: ReadableStreamDefaultController<Uint8Array> | undefined;
 
   try {
-    await tick([fake("recent main runs", () => ({
+    await tick([fake("recent commits", () => ({
       status: "good",
       value: "last source value",
     }))]);
@@ -876,7 +876,7 @@ boardTest("a multi-source tile stays active until every source update completes"
 
     now += 60_000;
     await tick([tile], sourceCtx);
-    const stale = tileHtml("recent main runs");
+    const stale = tileHtml("recent commits");
     assert(stale.startsWith(`unknown wide"`));
     assertStringIncludes(stale, "last source value");
     assertStringIncludes(stale, "refresh still pending");
@@ -892,7 +892,7 @@ boardTest("a multi-source tile stays active until every source update completes"
     fastRuns.resolve([]);
     await firstPublication;
     assertEquals(collections, 1, "the ready source collected the tile");
-    const partiallyComplete = tileHtml("recent main runs");
+    const partiallyComplete = tileHtml("recent commits");
     assert(partiallyComplete.startsWith(`unknown wide"`));
     assertStringIncludes(partiallyComplete, "fresh source value");
     assertStringIncludes(partiallyComplete, "refresh still pending");
@@ -911,7 +911,7 @@ boardTest("a multi-source tile stays active until every source update completes"
     }
   }
   assertEquals(collections, 2, "the pending source completes its original collection");
-  const complete = tileHtml("recent main runs");
+  const complete = tileHtml("recent commits");
   assert(complete.startsWith(`good wide"`));
   assertStringIncludes(complete, "fresh source value");
 });
@@ -964,7 +964,7 @@ boardTest("each run source publishes its dependent tiles as one batch", async ()
     sourceTile("labs ci trust", [labsSource]),
     sourceTile("dau", [loomSource]),
     sourceTile("loom ci trust", [loomSource]),
-    sourceTile("recent main runs", [labsSource, loomSource], true),
+    sourceTile("recent commits", [labsSource, loomSource], true),
   ];
 
   const messages: string[] = [];
@@ -986,7 +986,7 @@ boardTest("each run source publishes its dependent tiles as one batch", async ()
     assertStringIncludes(tileHtml("ci", first.gridHtml), "labs new");
     assertStringIncludes(tileHtml("labs ci trust", first.gridHtml), "labs new");
     assert(!tileHtml("dau", first.gridHtml).includes("loom new"));
-    assertStringIncludes(tileHtml("recent main runs", first.wideHtml), "labs new");
+    assertStringIncludes(tileHtml("recent commits", first.wideHtml), "labs new");
     assertStringIncludes(first.wideHtml, "loom-incremental pending");
     assertEquals(messages.length, 1, "one source arrival produces one broadcast");
 
@@ -1024,7 +1024,7 @@ boardTest("a ready source publishes while an older combined collection is still 
     env: () => undefined,
   };
   const combined: Tile = {
-    label: "recent main runs",
+    label: "recent commits",
     intervalMs: 0,
     runSources: [labsSource, loomSource],
     wide: true,
@@ -1060,7 +1060,7 @@ boardTest("a ready source publishes while an older combined collection is still 
   let refresh: Promise<void> | undefined;
   Date.now = () => now;
   try {
-    await tick([fake("recent main runs", () => ({
+    await tick([fake("recent commits", () => ({
       status: "good",
       value: "prior combined",
     }))]);
@@ -1071,26 +1071,26 @@ boardTest("a ready source publishes while an older combined collection is still 
 
     now += 60_000;
     await tick(tiles, sourceCtx);
-    assertStringIncludes(tileHtml("recent main runs"), "refresh still pending");
+    assertStringIncludes(tileHtml("recent commits"), "refresh still pending");
     messages.length = 0;
 
     const loomUpdate = nextMessage();
     loom.resolve([sourceRun(5, "loom ready")]);
     const first = updateFromEvent(await loomUpdate);
     assertStringIncludes(tileHtml("dau", first.gridHtml), "loom ready");
-    const firstRecent = tileHtml("recent main runs", first.wideHtml);
+    const firstRecent = tileHtml("recent commits", first.wideHtml);
     assertStringIncludes(firstRecent, "labs ready, loom ready");
     assert(firstRecent.startsWith(`unknown wide"`));
     assert(!tileHtml("ci", first.gridHtml).includes("labs ready"));
     publishOld({ status: "bad", value: "older cached merge" });
     assertEquals(messages.length, 1);
-    assertStringIncludes(tileHtml("recent main runs"), "labs ready, loom ready");
+    assertStringIncludes(tileHtml("recent commits"), "labs ready, loom ready");
 
     const labsUpdate = nextMessage();
     oldCollection.resolve(undefined);
     const second = updateFromEvent(await labsUpdate);
     assertStringIncludes(tileHtml("ci", second.gridHtml), "labs ready");
-    const secondRecent = tileHtml("recent main runs", second.wideHtml);
+    const secondRecent = tileHtml("recent commits", second.wideHtml);
     assertStringIncludes(secondRecent, "labs ready, loom ready");
     assert(secondRecent.startsWith(`good wide"`));
     assertEquals(messages.length, 2);

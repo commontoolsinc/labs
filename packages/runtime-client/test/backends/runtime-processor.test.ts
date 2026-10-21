@@ -10656,12 +10656,18 @@ describe("runtime-processor", () => {
             cancel: () => cancelled.push("second/mount-1"),
           }],
         ]) as never;
+        // What had been cancelled each time a release was asked for.
+        const releases: string[][] = [];
         state.runtime = {
           dispose: () => {
             throw new Error("the runtime must outlive a departing client");
           },
+          releaseUnreadDocuments: () => {
+            releases.push([...cancelled]);
+            return Promise.resolve();
+          },
         } as never;
-        return { processor, state, cancelled, unmounted };
+        return { processor, state, cancelled, unmounted, releases };
       }
 
       it("cancels only the departing client's subscriptions and mounts", () => {
@@ -10710,6 +10716,16 @@ describe("runtime-processor", () => {
         expect([...state.operationSessions.keys()]).toEqual([
           "session-of-second",
         ]);
+      });
+
+      it("asks the runtime to release what nothing reads once the departing client's subscriptions are gone", () => {
+        const { processor, releases } = departureState();
+        processor.disposeClient(testClient(1).client);
+        expect(releases).toEqual([[
+          "first/cell-a",
+          "first/op",
+          "first/mount-1",
+        ]]);
       });
 
       it("leaves the runtime running", () => {

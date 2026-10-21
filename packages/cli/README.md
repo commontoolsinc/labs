@@ -418,17 +418,26 @@ uses this fixture mechanism at both postures.
 
 `cf view [file]` is an interactive pager for transformed TypeScript, source
 files, and unified diffs. Named Markdown, JSON, JSONC, JSON Lines, YAML, Python,
-Swift, Kotlin, TOML, shell, Java properties, ProGuard, and XML files use their
-own syntax highlighting. Shell covers Bash and POSIX shell scripts named `.sh`,
-`.bash`, or `.command`, and Bash's startup files, such as `.bashrc` and
-`.profile`. A heredoc's body is colored as a string, with the expansions its
-delimiter allows. A Swift package manifest is Swift source under its `.swift`
-extension, and a module's `.swiftinterface` is Swift as well. Gradle build and
-settings scripts are Kotlin scripts under the `.kts` extension. Gradle version
-catalogs and Cargo manifests are TOML, as are Cargo lock files. The ProGuard
-language covers the keep rules that ProGuard and R8 read: `proguard-rules.pro`
-and `consumer-rules.pro` select it by name, and another `.pro` file uses it when
-one of its lines starts with one of ProGuard's option names, because Qt project
+Swift, Kotlin, TOML, HCL, shell, makefile, Java properties, INI, ProGuard, and
+XML files use their own syntax highlighting. HCL covers OpenTofu and Terraform
+configuration named `.tf` or `.tofu`, variable definitions files named
+`.tfvars`, backend configuration files named `.tfbackend`, and other `.hcl`
+files, such as dependency lock files. A string's interpolations and template
+directives are colored as code inside the string. Shell covers Bash and POSIX
+shell scripts named `.sh`, `.bash`, or `.command`, and Bash's startup files,
+such as `.bashrc` and `.profile`. A heredoc's body is colored as a string, with
+the expansions its delimiter allows. The makefile language reads GNU make's
+syntax in files named `Makefile`, `makefile`, `GNUmakefile`, or `.mk`. Make
+passes recipe lines to the shell, so they are colored as shell. The same is true
+of the command in a `!=` assignment and the argument of the `shell` function.
+Make's own variable references and function calls are colored inside that shell
+text. A Swift package manifest is Swift source under its `.swift` extension, and
+a module's `.swiftinterface` is Swift as well. Gradle build and settings scripts
+are Kotlin scripts under the `.kts` extension. Gradle version catalogs and Cargo
+manifests are TOML, as are Cargo lock files. The ProGuard language covers the
+keep rules that ProGuard and R8 read: `proguard-rules.pro` and
+`consumer-rules.pro` select it by name, and another `.pro` file uses it when one
+of its lines starts with one of ProGuard's option names, because Qt project
 files and Prolog use that suffix as well. XML covers Android manifests,
 resources, and layouts, SVG images, and Apple property lists, entitlements, and
 privacy manifests. Web manifests, TLDraw documents, Deno lock files, editor
@@ -440,16 +449,30 @@ without a filename keeps TypeScript highlighting when its module header
 identifies it. Python interpreter shebangs select Python for otherwise
 unrecognized names, `swift` and `xcrun swift` shebangs select Swift, and
 `kotlin` shebangs select Kotlin. `sh`, `bash`, `dash`, and `ash` shebangs select
-shell, which covers Git hooks and other extensionless programs. Node, Deno, and
-Bun shebangs select the TypeScript and JavaScript language family. A diff reads
-a shebang for a file whose path selects no language, from a hunk that starts at
-the file's first line, from the workspace file, or from the old Git blob. Other
-filename-free source and named files with unrecognized syntax are shown as plain
-text. For piped source, `--filename` selects syntax as though the input had that
-name. `--language` selects a language by its stable identifier or alias. Both
-options keep the pipe read-only and suppress unified-diff auto-detection. An
-explicit language takes priority when both options are present. Use `--diff`
-instead when the pipe is a unified diff.
+shell, which covers Git hooks and other extensionless programs. `make` and
+`gmake` shebangs select the makefile language. Node, Deno, and Bun shebangs
+select the TypeScript and JavaScript language family. For an otherwise
+unrecognized name, source that starts with an XML declaration (`<?xml`), after
+any byte order mark, selects XML, which covers Interface Builder documents,
+project files, and the other XML formats that no extension announces. A diff
+reads a shebang or an XML declaration for a file whose path selects no language,
+from a hunk that starts at the file's first line, from the workspace file, or
+from the old Git blob. Other filename-free source and named files with
+unrecognized syntax are shown as plain text. For piped source, `--filename`
+selects syntax as though the input had that name. `--language` selects a
+language by its stable identifier or alias. Both options keep the pipe read-only
+and suppress unified-diff auto-detection. An explicit language takes priority
+when both options are present. Use `--diff` instead when the pipe is a unified
+diff.
+
+INI covers `.ini` files, which include Ansible inventories with that suffix,
+Ansible's `ansible.cfg` and `.ansible.cfg`, and the configuration files of
+Python tools such as `setup.cfg`, `.coveragerc`, `.flake8`, `pylintrc`, and
+`.codespellrc`. Another `.cfg` file is INI when its first line other than blank
+lines and comments heads a section whose name does not start the way a JSON
+array's first value does. A line in an Ansible inventory that names a host and
+then sets `name=value` variables colors the host and each variable. The
+structure tree lists sections with the keys and hosts in each.
 
 The binary language handles known binary filenames, input containing a NUL byte,
 and input that is not valid UTF-8. It starts in a read-only rendered view with
@@ -470,10 +493,11 @@ and TypeScript semantic lookup.
 
 Automatic content detection is limited to binary input, structurally identified
 raw unified diffs, and standard Git commit output. A raw diff starts at the
-first nonblank line. Recognized shebangs and transformed compiler headers remain
-explicit selectors. A shared extension such as `.cfg` consults the source for
-the one pattern its metadata names. JSON-, YAML-, Markdown-, Python-, and other
-language-shaped source is otherwise not guessed from its syntax.
+first nonblank line. Recognized shebangs, XML declarations, and transformed
+compiler headers remain explicit selectors. A shared extension such as `.cfg`
+consults the source for the pattern each language's metadata pairs with it.
+JSON-, YAML-, Markdown-, Python-, and other language-shaped source is otherwise
+not guessed from its syntax.
 
 A diff shows its whole-diff change totals at the top right corner of its first
 line: the added line count and the removed line count, colored like additions

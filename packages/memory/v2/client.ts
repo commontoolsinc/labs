@@ -1704,11 +1704,15 @@ export class Client {
     this.#signedOpens = Promise.resolve();
     const ack = Promise.withResolvers<void>();
     this.#helloPending = ack;
-    // `sessionReportV1` is the server's capability alone: the client reads it
-    // from `hello.ok` and never offers it, since an older routed host refuses
-    // a hello carrying a flag it does not know.
-    const { sessionReportV1: _serverOnly, ...expectedFlags } =
-      getMemoryProtocolFlags();
+    // `sessionReportV1` and `watchRemoveV1` are the server's capabilities
+    // alone: the client reads them from `hello.ok` and never offers them,
+    // since an older routed host refuses a hello carrying a flag it does not
+    // know.
+    const {
+      sessionReportV1: _reportsServerOnly,
+      watchRemoveV1: _removalServerOnly,
+      ...expectedFlags
+    } = getMemoryProtocolFlags();
     try {
       const hello = {
         type: "hello",
@@ -2969,6 +2973,8 @@ export class SpaceSession {
   /**
    * Removes watches from both the live session and reconnect intent, retaining
    * unrelated watches acquired by preceding mutations during concurrent refresh.
+   * A server advertising `watchRemoveV1` is sent the ids alone, and answers
+   * with what changed; any other is sent the whole remaining set.
    */
   async watchRemoveSync(
     watchIds: readonly string[],
@@ -2977,13 +2983,23 @@ export class SpaceSession {
     let watches: WatchSpec[] = [];
     return await this.#runWatchMutation(
       () =>
-        this.#client.request<WatchSetResult>({
-          type: "session.watch.set",
-          requestId: crypto.randomUUID(),
-          space: this.space,
-          sessionId: this.#sessionId,
-          watches,
-        }),
+        this.#client.request<WatchSetResult>(
+          this.#client.serverFlags?.watchRemoveV1 === true
+            ? {
+              type: "session.watch.remove",
+              requestId: crypto.randomUUID(),
+              space: this.space,
+              sessionId: this.#sessionId,
+              watchIds: [...removed],
+            }
+            : {
+              type: "session.watch.set",
+              requestId: crypto.randomUUID(),
+              space: this.space,
+              sessionId: this.#sessionId,
+              watches,
+            },
+        ),
       (result) => {
         this.#noteResult(result.serverSeq);
         this.#noteOperationWatchCursors(result.sync);
