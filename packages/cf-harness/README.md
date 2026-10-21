@@ -1983,9 +1983,9 @@ Its `inspect_pattern` and `open_pattern_file` tools accept a bare pattern id or
 `cf:pattern:<id>`; index lookups and retained evidence use the bare id.
 
 Fresh CLI tasks tagged `author` (see task classification below), fresh CLI tasks
-of any kind run at `--depth deep`, and interactive sessions without retained
-research, request an opening `orient` pass for open-ended tasks. A task already
-selecting an implementation skips that automatic pass through attached
+in the `fabric` domain run at `--depth deep`, and interactive sessions without
+retained research, request an opening `orient` pass for open-ended tasks. A task
+already selecting an implementation skips that automatic pass through attached
 `patternRefs` or explicit markers in the request: `pattern:<space>/<slug>`,
 `cf:pattern:<id>`, or `skill:<id>`. A skill id names a registered skill or an
 `owner/repository/skill` address. Bare ids, paths, and prose such as "use the
@@ -2089,8 +2089,9 @@ classifier's, which decides any part the caller leaves out; the record says
 local job takes `depth`, `tags` and `domains` from its request, and
 `reasoningEffort` from its profile, which a request may lower but not raise.
 Only `deep` changes a run today, adding the opening research pass for a
-classified task in the `fabric` domain. The effort applies to the job's own
-model calls and children on its model; research keeps its own effort setting.
+classified task in the `fabric` domain; an `author` task gets that pass at any
+depth. The effort applies to the job's own model calls and children on its
+model; research keeps its own effort setting.
 
 A tool descriptor is a contract: its name, its parameters with one-line
 descriptions, and a sentence or two on what the tool does and returns. Task tags

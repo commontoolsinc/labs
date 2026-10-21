@@ -1193,7 +1193,7 @@ Deno.test("parseCfHarnessCliArgs reads a run depth, leaves an unnamed one to the
   );
 });
 
-Deno.test("parseCfHarnessCliArgs reads a caller's task tags and domains, none as no domain, and refuses a word it does not know", async () => {
+Deno.test("parseCfHarnessCliArgs reads a caller's task tags and domains, none as no domain, and refuses a word it does not know or a shape on resume", async () => {
   const parse = (argv: string[]) =>
     parseCfHarnessCliArgs(["--prompt", "hi", ...argv], {
       cwd: "/tmp/project",
@@ -1227,6 +1227,20 @@ Deno.test("parseCfHarnessCliArgs reads a caller's task tags and domains, none as
     () => parse(["--task-tags", "research"]),
     Error,
     "--task-tags names research",
+  );
+  await assertRejects(
+    () => parse(["--task-tags", "none"]),
+    Error,
+    "--task-tags names none; it takes respond, find, act, pieces, author",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--resume-run", "run-earlier", "--task-domains", "web"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--task-tags and --task-domains are not supported with --resume-run",
   );
 });
 

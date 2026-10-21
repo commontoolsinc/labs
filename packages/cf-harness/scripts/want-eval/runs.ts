@@ -7,14 +7,26 @@
 
 import { basename, join } from "@std/path";
 
-export const RUNS = join(
-  Deno.env.get("HOME") ?? "",
-  ".cf-harness/agent-runs/local",
-);
+/**
+ * Where a runner keeps its local jobs' runs: under `CF_HARNESS_HOME` when it
+ * is set, as the harness keeps its home, else `~/.cf-harness`.
+ */
+export const defaultRunsRoot = (): string =>
+  join(
+    Deno.env.get("CF_HARNESS_HOME") ??
+      join(Deno.env.get("HOME") ?? "", ".cf-harness"),
+    "agent-runs/local",
+  );
 
-/** The newest run directory of a job: the root run, not a subagent's. */
-export const rootRunOf = async (job: string): Promise<string> => {
-  const root = join(RUNS, job.startsWith("job-") ? job : `job-${job}`);
+/**
+ * The newest run directory of a job under `runsRoot`: the root run, not a
+ * subagent's.
+ */
+export const rootRunOf = async (
+  job: string,
+  runsRoot: string = defaultRunsRoot(),
+): Promise<string> => {
+  const root = join(runsRoot, job.startsWith("job-") ? job : `job-${job}`);
   const runs: { path: string; mtime: number }[] = [];
   for await (const entry of Deno.readDir(join(root, "artifacts"))) {
     if (!entry.isDirectory || entry.name.includes(".subagent.")) continue;

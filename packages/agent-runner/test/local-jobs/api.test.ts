@@ -223,6 +223,7 @@ describe("local-jobs/api", () => {
       ["a depth it does not know", { ...BODY, depth: "medium" }],
       ["tags that are not a list", { ...BODY, tags: "find" }],
       ["a tag it does not know", { ...BODY, tags: ["research"] }],
+      ["an empty list of tags", { ...BODY, tags: [] }],
       ["a domain it does not know", { ...BODY, domains: ["email"] }],
       [
         "a reasoning effort it does not know",

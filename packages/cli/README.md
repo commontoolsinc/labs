@@ -1752,12 +1752,16 @@ The door is HTTP on the Unix socket, mode 0600, with a bearer token in
 `<socket>.token`, also 0600 and minted at each start: reaching the socket is the
 authority. A caller enqueues
 `{caller, profile, idempotencyKey, task,
-instructions?, context?, resultSchema, tools?, maxModelTurns?, browserHost?,
-inputs?, foreignSpaces?}`
+instructions?, context?, resultSchema, tools?, maxModelTurns?, depth?, tags?,
+domains?, reasoningEffort?, browserHost?, inputs?, foreignSpaces?}`
 with `POST /jobs`, reads a job with `GET /jobs/<id>` or the newest with
 `GET /jobs?limit=n`, stops one with `POST /jobs/<id>/cancel`, and watches one
 with `GET /jobs/<id>/events?after=<seq>`, a stream of server-sent events that
-ends after the job's terminal state. `GET /health` keeps `lanes.local` and
+ends after the job's terminal state. A request's `depth` (`quick`, `standard` or
+`deep`), `tags` and `domains` say how far to take the task, what kind of work it
+is and where it happens, each of the last two in place of the harness's
+classification (`domains: []` is none); they grant nothing. `reasoningEffort`
+may lower the profile's, never raise it. `GET /health` keeps `lanes.local` and
 `lanes.fabric` as booleans and adds `readiness.local` and `readiness.fabric`,
 each `{state, since, reason}`. States are `starting`, `up`, `down`, or
 `refused`; `since` is an ISO timestamp of the last state or reason change.

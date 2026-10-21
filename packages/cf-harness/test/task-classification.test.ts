@@ -337,10 +337,16 @@ describe("task-classification", () => {
         .toEqual(["fabric"]);
       expect(classifyTask("knit a scarf in a herringbone pattern", {}).domains)
         .toEqual([]);
+      expect(classifyTask("which loom holds the timer pattern?", {}).domains)
+        .toEqual(["fabric"]);
     });
 
     it("needs a sign the data is the person's own, not a bare noun", () => {
       expect(classifyTask("What is a calendar?", {}).domains).toEqual([]);
+      expect(classifyTask("How can I meet the deadline?", {}).domains)
+        .toEqual([]);
+      expect(classifyTask("what is the message of the Gospel?", {}).domains)
+        .toEqual([]);
       expect(classifyTask("Compare email providers", {}).domains).toEqual([
         "web",
       ]);

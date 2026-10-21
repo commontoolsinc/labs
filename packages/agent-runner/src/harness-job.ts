@@ -113,7 +113,10 @@ export interface HarnessJobSpec {
   /** How far to take the task; the harness's default when absent. */
   depth?: HarnessRunDepth;
 
-  /** The task's kinds of work, in place of the harness's classification. */
+  /**
+   * The task's kinds of work, in place of the harness's classification; an
+   * empty list states none and leaves them to the harness.
+   */
   taskTags?: readonly HarnessTaskTag[];
 
   /** Where the task's work happens, in place of the harness's; `[]` is none. */
@@ -319,8 +322,8 @@ const argvOf = (
     ? ["--max-model-turns", String(spec.maxModelTurns)]
     : []),
   ...(spec.depth !== undefined ? ["--depth", spec.depth] : []),
-  ...(spec.taskTags !== undefined
-    ? ["--task-tags", spec.taskTags.join(",") || "none"]
+  ...(spec.taskTags !== undefined && spec.taskTags.length > 0
+    ? ["--task-tags", spec.taskTags.join(",")]
     : []),
   ...(spec.taskDomains !== undefined
     ? ["--task-domains", spec.taskDomains.join(",") || "none"]

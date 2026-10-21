@@ -325,7 +325,8 @@ export interface CreateHarnessPromptLoopOptions
 
   /**
    * How far the caller wants the run taken; `standard` when absent. A deep
-   * run of any kind gets the opening research pass.
+   * run in the `fabric` domain gets the opening research pass, as an `author`
+   * task does at any depth.
    */
   depth?: HarnessRunDepth;
 

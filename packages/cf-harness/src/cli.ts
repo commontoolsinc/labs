@@ -1830,14 +1830,26 @@ export const parseCfHarnessCliArgs = async (
   }
   const taskTags = args["task-tags"] === undefined
     ? undefined
-    : taskListOf(args["task-tags"], HARNESS_TASK_TAGS, "--task-tags");
+    : taskListOf(args["task-tags"], HARNESS_TASK_TAGS, "--task-tags", false);
   const taskDomains = args["task-domains"] === undefined
     ? undefined
-    : taskListOf(args["task-domains"], HARNESS_TASK_DOMAINS, "--task-domains");
+    : taskListOf(
+      args["task-domains"],
+      HARNESS_TASK_DOMAINS,
+      "--task-domains",
+      true,
+    );
   const taskShape: HarnessTaskShape = {
     ...(taskTags !== undefined ? { tags: taskTags } : {}),
     ...(taskDomains !== undefined ? { domains: taskDomains } : {}),
   };
+  // A resumed run is never classified, so a task shape on resume would be
+  // silently ignored; it is refused like --input-cell is.
+  if (resumeRun !== undefined && Object.keys(taskShape).length > 0) {
+    throw new Error(
+      "--task-tags and --task-domains are not supported with --resume-run",
+    );
+  }
   // 0 is meaningful (disables compaction), so an explicit 0 must survive.
   const rawCompactThreshold = typeof args["compact-threshold"] === "string"
     ? args["compact-threshold"].trim()
@@ -2454,8 +2466,8 @@ const toWorkspaceSandboxPath = (
 };
 
 /**
- * A comma-separated list of `vocabulary` values from flag `flag`, where
- * `none` is the empty list.
+ * A comma-separated list of `vocabulary` values from flag `flag`. Where
+ * `noneAllowed`, the word `none` alone is the empty list.
  *
  * @throws Error naming the flag for a value outside the vocabulary.
  */
@@ -2463,16 +2475,17 @@ const taskListOf = <T extends string>(
   value: unknown,
   vocabulary: readonly T[],
   flag: string,
+  noneAllowed: boolean,
 ): T[] => {
   const items = String(value).split(",").map((item) => item.trim())
     .filter((item) => item.length > 0);
-  if (items.length === 1 && items[0] === "none") return [];
+  if (noneAllowed && items.length === 1 && items[0] === "none") return [];
   return items.map((item) => {
     const known = vocabulary.find((word) => word === item);
     if (known === undefined) {
       throw new Error(
         `${flag} names ${item}; it takes ${vocabulary.join(", ")}${
-          flag === "--task-domains" ? ", or none" : ""
+          noneAllowed ? ", or none" : ""
         }`,
       );
     }

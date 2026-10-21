@@ -192,9 +192,11 @@ const enqueueRequestOf = (
     };
   }
   const taskTags = listOf(tags, HARNESS_TASK_TAGS);
-  if (tags !== undefined && taskTags === undefined) {
+  if (tags !== undefined && (taskTags === undefined || taskTags.length === 0)) {
     return {
-      error: `\`tags\` must be a list of ${HARNESS_TASK_TAGS.join(", ")}.`,
+      error: `\`tags\` must be a nonempty list of ${
+        HARNESS_TASK_TAGS.join(", ")
+      }.`,
     };
   }
   const taskDomains = listOf(domains, HARNESS_TASK_DOMAINS);

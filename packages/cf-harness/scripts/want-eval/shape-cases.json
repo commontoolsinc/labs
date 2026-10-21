@@ -1,8 +1,9 @@
 {
   "variants": {
     "default": {},
-    "quick": { "depth": "quick" },
-    "deep": { "depth": "deep" }
+    "deep": {
+      "depth": "deep"
+    }
   },
   "cases": [
     {

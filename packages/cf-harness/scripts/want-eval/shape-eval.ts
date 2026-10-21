@@ -21,7 +21,12 @@
  *     --cases packages/cf-harness/scripts/want-eval/shape-cases.json \
  *     --instructions <path to the Weaver's WantSaidNow.swift> \
  *     --out <directory> [--label baseline] [--variants default,deep] \
- *     [--only <case id>] [--instance-dir <loom instance directory>]
+ *     [--only <case id>] [--instance-dir <loom instance directory>] \
+ *     [--runs-root <the runner's agent-runs/local>]
+ *
+ * A variant names only what a caller may say about a job's shape: `depth`,
+ * `tags` and `domains`. A job that cannot be measured is a row saying why,
+ * so one failure does not lose the others.
  */
 
 import { type IncomingMessage, request } from "@node/http";
@@ -33,7 +38,13 @@ import {
   refuseUndeclaredFlags,
 } from "../../src/cli-flags.ts";
 import { instructionsFromSwift, RESULT_SCHEMA } from "./judge.ts";
-import { callsIn, recordOf, rootRunOf, subagentsOf } from "./runs.ts";
+import {
+  callsIn,
+  defaultRunsRoot,
+  recordOf,
+  rootRunOf,
+  subagentsOf,
+} from "./runs.ts";
 
 const FLAGS = [
   "cases",
@@ -43,6 +54,7 @@ const FLAGS = [
   "variants",
   "only",
   "instance-dir",
+  "runs-root",
 ];
 const undeclared: string[] = [];
 const args = parseArgs(Deno.args, {
@@ -53,6 +65,7 @@ const args = parseArgs(Deno.args, {
       Deno.env.get("HOME") ?? "",
       ".local/share/loom/instances/loom",
     ),
+    "runs-root": defaultRunsRoot(),
   },
   unknown: recordUndeclaredFlags(undeclared),
 });
@@ -162,7 +175,7 @@ const measure = async (
     answer?: string;
     offers?: unknown[];
   };
-  const run = await rootRunOf(job);
+  const run = await rootRunOf(job, args["runs-root"]);
   const report = await recordOf(run, "run-report.json") as {
     modelTurns?: number;
     totalUsage?: { totalTokens?: number };
@@ -196,6 +209,40 @@ const measure = async (
   };
 };
 
+/**
+ * A job whose run could not be read, such as one that failed before its run
+ * directory existed: a row with its state and why, and nothing measured.
+ */
+const unmeasured = async (
+  evalCase: ShapeCase,
+  variant: string,
+  job: string,
+  seconds: number,
+  error: unknown,
+): Promise<ShapeResult> => {
+  const snapshot = await jobOf(job).catch(
+    (): Record<string, unknown> => ({}),
+  );
+  return {
+    case: evalCase.id,
+    variant,
+    job,
+    state: String(snapshot.state ?? "unknown"),
+    errorCode: `unmeasured: ${
+      error instanceof Error ? error.message : String(error)
+    }`,
+    seconds,
+    tags: [],
+    modelTurns: 0,
+    totalTokens: 0,
+    rootCalls: [],
+    subagents: 0,
+    childCalls: 0,
+    answer: "",
+    offers: 0,
+  };
+};
+
 const row = (result: ShapeResult): string =>
   `| ${result.case} | ${result.variant} | ${result.state}${
     result.errorCode !== undefined ? ` (${result.errorCode})` : ""
@@ -218,15 +265,32 @@ const suite = JSON.parse(await Deno.readTextFile(args.cases)) as ShapeSuite;
 const variants = args.variants === undefined
   ? Object.keys(suite.variants)
   : args.variants.split(",");
+/** What a variant may say: the parts of a job's shape a caller can give. */
+const SHAPE_KEYS = ["depth", "tags", "domains"];
 for (const variant of variants) {
   if (!(variant in suite.variants)) {
     console.error(`no variant ${variant} in ${args.cases}`);
+    Deno.exit(2);
+  }
+  const stray = Object.keys(suite.variants[variant]).filter((key) =>
+    !SHAPE_KEYS.includes(key)
+  );
+  if (stray.length > 0) {
+    console.error(
+      `variant ${variant} names ${stray.join(", ")}; a variant may name only ${
+        SHAPE_KEYS.join(", ")
+      }`,
+    );
     Deno.exit(2);
   }
 }
 const cases = suite.cases.filter((evalCase) =>
   args.only === undefined || evalCase.id === args.only
 );
+if (cases.length === 0) {
+  console.error(`no case ${args.only} in ${args.cases}`);
+  Deno.exit(2);
+}
 const instructions = instructionsFromSwift(
   await Deno.readTextFile(args.instructions),
 );
@@ -249,7 +313,11 @@ const runs = await Promise.all(
       );
       await call("GET", `/jobs/${job}/events?after=0`);
       const seconds = Math.round((Date.now() - started) / 1000);
-      return await measure(evalCase, variant, job, seconds);
+      try {
+        return await measure(evalCase, variant, job, seconds);
+      } catch (error) {
+        return unmeasured(evalCase, variant, job, seconds, error);
+      }
     })
   ),
 );
