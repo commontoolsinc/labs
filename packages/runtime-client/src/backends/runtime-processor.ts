@@ -3825,14 +3825,14 @@ export class RuntimeProcessor {
     if (!isDID(request.space)) {
       throw new Error("uploadBlob requires a space DID");
     }
-    const suffix = (request.suffix ?? "bin").replace(/^\./, "") || "bin";
+    // With no suffix, the upload names no blob in its path, and the store
+    // chooses the suffix itself.
+    const suffix = request.suffix?.replace(/^\./, "");
+    const blobPath = suffix ? `/upload.${encodeURIComponent(suffix)}` : "";
     // The blob belongs to the named space, so it uploads to — and its
     // returned URL resolves against — THAT space's host.
     const host = this.#runtime.hostForSpace(request.space);
-    const target = new URL(
-      `/${request.space}/blobs/upload.${encodeURIComponent(suffix)}`,
-      host,
-    );
+    const target = new URL(`/${request.space}/blobs${blobPath}`, host);
     // The envelope's decode already produced this; `request.body` is a
     // `FabricBytes` by the time it arrives, and a handler owns the values its
     // request carries per `BaseRequest`, so nothing else is reading it. The
@@ -3842,11 +3842,19 @@ export class RuntimeProcessor {
     if (!(bytes instanceof FabricBytes)) {
       throw new Error("uploadBlob requires bytes as its body");
     }
+    if (request.name !== undefined && typeof request.name !== "string") {
+      throw new Error(
+        "uploadBlob requires any name it is given to be a string",
+      );
+    }
     // Blob upload payloads must preserve FabricBytes even when the wider
-    // process is running with legacy memory JSON flags.
+    // process is running with legacy memory JSON flags. A blob with no name
+    // has no `name` key at all, since its id is the hash of exactly what is
+    // sent.
     const body = blobUploadCodec.encode({
       type: request.contentType,
       body: bytes,
+      ...(request.name === undefined ? {} : { name: request.name }),
     });
     const response = await fetch(target, {
       method: "POST",

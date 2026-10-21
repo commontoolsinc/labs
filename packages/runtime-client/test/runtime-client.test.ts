@@ -1287,6 +1287,29 @@ describe("RuntimeClient", () => {
       expect(request.body).toBeInstanceOf(FabricBytes);
       expect(request.body.slice()).toEqual(new Uint8Array([1, 2, 3]));
     });
+
+    it("sends the name of the file the bytes came from", async () => {
+      const requests: unknown[] = [];
+      const conn = {
+        on: () => {},
+        request: (message: unknown) => {
+          requests.push(message);
+          return Promise.resolve({ id: "fid1:blob", url: "blobs/blob.png" });
+        },
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      await client.uploadBlob({
+        space: "did:key:z6Mk-runtime-client-blob" as never,
+        contentType: "image/png",
+        body: new Uint8Array([1, 2, 3]),
+        name: "photo.png",
+      });
+
+      expect((requests[0] as UploadBlobRequest).name).toBe("photo.png");
+    });
   });
 });
 

@@ -148,7 +148,7 @@ went names a `requestId`, since it can't know the event's own key.
 When the entry's name is not the name its blob was stored under, because the
 store chose a free one, or because the client stored the blob with no name, the
 store stores the blob's bytes and media type again under the entry's name, and
-the entry names that blob (see [named blobs](README.md#prerequisites)). An
+the entry names that blob (see [prerequisites](README.md#prerequisites)). An
 entry's blob always carries the entry's name.
 
 The store adds an entry with the request's fields, `addedAt` from the handler's
