@@ -3588,7 +3588,14 @@ export async function deriveSelectedValue(
   // The repeat runs the pattern this cell was set up with; the first read of a
   // selection is the one that installs it.
   const installedPattern = reads.patterns.get(readKey);
-  if (installedPattern === undefined) reads.patterns.set(readKey, mainPattern);
+  if (installedPattern === undefined) {
+    reads.patterns.set(readKey, mainPattern);
+  } else {
+    // The repeat sets up again over the piece the first read stored, and a
+    // release pass may have dropped that piece's documents since. Setup reads
+    // them in `tx`, so they are loaded first.
+    await runtime.runner.syncStoredPieceCells(resultCell, installedPattern);
+  }
   const errors = runtimeErrorLog(runtime);
   const errorCountBefore = errors.length;
   const result = await runtime.setup(
