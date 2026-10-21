@@ -448,12 +448,14 @@ The relay is used in these places:
   newer is a run the list is served behind, so readings go on reading the top
   until the list shows it. GitHub's list can be read a moment before it shows a
   run that a delivery has announced. A read of the top keeps the head's copy of
-  a run, read or delivered, when the list's copy is older. While the relay
+  a run, read or delivered, when the list's copy is older, and a delivered copy
+  unless the list's copy is newer. While the relay
   vouches for the read of the top, a reading reads the top only for such a run,
   and while it vouches for the read of a filtered list, a reading does not read
-  that list. So a workflow with no activity costs a read of the top, and of each
-  filtered list, every fifteen minutes, and one with activity costs about a read
-  of the top for each new run. A run deleted from the list sends no delivery;
+  that list. So while deliveries keep the relay vouching, a workflow with no
+  activity costs a read of the top, and of each filtered list, every fifteen
+  minutes, and one with activity costs about a read of the top for each new
+  run; once the relay goes quiet, readers read on their own intervals. A run deleted from the list sends no delivery;
   it stays held until the top is next read, or, further down, until the head is
   cut back past it.
 - **The scheduler.** A delivery that changes a run source, which is a run of
@@ -469,7 +471,7 @@ The relay is used in these places:
   a run on its repository's default branch not started for a pull request,
   starts a sweep at once when it finishes, or as soon as the sweep under way
   ends. Whether a failing job's workflow has changed since the failure is kept
-  from one sweep to the next until a push to any repository's default branch
+  from one sweep to the next until a push to that repository's default branch
   is delivered, or the relay stops vouching for it.
 - **The green branch.** The repository's activity record is read only when a
   push to the branch has been delivered since the last read, or the relay does
@@ -479,9 +481,12 @@ The relay is used in these places:
 - **The recent commits tile.** The organization's repositories are listed
   again only after a `repository` delivery, or when the relay does not vouch
   for the last listing. A delivered push to a repository's default branch has
-  that repository's commits read at once, without a listing, and read again on
-  each refresh until they start at the commit pushed. While the relay vouches
-  and nothing has been delivered, the tile reads nothing.
+  that repository's commits read at once, and read again on each refresh until
+  they start at the commit pushed; the read lists the repositories first only
+  when the relay does not vouch for the last listing, or when that listing
+  leaves out the repository pushed to. A push to a repository that a listing
+  read after it still leaves out is dropped. While the relay vouches and
+  nothing has been delivered, the tile reads nothing.
 
 The ci tile's inventory of repositories and workflows is read once an hour
 whatever the relay delivers, because enabling or disabling a workflow sends no

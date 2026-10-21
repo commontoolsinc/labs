@@ -51,7 +51,7 @@
  * the list has runs the head lacks, and each reading reads the top again,
  * however recently it was read, until the top shows the run or a newer one.
  * A read of the top keeps the head's copy of a run when the list's copy is
- * older. While the relay vouches for the connection the top of a list was
+ * older, and a delivered copy unless the list's copy is newer. While the relay vouches for the connection the top of a list was
  * last read under, every change to the runs there since has been delivered,
  * so a reading does not read the top again unless a run has landed on it;
  * the same holds for a filtered list and the connection it was last read
@@ -213,6 +213,8 @@ class Head {
    * the head lacks.
    */
   unlisted = new Map<number, GitHubRun>();
+  /** The runs whose copy held is one the relay delivered, by id. */
+  deliveredCopies = new Set<number>();
   /** The oldest run each reader last read, and when. */
   reach = new Map<string, { id: number; at: number }>();
   /** When a reading last asked for this head. */
@@ -413,6 +415,9 @@ export class RunLists {
         takeDelivered(held);
         await readTop(list, held, newest, this.#webhooks);
         await recheck(list, held, reading, this.#webhooks);
+        // What was delivered while the top and the filtered lists were read
+        // is taken in before the reader's runs are chosen.
+        takeDelivered(held);
         const count = await readDown(list, held, reading);
         takeDelivered(held);
         if (count > 0) {
@@ -503,6 +508,7 @@ function takeIn(head: Head, run: GitHubRun): void {
   } else if (!isOlder(run, head.runs[index])) {
     head.runs[index] = run;
     head.fresh.add(run.id);
+    head.deliveredCopies.add(run.id);
   }
 }
 
@@ -522,6 +528,9 @@ function trim(head: Head): void {
   if (below !== -1) {
     head.runs.length = below;
     head.complete = false;
+    for (const id of head.deliveredCopies) {
+      if (id < deepest) head.deliveredCopies.delete(id);
+    }
   }
 }
 
@@ -534,7 +543,8 @@ function trim(head: Head): void {
  * reaching any, every held run that was in their way is gone, and the head
  * starts again from them. A top read that leaves out the newest held run is
  * rejected as behind unless that run has been deleted. A run read that the
- * head holds a newer copy of, read or delivered, keeps that copy. The top is
+ * head holds a newer copy of, read or delivered, keeps that copy, and so does
+ * one whose delivered copy is as new. The top is
  * not read again while `webhooks` vouches for the connection it was last read
  * under, or within REUSE_MS of the last read, unless the head has an unlisted
  * run. Each unlisted run the read leaves out is read by its id: one that is
@@ -580,9 +590,18 @@ async function readTop(
   const last = top.at(-1)?.id ?? Infinity;
   const known = new Map(head.unlisted);
   for (const run of head.runs) known.set(run.id, run);
+  // A delivered copy updated at the same moment as the list's is kept, since
+  // the list can be served behind the delivery.
   const listed = top.map((run) => {
     const copy = known.get(run.id);
-    return copy !== undefined && isOlder(run, copy) ? copy : run;
+    const delivered = head.unlisted.has(run.id) ||
+      head.deliveredCopies.has(run.id);
+    if (
+      copy !== undefined &&
+      (isOlder(run, copy) || delivered && !isOlder(copy, run))
+    ) return copy;
+    head.deliveredCopies.delete(run.id);
+    return run;
   });
   head.runs = joins
     ? [...listed, ...head.runs.filter((run) => run.id < last)]
@@ -603,7 +622,11 @@ async function readTop(
     if (run === undefined) head.unlisted.delete(id);
     else if (id < newest) {
       head.unlisted.delete(id);
-      place(head, isOlder(run, copy) ? copy : run);
+      if (isOlder(copy, run)) place(head, run);
+      else {
+        place(head, copy);
+        head.deliveredCopies.add(id);
+      }
     }
   }
 }
@@ -758,6 +781,7 @@ async function readAgain(
     return false;
   }
   if (index !== -1) head.runs[index] = run;
+  head.deliveredCopies.delete(id);
   return index !== -1;
 }
 

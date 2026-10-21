@@ -1155,11 +1155,11 @@ boardTest("a shared run source preserves each dependent tile's per-source interv
   assertEquals(slowCollections, 1);
 });
 
-// A relay delivery of a run on main of the workflow `file` in test/delivered.
-function delivered(file: string): GitHubDelivery {
+// A relay delivery of a run on main of the workflow `file` in `repo`.
+function delivered(file: string, repo = "test/delivered"): GitHubDelivery {
   return {
     event: "workflow_run",
-    payload: workflowRunPayload("test/delivered", {
+    payload: workflowRunPayload(repo, {
       id: 1,
       event: "push",
       head_branch: "main",
@@ -1194,17 +1194,58 @@ boardTest("a relay delivery that changes a run source fetches it at once, and on
   }];
   await tick(tiles, sourceCtx);
 
-  assertEquals(onDelivery(delivered("other.yml"), tiles), false);
+  assertEquals(onDelivery(delivered("other.yml"), tiles, sourceCtx), false);
   await tick(tiles, sourceCtx);
   assertEquals(fetches, 1);
 
   using published = observeUpdate(() =>
     tileHtml("labs ci trust").includes("fetch 2")
   );
-  assertEquals(onDelivery(delivered("ci.yml"), tiles), true);
+  assertEquals(onDelivery(delivered("ci.yml"), tiles, sourceCtx), true);
   await tick(tiles, sourceCtx);
   await published.promise;
   assertEquals(fetches, 2);
+});
+
+boardTest("a relay delivery for a source whose tiles are all being collected fetches it once one of them is free", async () => {
+  const delivered1 = runSource("test/delivered", "ci.yml", "main");
+  const other = runSource("test/other", "ci.yml", "main");
+  let deliveredFetches = 0;
+  const blocked = deferred<void>();
+  const release = deferred<void>();
+  let blocking = false;
+  const sourceCtx: Ctx = {
+    runs: () => sourceCtx.runsFor(delivered1),
+    runsFor: async (source) => {
+      if (source.repo === delivered1.repo) {
+        deliveredFetches++;
+      } else if (blocking) {
+        blocked.resolve();
+        await release.promise;
+      }
+      return [sourceRun(1, source.repo)];
+    },
+    env: () => undefined,
+  };
+  const tiles = [{
+    ...sourceTile("labs ci trust", [delivered1, other]),
+    intervalMs: 600_000,
+  }];
+  await tick(tiles, sourceCtx);
+  blocking = true;
+  onDelivery(delivered("ci.yml", other.repo), tiles, sourceCtx);
+  const busy = tick(tiles, sourceCtx);
+  await blocked.promise;
+
+  onDelivery(delivered("ci.yml"), tiles, sourceCtx);
+  await tick(tiles, sourceCtx);
+  assertEquals(deliveredFetches, 1);
+
+  using published = observeUpdate(() => deliveredFetches === 2);
+  release.resolve();
+  await busy;
+  await published.promise;
+  assertEquals(deliveredFetches, 2);
 });
 
 boardTest("a relay delivery during a fetch of its source fetches the source again once that fetch is published", async () => {
@@ -1229,14 +1270,14 @@ boardTest("a relay delivery during a fetch of its source fetches the source agai
     intervalMs: 600_000,
   }];
   await tick(tiles, sourceCtx);
-  onDelivery(delivered("ci.yml"), tiles);
+  onDelivery(delivered("ci.yml"), tiles, sourceCtx);
   const second = tick(tiles, sourceCtx);
   await started.promise;
 
   using published = observeUpdate(() =>
     tileHtml("labs ci trust").includes("fetch 3")
   );
-  onDelivery(delivered("ci.yml"), tiles);
+  onDelivery(delivered("ci.yml"), tiles, sourceCtx);
   await tick(tiles, sourceCtx);
   assertEquals(fetches, 2);
   release.resolve();

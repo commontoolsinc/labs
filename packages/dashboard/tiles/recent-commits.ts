@@ -30,8 +30,11 @@
  * `repository` delivery has arrived since, the listing is not read again.
  * A delivered push to a repository's default branch has that repository's
  * commits read at once, without waiting for COMMITS_REFRESH_MS, and read
- * again on each refresh until they start at the commit pushed. While the
- * relay vouches and nothing has been delivered, a refresh reads nothing.
+ * again on each refresh until they start at the commit pushed. A push to a
+ * repository the last listing leaves out has the repositories listed again,
+ * and is dropped once a listing read after it still leaves the repository
+ * out. While the relay vouches and nothing has been delivered, a refresh
+ * reads nothing.
  */
 
 import { isObjectNotArray } from "@commonfabric/utils/types";
@@ -73,6 +76,7 @@ import { CI_HISTORY_SOURCES, GANTT_MAX_RUNS } from "../ci-job-history.ts";
 import { greenStar } from "../green-star.ts";
 import {
   Freshness,
+  type GitHubDelivery,
   type GitHubWebhooks,
   githubWebhooks,
   pushOf,
@@ -151,6 +155,26 @@ const HISTORY_QUERY = `query($owner: String!, $name: String!, $count: Int!) {
     }
   }
 }`;
+
+/**
+ * Returns the repository, as "owner/name", that a `repository` delivery
+ * reports deleted, archived or transferred out of the organization.
+ */
+function goneRepo(delivery: GitHubDelivery): string | undefined {
+  if (delivery.event !== "repository") return undefined;
+  const payload = delivery.payload;
+  if (!isObjectNotArray(payload) || !GONE.has(String(payload.action))) {
+    return undefined;
+  }
+  const repository = payload.repository;
+  return isObjectNotArray(repository) && typeof repository.full_name === "string"
+    ? repository.full_name
+    : undefined;
+}
+
+// The actions of a `repository` delivery that take a repository out of the
+// listing.
+const GONE = new Set(["deleted", "archived", "transferred"]);
 
 // The commit a push names as the one a deleted branch was moved to.
 const DELETED = "0".repeat(40);
@@ -275,9 +299,9 @@ export class OrganizationCommits {
   #listing: Freshness;
 
   // The commit each repository's default branch was last delivered as pushed
-  // to, by "owner/name" in lower case, until its commits are read starting at
-  // that commit.
-  #pushed = new Map<string, string>();
+  // to, and when, by "owner/name" in lower case, until its commits are read
+  // starting at that commit, or a listing read since leaves it out.
+  #pushed = new Map<string, { after: string; at: number }>();
 
   /**
    * Constructs an instance holding no commits, which learns of pushes and of
@@ -291,19 +315,31 @@ export class OrganizationCommits {
     webhooks.listen((delivery) => {
       const push = pushOf(delivery);
       if (push !== undefined && push.ref === `refs/heads/${push.defaultBranch}`) {
-        this.#pushed.set(push.repo.toLowerCase(), push.after);
+        this.#pushed.set(push.repo.toLowerCase(), {
+          after: push.after,
+          at: Date.now(),
+        });
       }
+      // A repository that leaves the organization takes its pushes with it.
+      const gone = goneRepo(delivery);
+      if (gone !== undefined) this.#pushed.delete(gone.toLowerCase());
     });
   }
 
   /**
    * Whether a refresh would read nothing: the relay vouches for the last
-   * listing, and no push has been delivered that the commits held do not
-   * show.
+   * listing, no push has been delivered that the commits held do not show,
+   * and every repository listed has had its commits read since its last push
+   * or been refused.
    */
   get current(): boolean {
-    return this.#repos !== undefined && this.#listing.current &&
-      this.#pushed.size === 0;
+    const repos = this.#repos;
+    return repos !== undefined && this.#listing.current &&
+      this.#pushed.size === 0 &&
+      repos.every((repo) =>
+        this.#held.get(repo.name)?.pushedAt === repo.pushedAt ||
+        this.#refused.has(repo.name)
+      );
   }
 
   /** Every commit held, of every repository. */
@@ -329,10 +365,21 @@ export class OrganizationCommits {
    * changed.
    */
   async refresh(credential: GitHubCredential): Promise<boolean> {
-    if (this.#repos === undefined || !this.#listing.current) {
+    if (
+      this.#repos === undefined || !this.#listing.current ||
+      this.#pushedUnlisted()
+    ) {
       const listed = this.#listing.reading();
+      const listedAt = Date.now();
       this.#repos = await organizationRepos(credential);
       listed();
+      // A push to a repository this listing still leaves out is to one the
+      // credential cannot see, or one the listing is behind, which the next
+      // listing finds when its own push or the relay's vouching runs out.
+      const names = new Set(this.#repos.map((repo) => repo.name.toLowerCase()));
+      for (const [key, pending] of this.#pushed) {
+        if (!names.has(key) && pending.at <= listedAt) this.#pushed.delete(key);
+      }
     }
     const repos = this.#repos;
     const listed = new Set(repos.map((repo) => repo.name));
@@ -365,7 +412,7 @@ export class OrganizationCommits {
           // so does one the history does not show yet.
           if (
             this.#pushed.get(key) === expected &&
-            (head ?? DELETED) === expected
+            (head ?? DELETED) === expected?.after
           ) this.#pushed.delete(key);
           if (before === undefined || before[0]?.sha !== commits[0]?.sha) {
             changed = true;
@@ -389,13 +436,19 @@ export class OrganizationCommits {
         }
       }),
     );
-    // A push to a repository the listing does not hold is read once a
-    // listing holds it.
-    const names = new Set(repos.map((repo) => repo.name.toLowerCase()));
-    for (const key of this.#pushed.keys()) {
-      if (!names.has(key)) this.#pushed.delete(key);
-    }
     return changed;
+  }
+
+  /**
+   * Helper for `refresh()`, which returns whether a push has been delivered
+   * to a repository the last listing does not hold, which the next listing
+   * may.
+   */
+  #pushedUnlisted(): boolean {
+    const names = new Set(
+      (this.#repos ?? []).map((repo) => repo.name.toLowerCase()),
+    );
+    return [...this.#pushed.keys()].some((key) => !names.has(key));
   }
 }
 

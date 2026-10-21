@@ -83,8 +83,8 @@ export interface Tile {
 export interface Ctx {
   runs(): Promise<Run[]>; // labs deno.yml runs on main (shared across CI tiles)
   // The runs of any source. A tile collected from run-source snapshots reads
-  // the snapshot the scheduler fetched once for every tile reading the source
-  // (loom's CI tiles, and the recent commits tile).
+  // the snapshot the scheduler fetched once for the source and shares with
+  // every tile reading it (loom's CI tiles, and the recent commits tile).
   runsFor(source: RunSource): Promise<Run[]>;
   // For a tile collected from run-source snapshots: why the snapshot of that
   // source is missing or out of date, or undefined when it is current.

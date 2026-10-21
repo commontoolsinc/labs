@@ -1317,6 +1317,21 @@ describe("github-runs", () => {
             expect(github.paths).toEqual([]);
           });
 
+          it("keeps a delivered copy of a run over a copy the list shows updated at the same moment", async () => {
+            const relay = new FakeRelay();
+            await relay.open();
+            const running = run(31, { status: "in_progress", conclusion: null });
+            const github = new FakeGitHub(runs(30, 1));
+            const lists = new RunLists(undefined, relay.webhooks);
+            await read(lists, github);
+            github.list = [running, ...runs(30, 1)];
+            await deliver(relay, run(31, { updated_at: running.updated_at }));
+
+            const read2 = await read(lists, github);
+
+            expect(read2[0].status).toBe("completed");
+          });
+
           it("keeps a delivered copy of a run over an older copy the list shows", async () => {
             const relay = new FakeRelay();
             await relay.open();

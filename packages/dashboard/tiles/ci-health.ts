@@ -49,9 +49,9 @@
  * held, so the sweep's findings are shown at once.
  *
  * Whether a failing job's workflow has changed since the failure is read once
- * for each failing run. It is read again after the relay delivers a push to a
- * repository's default branch, or when the relay cannot vouch that none has
- * been delivered.
+ * for each failing run. It is read again after the relay delivers a push to
+ * the run's repository's default branch, or when the relay cannot vouch that
+ * none has been delivered.
  */
 
 import {
@@ -94,6 +94,7 @@ import {
   type GitHubWebhooks,
   githubWebhooks,
   pushOf,
+  sameRepo,
   workflowRunOf,
 } from "../github-webhooks.ts";
 import { dashboardCacheFile } from "../history-files.ts";
@@ -512,9 +513,13 @@ function ciHealthView(collected: CiJobs, now = Date.now()): TileView {
 interface Sweep {
   repos: RepoInventory[];
   jobs: Job[];
-  redefined: Map<number, Promise<boolean>>;
+  redefined: Redefinitions;
   at: number;
 }
+
+// Whether each failing run's workflow has changed since the run, by run id,
+// with the repository the run is in.
+type Redefinitions = Map<number, { repo: string; answer: Promise<boolean> }>;
 
 /** The ci tile, and a way to wait for the sweep it has under way. */
 export interface CiHealthTile extends Tile {
@@ -544,13 +549,19 @@ export function createCiHealth(
   let sweep: Promise<void> | undefined;
   let sweepWanted = false;
   let collectedWith: { ctx: Ctx; credential: GitHubCredential } | undefined;
-  // Whether each failing run's workflow has changed since the run, by run id,
-  // kept from sweep to sweep while no push to a default branch arrives.
-  let redefined = new Map<number, Promise<boolean>>();
-  const definitions = new Freshness(webhooks, (delivery) => {
+  // Whether each failing run's workflow has changed since the run, kept from
+  // sweep to sweep while the relay vouches for it. A push to a repository's
+  // default branch drops the answers for that repository's runs.
+  let redefined: Redefinitions = new Map();
+  const definitions = new Freshness(webhooks, () => false);
+  webhooks.listen((delivery) => {
     const push = pushOf(delivery);
-    return push !== undefined &&
-      push.ref === `refs/heads/${push.defaultBranch}`;
+    if (push === undefined || push.ref !== `refs/heads/${push.defaultBranch}`) {
+      return;
+    }
+    for (const [id, { repo }] of redefined) {
+      if (sameRepo(repo, push.repo)) redefined.delete(id);
+    }
   });
   // What the latest collection to finish saw, which is what the page renders.
   // The tile is collected once for each of its snapshots, and the scheduler
@@ -566,7 +577,7 @@ export function createCiHealth(
 
   const judge = (
     listing: Listing,
-    redefined: Map<number, Promise<boolean>>,
+    redefined: Redefinitions,
     credential: GitHubCredential,
   ): Promise<Job> => {
     let held = attempts.get(listing.workflow.id);
@@ -576,7 +587,7 @@ export function createCiHealth(
     }
     held.observe(listing.runs);
     const changedSince = (failing: Listing, run: Run): Promise<boolean> => {
-      let answer = redefined.get(run.id);
+      let answer = redefined.get(run.id)?.answer;
       if (!answer) {
         answer = redefinedSince(failing.inventory, failing.workflow, run, credential)
           .catch((error) => {
@@ -590,7 +601,7 @@ export function createCiHealth(
             );
             return false;
           });
-        redefined.set(run.id, answer);
+        redefined.set(run.id, { repo: failing.inventory.repo, answer });
       }
       return answer;
     };

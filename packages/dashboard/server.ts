@@ -80,8 +80,9 @@ const activeActivityUpdates = new Set<string>();
 const runSnapshots = new Map<string, Run[]>();
 const runSourceErrors = new Map<string, string>();
 const lastSourceTileRun = new Map<string, number>();
-// The sources a relay delivery has changed since their fetch last started.
-const changedSources = new Set<string>();
+// The sources a relay delivery has changed since their fetch last started,
+// with the tiles and context they are collected with.
+const changedSources = new Map<string, { tiles: Tile[]; sourceCtx: Ctx }>();
 interface ActiveTileUpdate {
   count: number;
   startedAt: number;
@@ -208,10 +209,18 @@ function beginTileUpdate(tile: Tile, startedAt: number): void {
   }
 }
 
+// A changed source whose tiles were all being collected when it was
+// delivered is fetched as soon as one of them is free.
 function finishTileUpdate(tile: Tile): void {
   const active = activeTileUpdates.get(tile.label);
   if (!active || active.count === 1) activeTileUpdates.delete(tile.label);
   else active.count--;
+  for (const { tiles, sourceCtx } of changedSources.values()) {
+    if (tiles.includes(tile)) {
+      queueMicrotask(() => collectChanged(tiles, sourceCtx));
+      return;
+    }
+  }
 }
 
 // How many collections of each tile have started, and the number of the
@@ -629,10 +638,6 @@ export async function tick(tiles: Tile[] = TILES, sourceCtx: Ctx = ctx) {
         activeRunSourceUpdates.delete(runSourceKey(group.source));
         for (const tile of group.tiles) finishTileUpdate(tile);
       }
-      // A delivery that arrived during the fetch is fetched for at once.
-      if (changedSources.has(runSourceKey(group.source))) {
-        collectChanged(tiles, sourceCtx);
-      }
     }
   };
 
@@ -646,17 +651,19 @@ export async function tick(tiles: Tile[] = TILES, sourceCtx: Ctx = ctx) {
 /**
  * Takes in a delivery of the GitHub webhook relay: every source of `tiles`
  * that it changes is due at once, rather than on its tiles' intervals, and a
- * source being fetched already is fetched again once that fetch is
- * published. Returns whether any source is due.
+ * source being fetched already, or whose tiles are all being collected, is
+ * fetched as soon as a tile reading it is free. Returns whether any source is
+ * due.
  */
 export function onDelivery(
   delivery: GitHubDelivery,
   tiles: Tile[] = TILES,
+  sourceCtx: Ctx = ctx,
 ): boolean {
   let changed = false;
   for (const { source } of groupRunSources(tiles)) {
     if (!changesRunSource(source, delivery)) continue;
-    changedSources.add(runSourceKey(source));
+    changedSources.set(runSourceKey(source), { tiles, sourceCtx });
     changed = true;
   }
   return changed;

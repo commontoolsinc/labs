@@ -355,6 +355,58 @@ describe("recent-commits", () => {
             expect(calls).toEqual([`graphql ${ORG}/labs`, `graphql ${ORG}/labs`]);
           });
 
+          it("reads again a repository whose read failed, however the relay vouches", async () => {
+            const relay = new FakeRelay();
+            await relay.open();
+            let repos: RepoSpec[] = [{ ...labs(["l"]), status: 502 }];
+            restore = standIn(() => repos, calls);
+            const organization = new OrganizationCommits(relay.webhooks);
+            await organization.refresh(CREDENTIAL);
+            expect(organization.current).toBe(false);
+            repos = [labs(["l"])];
+            calls.length = 0;
+
+            expect(await organization.refresh(CREDENTIAL)).toBe(true);
+
+            expect(calls).toEqual([`graphql ${ORG}/labs`]);
+            expect(organization.current).toBe(true);
+          });
+
+          it("lists the repositories again for a push to one the listing leaves out, and drops the push once a later listing leaves it out too", async () => {
+            const relay = new FakeRelay();
+            await relay.open();
+            let repos = [labs(["l"])];
+            restore = standIn(() => repos, calls);
+            const organization = new OrganizationCommits(relay.webhooks);
+            await organization.refresh(CREDENTIAL);
+            await relay.deliver(
+              "push",
+              pushPayload(`${ORG}/hidden`, "refs/heads/main", "h"),
+            );
+            calls.length = 0;
+
+            await organization.refresh(CREDENTIAL);
+            expect(calls).toEqual([`/orgs/${ORG}/repos?per_page=100&page=1`]);
+            expect(organization.current).toBe(true);
+
+            await relay.deliver(
+              "push",
+              pushPayload(`${ORG}/fresh`, "refs/heads/main", "f"),
+            );
+            repos = [...repos, {
+              name: "fresh",
+              pushedAt: "2026-09-30T13:00:00Z",
+              commits: [commit(`${ORG}/fresh`, "f", "2026-09-30T13:00:00Z")],
+            }];
+            calls.length = 0;
+            await organization.refresh(CREDENTIAL);
+            expect(calls).toEqual([
+              `/orgs/${ORG}/repos?per_page=100&page=1`,
+              `graphql ${ORG}/fresh`,
+            ]);
+            expect(organization.current).toBe(true);
+          });
+
           it("lists the repositories again once a repository delivery arrives", async () => {
             const relay = new FakeRelay();
             await relay.open();

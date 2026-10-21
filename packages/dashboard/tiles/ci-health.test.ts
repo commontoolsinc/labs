@@ -1728,7 +1728,7 @@ Deno.test("ci: a sweep reads no runs the relay vouches for", async () => {
   });
 });
 
-Deno.test("ci: a failing build's workflow history is read again only once a default branch is pushed to", async () => {
+Deno.test("ci: a failing build's workflow history is read again only once its repository's default branch is pushed to", async () => {
   await withGitHub(
     standingOrg([{ conclusion: "failure", minutesAgo: 30 }], green),
     async (wire) => {
@@ -1742,16 +1742,16 @@ Deno.test("ci: a failing build's workflow history is read again only once a defa
         relay.webhooks,
       );
       await collectSwept(tile);
-      wire.sweepAgain();
-      await relay.deliver("ping", {});
-      await collectSwept(tile);
       assertEquals(histories(), 1);
 
+      // Two sweep intervals stay inside the time the relay vouches for a
+      // read.
       wire.sweepAgain();
       await relay.deliver(
         "push",
-        pushPayload(`${ORG}/elsewhere`, "refs/heads/feature"),
+        pushPayload(`${ORG}/elsewhere`, "refs/heads/main"),
       );
+      await relay.deliver("push", pushPayload(REPO, "refs/heads/feature"));
       await collectSwept(tile);
       assertEquals(histories(), 1);
 

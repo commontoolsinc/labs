@@ -368,7 +368,8 @@ export function workflowRunOf(
     typeof headSha !== "string" || typeof status !== "string" ||
     !(typeof conclusion === "string" || conclusion === null) ||
     typeof runAttempt !== "number" || typeof displayTitle !== "string" ||
-    typeof createdAt !== "string" || typeof runStartedAt !== "string" ||
+    typeof createdAt !== "string" ||
+    !(typeof runStartedAt === "string" || runStartedAt === null) ||
     typeof updatedAt !== "string" || typeof htmlUrl !== "string" ||
     !(headCommit === null || typeof message === "string")
   ) return undefined;
@@ -388,7 +389,9 @@ export function workflowRunOf(
       run_attempt: runAttempt,
       display_title: displayTitle,
       created_at: createdAt,
-      run_started_at: runStartedAt,
+      // A run that has not started yet may name no start, and is listed as
+      // starting when it was created.
+      run_started_at: runStartedAt ?? createdAt,
       updated_at: updatedAt,
       html_url: htmlUrl,
       head_commit: typeof message === "string" ? { message } : null,

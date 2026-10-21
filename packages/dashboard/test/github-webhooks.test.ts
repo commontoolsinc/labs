@@ -76,7 +76,10 @@ describe("github-webhooks", () => {
         it("reads a frame that arrives a byte at a time", async () => {
           const relay = new FakeRelay();
           await relay.open();
-          const delivery = await relay.write(request("issues", '{"ref":"x"}'), 1);
+          const delivery = await relay.write(
+            request("issues", '{"ref":"x"}'),
+            1,
+          );
           expect(delivery).toEqual({ event: "issues", payload: { ref: "x" } });
         });
 
@@ -406,6 +409,18 @@ describe("github-webhooks", () => {
         workflowFile: "ci.yml",
         run: { ...RUN, name: "CI", path: ".github/workflows/ci.yml" },
       });
+    });
+
+    it("reads a run that has not started yet as starting when it was created", () => {
+      const payload = workflowRunPayload(REPO, RUN);
+      const activity = workflowRunOf({
+        event: "workflow_run",
+        payload: {
+          ...payload,
+          workflow_run: { ...payload.workflow_run, run_started_at: null },
+        },
+      });
+      expect(activity?.run.run_started_at).toBe(RUN.created_at);
     });
 
     it("keeps only the fields of the run the dashboard reads", () => {
