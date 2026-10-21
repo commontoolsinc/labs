@@ -23,7 +23,7 @@ interface FileEntry {
   /** The blob holding the bytes. */
   blob: BlobRef;
 
-  /** The size of the bytes, in bytes. */
+  /** The size of the file, in bytes. */
   size: number;
 
   /** When the file was added. */
@@ -57,8 +57,8 @@ interface FileProfile {
   [`FileStoreOutput`](FileStoreOutput.md#add)). A reader fetches the bytes from
   that space's blob store. An entry holds no URL: a URL depends on where the
   reader's runtime reaches the blob store, and a blob reference doesn't.
-- **`size`** is the length of the bytes, so a reader can show it, and decide
-  whether to fetch, without fetching.
+- **`size`** is the size of the file, in bytes, so a reader can show it, and
+  decide whether to fetch, without fetching.
 - **`addedAt`** comes from the clock of the handler that adds the entry, at
   whatever resolution the system provides (see the [timing side-channel
   mitigations](../sandboxing/TIMING_SIDE_CHANNELS.md)).

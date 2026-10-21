@@ -130,7 +130,7 @@ number, onConflict?: "refuse" | "rename")`
 - `mediaType: string` — The media type the blob was stored with.
 - `blob: BlobRef` — The blob holding the bytes. A `blob.space` other than the
   store's own space is refused, with `code: "other-space"`.
-- `size: number` — The length of the bytes.
+- `size: number` — The size of the file, in bytes.
 - `onConflict` — What to do when `name` is taken. With `"refuse"`, the default,
   the request is refused, with `code: "name-taken"`. With `"rename"`, the store
   adds the entry under the first of `name (2)`, `name (3)`, and so on that is
