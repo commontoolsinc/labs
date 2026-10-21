@@ -34,10 +34,13 @@ describe("strategy", () => {
     }
   });
 
-  it("tells a quick run to stop after a lookup or two and say what it did not check", () => {
+  it("tells a quick run to answer directly, or from the one tool call that matches the ask", () => {
     const quick = prompt("quick", ["personal"]);
 
-    expect(quick).toContain("one or two lookups");
+    expect(quick).toContain("Answer directly when you can, without research");
+    expect(quick).toContain(
+      "the one tool call that best matches what they asked",
+    );
     expect(quick).not.toContain("Search every source");
     expect(quick).not.toContain("Before you finish");
   });
@@ -57,6 +60,6 @@ describe("strategy", () => {
 
     expect(general).toContain("worth opening on its own");
     expect(general).toContain("Before you finish, read your result");
-    expect(general).not.toContain("one or two lookups");
+    expect(general).not.toContain("the one tool call that best matches");
   });
 });
