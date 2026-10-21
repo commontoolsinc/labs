@@ -76,7 +76,9 @@ a cell.
   offload to an object store, and no signed or expiring URL.
 - GIF, JPEG, PNG, and WebP are served as their own media type, so an `<img>`
   can show them. Every other type is served as `application/octet-stream`, so
-  a browser downloads it rather than rendering it inline.
+  a browser downloads it rather than rendering it inline. Every blob is served
+  with `X-Content-Type-Options: nosniff`, so a browser takes the type as given
+  rather than guessing one from the bytes.
 - Nothing deletes a blob. Removing a record drops the reference; the bytes
   stay.
 - The upload and download routes are not authenticated: anyone who holds a

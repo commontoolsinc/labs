@@ -95,6 +95,7 @@ describe("Blob Routes", () => {
     const get = await app.request(`/${identity.did()}/blobs/${hash}.png`);
     expect(get.status).toBe(200);
     expect(get.headers.get("Content-Type")).toBe("image/gif");
+    expect(get.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(get.headers.get("Content-Disposition")).toBeNull();
     expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
   });
@@ -269,6 +270,7 @@ describe("Blob Routes", () => {
     const get = await app.request(`/${identity.did()}/blobs/${hash}.html`);
     expect(get.status).toBe(200);
     expect(get.headers.get("Content-Type")).toBe("application/octet-stream");
+    expect(get.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
   });
 

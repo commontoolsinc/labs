@@ -292,9 +292,12 @@ router.get("/:spaceDid/blobs/:blobName", async (c) => {
   }
 
   const body = contents.body.slice();
+  // `nosniff` holds a browser to the `Content-Type` given, so bytes served as
+  // `application/octet-stream` are never read as a type it guesses at.
   const headers = new Headers({
     "Content-Type": safeResponseType(contents.type),
     "Cache-Control": "public, max-age=31536000, immutable",
+    "X-Content-Type-Options": "nosniff",
   });
   if (contents.name !== undefined) {
     headers.set(
