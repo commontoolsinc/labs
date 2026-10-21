@@ -14,9 +14,16 @@ import { memoryServer } from "@/routes/storage/memory.ts";
 
 const router = createRouter();
 
+/**
+ * A blob as the store keeps it: its media type, its bytes, and, when it was
+ * stored with one, the name of the file they came from. A blob's id is the hash
+ * of the whole record, so the same bytes stored under two names, or under a
+ * name and under none, are two blobs.
+ */
 type BlobContents = {
   type: string;
   body: FabricBytes;
+  name?: string;
 };
 
 const DEFAULT_SUFFIX_BY_TYPE: Record<string, string> = {
@@ -35,6 +42,8 @@ const SAFE_RESPONSE_TYPES = new Set([
   "image/webp",
 ]);
 const VALID_SUFFIX = /^[A-Za-z0-9]{1,8}$/;
+const MAX_FILE_NAME_BYTES = 255;
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
 
 class BlobPayloadTooLarge extends Error {
   constructor() {
@@ -86,29 +95,53 @@ const toByteArray = (value: unknown): Uint8Array | undefined => {
 };
 
 /**
- * Returns `value` as blob contents if its body is a `FabricBytes`, the one form
- * an upload may take, or `undefined` otherwise.
+ * Indicates whether `name` may name the file a blob holds: a non-empty string
+ * of at most {@link MAX_FILE_NAME_BYTES} bytes as UTF-8, with no control
+ * character in it. Nothing else about it is checked, so a name may hold a `/`
+ * or start with a `.`; a download only ever offers it as a name to save under.
  */
-const asBlobContents = (value: unknown): BlobContents | undefined =>
-  isObjectNotArray(value) && typeof value.type === "string" &&
-    value.body instanceof FabricBytes
-    ? { type: value.type, body: value.body }
+const isFileName = (name: unknown): name is string =>
+  typeof name === "string" && name.length > 0 &&
+  new TextEncoder().encode(name).byteLength <= MAX_FILE_NAME_BYTES &&
+  !CONTROL_CHARACTER.test(name);
+
+/**
+ * Returns `value` as blob contents if its body is a `FabricBytes`, the one form
+ * an upload may take, and its `name`, if it has one, is a file name (see
+ * {@link isFileName}), or `undefined` otherwise.
+ */
+const asBlobContents = (value: unknown): BlobContents | undefined => {
+  if (
+    !isObjectNotArray(value) || typeof value.type !== "string" ||
+    !(value.body instanceof FabricBytes)
+  ) {
+    return undefined;
+  }
+  if (value.name === undefined) {
+    return { type: value.type, body: value.body };
+  }
+  return isFileName(value.name)
+    ? { type: value.type, body: value.body, name: value.name }
     : undefined;
+};
 
 /**
  * Like {@link asBlobContents}, except that the body may also be one of the
- * byte-shaped forms {@link toByteArray} reads, which a stored blob may hold.
+ * byte-shaped forms {@link toByteArray} reads, which a stored blob may hold,
+ * and that a `name` which is not a file name is dropped rather than refused, so
+ * that the blob is still served, under no name.
  */
 const asStoredBlobContents = (value: unknown): BlobContents | undefined => {
   if (!isObjectNotArray(value) || typeof value.type !== "string") {
     return undefined;
   }
+  const name = isFileName(value.name) ? { name: value.name } : {};
   if (value.body instanceof FabricBytes) {
-    return { type: value.type, body: value.body };
+    return { type: value.type, body: value.body, ...name };
   }
   const bytes = toByteArray(value.body);
   if (bytes) {
-    return { type: value.type, body: new FabricBytes(bytes, true) };
+    return { type: value.type, body: new FabricBytes(bytes, true), ...name };
   }
   return undefined;
 };
@@ -137,6 +170,27 @@ const suffixFor = (blobName: string | undefined, type: string): string => {
 
 const safeResponseType = (type: string): string =>
   SAFE_RESPONSE_TYPES.has(type) ? type : "application/octet-stream";
+
+/**
+ * Returns the `Content-Disposition` a blob of media type `type` whose file is
+ * named `name` is served with: `inline` for a type served as itself, and
+ * `attachment` for one served as `application/octet-stream`, which a browser
+ * saves rather than shows. The name is given twice, as RFC 6266 describes: as
+ * percent-encoded UTF-8 in `filename*`, and as an ASCII stand-in in `filename`,
+ * with `_` for each character a quoted string can't carry, for a client that
+ * reads only that one.
+ */
+const contentDispositionFor = (name: string, type: string): string => {
+  const disposition = SAFE_RESPONSE_TYPES.has(type) ? "inline" : "attachment";
+  const ascii = name.replace(/[^\x20-\x7e]|["\\]/gu, "_");
+  // `encodeURIComponent()` leaves `'`, `(`, `)` and `*` as they are, and RFC
+  // 5987 admits none of them unencoded.
+  const encoded = encodeURIComponent(name).replace(
+    /['()*]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `${disposition}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+};
 
 const readLimitedText = async (request: Request): Promise<string> => {
   const contentLength = Number(request.headers.get("Content-Length"));
@@ -213,7 +267,7 @@ const upload = async (c: Context) => {
 
   const id = hashOf(contents).toString();
   const blobName = c.req.param("blobName") as string | undefined;
-  const suffix = suffixFor(blobName, contents.type);
+  const suffix = suffixFor(blobName ?? contents.name, contents.type);
   const hash = id.slice("fid1:".length);
   await memoryServer.writeDocument(spaceDid, `cid:${id}`, contents);
 
@@ -240,13 +294,17 @@ router.get("/:spaceDid/blobs/:blobName", async (c) => {
   }
 
   const body = contents.body.slice();
-  return new Response(body, {
-    status: 200,
-    headers: {
-      "Content-Type": safeResponseType(contents.type),
-      "Cache-Control": "public, max-age=31536000, immutable",
-    },
+  const headers = new Headers({
+    "Content-Type": safeResponseType(contents.type),
+    "Cache-Control": "public, max-age=31536000, immutable",
   });
+  if (contents.name !== undefined) {
+    headers.set(
+      "Content-Disposition",
+      contentDispositionFor(contents.name, contents.type),
+    );
+  }
+  return new Response(body, { status: 200, headers });
 });
 
 export default router;

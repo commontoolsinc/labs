@@ -95,6 +95,7 @@ describe("Blob Routes", () => {
     const get = await app.request(`/${identity.did()}/blobs/${hash}.png`);
     expect(get.status).toBe(200);
     expect(get.headers.get("Content-Type")).toBe("image/gif");
+    expect(get.headers.get("Content-Disposition")).toBeNull();
     expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
   });
 
@@ -319,6 +320,164 @@ describe("Blob Routes", () => {
     expect(new Uint8Array(await get.arrayBuffer())).toEqual(
       new Uint8Array([71, 73, 70]),
     );
+  });
+
+  describe("named blobs", () => {
+    const bytes = new Uint8Array([71, 73, 70, 56, 57, 97]);
+
+    const uploadTo = async (path: string, payload: FabricValue) =>
+      await app.request(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: encodeMemoryBoundary(payload),
+      });
+
+    it("gives the same bytes a different id under a name than under none", async () => {
+      const identity = await Identity.fromPassphrase("toolshed-blob-named-id");
+      await bootstrapHomeSpace(identity);
+      const unnamed = { type: "image/gif", body: new FabricBytes(bytes) };
+      const named = { ...unnamed, name: "photo.gif" };
+
+      const postUnnamed = await uploadTo(
+        `/${identity.did()}/blobs/image.gif`,
+        unnamed,
+      );
+      const postNamed = await uploadTo(
+        `/${identity.did()}/blobs/image.gif`,
+        named,
+      );
+
+      const unnamedId = (await postUnnamed.json()).id;
+      const namedId = (await postNamed.json()).id;
+      expect(unnamedId).toBe(hashOf(unnamed).toString());
+      expect(namedId).toBe(hashOf(named).toString());
+      expect(namedId).not.toBe(unnamedId);
+      const document = await memoryServer.readDocument(
+        identity.did(),
+        `cid:${namedId}`,
+      );
+      expect(document?.value).toEqual(named);
+    });
+
+    it("serves a blob of a type it serves as itself inline, under its name", async () => {
+      const identity = await Identity.fromPassphrase(
+        "toolshed-blob-named-inline",
+      );
+      await bootstrapHomeSpace(identity);
+      const contents = {
+        type: "image/gif",
+        body: new FabricBytes(bytes),
+        name: "café (1).gif",
+      };
+      const hash = hashOf(contents).toString().slice("fid1:".length);
+
+      const post = await uploadTo(
+        `/${identity.did()}/blobs/image.gif`,
+        contents,
+      );
+      expect(post.status).toBe(201);
+
+      const get = await app.request(`/${identity.did()}/blobs/${hash}.gif`);
+      expect(get.status).toBe(200);
+      expect(get.headers.get("Content-Disposition")).toBe(
+        `inline; filename="caf_ (1).gif"; ` +
+          `filename*=UTF-8''caf%C3%A9%20%281%29.gif`,
+      );
+      expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
+    });
+
+    it("serves a blob of a type it serves as octet-stream as an attachment, under its name", async () => {
+      const identity = await Identity.fromPassphrase(
+        "toolshed-blob-named-attachment",
+      );
+      await bootstrapHomeSpace(identity);
+      const contents = {
+        type: "application/pdf",
+        body: new FabricBytes(bytes),
+        name: `say "hi".pdf`,
+      };
+      const hash = hashOf(contents).toString().slice("fid1:".length);
+
+      const post = await uploadTo(`/${identity.did()}/blobs/doc.pdf`, contents);
+      expect(post.status).toBe(201);
+
+      const get = await app.request(`/${identity.did()}/blobs/${hash}.pdf`);
+      expect(get.headers.get("Content-Type")).toBe("application/octet-stream");
+      expect(get.headers.get("Content-Disposition")).toBe(
+        `attachment; filename="say _hi_.pdf"; ` +
+          `filename*=UTF-8''say%20%22hi%22.pdf`,
+      );
+    });
+
+    it("takes the URL suffix from the name when the upload path names no blob", async () => {
+      const identity = await Identity.fromPassphrase(
+        "toolshed-blob-named-suffix",
+      );
+      await bootstrapHomeSpace(identity);
+      const contents = {
+        type: "application/pdf",
+        body: new FabricBytes(bytes),
+        name: "report.pdf",
+      };
+      const hash = hashOf(contents).toString().slice("fid1:".length);
+
+      const post = await uploadTo(`/${identity.did()}/blobs`, contents);
+
+      expect(post.status).toBe(201);
+      expect((await post.json()).url).toBe(`blobs/${hash}.pdf`);
+    });
+
+    it("returns 400 for an upload whose name is not a file name", async () => {
+      const identity = await Identity.fromPassphrase(
+        "toolshed-blob-named-invalid",
+      );
+      const names: FabricValue[] = ["", "line\nbreak", "x".repeat(256), 7];
+      for (const name of names) {
+        const post = await uploadTo(`/${identity.did()}/blobs/image.gif`, {
+          type: "image/gif",
+          body: new FabricBytes(bytes),
+          name,
+        });
+        expect({ name, status: post.status }).toEqual({ name, status: 400 });
+      }
+    });
+
+    it("returns 201 for an upload whose name is 255 bytes as UTF-8", async () => {
+      const identity = await Identity.fromPassphrase(
+        "toolshed-blob-named-longest",
+      );
+      await bootstrapHomeSpace(identity);
+
+      const post = await uploadTo(`/${identity.did()}/blobs/image.gif`, {
+        type: "image/gif",
+        body: new FabricBytes(bytes),
+        name: "é".repeat(127) + "x",
+      });
+
+      expect(post.status).toBe(201);
+    });
+
+    it("serves a stored blob whose name is not a file name with no `Content-Disposition`", async () => {
+      const identity = await Identity.fromPassphrase(
+        "toolshed-blob-named-stored-invalid",
+      );
+      await bootstrapHomeSpace(identity);
+      const contents = {
+        type: "image/gif",
+        body: new FabricBytes(bytes),
+        name: "",
+      };
+      const id = hashOf(contents).toString();
+      await memoryServer.writeDocument(identity.did(), `cid:${id}`, contents);
+
+      const get = await app.request(
+        `/${identity.did()}/blobs/${id.slice("fid1:".length)}.gif`,
+      );
+
+      expect(get.status).toBe(200);
+      expect(get.headers.get("Content-Disposition")).toBeNull();
+      expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
+    });
   });
 
   it("rejects invalid blob payloads", async () => {
