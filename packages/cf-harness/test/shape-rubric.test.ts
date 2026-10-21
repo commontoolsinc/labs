@@ -183,6 +183,24 @@ describe("shape-rubric", () => {
       expect(material.reads.join("\n")).not.toContain("submit_result");
     });
 
+    it("counts a host-supplied result with no call, such as opening research, as a read", () => {
+      const material = materialOf("tile", [[
+        { role: "user", content: "ask" },
+        {
+          role: "user",
+          content: "Host opening research handoff: cells notify readers",
+          toolResultProvenance: { source: "research" },
+        },
+        call("1", "web_fetch", { url: "https://example.org" }),
+        { ...result("1", "page"), toolResultProvenance: { source: "web" } },
+      ]]);
+
+      expect(material.reads).toHaveLength(2);
+      expect(material.reads[0]).toContain("host-supplied");
+      expect(material.reads[0]).toContain("cells notify readers");
+      expect(material.reads[1]).toContain("web_fetch");
+    });
+
     it("clips a long page and stops listing reads past the limit", () => {
       const long = "x".repeat(LIMITS.page + 10);
       const reads = Array.from(

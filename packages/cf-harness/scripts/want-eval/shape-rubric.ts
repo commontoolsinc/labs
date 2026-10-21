@@ -228,7 +228,7 @@ export const unblind = (
 });
 
 /** How much of each page, each read's result, and all reads the judge sees. */
-export const LIMITS = { page: 16000, readResult: 600, reads: 24000 };
+export const LIMITS = { page: 16000, readResult: 1500, reads: 24000 };
 
 const clip = (text: string, limit: number): string =>
   text.length <= limit ? text : `${text.slice(0, limit)} …[clipped]`;
@@ -256,7 +256,9 @@ const callSummary = (name: string, args: unknown): string => {
 /**
  * What the transcripts of one run (its root and any subagents) left for the
  * person: each `page.write` as a page, and every other tool call as a read,
- * with an excerpt of what came back. The answer is the job's own result.
+ * with an excerpt of what came back. A tool result the host supplied without
+ * a call, such as the opening research a deep run gets before its first
+ * turn, is a read too. The answer is the job's own result.
  */
 export const materialOf = (
   answer: string,
@@ -265,6 +267,19 @@ export const materialOf = (
   const pages: RunMaterial["pages"] = [];
   const reads: string[] = [];
   let readChars = 0;
+  const read = (summary: string, result: string | undefined) => {
+    if (readChars === Infinity) return;
+    const line = `- ${summary}\n  → ${
+      clip((result ?? "(no result)").replace(/\s+/g, " "), LIMITS.readResult)
+    }`;
+    if (readChars + line.length > LIMITS.reads) {
+      reads.push("- …[further reads clipped]");
+      readChars = Infinity;
+      return;
+    }
+    reads.push(line);
+    readChars += line.length;
+  };
   for (const transcript of transcripts) {
     if (!Array.isArray(transcript)) {
       throw new Error("a transcript is not a list of messages");
@@ -281,6 +296,16 @@ export const materialOf = (
       }
     }
     for (const message of transcript) {
+      const content = fieldOf(message, "content");
+      if (
+        fieldOf(message, "toolResultProvenance") !== undefined &&
+        fieldOf(message, "toolCallId") === undefined
+      ) {
+        read(
+          "host-supplied result, before the first turn",
+          typeof content === "string" ? content : JSON.stringify(content),
+        );
+      }
       const calls = fieldOf(message, "toolCalls");
       if (!Array.isArray(calls)) continue;
       for (const call of calls) {
@@ -301,21 +326,10 @@ export const materialOf = (
           continue;
         }
         const id = fieldOf(call, "id");
-        const result = typeof id === "string" ? results.get(id) : undefined;
-        const line = `- ${callSummary(name, args)}\n  → ${
-          clip(
-            (result ?? "(no result)").replace(/\s+/g, " "),
-            LIMITS.readResult,
-          )
-        }`;
-        if (readChars === Infinity) continue;
-        if (readChars + line.length > LIMITS.reads) {
-          reads.push("- …[further reads clipped]");
-          readChars = Infinity;
-          continue;
-        }
-        reads.push(line);
-        readChars += line.length;
+        read(
+          callSummary(name, args),
+          typeof id === "string" ? results.get(id) : undefined,
+        );
       }
     }
   }
