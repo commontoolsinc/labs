@@ -159,6 +159,7 @@ import {
 } from "./event-append-queue.ts";
 import {
   IMemoryAddress,
+  IMemorySpaceAddress,
   IMergedChanges,
   IOperationStorageCapability,
   IPreconditionFailedError,
@@ -651,6 +652,13 @@ type ConfirmedVersion = MaterializedVersion & {
   seq: number;
 
   /**
+   * Whether an accept establishes this whole value: a remote set or
+   * deletion, or a write the server elided as an identity against the
+   * commit's read of the document.
+   */
+  acceptedWhole?: true;
+
+  /**
    * Whether `value` is the store's value at `seq` with a derived write folded
    * over it by this replica alone, because the space refused that write for
    * lack of a grant. The store never held it: a frame at a later seq replaces
@@ -932,6 +940,20 @@ const holdsContentAddressedValue = (
   const doc = record?.confirmed.value;
   return isObjectNotArray(doc) && taggedHashStringOf(doc.value) === hash;
 };
+
+/**
+ * Whether `record` holds content that no later commit can change: a
+ * content-addressed document in space scope whose confirmed value hashes to
+ * its id. In space scope only: a session-scoped write is promoted into the
+ * confirmed layer without any server accepting it.
+ */
+const holdsImmutableContent = (
+  id: URI,
+  scope: CellScope | undefined,
+  record: DocumentRecord | undefined,
+): boolean =>
+  id.startsWith("cid:") && normalizeCellScope(scope) === "space" &&
+  holdsContentAddressedValue(record, id.slice("cid:".length));
 
 /** Folds pending and locally accepted wave contributions in sealing order. */
 const materializePendingVersions = (
@@ -4954,6 +4976,14 @@ export class SpaceReplica
   /** How many release passes (`releaseUnread()`) have begun. */
   #releasePasses = 0;
 
+  /**
+   * The documents a release removed while something held them that could not
+   * be watched again, by doc key. Each keeps its value, and the next pass
+   * watches it again, or drops it if nothing holds it any more, unless a
+   * frame for it arrives first.
+   */
+  readonly #owedWatches = new Map<string, SessionSync["removes"][number]>();
+
   readonly #isRead: (address: LocalDocAddress) => boolean;
   readonly #onDocumentsDropped:
     | ((addresses: readonly LocalDocAddress[]) => void)
@@ -6352,7 +6382,20 @@ export class SpaceReplica
   }
 
   /** ISpaceReplica.completeThroughSeq. */
-  completeThroughSeq(): number | undefined {
+  completeThroughSeq(
+    documents: readonly Pick<IMemorySpaceAddress, "id" | "scope">[] = [],
+  ): number | undefined {
+    // A receipt proves one stored version. Only a delivered watch or immutable
+    // content also proves that later commits cannot have changed it unseen.
+    for (const { id, scope } of documents) {
+      const key = this.#docKeyOf({ id, scope });
+      if (
+        !this.#delivered.has(key) &&
+        !holdsImmutableContent(id, scope, this.#docs.get(key))
+      ) {
+        return undefined;
+      }
+    }
     if (this.#completeThroughLost || this.#completeThroughSeq === 0) {
       return undefined;
     }
@@ -6383,14 +6426,13 @@ export class SpaceReplica
       return false;
     }
     if (delivered === undefined) {
-      // A schema document this replica's own commit stored may never arrive
-      // in a frame: the server ships it with a document that refers to it,
-      // and does not send a replica its own change to a document it holds.
-      // Content under a `cid:` id cannot change, so holding that content
-      // confirmed is confirmation. In space scope only: a session-scoped
-      // write is promoted here without any server accepting it.
-      return id.startsWith("cid:") && normalizeCellScope(scope) === "space" &&
-        holdsContentAddressedValue(record, id.slice("cid:".length));
+      // A document this replica's own commit stored may never arrive in a
+      // frame: the server does not send a replica its own change to a
+      // document it holds, and ships a schema document only with a document
+      // that refers to it. An accepted whole write names the stored version,
+      // and content under a `cid:` id cannot change.
+      return confirmed.acceptedWhole === true ||
+        holdsImmutableContent(id, scope, record);
     }
     // Past its delivered seq, the confirmed state is an own accepted write
     // promoted locally, which a push through that seq has since covered.
@@ -7128,10 +7170,12 @@ export class SpaceReplica
    * first watched on its own, with a selector that follows no links, so that
    * no removal can take it from the session. Of the documents the answer says
    * the session no longer covers, one that something began to hold while the
-   * removal was on its way keeps its value and is watched again on its own;
-   * every other one is emptied as any removal empties it and, unless a local
-   * write to it is pending, dropped, so that a later read of it loads it
-   * again. A root read or pulled since the previous pass is
+   * removal was on its way keeps its value and is watched again on its own
+   * (`#watchAgain()`); every other one is emptied as any removal empties it
+   * and, unless a local write to it is pending, dropped, so that a later read
+   * of it loads it again. A pass begins by watching again each document an
+   * earlier pass could not watch again, or by dropping it if nothing holds it
+   * any more. A root read or pulled since the previous pass is
    * kept for the next one, so a document loaded for a read not yet made, or
    * read into a value that follows its links later, stays loaded through the
    * pass that follows. A session whose server cannot remove a watch by id
@@ -7139,7 +7183,12 @@ export class SpaceReplica
    */
   async releaseUnread(): Promise<WatchAddress[]> {
     const pass = this.#releasePasses++;
-    if (this.#closed || this.#sessionClient === undefined) return [];
+    if (this.#closed) return [];
+    for (const remove of this.#owedWatches.values()) {
+      if (this.#holds(removedAddress(remove))) this.#watchAgain(remove);
+      else this.#dropReleased(remove);
+    }
+    if (this.#sessionClient === undefined) return [];
     const releasable = (root: RootWatches) =>
       root.pulledInPass < pass &&
       (this.#docs.get(root.key)?.readInPass ?? -1) < pass &&
@@ -7217,6 +7266,10 @@ export class SpaceReplica
       );
       for (const remove of heldSince) {
         const key = this.#docKeyOf(removedAddress(remove));
+        // The session no longer keeps it current, so nothing may count it
+        // as delivered until the answer to its own watch arrives.
+        this.#delivered.delete(key);
+        this.#watchedIds.delete(key);
         if ((this.#docs.get(key)?.pending.length ?? 0) === 0) continue;
         // The session reports nothing about the document until it is
         // watched again, so a foreign change in between is hidden: the
@@ -7273,15 +7326,20 @@ export class SpaceReplica
 
   /**
    * Watches on its own a document a release removed after something began to
-   * hold it. If that fails, the document is removed as the release removed
-   * it, so that its readers load it again rather than keep a value the
-   * session no longer keeps current. One with a local write pending keeps
-   * that write over an emptied base, as under any removal.
+   * hold it. If that fails, the document keeps its value and the next pass
+   * tries again (`#owedWatches`), since a reader of it need not load it
+   * again. If the space refuses the watch outright, the document is removed
+   * as the release removed it, so that its readers meet the refusal rather
+   * than keep a value the session no longer keeps current; one with a local
+   * write pending keeps that write over an emptied base, as under any
+   * removal.
    */
   #watchAgain(remove: SessionSync["removes"][number]): void {
+    const key = this.#docKeyOf(removedAddress(remove));
+    this.#owedWatches.delete(key);
     void this.#watchDocument(removedAddress(remove)).then(
       (result) => result.error,
-      (error: unknown) => error,
+      toPullError,
     ).then((error) => {
       if (error === undefined || this.#closed) return;
       logger.warn("watch-again-failed", () => [
@@ -7289,15 +7347,24 @@ export class SpaceReplica
         remove.id,
         error,
       ]);
-      this.#applySessionSync({
-        type: "sync",
-        fromSeq: 0,
-        toSeq: 0,
-        upserts: [],
-        removes: [remove],
-      }, "integrate");
-      this.#forgetRemoved([remove]);
+      if (isPermanentAuthorizationFailure(error)) this.#dropReleased(remove);
+      else this.#owedWatches.set(key, remove);
     });
+  }
+
+  /**
+   * Empties and drops a document a release removed, as the removal would
+   * have had nothing held it.
+   */
+  #dropReleased(remove: SessionSync["removes"][number]): void {
+    this.#applySessionSync({
+      type: "sync",
+      fromSeq: 0,
+      toSeq: 0,
+      upserts: [],
+      removes: [remove],
+    }, "integrate");
+    this.#forgetRemoved([remove]);
   }
 
   /**
@@ -10035,6 +10102,8 @@ export class SpaceReplica
         this.instanceKey(upsert.scope, undefined, upsert.scopeKey),
       );
       this.#watchedIds.add(key);
+      // A frame for the document means a watch covers it again.
+      this.#owedWatches.delete(key);
       this.#delivered.set(key, {
         id: upsert.id as URI,
         scope: upsert.scope,
@@ -10097,6 +10166,9 @@ export class SpaceReplica
       );
       this.#watchedIds.delete(key);
       this.#delivered.delete(key);
+      // A removal settles what the session keeps of the document, so a
+      // watch a release owes it is not asked for again.
+      this.#owedWatches.delete(key);
       if (record.pending.length > 0) {
         // A shadowed remove carries no seq on the wire: the sentinel 1
         // holds W entirely until the shadow clears (see the field doc).
@@ -11010,6 +11082,10 @@ export class SpaceReplica
             cloneIfNecessary(computed.value) as EntityDocument,
             coverClass,
           );
+          // The identity proof made against the commit's read shows the
+          // whole stored document is `computed.value`, whether the layer
+          // set the document or patched it.
+          record.confirmed.acceptedWhole = true;
         }
         record.pending = record.pending.filter((entry) =>
           entry.localSeq !== localSeq
@@ -11105,6 +11181,11 @@ export class SpaceReplica
       );
 
       if (promoted) {
+        // A blind patch can merge with content this replica has never read.
+        // A whole replacement or deletion establishes the complete result.
+        if (!local && (pending.op === "set" || pending.op === "delete")) {
+          promoted.acceptedWhole = true;
+        }
         record.confirmed = promoted;
         record.materialized = reusedSuffix && reusedSuffix.length > 0
           ? {

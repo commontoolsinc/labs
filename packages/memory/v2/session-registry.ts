@@ -9,6 +9,11 @@ import type {
   ViewQuery,
   WatchSpec,
 } from "../v2.ts";
+import {
+  type DocumentInterestQuery,
+  type DocumentInterestsReport,
+  inspectDocumentInterests,
+} from "./document-interests.ts";
 import type { TrackedGraphState } from "./query.ts";
 import type { SessionCacheEntry } from "./server-sync.ts";
 import { trackedIdsFromEntries } from "./server-sync.ts";
@@ -363,6 +368,11 @@ export class SessionRegistry {
       }
     }
     return sessions;
+  }
+
+  /** Attributes a document to retained sessions without pruning or mutation. */
+  documentInterests(query: DocumentInterestQuery): DocumentInterestsReport {
+    return inspectDocumentInterests(this.#sessions.values(), query);
   }
 
   /** Every live session of one principal across ALL spaces — the

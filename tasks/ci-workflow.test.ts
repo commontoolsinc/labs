@@ -200,6 +200,22 @@ Deno.test("cache-only binary builders install their entrypoint graphs", async ()
   assertEquals(dockerBuilds, ["toolshed"]);
 });
 
+Deno.test("the test-selection publisher installs only what it runs", async () => {
+  const publisher = (await parsedWorkflow("test-selection.yml")).jobs.publish;
+
+  assertEquals(
+    publisher.steps?.filter((step) =>
+      step.uses === "./.github/actions/deno-install"
+    ),
+    [],
+  );
+  assertEquals(
+    namedStep(publisher, "📦 Cache publisher dependencies").run,
+    "deno cache --frozen tasks/test-selection-publish.ts " +
+      "tasks/step-summary.ts",
+  );
+});
+
 Deno.test("CI browser tests use the runner's installed Chrome", async () => {
   const contents = await workflow("deno.yml");
   const configuredPath = contents.match(

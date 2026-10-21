@@ -58,22 +58,32 @@ piece), and when a host's client departs
 also call `Runtime.releaseUnreadDocuments()` itself. The pass waits until the
 scheduler is idle. Passes run one after another, never two at once.
 
-A pass first gives each document the replica keeps, as above, a watch of its
-own where it has none, with a selector that follows no links: a document that
-something reads only through a link from another document is otherwise watched
-only as part of that document's watch. It then removes the watches rooted at
-each document the replica does not keep and that was neither loaded nor read
-since the previous pass began, so no removal can take a kept document from the
-session. The server answers with `removes` naming each document no remaining
-watch reaches. Each is emptied as any removal empties it, and then dropped
-unless a local write to it is pending: its value, its delivery record, and its
-watched mark go. A document that something began to hold while the removal was
-on its way is the exception: it keeps its value and is watched again on its
-own, and the answer to that watch brings it up to date. If that watch fails,
-the document is removed and dropped like the others, so that its readers load
-it again. A removal the server sends for any other reason, such as the
-retraction of an instance whose lease has lapsed, empties the document in the
-same way, whatever holds it.
+A pass that has watches to remove first gives each document the replica keeps,
+as above, a watch of its own where it has none, with a selector that follows no
+links: a document that something reads only through a link from another
+document is otherwise watched only as part of that document's watch. It then
+removes the watches rooted at each document the replica does not keep and that
+was neither loaded nor read since the previous pass began, so no removal can
+take a kept document from the session. The server answers with `removes` naming
+each document no remaining watch reaches. Each is emptied as any removal empties
+it, and then dropped unless a local write to it is pending: its value, its
+delivery record, and its watched mark go.
+
+A document that something began to hold while the removal was on its way is the
+exception. It keeps its value, but loses its delivery record and its watched
+mark, and is watched again on its own; the answer to that watch brings it up to
+date and records its delivery again. If that watch fails, the document keeps its
+value, still without a delivery record or a watched mark, and the next pass
+watches it again, or drops it if nothing holds it any more. A frame that
+delivers the document, or a removal the server sends for it, before then settles
+it instead, and the pass leaves it alone. An action that reads the document does
+not load it again, so dropping it would leave the action with no value and no
+later changes. If the space refuses the watch outright, the document is removed
+and dropped like the others, so that its readers meet the refusal.
+
+A removal the server sends for any other reason, such as the retraction of an
+instance whose lease has lapsed, empties the document in the same way, whatever
+holds it.
 
 The server records which documents a session's watches reach, not which watch
 reached each one, so it answers the removal of a watch it walked by walking the
