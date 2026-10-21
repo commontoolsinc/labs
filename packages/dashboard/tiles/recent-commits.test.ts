@@ -4,6 +4,7 @@ import { FakeTime } from "@std/testing/time";
 
 import { LOOM_REPO, RECENT_WINDOW, REPO, WEAVER_REPO } from "../config.ts";
 import { staticGitHubCredential } from "../github-auth.ts";
+import { FakeRelay, pushPayload } from "../test/webhook-relay.ts";
 import type { Ctx, Run } from "../types.ts";
 import {
   type Commit,
@@ -310,6 +311,65 @@ describe("recent-commits", () => {
   describe("OrganizationCommits", () => {
     describe("instance members", () => {
       describe("refresh()", () => {
+        describe("given the relay", () => {
+          const labs = (shas: string[]): RepoSpec => ({
+            name: "labs",
+            pushedAt: "2026-09-30T12:00:00Z",
+            commits: shas.map((sha) => commit(REPO, sha, "2026-09-30T12:00:00Z")),
+          });
+
+          it("reads nothing while the relay vouches for the last listing and no push has been delivered", async () => {
+            const relay = new FakeRelay();
+            await relay.open();
+            restore = standIn(() => [labs(["l"])], calls);
+            const organization = new OrganizationCommits(relay.webhooks);
+            await organization.refresh(CREDENTIAL);
+            await relay.deliver("push", pushPayload(REPO, "refs/heads/feature"));
+            calls.length = 0;
+
+            expect(organization.current).toBe(true);
+            await organization.refresh(CREDENTIAL);
+            expect(calls).toEqual([]);
+          });
+
+          it("reads the history of a repository delivered as pushed to, without listing, until it starts at the commit pushed", async () => {
+            const relay = new FakeRelay();
+            await relay.open();
+            let repos = [labs(["l"])];
+            restore = standIn(() => repos, calls);
+            const organization = new OrganizationCommits(relay.webhooks);
+            await organization.refresh(CREDENTIAL);
+            await relay.deliver(
+              "push",
+              pushPayload(REPO, "refs/heads/main", "m"),
+            );
+            calls.length = 0;
+
+            expect(organization.current).toBe(false);
+            expect(await organization.refresh(CREDENTIAL)).toBe(false);
+            expect(organization.current).toBe(false);
+            repos = [labs(["m", "l"])];
+            expect(await organization.refresh(CREDENTIAL)).toBe(true);
+
+            expect(organization.current).toBe(true);
+            expect(calls).toEqual([`graphql ${ORG}/labs`, `graphql ${ORG}/labs`]);
+          });
+
+          it("lists the repositories again once a repository delivery arrives", async () => {
+            const relay = new FakeRelay();
+            await relay.open();
+            restore = standIn(() => [labs(["l"])], calls);
+            const organization = new OrganizationCommits(relay.webhooks);
+            await organization.refresh(CREDENTIAL);
+            await relay.deliver("repository", { action: "created" });
+            calls.length = 0;
+
+            await organization.refresh(CREDENTIAL);
+
+            expect(calls).toEqual([`/orgs/${ORG}/repos?per_page=100&page=1`]);
+          });
+        });
+
         it("reads the commits of every repository that is not archived, and returns `true`", async () => {
           restore = standIn(() => [
             {
@@ -838,6 +898,47 @@ describe("recent-commits", () => {
         expect(
           calls.filter((call) => call.startsWith(`/orgs/`)).length,
         ).toBe(1);
+      });
+
+      it("reads at once when a push to a default branch is delivered, and not while the relay vouches it would read nothing", async () => {
+        const relay = new FakeRelay();
+        await relay.open();
+        let repos: RepoSpec[] = [{
+          name: "labs",
+          pushedAt: "2026-09-30T12:00:00Z",
+          commits: [commit(REPO, "l", "2026-09-30T12:00:00Z")],
+        }];
+        restore = standIn(() => repos, calls);
+        let asked = 0;
+        const tile = createRecentCommits(
+          new OrganizationCommits(relay.webhooks),
+          relay.webhooks,
+        );
+        const collecting = ctx(() => [], {
+          env: (key) => key === "GH_TOKEN" ? "test-token" : undefined,
+          collectAgain: () => asked++,
+        });
+        using time = new FakeTime();
+        await tile.collect(collecting);
+        await tile.reading();
+        time.tick(60_000);
+        await relay.deliver("ping", {});
+        await tile.collect(collecting);
+        await tile.reading();
+        expect(calls.length).toBe(2);
+
+        repos = [{
+          ...repos[0],
+          commits: [
+            commit(REPO, "m", "2026-09-30T13:00:00Z"),
+            ...repos[0].commits ?? [],
+          ],
+        }];
+        await relay.deliver("push", pushPayload(REPO, "refs/heads/main", "m"));
+        await tile.reading();
+
+        expect(calls.slice(2)).toEqual([`graphql ${ORG}/labs`]);
+        expect(asked).toBe(2);
       });
 
       it("counts on its sub line the repositories GitHub refused to read, and says when a read found no commits", async () => {

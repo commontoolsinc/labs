@@ -22,6 +22,7 @@ import {
   handle,
   heartbeat,
   nextFaviconRedSince,
+  onDelivery,
   page,
   resetBoardForTest,
   serveTick,
@@ -29,9 +30,11 @@ import {
   tick,
 } from "./server.ts";
 import {
+  CI_WORKFLOW,
   LOOM_CI_WORKFLOW,
   LOOM_REPO,
   PORT,
+  REPO,
 } from "./config.ts";
 import { TILES } from "./registry.ts";
 import { github } from "./lib.ts";
@@ -44,6 +47,8 @@ import {
   type TileView,
 } from "./types.ts";
 import { DASHBOARD_MESSAGE_LIFETIME_MS } from "./dashboard-message.ts";
+import { type GitHubDelivery, GitHubWebhooks } from "./github-webhooks.ts";
+import { FakeRelay, workflowRunPayload } from "./test/webhook-relay.ts";
 import { dashboardCacheFile } from "./history-files.ts";
 import {
   sampleManifest,
@@ -1150,6 +1155,96 @@ boardTest("a shared run source preserves each dependent tile's per-source interv
   assertEquals(slowCollections, 1);
 });
 
+// A relay delivery of a run on main of the workflow `file` in test/delivered.
+function delivered(file: string): GitHubDelivery {
+  return {
+    event: "workflow_run",
+    payload: workflowRunPayload("test/delivered", {
+      id: 1,
+      event: "push",
+      head_branch: "main",
+      head_sha: "sha-1",
+      status: "completed",
+      conclusion: "failure",
+      run_attempt: 1,
+      display_title: "delivered",
+      created_at: new Date().toISOString(),
+      run_started_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      html_url: "",
+      head_commit: null,
+    }, `.github/workflows/${file}`),
+  };
+}
+
+boardTest("a relay delivery that changes a run source fetches it at once, and one that does not fetches nothing", async () => {
+  const source = runSource("test/delivered", "ci.yml", "main");
+  let fetches = 0;
+  const sourceCtx: Ctx = {
+    runs: () => sourceCtx.runsFor(source),
+    runsFor: () => {
+      fetches++;
+      return Promise.resolve([sourceRun(1, `fetch ${fetches}`)]);
+    },
+    env: () => undefined,
+  };
+  const tiles = [{
+    ...sourceTile("labs ci trust", [source]),
+    intervalMs: 600_000,
+  }];
+  await tick(tiles, sourceCtx);
+
+  assertEquals(onDelivery(delivered("other.yml"), tiles), false);
+  await tick(tiles, sourceCtx);
+  assertEquals(fetches, 1);
+
+  using published = observeUpdate(() =>
+    tileHtml("labs ci trust").includes("fetch 2")
+  );
+  assertEquals(onDelivery(delivered("ci.yml"), tiles), true);
+  await tick(tiles, sourceCtx);
+  await published.promise;
+  assertEquals(fetches, 2);
+});
+
+boardTest("a relay delivery during a fetch of its source fetches the source again once that fetch is published", async () => {
+  const source = runSource("test/delivered", "ci.yml", "main");
+  let fetches = 0;
+  const started = deferred<void>();
+  const release = deferred<void>();
+  const sourceCtx: Ctx = {
+    runs: () => sourceCtx.runsFor(source),
+    runsFor: async () => {
+      const fetch = ++fetches;
+      if (fetch === 2) {
+        started.resolve();
+        await release.promise;
+      }
+      return [sourceRun(1, `fetch ${fetch}`)];
+    },
+    env: () => undefined,
+  };
+  const tiles = [{
+    ...sourceTile("labs ci trust", [source]),
+    intervalMs: 600_000,
+  }];
+  await tick(tiles, sourceCtx);
+  onDelivery(delivered("ci.yml"), tiles);
+  const second = tick(tiles, sourceCtx);
+  await started.promise;
+
+  using published = observeUpdate(() =>
+    tileHtml("labs ci trust").includes("fetch 3")
+  );
+  onDelivery(delivered("ci.yml"), tiles);
+  await tick(tiles, sourceCtx);
+  assertEquals(fetches, 2);
+  release.resolve();
+  await second;
+  await published.promise;
+  assertEquals(fetches, 3);
+});
+
 boardTest("a failed run source keeps its last good snapshot", async () => {
   const source = runSource("test/stale-source", "ci.yml", "main");
   let failing = false;
@@ -1940,7 +2035,7 @@ boardTest("start: serves the handler on the configured port and keeps collecting
       return undefined;
     }) as unknown as typeof Deno.serve, () => {
       collections++;
-    }).timer;
+    }, new GitHubWebhooks()).timer;
   } finally {
     clearInterval(timer);
     console.log = log;
@@ -1973,6 +2068,7 @@ boardTest("start: the work it schedules on its clock both heartbeats and collect
       () => {
         collections++;
       },
+      new GitHubWebhooks(),
     ));
   } finally {
     clearInterval(timer);
@@ -1987,6 +2083,81 @@ boardTest("start: the work it schedules on its clock both heartbeats and collect
   assertEquals(collections, 2);
 
   await reader.cancel();
+});
+
+boardTest("start: collects through its collector when a relay delivery changes a run source, and not otherwise", async () => {
+  const log = console.log;
+  console.log = () => {};
+  const relay = new FakeRelay();
+  let collections = 0;
+  const collected = deferred<void>();
+  let timer: ReturnType<typeof setInterval> | undefined;
+  try {
+    ({ timer } = start(
+      ((opts: Deno.ServeTcpOptions) => {
+        opts.onListen?.({ transport: "tcp", hostname: "localhost", port: PORT });
+        return undefined;
+      }) as unknown as typeof Deno.serve,
+      () => {
+        if (++collections === 2) collected.resolve();
+      },
+      relay.webhooks,
+    ));
+  } finally {
+    clearInterval(timer);
+    console.log = log;
+  }
+  await relay.open();
+  await relay.deliver("issues", {});
+  const run = {
+    id: 1,
+    event: "push",
+    head_branch: "main",
+    head_sha: "sha-1",
+    status: "completed",
+    conclusion: "failure",
+    run_attempt: 1,
+    display_title: "delivered",
+    created_at: new Date().toISOString(),
+    run_started_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    html_url: "",
+    head_commit: null,
+  };
+  await relay.deliver(
+    "workflow_run",
+    workflowRunPayload(REPO, run, `.github/workflows/${CI_WORKFLOW}`),
+  );
+  await collected.promise;
+  assertEquals(collections, 2);
+});
+
+boardTest("start: connects to the relay, and connects again on its clock once the connection ends", async () => {
+  const log = console.log;
+  console.log = () => {};
+  const relay = new FakeRelay();
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let onTick = () => Promise.resolve();
+  try {
+    ({ timer, onTick } = start(
+      ((opts: Deno.ServeTcpOptions) => {
+        opts.onListen?.({ transport: "tcp", hostname: "localhost", port: PORT });
+        return undefined;
+      }) as unknown as typeof Deno.serve,
+      () => {},
+      relay.webhooks,
+    ));
+  } finally {
+    clearInterval(timer);
+    console.log = log;
+  }
+  assertEquals(relay.connections, 1);
+  await onTick();
+  assertEquals(relay.connections, 1, "an open connection is kept");
+
+  await relay.end();
+  await onTick();
+  assertEquals(relay.connections, 2);
 });
 
 describe("workflow activity", () => {
