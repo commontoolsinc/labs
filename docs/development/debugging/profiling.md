@@ -816,29 +816,26 @@ and SigNoz with the rest of the meter; with `OTEL_ENABLED` alone it is an API
 no-op, as the runtime bridge's instruments are.
 
 The alert rule itself lives in SigNoz, which this repository does not
-configure, so wiring it is a step on the host rather than a change here.
-SigNoz keeps the dotted OpenTelemetry names, and its PromQL quotes them. An
-alert on
-
-```promql
-sum by ("space.did") (rate({"ct.memory.commits",storm="true"}[1m])) > 0
-```
-
-fires for the spaces with a storm-labelled commit in the trailing minute, so
-it raises as soon as the first such commit is exported and can stay raised
-for up to a minute after the server clears the storm, plus the collector's
-export delay either way; it needs no sustain of its own because the server
-has applied one. A rule over the raw rate,
-
-```promql
-sum by ("space.did") (rate({"ct.memory.commits"}[1m])) * 60
-```
-
-above the threshold for the sustained window, says the same thing with the
-thresholds held in SigNoz rather than in the server's environment, and is the
-one to reach for when the two should differ. A collector configured to
-normalize names instead exposes the same series under its own spelling, and
-the rule names that one. The host's netdata and the ops agent watch the
+configure, so wiring it is a step on the host rather than a change here. Build
+it in SigNoz's query builder: a metric-based alert whose query is the metric
+`ct.memory.commits` filtered to `storm = 'true'`, aggregated within each
+series as `Rate`, which SigNoz picks on its own for a cumulative sum, and
+across series as `Sum` grouped by `space.did`, with the threshold "above 0 at
+least once in the last five minutes". It fires for the spaces with a
+storm-labelled commit in the trailing minute, so it raises as soon as the
+first such commit is exported and can stay raised for up to a minute after
+the server clears the storm, plus the collector's export delay either way; it
+needs no sustain of its own because the server has applied one, and it reads
+zero again once the labelled series stops moving. Do not write the rule in
+SigNoz's PromQL layer. On this counter, which Deno's OpenTelemetry exports as
+a cumulative sum, its `rate()` and `increase()` over the quoted dotted name
+return a scaled running total rather than the change, so a space that stormed
+once reads as storming for as long as its series exists; the builder's `Rate`
+reads the change. The same builder query without the storm filter, with a
+threshold of 2 a second, the 120 a minute the server judges by, held for the
+sustained window, says the same thing with the thresholds in SigNoz rather
+than in the server's environment, and is the one to reach for when the two
+should differ. The host's netdata and the ops agent watch the
 process, not this counter: a CPU alarm from either says an instance is busy,
 and `commitRates` on that instance says which space and whose sessions made it
 so.
