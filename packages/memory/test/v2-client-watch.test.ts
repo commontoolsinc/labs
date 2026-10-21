@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import { Server } from "../v2/server.ts";
 import {
   connect,
@@ -275,11 +275,11 @@ Deno.test("memory v2 client installs a watch set and receives live updates", asy
 });
 
 /**
- * `runWatchMutation()` checks that the session is open when the call is made
- * and then awaits the response, so the `apply` step that acks that response
- * can run after the session has closed. A closed session must arm no new
- * work: `close()` drains the background tasks it knows about and returns, so
- * anything queued afterwards is work that nothing awaits.
+ * A session that closes while a watch mutation's response is on its way
+ * rejects the mutation with its close error. A closed session must arm no new
+ * work for that response either: `close()` drains the background tasks it
+ * knows about and returns, so anything queued afterwards is work that nothing
+ * awaits.
  *
  * The armed timer is the observation, because the wire cannot tell the two
  * cases apart. `flushScheduledAcks()` independently declines to speak for a
@@ -319,9 +319,8 @@ Deno.test("memory v2 session closed mid-watch-set arms no ack timer", async () =
       inner.setReceiver((payload: string) => {
         if ((setRequestId !== null) && payload.includes(setRequestId)) {
           setRequestId = null;
-          // The close lands between the response frame and the `apply` that
-          // frame resolves, so the session is already closed when `apply`
-          // reaches its ack.
+          // The close lands as the response frame arrives, before the
+          // mutation has applied it.
           closing = session?.close() ?? null;
           countTimers = true;
         }
@@ -345,8 +344,8 @@ Deno.test("memory v2 session closed mid-watch-set arms no ack timer", async () =
   }) as typeof setTimeout;
 
   try {
-    await session.watchSetSync([]);
-    // `apply` has run by now: the mutation resolves on its return value.
+    const mutation = session.watchSetSync([]);
+    await assertRejects(() => mutation, Error, "memory session closed");
     countTimers = false;
     assertEquals(closing !== null, true, "the close raced the apply");
     await closing;
