@@ -330,6 +330,25 @@ describe("task-classification", () => {
       );
     }
 
+    it("reads the fabric in a pattern named beside one of its parts in either order", () => {
+      expect(classifyTask("How do pattern handlers work?", {}).domains)
+        .toEqual(["fabric"]);
+      expect(classifyTask("How do handlers in a pattern work?", {}).domains)
+        .toEqual(["fabric"]);
+      expect(classifyTask("knit a scarf in a herringbone pattern", {}).domains)
+        .toEqual([]);
+    });
+
+    it("needs a sign the data is the person's own, not a bare noun", () => {
+      expect(classifyTask("What is a calendar?", {}).domains).toEqual([]);
+      expect(classifyTask("Compare email providers", {}).domains).toEqual([
+        "web",
+      ]);
+      expect(classifyTask("what's on my work calendar?", {}).domains).toEqual([
+        "personal",
+      ]);
+    });
+
     it("puts a web purchase on the web only when the run can drive a browser", () => {
       expect(classifyTask("buy the cheapest oat milk", {}).domains).toEqual([]);
       expect(

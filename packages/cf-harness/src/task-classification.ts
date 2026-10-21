@@ -117,12 +117,21 @@ const ADD_TO = /\badd\b.*\bto (?:the|this)\b(?!\s+loom\b)/;
 /** The action verbs {@link ACT} and {@link WEB_ACT} read, standing alone. */
 const ACTION_VERB =
   /\b(?:deploy|add|move|buy|order|book|purchase|reserve|sign up|fill|check ?out|browse)\b/;
-/** Signs of the person's own data: their schedule, mail and messages. */
+/**
+ * Signs of the person's own data: something of theirs (`my calendar`), their
+ * own correspondence or meetings (`I replied`, `emailed me`), one they point
+ * at (`that email from`), or what is on a day of theirs. A bare noun such as
+ * "calendar" or "email" is not one: it names a thing anyone may ask about.
+ */
 const PERSONAL =
-  /\b(?:calendar|schedule|meetings?|appointments?|e-?mails?|inbox|messages?|replied|texts?|dms?|contacts?)\b|\bmy (?:next|week|day|weekend|notes?|files?|documents?|docs|photos?|tasks?|to-?dos?|plans?|people|friends|family)\b|\b(?:emailed|messaged|texted|called|wrote to)\s+me\b|^what'?s on\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tonight|tomorrow|this week|next week|the weekend)\b/;
-/** Signs of Common Fabric itself, beyond a held or authored piece. */
+  /\b(?:my|our)\s+(?:\w+\s+)?(?:calendar|schedule|meetings?|appointments?|e-?mails?|inbox|messages?|texts?|dms?|contacts?|notes?|files?|documents?|docs|photos?|tasks?|to-?dos?|week|day|weekend|plans?|people|friends|family|next)\b|\b(?:i|am i|have i|did i|haven't i|i've)\b.*\b(?:meet|meeting|replied|reply|emailed|messaged|texted|scheduled|booked)\b|\b(?:emailed|messaged|texted|called|wrote to|invited)\s+me\b|\b(?:that|this|the)\s+(?:e-?mail|message|text|invite|meeting|appointment)\b|^what'?s on\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tonight|tomorrow|this week|next week|the weekend)\b/;
+/**
+ * Signs of Common Fabric itself, beyond a held or authored piece: the system
+ * by name, the pattern index, or a pattern named beside one of its parts or
+ * a loom, in either order.
+ */
 const FABRIC =
-  /\bcommon fabric\b|\bpattern index\b|\bpatterns?\b.*\b(?:cells?|pieces?|handlers?|verbs?|schemas?|loom|deploy)\b|\bdeploy\b.*\bpatterns?\b/;
+  /\bcommon fabric\b|\bpattern index\b|\bpatterns?\b.*\b(?:cells?|pieces?|handlers?|verbs?|schemas?|loom|deploy)\b|\b(?:cells?|pieces?|handlers?|verbs?|schemas?|deploy)\b.*\bpatterns?\b/;
 /** Signs of the public web. */
 const WEB =
   /\b(?:online|on the (?:web|internet)|websites?|web ?pages?|google|news|reviews?|weather|forecast)\b|\blatest\b.*\b(?:version|release|news)\b/;
