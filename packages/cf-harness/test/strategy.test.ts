@@ -37,6 +37,9 @@ describe("strategy", () => {
   it("tells a quick run to answer directly, or from the one tool call that matches the ask", () => {
     const quick = prompt("quick", ["personal"]);
 
+    expect(quick).toContain(
+      "Their words set the task; a quick run adds nothing beyond it.",
+    );
     expect(quick).toContain("Answer directly when you can, without research");
     expect(quick).toContain(
       "with the wrong arguments for what they asked, you may correct once",
