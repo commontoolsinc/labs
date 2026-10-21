@@ -546,6 +546,7 @@ const handlers: Record<
       const scheduler = controller().runtime.scheduler;
       scheduler.enableSettleStats();
       scheduler.setActionRunTraceEnabled(true);
+      scheduler.setTriggerTraceEnabled(true);
     }
     await maybeAttachOtelBridge(identity);
     return { did: identity.did() };
@@ -1521,6 +1522,7 @@ const handlers: Record<
       graph: scheduler.getGraphSnapshot(),
       settleStatsHistory: scheduler.getSettleStatsHistory(),
       actionRunTrace: scheduler.getActionRunTrace(),
+      triggerTrace: scheduler.getTriggerTrace(),
     } satisfies RuntimeDiagnosticsSnapshot;
   },
 
