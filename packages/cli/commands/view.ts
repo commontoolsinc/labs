@@ -50,11 +50,12 @@ COMMON USAGE:
   cf check ./p.tsx --show-transformed --no-run | cf view --plain | bat
 
 KEYS (press ? in the viewer for the full list):
-  mouse wheel, ↑/↓ or k/j scroll · ←/→ h/l pan · Space/b page
+  mouse wheel, ↑/↓ or k/j scroll · ←/→ h/l pan · Space/PgUp page
   g/G top/bottom · / search
   structure tree: w/s sibling · a/d parent/child · Tab/⇧Tab depth-first
   Enter info card · in it: ↑/↓ pick a reference · Enter opens it · z reveals it
-  v source/rendered · t look up a definition · # line numbers · \\ wrap mode · q quit
+  v source/rendered · t look up a definition · # line numbers · \\ wrap mode
+  b blame: when each line last changed, and who changed it · q quit
   P push the checked-out branch to origin and open the pull request page
 
 When stdout is not a terminal (piped/redirected) it prints the colorized text
