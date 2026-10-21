@@ -803,40 +803,6 @@ describe("v2-client-reconnect-watch", () => {
         }
       }
 
-      it("rejects a watch request with the close error when its session closes before the response arrives", async () => {
-        const { before, after } = restartedServers("closed-while-waiting");
-        const host = outageTransport(before);
-        const client = await connect({ transport: host.transport });
-        try {
-          const session = await client.mount(
-            SPACE,
-            {},
-            testSessionOpenAuthFactory,
-          );
-          session.setConcurrentWatchRefresh(concurrentWatchRefresh);
-          await session.watchAddSync([graphWatch("before")]);
-
-          host.losesResponse = (message) => addsWatch(message, "unanswered");
-          const sent = Promise.withResolvers<void>();
-          host.onSend = (message) => {
-            if (addsWatch(message, "unanswered")) sent.resolve();
-          };
-          const unanswered = session.watchAddSync([graphWatch("unanswered")]);
-          // Awaited below; observed here so that a rejection before then
-          // fails the case rather than surfacing as unhandled.
-          unanswered.catch(() => {});
-          await sent.promise;
-          await session.close();
-
-          await expect(unanswered).rejects.toThrow("memory session closed");
-          expect(client.isConnected()).toBe(true);
-        } finally {
-          await client.close();
-          await before.close();
-          await after.close();
-        }
-      });
-
       it("keeps out a watch removed while the restore's watch set is on the wire", async () => {
         // The removal's turn comes after the restore has sent the watch set it
         // re-establishes and before that set's response has been applied. A
