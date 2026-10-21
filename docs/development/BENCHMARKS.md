@@ -847,8 +847,10 @@ that is every page's rendered swatches. A burst ends when every page holds the
 exact option, name and color tuple for every voter on every option, with no
 duplicate row, and two animation frames have passed since the last change, so
 the endpoint is a paint opportunity in every browser rather than a runtime's
-quiescence. Driver completion, which includes the CDP teardown, is reported
-apart from that headline. Two warmup bursts precede the measured rounds.
+quiescence. The driver's own completion, from the first click's dispatch until
+it has seen every page converge, is reported apart from that headline, and the
+browsers' teardown comes after both and is not timed. Two warmup bursts precede
+the measured rounds.
 
 It is a `deno run -A` script rather than a `Deno.bench` file, so the Benchmarks
 workflow does not run it and the dashboard carries no series for it; it is run
