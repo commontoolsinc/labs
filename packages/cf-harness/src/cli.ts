@@ -115,7 +115,7 @@ import {
 } from "./prompt-loop.ts";
 import { DELEGATION_GUIDANCE, orientationGuidance } from "./orientation.ts";
 import {
-  classifiedTags,
+  classifiedShape,
   type RunShape,
   sendsSection,
 } from "./prompt-sections.ts";
@@ -169,7 +169,13 @@ import {
   OpenAICodexResponsesClient,
 } from "./model/openai-codex-responses.ts";
 import type { HarnessModelClient, HarnessModelUsage } from "./model/client.ts";
-import type { HarnessTaskTag } from "./task-classification.ts";
+import {
+  HARNESS_TASK_DOMAINS,
+  HARNESS_TASK_TAGS,
+  type HarnessTaskDomain,
+  type HarnessTaskShape,
+  type HarnessTaskTag,
+} from "./task-classification.ts";
 import {
   currentProvenance,
   type HarnessProvenance,
@@ -219,6 +225,8 @@ const CLI_STRING_FLAGS = [
   "reasoning-effort",
   "research-reasoning-effort",
   "depth",
+  "task-tags",
+  "task-domains",
   "compact-threshold",
   "prompt-cache-mode",
   "skills-root",
@@ -349,6 +357,7 @@ export interface CfHarnessCliCapabilities {
     reasoningEffort: true;
     researchReasoningEffort: true;
     runDepth: true;
+    taskShape: true;
     compactThreshold: true;
     persistentProviderConfig: true;
     structuredAuthControl: true;
@@ -626,6 +635,12 @@ Options:
                                 Reasoning effort for the research tool's own model
   --depth <depth>               quick | standard | deep: how far to take the task
                                 (default: standard)
+  --task-tags <tags>            The task's kinds of work, comma-separated, in
+                                place of the classifier's: respond, find, act,
+                                pieces, author
+  --task-domains <domains>      Where the task's work happens, comma-separated,
+                                in place of the classifier's: fabric,
+                                personal, web, or none
   --compact-threshold <n>       Token threshold for server-side compaction
                                 (default: 75% of the model input budget; 0 disables)
   --prompt-cache-mode <mode>    implicit | explicit (GPT-5.6/GPT-6.1 Sol API gateway)
@@ -867,6 +882,7 @@ export const createCfHarnessCliCapabilities = (): CfHarnessCliCapabilities => ({
     reasoningEffort: true,
     researchReasoningEffort: true,
     runDepth: true,
+    taskShape: true,
     compactThreshold: true,
     persistentProviderConfig: true,
     structuredAuthControl: true,
@@ -1812,6 +1828,16 @@ export const parseCfHarnessCliArgs = async (
       `--depth must be one of ${HARNESS_RUN_DEPTHS.join(", ")}`,
     );
   }
+  const taskTags = args["task-tags"] === undefined
+    ? undefined
+    : taskListOf(args["task-tags"], HARNESS_TASK_TAGS, "--task-tags");
+  const taskDomains = args["task-domains"] === undefined
+    ? undefined
+    : taskListOf(args["task-domains"], HARNESS_TASK_DOMAINS, "--task-domains");
+  const taskShape: HarnessTaskShape = {
+    ...(taskTags !== undefined ? { tags: taskTags } : {}),
+    ...(taskDomains !== undefined ? { domains: taskDomains } : {}),
+  };
   // 0 is meaningful (disables compaction), so an explicit 0 must survive.
   const rawCompactThreshold = typeof args["compact-threshold"] === "string"
     ? args["compact-threshold"].trim()
@@ -2144,6 +2170,7 @@ export const parseCfHarnessCliArgs = async (
       ? { researchReasoningEffort }
       : {}),
     ...(depth !== undefined ? { depth } : {}),
+    ...(Object.keys(taskShape).length > 0 ? { taskShape } : {}),
     ...(compactThreshold !== undefined ? { compactThreshold } : {}),
     ...(promptCacheMode !== undefined ? { promptCacheMode } : {}),
     gatewayConfigurationExplicit,
@@ -2427,6 +2454,33 @@ const toWorkspaceSandboxPath = (
 };
 
 /**
+ * A comma-separated list of `vocabulary` values from flag `flag`, where
+ * `none` is the empty list.
+ *
+ * @throws Error naming the flag for a value outside the vocabulary.
+ */
+const taskListOf = <T extends string>(
+  value: unknown,
+  vocabulary: readonly T[],
+  flag: string,
+): T[] => {
+  const items = String(value).split(",").map((item) => item.trim())
+    .filter((item) => item.length > 0);
+  if (items.length === 1 && items[0] === "none") return [];
+  return items.map((item) => {
+    const known = vocabulary.find((word) => word === item);
+    if (known === undefined) {
+      throw new Error(
+        `${flag} names ${item}; it takes ${vocabulary.join(", ")}${
+          flag === "--task-domains" ? ", or none" : ""
+        }`,
+      );
+    }
+    return known;
+  });
+};
+
+/**
  * The parent's standing instructions. Task tags narrow the orientation to the
  * kinds of work the task calls for: only work on pieces or patterns is framed
  * as code to read and repair, and only writing a pattern is told to verify its
@@ -2434,14 +2488,25 @@ const toWorkspaceSandboxPath = (
  * defaults rather than to ask; with no allow-list it holds every tool.
  */
 export const buildCfHarnessBaseSystemPrompt = (
-  { patternIndex, tags, depth = DEFAULT_HARNESS_RUN_DEPTH, allowedToolIds }: {
+  {
+    patternIndex,
+    tags,
+    domains,
+    depth = DEFAULT_HARNESS_RUN_DEPTH,
+    allowedToolIds,
+  }: {
     patternIndex: boolean;
     tags?: ReadonlySet<HarnessTaskTag>;
+    domains?: ReadonlySet<HarnessTaskDomain>;
     depth?: HarnessRunDepth;
     allowedToolIds?: readonly BuiltinToolId[];
   },
 ): string => {
-  const shape: RunShape = { ...(tags !== undefined ? { tags } : {}), depth };
+  const shape: RunShape = {
+    ...(tags !== undefined ? { tags } : {}),
+    ...(domains !== undefined ? { domains } : {}),
+    depth,
+  };
   const codeWork = sendsSection("code-work", shape);
   const verifies = sendsSection("verification", shape);
   return [
@@ -2556,6 +2621,7 @@ export const buildCfHarnessOperatorSystemPrompt = (
       fabricMountPath?: string;
       hostMounts?: readonly CfHarnessHostMountConfig[];
       taskTags?: ReadonlySet<HarnessTaskTag>;
+      taskDomains?: ReadonlySet<HarnessTaskDomain>;
     },
 ): string => {
   const focusRoot = toWorkspaceSandboxPath(config.workspace, config.focusRoot);
@@ -2563,6 +2629,9 @@ export const buildCfHarnessOperatorSystemPrompt = (
     buildCfHarnessBaseSystemPrompt({
       patternIndex: config.patternIndex !== undefined,
       ...(config.taskTags !== undefined ? { tags: config.taskTags } : {}),
+      ...(config.taskDomains !== undefined
+        ? { domains: config.taskDomains }
+        : {}),
       ...(config.depth !== undefined ? { depth: config.depth } : {}),
       ...(config.allowedToolIds !== undefined
         ? { allowedToolIds: config.allowedToolIds }
@@ -2600,12 +2669,16 @@ export const buildCfHarnessBatchSystemPrompt = (
       fabricMountPath?: string;
       hostMounts?: readonly CfHarnessHostMountConfig[];
       taskTags?: ReadonlySet<HarnessTaskTag>;
+      taskDomains?: ReadonlySet<HarnessTaskDomain>;
     },
 ): string => {
   const lines = [
     buildCfHarnessBaseSystemPrompt({
       patternIndex: config.patternIndex !== undefined,
       ...(config.taskTags !== undefined ? { tags: config.taskTags } : {}),
+      ...(config.taskDomains !== undefined
+        ? { domains: config.taskDomains }
+        : {}),
       ...(config.depth !== undefined ? { depth: config.depth } : {}),
       ...(config.allowedToolIds !== undefined
         ? { allowedToolIds: config.allowedToolIds }
@@ -2645,6 +2718,7 @@ export const resolveCfHarnessCliSystemPrompt = (
       fabricMountPath?: string;
       hostMounts?: readonly CfHarnessHostMountConfig[];
       taskTags?: ReadonlySet<HarnessTaskTag>;
+      taskDomains?: ReadonlySet<HarnessTaskDomain>;
       skillCatalogEnabled?: boolean;
       skillNames?: readonly string[];
     },
@@ -4009,10 +4083,13 @@ export const runCfHarnessCli = async (
             })\n`,
           ),
       });
-      // The tags decide how much orientation the run starts with; a run whose
-      // loop cannot classify starts with all of it.
+      // The classification decides how much orientation the run starts
+      // with; a run whose loop cannot classify starts with all of it.
       const classification = await loop.classifyTask?.(parsed.prompt!);
-      const taskTags = classifiedTags(classification);
+      const shape = classifiedShape(
+        classification,
+        parsed.depth ?? DEFAULT_HARNESS_RUN_DEPTH,
+      );
       result = await loop.runPrompt({
         prompt: parsed.prompt!,
         openingResearchTask: parsed.prompt!,
@@ -4022,12 +4099,12 @@ export const runCfHarnessCli = async (
           fabricMountPath: parsed.fabricMount !== undefined
             ? DEFAULT_RUNSC_FABRIC_MOUNT_PATH
             : undefined,
-          ...(taskTags !== undefined ? { taskTags } : {}),
+          ...(shape.tags !== undefined ? { taskTags: shape.tags } : {}),
+          ...(shape.domains !== undefined
+            ? { taskDomains: shape.domains }
+            : {}),
         }),
-        contextMessages: orientContextMessages(contextMessages, {
-          ...(taskTags !== undefined ? { tags: taskTags } : {}),
-          depth: parsed.depth ?? DEFAULT_HARNESS_RUN_DEPTH,
-        }),
+        contextMessages: orientContextMessages(contextMessages, shape),
         model: parsed.model,
         maxModelTurns: parsed.maxModelTurns,
         promptSlotBinding,

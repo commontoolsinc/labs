@@ -167,6 +167,22 @@ describe("local-jobs/api", () => {
       });
     });
 
+    it("keeps the tags and domains a request names on its job, an empty list of domains among them", async () => {
+      const { post } = apiWith();
+
+      const response = await post("/jobs", {
+        ...BODY,
+        tags: ["find", "find"],
+        domains: [],
+      });
+
+      expect(response.status).toBe(201);
+      expect((await response.json()).job.request).toMatchObject({
+        tags: ["find"],
+        domains: [],
+      });
+    });
+
     it("returns 409 for a key that names a different request", async () => {
       const { post } = apiWith();
       await post("/jobs", BODY);
@@ -205,6 +221,9 @@ describe("local-jobs/api", () => {
       ["a turn count below one", { ...BODY, maxModelTurns: 0 }],
       ["a fractional turn count", { ...BODY, maxModelTurns: 1.5 }],
       ["a depth it does not know", { ...BODY, depth: "medium" }],
+      ["tags that are not a list", { ...BODY, tags: "find" }],
+      ["a tag it does not know", { ...BODY, tags: ["research"] }],
+      ["a domain it does not know", { ...BODY, domains: ["email"] }],
       [
         "a reasoning effort it does not know",
         { ...BODY, reasoningEffort: "extreme" },

@@ -3177,9 +3177,10 @@ describe("CfHarnessPromptLoop opening research", () => {
       expect(runIds).toEqual([]);
     });
 
-    it("runs opening research for a deep task of any kind, and not for the same task at standard depth", async () => {
-      const task = "weather in Brisbane";
-      const researched = async (depth: HarnessRunDepth) => {
+    it("runs opening research for a deep task about the fabric, and not for one elsewhere or at standard depth", async () => {
+      const fabric =
+        "How does a Common Fabric pattern react when a cell it reads changes?";
+      const researched = async (task: string, depth: HarnessRunDepth) => {
         const runIds: string[] = [];
         const loop = classifiedLoop(`run-${depth}`, runIds, undefined, depth);
         await loop.classifyTask(task);
@@ -3192,8 +3193,9 @@ describe("CfHarnessPromptLoop opening research", () => {
         return result.runState.openingResearch?.status;
       };
 
-      expect(await researched("deep")).toBe("completed");
-      expect(await researched("standard")).toBeUndefined();
+      expect(await researched(fabric, "deep")).toBe("completed");
+      expect(await researched(fabric, "standard")).toBeUndefined();
+      expect(await researched("weather in Brisbane", "deep")).toBeUndefined();
     });
 
     it("runs opening research for an author task", async () => {

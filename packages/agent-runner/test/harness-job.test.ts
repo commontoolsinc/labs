@@ -367,6 +367,20 @@ describe("runHarnessJob()", () => {
       expect(plain.seen.maxModelTurns).not.toBe(6);
     });
 
+    it("gives the harness the spec's task tags and domains, an empty list as none", async () => {
+      const { seen } = await runScripted(
+        plainSpec({ taskTags: ["find"], taskDomains: [] }),
+        answering("Titan"),
+      );
+      const plain = await runScripted(plainSpec(), answering("Titan"));
+
+      expect(seen.loopOptions?.taskShape).toEqual({
+        tags: ["find"],
+        domains: [],
+      });
+      expect(plain.seen.loopOptions?.taskShape).toBeUndefined();
+    });
+
     it("gives the harness the spec's depth and reasoning effort, and neither when the spec names none", async () => {
       const { seen } = await runScripted(
         plainSpec({ depth: "deep", reasoningEffort: "low" }),

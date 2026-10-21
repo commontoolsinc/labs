@@ -180,6 +180,8 @@ export const localJobSpecOf = async (
     ],
     maxModelTurns: profile.maxModelTurns,
     ...(request.depth !== undefined ? { depth: request.depth } : {}),
+    ...(request.tags !== undefined ? { taskTags: request.tags } : {}),
+    ...(request.domains !== undefined ? { taskDomains: request.domains } : {}),
     ...(profile.reasoningEffort !== undefined
       ? { reasoningEffort: profile.reasoningEffort }
       : {}),

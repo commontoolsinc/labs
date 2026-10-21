@@ -8,7 +8,8 @@
  * - `GET /health` — the lane is serving.
  * - `POST /jobs` — enqueue `{caller, profile, idempotencyKey, task,
  *   instructions?, context?, resultSchema, tools?, maxModelTurns?, depth?,
- *   reasoningEffort?, browserHost?, inputs?, foreignSpaces?}`, where `inputs` maps a name to a
+ *   tags?, domains?, reasoningEffort?, browserHost?, inputs?,
+ *   foreignSpaces?}`, where `inputs` maps a name to a
  *   piece address and `foreignSpaces` a space DID an input names to the
  *   origin serving it;
  *   answers `201` with the new job, or `200` with the one the key already
@@ -33,6 +34,10 @@ import {
   HARNESS_RUN_DEPTHS,
   parseHarnessRunDepth,
 } from "@commonfabric/cf-harness/contracts/run-depth";
+import {
+  HARNESS_TASK_DOMAINS,
+  HARNESS_TASK_TAGS,
+} from "@commonfabric/cf-harness/task-classification";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import type { LocalJobBrowserHost } from "./browser-host.ts";
@@ -104,6 +109,21 @@ const json = (status: number, body: unknown): Response =>
 const refuse = (status: number, code: string, error: string): Response =>
   json(status, { ok: false, code, error });
 
+/**
+ * `value` as a list of `vocabulary` words, each once, or undefined when it is
+ * not a list of them.
+ */
+const listOf = <T extends string>(
+  value: unknown,
+  vocabulary: readonly T[],
+): T[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const words = value.map((item) => vocabulary.find((word) => word === item));
+  return words.every((word) => word !== undefined)
+    ? [...new Set(words.filter((word) => word !== undefined))]
+    : undefined;
+};
+
 /** Helper for enqueue, which reads a request body or names what is wrong. */
 const enqueueRequestOf = (
   value: unknown,
@@ -127,6 +147,8 @@ const enqueueRequestOf = (
     tools,
     maxModelTurns,
     depth,
+    tags,
+    domains,
     reasoningEffort,
     browserHost,
     inputs,
@@ -167,6 +189,20 @@ const enqueueRequestOf = (
   if (depth !== undefined && runDepth === undefined) {
     return {
       error: `\`depth\` must be one of ${HARNESS_RUN_DEPTHS.join(", ")}.`,
+    };
+  }
+  const taskTags = listOf(tags, HARNESS_TASK_TAGS);
+  if (tags !== undefined && taskTags === undefined) {
+    return {
+      error: `\`tags\` must be a list of ${HARNESS_TASK_TAGS.join(", ")}.`,
+    };
+  }
+  const taskDomains = listOf(domains, HARNESS_TASK_DOMAINS);
+  if (domains !== undefined && taskDomains === undefined) {
+    return {
+      error: `\`domains\` must be a list of ${
+        HARNESS_TASK_DOMAINS.join(", ")
+      }.`,
     };
   }
   const effort = reasoningEffortOf(reasoningEffort);
@@ -210,6 +246,8 @@ const enqueueRequestOf = (
       ...(tools !== undefined ? { tools: tools as string[] } : {}),
       ...(maxModelTurns !== undefined ? { maxModelTurns } : {}),
       ...(runDepth !== undefined ? { depth: runDepth } : {}),
+      ...(taskTags !== undefined ? { tags: taskTags } : {}),
+      ...(taskDomains !== undefined ? { domains: taskDomains } : {}),
       ...(effort !== undefined ? { reasoningEffort: effort } : {}),
       ...(browserHost !== undefined
         ? { browserHost: browserHost as Record<string, unknown> }
