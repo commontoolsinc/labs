@@ -34,14 +34,22 @@ const CLASSIFIED: RunShape[] = TAG_SETS.flatMap((tags) =>
 );
 
 describe("prompt sections", () => {
-  it("sends a task that was never classified every section but the stand-ins for piece targeting", () => {
+  it("sends a standard run that was never classified every section but the stand-ins for piece targeting and those for another depth", () => {
+    const otherDepth = [
+      "fast-reply",
+      "personal-exhaustive",
+      "web-research",
+      "material-bar",
+      "critique",
+    ];
     expect(
       PROMPT_SECTIONS.filter((section) =>
         sendsSection(section, { depth: "standard" })
       ),
     ).toEqual(
       PROMPT_SECTIONS.filter((section) =>
-        section !== "held-pieces" && section !== "may-hold-pieces"
+        section !== "held-pieces" && section !== "may-hold-pieces" &&
+        !otherDepth.includes(section)
       ),
     );
   });
@@ -80,5 +88,20 @@ describe("prompt sections", () => {
         depth: "deep",
       }),
     ).toBe(true);
+  });
+
+  it("sends a standard run no strategy section, a quick run only the fast reply, and a deep run the rest where its domains call for them", () => {
+    for (const shape of CLASSIFIED) {
+      const deep = shape.depth === "deep";
+      expect(sendsSection("fast-reply", shape)).toBe(shape.depth === "quick");
+      expect(sendsSection("personal-exhaustive", shape)).toBe(
+        deep && shape.domains?.has("personal") === true,
+      );
+      expect(sendsSection("web-research", shape)).toBe(
+        deep && shape.domains?.has("web") === true,
+      );
+      expect(sendsSection("material-bar", shape)).toBe(deep);
+      expect(sendsSection("critique", shape)).toBe(deep);
+    }
   });
 });

@@ -114,6 +114,7 @@ import {
   type HarnessPromptLoopResult,
 } from "./prompt-loop.ts";
 import { DELEGATION_GUIDANCE, orientationGuidance } from "./orientation.ts";
+import { strategyGuidance } from "./strategy.ts";
 import {
   classifiedShape,
   type RunShape,
@@ -2530,6 +2531,7 @@ export const buildCfHarnessBaseSystemPrompt = (
       ? "Use finish_task to ask the user for the input or choice that would unblock the task, or to give a concrete reason you cannot proceed."
       : "Act on reasonable defaults rather than asking. When the task truly cannot be done, finish with a result that says why. Where other guidance says to ask the user, say in your result what you need instead.",
     orientationGuidance({ patternIndex, shape }),
+    ...strategyGuidance(shape),
     codeWork
       ? `Treat repository files and tool results as evidence. Separate observed facts from assumptions, keep work scoped to the assigned goal${
         verifies
