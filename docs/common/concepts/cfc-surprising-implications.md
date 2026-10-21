@@ -37,24 +37,48 @@ says where it lives.
    tainted by what the component shows. UI that must show data its host may not
    see belongs in a component, not in a pattern (§9.2.1).
 
-3. **A pattern cannot touch the DOM.** There are no refs, no layout reads, and
-   no measuring after render: pattern code runs in a worker and produces view
-   nodes, and the renderer turns them into DOM somewhere the pattern cannot
-   reach. What comes back is only what the renderer and components choose to
-   send, as event fields and as writes to cells bound with `$prop`. So "the
-   pattern could measure the layout" is the wrong worry, and "a component
-   forwards a content-dependent measurement, such as the height of what it
-   rendered" is the right one, because every field a component emits is a
-   release to the pattern (`packages/html/src/main/events.ts`).
+3. **A pattern has no general-purpose DOM or browser API.** There are no
+   refs, no layout reads, and no measuring after render: pattern code runs in a
+   worker and produces view nodes, and the renderer turns them into DOM
+   somewhere the pattern cannot reach. Nor is there `fetch`, `localStorage`, or
+   the rest of the browser; every effect goes through a runtime builtin, so the
+   runtime sees every flow. What comes back from the screen is only what the
+   renderer and components choose to send, as event fields and as writes to
+   cells bound with `$prop`. So "the pattern could measure the layout" is the
+   wrong worry, and "a component forwards a content-dependent measurement,
+   such as the height of what it rendered" is the right one, because every
+   field a component emits is a release to the pattern
+   (`packages/html/src/main/events.ts`,
+   [`SES_SANDBOXING_SPEC.md`](../../specs/sandboxing/SES_SANDBOXING_SPEC.md)).
 
-4. **Rendering is a flow, and the viewer is its audience.** Showing a value on
+4. **Time is coarse, and the runtime hands it to you.** A pattern has no
+   timers, no `performance.now()`, and no `requestAnimationFrame`; in a handler
+   `Date.now()` is the time of the triggering event, rounded to the second, and
+   in a `computed()` or `lift()` it throws. A fine clock is a side channel, and
+   a derivation that reads the clock or a random number is not idempotent, so
+   the reactive graph would not settle. A pattern that needs the current
+   time asks for a clock that ticks, `wish({ query: "#now/60" })` for one
+   that ticks each minute, and precise timing, as a game needs, is out of scope
+   ([timing side channels](../../specs/sandboxing/TIMING_SIDE_CHANNELS.md)).
+
+5. **An iframe gets the whole browser and gives up trusted UI.** A `cf-iframe`
+   guest is a real document: it can use the DOM, measure layout, run timers,
+   and bring React or D3. The price is that the renderer cannot vouch for
+   anything the guest draws, so a guest cannot host trusted `cf-*` components,
+   and its events are never a trusted gesture. And because a guest can reach
+   the network, handing it data is checked as a flow that can leave the
+   device, not only as display, so a guest may be refused data that the same
+   page could show in a component
+   ([`iframe-pattern-guide.md`](../ai/iframe-pattern-guide.md)).
+
+6. **Rendering is a flow, and the viewer is its audience.** Showing a value on
    screen is checked like sending it anywhere else: a value the viewer may not
    see renders as a redacted placeholder, and a pattern cannot declassify for
    display on its own say-so. "It's only shown, not sent" is no exemption, and
    the same piece can show a value to one user and withhold it from another
    (§8.10.6).
 
-5. **Composition already gathers; it needs no registry.** A parent that
+7. **Composition already gathers; it needs no registry.** A parent that
    instantiates sub-patterns holds their results and reads their outputs
    directly, and reading a child's labeled output taints the parent exactly as
    any other read does. Designs keep inventing a collector, a registry, or a
@@ -63,41 +87,41 @@ says where it lives.
    it, does not take on its content label, though the reference's own label
    still flows (§8.2.4, §8.13.4; [composition](../patterns/composition.md)).
 
-6. **Taint is per computation, not per variable.** A computation is tainted by
+8. **Taint is per computation, not per variable.** A computation is tainted by
    everything it reads, not just by the values that reach a given output, so
    one unrelated secret read in a handler taints every write it makes. Keeping
    work that reads sensitive data in its own `computed()`, apart from work that
    does not, is what keeps the second one clean (§8.9.2).
 
-7. **Whether something happened is as secret as what made it happen.** A read
+9. **Whether something happened is as secret as what made it happen.** A read
    that only decides a branch, or whether to write at all, still taints the
    result, and a computation that re-runs because a cell changed carries the
    label of what triggered it. A notification, a wake-up, or a badge count is
    as confidential as the data that caused it; "just a ping, no content" leaks
    that the content exists (§8.9.2, §8.11.3, invariant 9).
 
-8. **An `onClick` is not consent.** In React any click handler is "the user
-   did it". Here a click counts as the user's intent only when it is bound to
-   what a trusted surface actually rendered, so the user is known to have seen
-   the thing they approved. A pattern cannot manufacture consent with its own
-   button; sharing, sealing, and other sensitive actions go through components
-   built for them (§3.8.1, §6.3).
+10. **An `onClick` is not consent.** In React any click handler is "the user
+    did it". Here a click counts as the user's intent only when it is bound to
+    what a trusted surface actually rendered, so the user is known to have seen
+    the thing they approved. A pattern cannot manufacture consent with its own
+    button; sharing, sealing, and other sensitive actions go through components
+    built for them (§3.8.1, §6.3).
 
-9. **Endorsement adds evidence; it never removes a restriction.** Integrity is
-   a set of claims a value has, starting empty, and endorsing adds a claim; it
-   does nothing to confidentiality, which only a release rule removes
-   (§3.1.6.2, §3.7.2). Combining values keeps only the claims they share, and
-   most claims belong to the exact value, so any transformation drops them; a
-   trusted value mixed with an untrusted one is untrusted (§8.6.2).
+11. **Endorsement adds evidence; it never removes a restriction.** Integrity is
+    a set of claims a value has, starting empty, and endorsing adds a claim; it
+    does nothing to confidentiality, which only a release rule removes
+    (§3.1.6.2, §3.7.2). Combining values keeps only the claims they share, and
+    most claims belong to the exact value, so any transformation drops them; a
+    trusted value mixed with an untrusted one is untrusted (§8.6.2).
 
-10. **Changing the code changes who may write.** Write authority belongs to the
+12. **Changing the code changes who may write.** Write authority belongs to the
     code, identified by its content, not to the author or the piece, so an edit
     to a pattern's source makes its handlers new writers, and rebinding the code
     is re-authorization, not inheritance (§8.15.6). A field that names its
     writer refuses an updated pattern until the update is authorized as the
     old version's successor.
 
-11. **Model output influenced by someone else's text stays influenced.** When
+13. **Model output influenced by someone else's text stays influenced.** When
     a prompt includes text a third party wrote, such as a message from a
     contact mentioning a party, the output carries a prompt-influence marking,
     and screening the input or the output for injection does not clear it.
@@ -105,26 +129,26 @@ says where it lives.
     the user saw, discharges it, and letting the output choose a destination or
     recipient needs stronger evidence still (§8.10.5, §10.1).
 
-12. **Release is the data owner's decision, one clause at a time.** Code does
+14. **Release is the data owner's decision, one clause at a time.** Code does
     not declassify by deciding to: a release needs a rule carrying the
     authority of the principal whose restriction it removes, and removing one
     principal's restriction leaves everyone else's in place (§5.3.3,
     invariants 3, 11 and 15). A design where a pattern "decides the user meant
     to share it" is missing the rule that would let it.
 
-13. **Untrusted input must not choose what is released, to whom, or when.**
+15. **Untrusted input must not choose what is released, to whom, or when.**
     Every parameter that sets a release's scope, destination, audience, or
     trigger must carry the integrity the policy requires, so a recipient address
     or a send time taken from an incoming message cannot steer a release even
     when the release itself is permitted. A reader list computed from stored
     content counts as an audience (§3.8.4, invariant 7).
 
-14. **Nothing may endorse on a branch that depends on a secret.** Whether an
+16. **Nothing may endorse on a branch that depends on a secret.** Whether an
     endorsement happened would reveal the secret it compared against, so an
     endorsement decision that needs data the endorser cannot see fails closed
     (§3.8.5, invariant 8).
 
-15. **Counting or filtering rows you cannot read leaks them.** A count, a
+17. **Counting or filtering rows you cannot read leaks them.** A count, a
     total, or an empty result over rows outside the reader's clearance reveals
     that they exist, so anything derived from them is tainted by them, and
     silently skipping unreadable rows is a release that a policy has to permit
