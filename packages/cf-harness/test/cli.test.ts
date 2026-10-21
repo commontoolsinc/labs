@@ -1171,6 +1171,28 @@ Deno.test("parseCfHarnessCliArgs reads cache and reasoning defaults from the pro
   }
 });
 
+Deno.test("parseCfHarnessCliArgs reads a run depth, leaves an unnamed one to the default, and refuses one it does not know", async () => {
+  const parse = (argv: string[]) =>
+    parseCfHarnessCliArgs(["--prompt", "hi", ...argv], {
+      cwd: "/tmp/project",
+      env: {},
+    });
+
+  const deep = await parse(["--depth", "deep"]);
+  const unnamed = await parse([]);
+
+  if ("help" in deep || "help" in unnamed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(deep.depth, "deep");
+  assertEquals(unnamed.depth, undefined);
+  await assertRejects(
+    () => parse(["--depth", "medium"]),
+    Error,
+    "--depth must be one of quick, standard, deep",
+  );
+});
+
 Deno.test("parseCfHarnessCliArgs rejects an empty reasoning effort flag", async () => {
   await assertRejects(
     () =>

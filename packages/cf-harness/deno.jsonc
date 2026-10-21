@@ -47,6 +47,7 @@
     "./auth/provider-settings": "./src/auth/provider-settings.ts",
     "./control-errors": "./src/control-errors.ts",
     "./contracts/prompt-slot": "./src/contracts/prompt-slot.ts",
+    "./contracts/run-depth": "./src/contracts/run-depth.ts",
     "./contracts/cfc-invocation-context": "./src/contracts/cfc-invocation-context.ts",
     "./contracts/native-model-tool": "./src/contracts/native-model-tool.ts",
     "./contracts/browser-host": "./src/contracts/browser-host.ts",

@@ -179,6 +179,10 @@ export const localJobSpecOf = async (
       ...(browser ? [LOCAL_JOB_BROWSER_SUBAGENT_PROFILE] : []),
     ],
     maxModelTurns: profile.maxModelTurns,
+    ...(request.depth !== undefined ? { depth: request.depth } : {}),
+    ...(profile.reasoningEffort !== undefined
+      ? { reasoningEffort: profile.reasoningEffort }
+      : {}),
     instructions: framing.length > 0 ? framing.join("\n\n") : undefined,
     model: profile.model ?? options.model,
     loomRetrievalConfigPath: profile.loomRetrievalConfig ??

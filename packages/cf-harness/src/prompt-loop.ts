@@ -201,6 +201,7 @@ import { collapseSupersededRunPatternDiagnostics } from "./run-pattern-diagnosti
 import { collapseSupersededRunPatternSources } from "./run-pattern-source-collapse.ts";
 import {
   type HarnessOpeningResearch,
+  type HarnessRunState,
   isTerminalHarnessRunStatus,
 } from "./run-state.ts";
 import {
@@ -224,6 +225,15 @@ import {
   classifyTask,
   type HarnessTaskClassification,
 } from "./task-classification.ts";
+import {
+  classifiedTags,
+  type RunShape,
+  sendsSection,
+} from "./prompt-sections.ts";
+import {
+  DEFAULT_HARNESS_RUN_DEPTH,
+  type HarnessRunDepth,
+} from "./contracts/run-depth.ts";
 import { createResearchRunner } from "./research/runner.ts";
 import { researchPatternRecords } from "./research/context.ts";
 import { REVISION_VERIFICATION_GUIDANCE } from "./revision-verification.ts";
@@ -311,6 +321,12 @@ export interface CreateHarnessPromptLoopOptions
 
   promptCacheMode?: "implicit" | "explicit";
   reasoningEffort?: string;
+
+  /**
+   * How far the caller wants the run taken; `standard` when absent. A deep
+   * run of any kind gets the opening research pass.
+   */
+  depth?: HarnessRunDepth;
 
   /**
    * Reasoning effort for the `research` tool's private model turns. Research
@@ -3088,6 +3104,7 @@ export class CfHarnessPromptLoop {
   readonly #cacheAffinityKey?: string;
   readonly #promptCacheMode?: "implicit" | "explicit";
   readonly #reasoningEffort?: string;
+  readonly #depth: HarnessRunDepth;
   readonly #researchReasoningEffort?: string;
   readonly #compactThreshold?: number;
   readonly #subagentCompositionGuidance: boolean;
@@ -3235,6 +3252,7 @@ export class CfHarnessPromptLoop {
     this.#cacheAffinityKey = options.cacheAffinityKey;
     this.#promptCacheMode = options.promptCacheMode;
     this.#reasoningEffort = options.reasoningEffort;
+    this.#depth = options.depth ?? DEFAULT_HARNESS_RUN_DEPTH;
     this.#researchReasoningEffort = options.researchReasoningEffort;
     this.#compactThreshold = options.compactThreshold;
     this.#subagentCompositionGuidance = options.subagentCompositionGuidance ??
@@ -3598,7 +3616,7 @@ export class CfHarnessPromptLoop {
     if (
       options.task === undefined || this.engine.resumedRun ||
       runState.lineage !== undefined || !this.#allowedToolIds.has("research") ||
-      runState.taskClassification?.tags.includes("author") === false ||
+      !sendsSection("opening-research", this.#shapeOf(runState)) ||
       isClosedResearchTask(options.task, runState)
     ) {
       return undefined;
@@ -3721,6 +3739,14 @@ export class CfHarnessPromptLoop {
     return { index: taskIndex, inserted: true };
   }
 
+  /** What decides which sections a run of this loop is sent. */
+  #shapeOf(
+    runState: Pick<HarnessRunState, "taskClassification">,
+  ): RunShape {
+    const tags = classifiedTags(runState.taskClassification);
+    return { ...(tags !== undefined ? { tags } : {}), depth: this.#depth };
+  }
+
   /**
    * Tags a fresh root task with the kinds of work it calls for and records
    * them on the run, before the host assembles the prompt the tags shape.
@@ -3828,7 +3854,7 @@ export class CfHarnessPromptLoop {
     const browserHost = this.#allowedSubagentProfiles.has(
         BROWSER_SUBAGENT_PROFILE,
       ) &&
-        initialRunState.taskClassification?.tags.includes("act") !== false
+        sendsSection("browser-host-parent", this.#shapeOf(initialRunState))
       ? this.engine.browserHost
       : undefined;
     if (this.#requirePieceOutput || browserHost !== undefined) {

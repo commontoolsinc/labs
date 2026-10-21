@@ -15,8 +15,11 @@
  * them twice.
  */
 
+import type { HarnessRunDepth } from "@commonfabric/cf-harness/contracts/run-depth";
 import { hashStringOf } from "@commonfabric/data-model";
 import { Database } from "@db/sqlite";
+
+import type { ReasoningEffort } from "./profiles.ts";
 
 /** A job's state. */
 export type LocalJobState =
@@ -46,6 +49,15 @@ export interface LocalJobRequest {
   resultSchema: unknown;
   tools?: string[];
   maxModelTurns?: number;
+
+  /** How far the caller wants the job taken; the harness's default when absent. */
+  depth?: HarnessRunDepth;
+
+  /**
+   * The reasoning effort the job runs at, no more than its profile's; the
+   * profile's when absent.
+   */
+  reasoningEffort?: ReasoningEffort;
 
   /**
    * The caller can host the job's browser. Its contents are not read yet;

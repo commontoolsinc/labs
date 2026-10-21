@@ -173,6 +173,23 @@ describe("local-jobs/lane", () => {
       });
     });
 
+    it("runs the task at the request's depth and the profile's reasoning effort, and names neither where they do not", async () => {
+      const spec = await localJobSpecOf(
+        { request: { ...REQUEST, depth: "deep" } } as LocalJob,
+        { ...ASK, reasoningEffort: "low" },
+        {},
+      );
+      const plain = await localJobSpecOf(
+        { request: REQUEST } as LocalJob,
+        ASK,
+        {},
+      );
+
+      expect(spec).toMatchObject({ depth: "deep", reasoningEffort: "low" });
+      expect("depth" in plain).toBe(false);
+      expect("reasoningEffort" in plain).toBe(false);
+    });
+
     it("takes the runner's retrieval file and model where the profile names none, and the profile's over the runner's", async () => {
       const runner = {
         loomRetrievalConfigPath: "/runner/retrieval.json",
