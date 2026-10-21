@@ -11,7 +11,17 @@
  */
 
 import { diffContentRowCount, maxPagerTop, maxTop } from "./actions.ts";
-import { cpLen, paint, RESET, type Style } from "./ansi.ts";
+import {
+  cpLen,
+  LEADING_ESCAPE,
+  paint,
+  RESET,
+  stripAnsi,
+  type Style,
+  term,
+  visibleWidth,
+} from "./ansi.ts";
+import { BLAME_WIDTH, blameLabel, type BlameLine } from "./blame.ts";
 import type { Document, Line, StructureNode, ViewMode } from "./model.ts";
 import {
   type DisplayCell,
@@ -204,6 +214,14 @@ export interface ViewState {
    * when `showLineNumbers` is set. */
   lineNumbers?: readonly (number | null)[] | null;
 
+  /** The blame column: the attribution it shows on each display line in view,
+   * or null there for none, and the time its ages are measured to, in
+   * milliseconds since the epoch. Null or absent when the column is hidden. */
+  blame?: {
+    readonly lines: readonly (BlameLine | null)[];
+    readonly now: number;
+  } | null;
+
   /** How the non-printable characters in the content are shown. */
   displayMode: DisplayMode;
 
@@ -294,6 +312,13 @@ function gutterWidth(doc: Document, view: ViewState): number {
   return Math.max(4, String(Math.max(1, max)).length + 1);
 }
 
+/** The width of the blame column at the right of a `width`-column screen: its
+ * full width when it is `shown` and leaves at least as much for the rest of the
+ * row, else zero. */
+export function blameColumnWidth(width: number, shown: boolean): number {
+  return shown && width >= 2 * BLAME_WIDTH ? BLAME_WIDTH : 0;
+}
+
 /** Layout widths the content area is laid out with, for cursor placement. */
 function layout(
   doc: Document,
@@ -302,9 +327,11 @@ function layout(
   gutterWidth: number;
   guideWidth: number;
   contentWidth: number;
+  blameWidth: number;
 } {
+  const blameWidth = blameColumnWidth(view.width, !!view.blame);
   const fitted = fitViewLayout(
-    view.width,
+    view.width - blameWidth,
     gutterWidth(doc, view),
     view.selected ? 1 : 0,
     view.expandMargin ? DIFF_MARGIN_WIDTH : 0,
@@ -314,6 +341,7 @@ function layout(
     gutterWidth: fitted.gutterWidth,
     guideWidth: fitted.guideWidth,
     contentWidth: fitted.contentWidth + fitted.marginWidth,
+    blameWidth,
   };
 }
 
@@ -493,6 +521,7 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
     gutterWidth: gw,
     guideWidth,
     contentWidth,
+    blameWidth,
   } = layout(doc, view);
   const annotations = new Map(
     (view.diffAnnotations ?? []).map((annotation) => [
@@ -576,6 +605,7 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
   let displayedCells: readonly DisplayCell[] | undefined;
   let displayedSelection: SelectionSpan | null = null;
   let displayedMatches: LineMatches | null = null;
+  let blameStartLine = -1;
 
   for (let r = 0; r < contentHeight; r++) {
     const rowIdx = view.top + r;
@@ -622,6 +652,15 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
       displayedSelection = null;
       displayedMatches = null;
     }
+    // A line's blame label goes on the first of its rows on screen, unless the
+    // line above it is on screen and comes from the same commit, so each run of
+    // lines from one commit is labeled once.
+    const startsOnScreen = firstOfLine || r === 0;
+    const labelsBlame = startsOnScreen &&
+      !(blameStartLine === lineIdx - 1 &&
+        view.blame?.lines[lineIdx - 1]?.commit ===
+          view.blame?.lines[lineIdx]?.commit);
+    if (startsOnScreen) blameStartLine = lineIdx;
     const annotation = annotations.get(lineIdx);
     const labelsWrappedExpansion = annotation === "expandDown" &&
       wrapPlan !== null &&
@@ -672,7 +711,7 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
         contentWidth,
         wrapPlan,
         suffix,
-      ),
+      ) + blameCell(view.blame, lineIdx, labelsBlame, blameWidth, view.color),
     );
   }
   rows.push(renderStatus(doc, view, wrapPlan));
@@ -764,6 +803,28 @@ function renderContentRow(
     suffix,
   );
   return gutter + guide + content;
+}
+
+/** A `width`-column cell of the `blame` column for a row showing display
+ * line `lineIdx`, carrying the line's label when `labeled`. */
+function blameCell(
+  blame: ViewState["blame"],
+  lineIdx: number,
+  labeled: boolean,
+  width: number,
+  color: boolean,
+): string {
+  if (width === 0) return "";
+  const line = blame?.lines[lineIdx];
+  const label = blame && line && labeled
+    ? truncate(showControls(blameLabel(line, blame.now)), width - 1, true)
+    : "";
+  // The label's alignment padding stays outside its link.
+  const text = label.trimStart();
+  const linked = color && line?.url && text
+    ? " ".repeat(label.length - text.length) + term.hyperlink(line.url, text)
+    : label;
+  return paintIf(" " + padTo(linked, width - 1), ui.lineNumber, color);
 }
 
 function guideChar(
@@ -1102,12 +1163,15 @@ function renderStatus(
 
   // The right of the bar carries the current file (bold) then the position; the
   // file is capped so it never crowds out the position or the left hints.
-  const fileMax = Math.max(8, Math.floor(view.width / 2) - visibleLen(pos) - 2);
+  const fileMax = Math.max(
+    8,
+    Math.floor(view.width / 2) - visibleWidth(pos) - 2,
+  );
   const file = view.currentFile
     ? truncate(showControls(view.currentFile), fileMax, false)
     : "";
   const rightPlain = file ? `${file}  ${pos}` : pos;
-  const rightW = visibleLen(rightPlain);
+  const rightW = visibleWidth(rightPlain);
 
   // The left is truncated to whatever space the right leaves it.
   const leftBudget = Math.max(0, view.width - rightW - 2);
@@ -1125,7 +1189,7 @@ function renderStatus(
   const rightAnsi =
     (file ? paint(file, ui.statusFile) + paint("  ", ui.statusBar) : "") +
     paint(pos, ui.statusBar);
-  const leftW = visibleLen(leftPlain);
+  const leftW = visibleWidth(leftPlain);
   const space = Math.max(1, view.width - leftW - rightW);
   const line = leftAnsi + paint(" ".repeat(space), ui.statusBar) + rightAnsi;
   const pad = view.width - (leftW + space + rightW);
@@ -1139,7 +1203,7 @@ function fitHints(
 ): readonly KeyHint[] {
   const out: KeyHint[] = [];
   for (const h of hints) {
-    if (visibleLen(hintsPlain([...out, h])) > budget) break;
+    if (visibleWidth(hintsPlain([...out, h])) > budget) break;
     out.push(h);
   }
   return out;
@@ -1356,7 +1420,7 @@ function darkenSpan(
   if (r < 0 || r >= rows.length || from < 0) return;
   const n = Math.min(count, view.width - from);
   if (n <= 0) return;
-  const chars = sliceVisible(rows[r], from, from + n).replace(ANSI, "")
+  const chars = stripAnsi(sliceVisible(rows[r], from, from + n))
     .padEnd(n, " ").slice(0, n);
   rows[r] = overlayRow(rows[r], from, paint(chars, ui.overlayShadow));
 }
@@ -1596,7 +1660,7 @@ function placeButtonShadows(
 /** Splice `insert` into `base` starting at visible column `x`. */
 function overlayRow(base: string, x: number, insert: string): string {
   const left = sliceVisible(base, 0, x);
-  const insertW = visibleLen(insert);
+  const insertW = visibleWidth(insert);
   const right = sliceVisible(base, x + insertW, Number.MAX_SAFE_INTEGER);
   return left + RESET + insert + RESET + right;
 }
@@ -1681,15 +1745,8 @@ function kindGlyph(kind: string): string {
 // Visible-width string ops (ANSI-aware)
 //
 
-// deno-lint-ignore no-control-regex
-const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
-
-function visibleLen(text: string): number {
-  return cpLen(text.replace(ANSI, ""));
-}
-
 function padTo(text: string, width: number): string {
-  const len = visibleLen(text);
+  const len = visibleWidth(text);
   if (len >= width) return text;
   return text + " ".repeat(width - len);
 }
@@ -1702,8 +1759,7 @@ function sliceVisible(text: string, from: number, to: number): string {
   let i = 0;
   while (i < text.length) {
     if (text[i] === "\x1b") {
-      // deno-lint-ignore no-control-regex
-      const m = text.slice(i).match(/^\x1b\[[0-9;?]*[A-Za-z]/);
+      const m = text.slice(i).match(LEADING_ESCAPE);
       if (m) {
         out += m[0];
         i += m[0].length;
@@ -1738,7 +1794,6 @@ function truncCenter(text: string, width: number, fill: string): string {
 export const _internal = {
   sliceVisible,
   padTo,
-  visibleLen,
   cellsToAnsi,
   mergeBg,
   darkenSpan,

@@ -17,6 +17,13 @@ import type {
 import type { Key } from "./keys.ts";
 import { cpLen } from "./ansi.ts";
 import {
+  blameKey,
+  type BlameLine,
+  type BlameRequest,
+  type BlameTarget,
+} from "./blame.ts";
+import {
+  blameColumnWidth,
   type DialogButton,
   type DialogState,
   DIFF_MARGIN_WIDTH,
@@ -83,6 +90,7 @@ import {
   commitSubjects,
   findCommitHeaders,
   findCommitMessages,
+  withoutTransportCR,
 } from "./commitmsg.ts";
 import type { Highlighter, Semantics } from "./languages/language.ts";
 import { EditBuffer, type LineEndingProvenance } from "./editbuffer.ts";
@@ -111,6 +119,23 @@ export interface SessionOptions {
 
   /** Initial representation, falling back to source when none is available. */
   viewMode?: ViewMode;
+
+  /** The current time, in milliseconds since the epoch, which the blame
+   * column's ages are measured to. Defaults to the system clock. */
+  now?: () => number;
+}
+
+/** A `git blame` the session asks its driver to run, which the driver hands
+ * back with the result to {@link Session.finishBlameLoad}. */
+export interface BlameLoad {
+  readonly request: BlameRequest;
+}
+
+/** A file's blame: the load that fetches it, and its lines once it has
+ * finished. */
+interface BlameEntry {
+  readonly load: BlameLoad;
+  lines: readonly BlameLine[] | null;
 }
 
 type Mode =
@@ -250,6 +275,28 @@ export class Session {
 
   /** How non-printable characters are shown; edit mode forces the first mode. */
   #displayMode: DisplayMode = DISPLAY_MODES[0];
+
+  /** Whether the blame column is on. */
+  #blameOn = false;
+
+  /** The clock the blame column's ages are measured by. */
+  #now: () => number;
+
+  /** Each file's blame, by {@link blameKey}. */
+  #blames = new Map<string, BlameEntry>();
+
+  /** Loads the viewport needs that the driver has not yet taken. */
+  #blameWanted: BlameLoad[] = [];
+
+  /** The {@link blameKey}s of files git could not blame. */
+  #blameFailures = new Set<string>();
+
+  /** The source's blame targets, and the source and text they are for. */
+  #blameTargetCache?: {
+    source: EditableSource;
+    text: string;
+    targets: readonly (BlameTarget | null)[];
+  };
 
   /** Indices (document order) of the diff files collapsed to a summary line.
    * Cleared when the text cursor is revealed, since hidden lines cannot be
@@ -452,6 +499,7 @@ export class Session {
     this.#sourceDoc = doc;
     this.#currentDoc = doc;
     this.#color = options.color;
+    this.#now = options.now ?? Date.now;
     this.#lineNumberMode = options.showLineNumbers ? "input" : "off";
     this.width = size.width;
     this.height = size.height;
@@ -1098,6 +1146,7 @@ export class Session {
       lineNumbers: this.#lineNumberMode === "off"
         ? null
         : this.#gutterNumbers(),
+      blame: this.#blameColumn(),
       displayMode: this.#displayMode,
       selected: this.#displaySelected(),
       matches: search?.matches ?? null,
@@ -2207,11 +2256,13 @@ export class Session {
       case "ctrl-f":
         this.top = clamp(this.top + rows - 1, 0, lastTop);
         return;
-      case "b":
-      case "B":
       case "pageup":
       case "ctrl-b":
         this.top = clamp(this.top - rows + 1, 0, lastTop);
+        return;
+      case "b":
+      case "B":
+        this.#toggleBlame();
         return;
       case "ctrl-d":
         this.top = clamp(this.top + (rows >> 1), 0, lastTop);
@@ -3517,7 +3568,7 @@ export class Session {
 
   #contentWidth(): number {
     const fitted = fitViewLayout(
-      this.width,
+      this.width - blameColumnWidth(this.width, this.#blameShown()),
       this.#gutterWidth(),
       this.#selectedNode() ? 1 : 0,
       this.#hasDiffMargin() ? DIFF_MARGIN_WIDTH : 0,
@@ -3704,6 +3755,128 @@ export class Session {
     return out;
   }
 
+  /** Turn the blame column on or off, keeping the viewport's top line. It
+   * stays off when no line comes from a file git can blame. */
+  #toggleBlame(): void {
+    const source = this.#source;
+    if (
+      !this.#blameOn &&
+      !(source && this.#blameTargets(source).some((target) => target !== null))
+    ) {
+      this.#message = "No line here comes from a file git can blame";
+      return;
+    }
+    const anchor = this.#wrapLines ? this.#viewportAnchor() : null;
+    this.#blameOn = !this.#blameOn;
+    if (anchor) this.#restoreWrappedAnchor(anchor);
+    this.#message = !this.#blameOn
+      ? "Blame off"
+      : this.#blameShown()
+      ? "Blame on"
+      : blameColumnWidth(this.width, true) === 0
+      ? "Blame on; the screen is too narrow to show it"
+      : "Blame on; it shows in the source view";
+  }
+
+  /** Whether the blame column is drawn. */
+  #blameShown(): boolean {
+    return this.#blameSource() !== null;
+  }
+
+  /** The source whose lines the blame column attributes, or null when the
+   * column is not drawn: it is off, the screen is too narrow for it, or the
+   * displayed lines are not the source's lines. */
+  #blameSource(): EditableSource | null {
+    const source = this.#source;
+    return this.#blameOn && source?.blameTargets &&
+        blameColumnWidth(this.width, true) > 0 &&
+        (this.#viewMode === "source" ||
+          source.renderLineTopology !== "independent")
+      ? source
+      : null;
+  }
+
+  /** The source's blame targets for the current text, cached against both. */
+  #blameTargets(source: EditableSource): readonly (BlameTarget | null)[] {
+    if (!source.blameTargets) return [];
+    const text = this.#sourceDoc.text;
+    let cache = this.#blameTargetCache;
+    if (cache?.source !== source || cache.text !== text) {
+      cache = { source, text, targets: source.blameTargets(text) };
+      this.#blameTargetCache = cache;
+    }
+    return cache.targets;
+  }
+
+  /** The blame column: the attribution it shows on each display line in view,
+   * or null where it shows none, and the current time; null when the column
+   * is hidden. Asks for the blame of any file in view that it does not have
+   * yet. */
+  #blameColumn(): ViewState["blame"] {
+    const source = this.#blameSource();
+    if (!source) return null;
+    const targets = this.#blameTargets(source);
+    const plan = this.#foldPlan();
+    const column = new Array<BlameLine | null>(plan.displayLines.length)
+      .fill(null);
+    const first = this.#toFolded(this.#toDoc(this.top));
+    const last = this.#toFolded(
+      this.#toDoc(this.top + this.#contentRows() - 1),
+    );
+    for (let row = first; row <= last; row++) {
+      const target = targets[plan.displayToDoc(row)];
+      if (target) column[row] = this.#blameFor(target);
+    }
+    return { lines: column, now: this.#now() };
+  }
+
+  /** The attribution of `target`'s line, or null while it is unknown. Loads
+   * the blame of a file that has none, or has one taken of other text. */
+  #blameFor(target: BlameTarget): BlameLine | null {
+    const key = blameKey(target.request);
+    if (this.#blameFailures.has(key)) return null;
+    const entry = this.#blames.get(key);
+    const current = entry?.load.request.contents === target.request.contents;
+    if (!entry || (!current && entry.lines !== null)) {
+      const load = { request: target.request };
+      this.#blames.set(key, { load, lines: null });
+      this.#blameWanted.push(load);
+      return null;
+    }
+    const line = current ? entry.lines?.[target.line] : undefined;
+    if (!line) return null;
+    if (
+      target.text !== undefined &&
+      withoutTransportCR(line.text) !== withoutTransportCR(target.text)
+    ) return null;
+    return line;
+  }
+
+  /** The blame loads the viewport needs, for the driver to run. Each is
+   * returned once. */
+  takeBlameLoads(): BlameLoad[] {
+    const loads = this.#blameWanted;
+    this.#blameWanted = [];
+    return loads;
+  }
+
+  /** Record the lines of a load {@link takeBlameLoads} returned. A result for
+   * a load the session no longer wants is dropped. */
+  finishBlameLoad(load: BlameLoad, lines: readonly BlameLine[]): void {
+    const entry = this.#blames.get(blameKey(load.request));
+    if (entry?.load === load) entry.lines = lines;
+  }
+
+  /** Record that git could not blame a load's file, which is not tried
+   * again, and say why. */
+  failBlameLoad(load: BlameLoad, reason: string): void {
+    const key = blameKey(load.request);
+    if (this.#blames.get(key)?.load !== load) return;
+    this.#blames.delete(key);
+    this.#blameFailures.add(key);
+    if (this.#blameOn) this.#message = `Blame: ${reason}`;
+  }
+
   #handleChord(key: Key): void {
     this.#chord = null;
     this.#message = "";
@@ -3756,6 +3929,9 @@ export class Session {
         options,
       ) ?? current;
       this.#buffer.setBaseline(savedBaseline);
+      // The save rewrote files, and an amend replaced a commit, that blame
+      // attributed.
+      this.#blames.clear();
       const refreshedLineEndings = this.#source.lineEndingProvenance?.(current);
       if (refreshedLineEndings) {
         const retainedLineEndings = this.#buffer.lineEndingProvenance();
@@ -5363,7 +5539,7 @@ export function helpOverlay(hasMultipleCommits: boolean): {
     ["  H / L", "scroll left / right"],
     ["  ↑ ↓ ← →", "scroll / pan the view"],
     ["  ⌥↑ ⌥↓ ⌥← ⌥→", "scroll / pan while editing"],
-    ["  Space / B", "page down / up"],
+    ["  Space / PgUp", "page down / up"],
     ["  ^D / ^U", "half page down / up"],
     ["  g / G", "top / bottom"],
     ["", ""],
@@ -5418,6 +5594,7 @@ export function helpOverlay(hasMultipleCommits: boolean): {
     ["View", ""],
     ["  V", "toggle source / rendered view when the language supports it"],
     ["  #", "line numbers: off / input position / file or message line"],
+    ["  B", "blame: when each line last changed, and who changed it"],
     ["  \\", "line wrapping: off / hard / word"],
     ["  C", "cycle non-printables: pictures / ANSI color / hidden"],
     ["  ?", "this help   ·   Q  quit"],
