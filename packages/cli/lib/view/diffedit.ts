@@ -127,7 +127,10 @@ export function diffSource(
   };
   let blameRoot: string | null | undefined;
   const blameTargets = (text: string) =>
-    diffBlameTargets(text, ws, () => blameRoot ??= git?.repoRoot?.() ?? null);
+    diffBlameTargets(text, ws, () => {
+      if (blameRoot === undefined) blameRoot = git?.repoRoot?.() ?? null;
+      return blameRoot;
+    });
   let countContextText: string | undefined;
   let countContexts: readonly DiffCountFileContext[] = [];
   const diffCountContexts = (text: string) => {

@@ -593,7 +593,9 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
   let endMarkStart = diffEndRow + (hasDiffEndConnector ? 1 : 0);
   const availableEndRows = contentHeight - Math.max(0, endMarkStart - view.top);
   const showEndMark = view.isDiff === true && !view.cursor;
-  let endRows = showEndMark ? endMarkRows(view.width, availableEndRows) : [];
+  // End-mark rows span the screen up to the blame column.
+  const endWidth = Math.max(1, view.width - blameWidth);
+  let endRows = showEndMark ? endMarkRows(endWidth, availableEndRows) : [];
   if (
     showEndMark && hasDiffEndConnector && availableEndRows <= 0 &&
     diffEndRow >= view.top && diffEndRow < view.top + contentHeight
@@ -613,7 +615,7 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
     if (endMark !== null) {
       const suffix = plainSuffix(
         hasDiffEndConnector && rowIdx === diffEndRow
-          ? diffEndSuffix(view.width)
+          ? diffEndSuffix(endWidth)
           : "",
       );
       rows.push(
@@ -621,9 +623,9 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
           undefined,
           view,
           0,
-          Math.max(1, view.width),
-          Math.max(1, view.width),
-          Math.max(1, view.width),
+          endWidth,
+          endWidth,
+          endWidth,
           0,
           false,
           null,
@@ -631,7 +633,7 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
           null,
           endMark,
           suffix,
-        ),
+        ) + blameCell(null, 0, false, blameWidth, view.color),
       );
       continue;
     }

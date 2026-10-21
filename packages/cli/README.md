@@ -553,7 +553,8 @@ program `SSH_ASKPASS` names, and fails when it names none. `P` refuses to push
 on a branch, and refuses when git started the viewer as its pager for a
 different repository.
 
-Press `b` to show or hide the blame column, which takes the right 20 columns of
+In the main view, `b` shows or hides the blame column in place of paging up;
+Page Up and Ctrl-B still page up there. The column takes the right 20 columns of
 the screen when the terminal is at least 40 columns wide. Each line's entry is
 how long ago the commit that last changed it was written, then the author's
 name, cut to fit. The age is a whole number of seconds under a minute, minutes

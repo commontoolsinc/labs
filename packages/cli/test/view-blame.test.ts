@@ -772,6 +772,7 @@ describe("blame", () => {
     async function diffSession(
       cwd: string,
       diff: string,
+      { width = 100, blame = true }: { width?: number; blame?: boolean } = {},
     ): Promise<Session> {
       const ws = realWorkspace(cwd);
       const model = parseDiff(diff)!;
@@ -779,11 +780,11 @@ describe("blame", () => {
       const session = new Session(
         doc,
         { color: false, showLineNumbers: false, now: () => NOW },
-        { width: 100, height: 60 },
+        { width, height: 60 },
         undefined,
         diffSource(ws, edit, undefined, realGit(cwd)),
       );
-      press(session, "b");
+      if (blame) press(session, "b");
       await loadBlames(session);
       return session;
     }
@@ -808,6 +809,37 @@ describe("blame", () => {
         expect(blameOf(session, "+const b = 20;")).toBe("168d Bob");
         expect(blameOf(session, " const a = 1;")).toBe("2y Alice");
         expect(blameOf(session, "-const b = 2;")).toBeNull();
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
+    });
+
+    it("draws the diff's end mark beside the blame column", async () => {
+      const { root, path } = await repository();
+      try {
+        await Deno.writeTextFile(
+          path,
+          "const a = 1;\nconst b = 20;\nconst c = 30;\n",
+        );
+        const diff = await git(root, ["diff"]);
+        const frame = (session: Session) =>
+          renderFrame(session.displayDoc(), session.view());
+        const blamed = frame(await diffSession(root, diff));
+        const narrower = frame(
+          await diffSession(root, diff, {
+            width: 100 - BLAME_WIDTH,
+            blame: false,
+          }),
+        );
+        const ends = blamed.flatMap((row, index) =>
+          row.includes("❦") ? [index] : []
+        );
+        expect(ends.length).toBeGreaterThan(0);
+        for (const index of ends) {
+          expect(blamed[index]).toBe(
+            narrower[index] + " ".repeat(BLAME_WIDTH),
+          );
+        }
       } finally {
         await Deno.remove(root, { recursive: true });
       }
