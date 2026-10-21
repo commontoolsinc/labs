@@ -525,99 +525,114 @@ describe("v2-client-reconnect-watch", () => {
         }
       });
 
-      it("re-establishes a watch whose request was on the wire when the restore began", async () => {
-        // `restore()` runs on a live connection while an acquisition's request
-        // is on the wire and its response is held back. The response is let
-        // through as the restore builds the watch set it re-establishes. That
-        // set replaces whatever the response installed, so the server keeps
-        // the acquisition only if the restore sends it again afterwards.
+      for (const firstResponseArrives of [true, false]) {
+        it(
+          firstResponseArrives
+            ? "re-establishes a watch whose request was on the wire when the restore began"
+            : "re-establishes a watch whose request was on the wire when the restore began, its first response never arriving",
+          async () => {
+            // `restore()` runs on a live connection while an acquisition's request
+            // is on the wire and its response is held back. The response is let
+            // through as the restore builds the watch set it re-establishes, or
+            // never. That set replaces whatever the response installed, so the
+            // server keeps the acquisition only if the restore sends it again
+            // afterwards, and the acquisition completes only on the response to
+            // that send.
 
-        const server = new Server({
-          ...testSessionOpenServerOptions,
-          store: new URL("memory://reconnect-watch-in-flight"),
-        });
-        const inner = loopback(server);
-        let inFlightRequestId: string | undefined;
-        let heldResponse: string | undefined;
-        let deliver = (_payload: string) => {};
-        const transport: Transport = {
-          send(payload) {
-            const message = decodeMemoryBoundary(payload) as {
-              type: string;
-              requestId?: string;
-              watches?: { id: string }[];
-            };
-            if (
-              inFlightRequestId === undefined &&
-              message.type === "session.watch.add" &&
-              message.watches?.some((watch) => watch.id === "in-flight")
-            ) {
-              inFlightRequestId = message.requestId;
-            }
-            return inner.send(payload);
-          },
-          close: () => inner.close(),
-          setReceiver(next) {
-            deliver = next;
-            inner.setReceiver((payload) => {
-              const { requestId } = decodeMemoryBoundary(payload) as {
-                requestId?: string;
-              };
-              if (requestId !== undefined && requestId === inFlightRequestId) {
-                heldResponse = payload;
-                responseHeld.resolve();
-                return;
-              }
-              next(payload);
+            const server = new Server({
+              ...testSessionOpenServerOptions,
+              store: new URL(
+                `memory://reconnect-watch-in-flight-${firstResponseArrives}`,
+              ),
             });
-          },
-          setCloseReceiver() {},
-        };
-        const responseHeld = Promise.withResolvers<void>();
-        const client = await connect({ transport });
-        try {
-          const session = await client.mount(
-            SPACE,
-            {},
-            testSessionOpenAuthFactory,
-          );
-          session.setConcurrentWatchRefresh(concurrentWatchRefresh);
-          await session.watchAddSync([graphWatch("before")]);
-          const inFlight = session.watchAddSync([graphWatch("in-flight")]);
-          await responseHeld.promise;
+            const inner = loopback(server);
+            let inFlightRequestId: string | undefined;
+            let heldResponse: string | undefined;
+            let deliver = (_payload: string) => {};
+            const transport: Transport = {
+              send(payload) {
+                const message = decodeMemoryBoundary(payload) as {
+                  type: string;
+                  requestId?: string;
+                  watches?: { id: string }[];
+                };
+                if (
+                  inFlightRequestId === undefined &&
+                  message.type === "session.watch.add" &&
+                  message.watches?.some((watch) => watch.id === "in-flight")
+                ) {
+                  inFlightRequestId = message.requestId;
+                }
+                return inner.send(payload);
+              },
+              close: () => inner.close(),
+              setReceiver(next) {
+                deliver = next;
+                inner.setReceiver((payload) => {
+                  const { requestId } = decodeMemoryBoundary(payload) as {
+                    requestId?: string;
+                  };
+                  if (
+                    requestId !== undefined && requestId === inFlightRequestId
+                  ) {
+                    heldResponse = payload;
+                    responseHeld.resolve();
+                    return;
+                  }
+                  next(payload);
+                });
+              },
+              setCloseReceiver() {},
+            };
+            const responseHeld = Promise.withResolvers<void>();
+            const client = await connect({ transport });
+            try {
+              const session = await client.mount(
+                SPACE,
+                {},
+                testSessionOpenAuthFactory,
+              );
+              session.setConcurrentWatchRefresh(concurrentWatchRefresh);
+              await session.watchAddSync([graphWatch("before")]);
+              const inFlight = session.watchAddSync([graphWatch("in-flight")]);
+              await responseHeld.promise;
 
-          let restoring = false;
-          let holdingsRequests = 0;
-          session.holdingsProvider = () => {
-            // The first request is the reopen's, the second the
-            // re-establishment's.
-            if (restoring && ++holdingsRequests === 2) {
-              deliver(heldResponse!);
+              let restoring = false;
+              let holdingsRequests = 0;
+              session.holdingsProvider = () => {
+                // The first request is the reopen's, the second the
+                // re-establishment's.
+                if (
+                  restoring && ++holdingsRequests === 2 && firstResponseArrives
+                ) {
+                  deliver(heldResponse!);
+                }
+                return [];
+              };
+              const open = client.openSession.bind(client);
+              const reopened = stub(client, "openSession", async (...args) => ({
+                ...await open(...args),
+                resumed: false,
+              }));
+              try {
+                restoring = true;
+                await session.restore();
+              } finally {
+                reopened.restore();
+              }
+              await inFlight;
+
+              expect(holdingsRequests).toBe(2);
+              expect(
+                server.demandedInstancesForSpace(SPACE).map((row) => row.id),
+              ).toContain("of:in-flight");
+            } finally {
+              await client.close();
+              await server.close();
             }
-            return [];
-          };
-          const open = client.openSession.bind(client);
-          const reopened = stub(client, "openSession", async (...args) => ({
-            ...await open(...args),
-            resumed: false,
-          }));
-          try {
-            restoring = true;
-            await session.restore();
-          } finally {
-            reopened.restore();
-          }
-          await inFlight;
-
-          expect(holdingsRequests).toBe(2);
-          expect(
-            server.demandedInstancesForSpace(SPACE).map((row) => row.id),
-          ).toContain("of:in-flight");
-        } finally {
-          await client.close();
-          await server.close();
-        }
-      });
+          },
+        );
+      }
 
       for (const reopen of [false, true]) {
         const how = reopen ? "re-opened" : "resumed";

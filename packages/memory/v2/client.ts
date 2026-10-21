@@ -3882,12 +3882,13 @@ export class SpaceSession {
     try {
       for (;;) {
         const { response, resent } = request;
-        let result: R;
+        let answer: { result: R } | void;
         try {
-          // The session's close rejects `resent`, which ends this wait too.
-          result = await Promise.race([
-            response,
-            resent.promise.then(() => response),
+          // Sending the request again ends this wait as well, and the
+          // session's close, which rejects `resent`, ends it with an error.
+          answer = await Promise.race([
+            response.then((result) => ({ result })),
+            resent.promise,
           ]);
         } catch (error) {
           if (response !== request.response) continue;
@@ -3899,7 +3900,9 @@ export class SpaceSession {
           await resent.promise;
           continue;
         }
-        if (response === request.response) return apply(result);
+        if (answer !== undefined && response === request.response) {
+          return apply(answer.result);
+        }
       }
     } finally {
       this.#unappliedWatchRequests.delete(request);
