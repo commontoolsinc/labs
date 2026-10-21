@@ -25,6 +25,16 @@
  * query per repository. A collection never waits for that read, and when the
  * read finds new commits the tile asks to be collected again. The tile's sub
  * line counts the repositories GitHub refused to read.
+ *
+ * While the GitHub webhook relay vouches for the last listing, and no
+ * `repository` delivery has arrived since, the listing is not read again.
+ * A delivered push to a repository's default branch has that repository's
+ * commits read at once, without waiting for COMMITS_REFRESH_MS, and read
+ * again on each refresh until they start at the commit pushed. A push to a
+ * repository the last listing leaves out has the repositories listed again,
+ * and is dropped once a listing read after it still leaves the repository
+ * out. While the relay vouches and nothing has been delivered, a refresh
+ * reads nothing.
  */
 
 import { isObjectNotArray } from "@commonfabric/utils/types";
@@ -64,6 +74,13 @@ import {
 } from "../config.ts";
 import { CI_HISTORY_SOURCES, GANTT_MAX_RUNS } from "../ci-job-history.ts";
 import { greenStar } from "../green-star.ts";
+import {
+  Freshness,
+  type GitHubDelivery,
+  type GitHubWebhooks,
+  githubWebhooks,
+  pushOf,
+} from "../github-webhooks.ts";
 import {
   type OrganizationRepo,
   organizationRepos,
@@ -139,6 +156,37 @@ const HISTORY_QUERY = `query($owner: String!, $name: String!, $count: Int!) {
   }
 }`;
 
+/**
+ * Returns the repository, as "owner/name", that a `repository` delivery
+ * reports, and whether the delivery takes it out of the listing, by deleting
+ * or archiving it, or puts it back, by creating or unarchiving it. Returns
+ * `undefined` for any other delivery, a transfer among them, whose direction
+ * the next listing shows.
+ */
+function repositoryChangeOf(
+  delivery: GitHubDelivery,
+): { repo: string; gone: boolean } | undefined {
+  if (delivery.event !== "repository") return undefined;
+  const payload = delivery.payload;
+  if (!isObjectNotArray(payload) || typeof payload.action !== "string") {
+    return undefined;
+  }
+  const gone = GONE.has(payload.action);
+  if (!gone && !BACK.has(payload.action)) return undefined;
+  const repository = payload.repository;
+  return isObjectNotArray(repository) && typeof repository.full_name === "string"
+    ? { repo: repository.full_name, gone }
+    : undefined;
+}
+
+// The actions of a `repository` delivery that take a repository out of the
+// listing, and those that put one back.
+const GONE = new Set(["deleted", "archived"]);
+const BACK = new Set(["created", "unarchived"]);
+
+// The commit a push names as the one a deleted branch was moved to.
+const DELETED = "0".repeat(40);
+
 // The GraphQL error types that asking again unchanged would not alter.
 const REFUSALS = new Set(["FORBIDDEN", "NOT_FOUND"]);
 
@@ -196,12 +244,13 @@ function isRefusal(error: unknown): boolean {
 
 /**
  * Reads the commits among the newest HISTORY_DEPTH on a repository's default
- * branch that people landed through pull requests, newest first.
+ * branch that people landed through pull requests, newest first, and the
+ * commit the branch is at.
  */
 async function readCommits(
   repo: OrganizationRepo,
   credential: GitHubCredential,
-): Promise<Commit[]> {
+): Promise<{ head: string | undefined; commits: Commit[] }> {
   const [owner, name] = repo.name.split("/");
   const data = await githubGraphql(
     HISTORY_QUERY,
@@ -219,14 +268,19 @@ async function readCommits(
   const branch = isObjectNotArray(repository)
     ? repository.defaultBranchRef
     : undefined;
-  if (branch === null) return [];
+  if (branch === null) return { head: undefined, commits: [] };
   const target = isObjectNotArray(branch) ? branch.target : undefined;
   const history = isObjectNotArray(target) ? target.history : undefined;
   const nodes = isObjectNotArray(history) ? history.nodes : undefined;
   if (!Array.isArray(nodes)) {
     throw new Error("GitHub commit history returned invalid data");
   }
-  return nodes.flatMap((node) => landedCommitOf(repo, node));
+  const commits = nodes.flatMap((node) => landedCommitOf(repo, node));
+  const newest: unknown = nodes[0];
+  const head = isObjectNotArray(newest) && typeof newest.oid === "string"
+    ? newest.oid
+    : undefined;
+  return { head, commits };
 }
 
 /**
@@ -246,6 +300,79 @@ export class OrganizationCommits {
   // when they were last read.
   #refused = new Set<string>();
 
+  // The last listing of the organization's repositories, and whether the
+  // relay vouches that no repository has been added, removed or changed
+  // since.
+  #repos: OrganizationRepo[] | undefined;
+  #listing: Freshness;
+
+  // The commit each repository's default branch was last delivered as pushed
+  // to, and how many deliveries had arrived with it, by "owner/name" in lower
+  // case, until its commits are read starting at that commit, or a listing
+  // started after it leaves the repository out.
+  #pushed = new Map<string, { after: string; delivery: number }>();
+
+  // The repositories a delivery said left the organization, by "owner/name"
+  // in lower case, which are left out of every listing until one leaves them
+  // out itself.
+  #gone = new Set<string>();
+
+  // Whether a delivery has dropped commits since the last refresh.
+  #dropped = false;
+
+  #webhooks: GitHubWebhooks;
+
+  /**
+   * Constructs an instance holding no commits, which learns of pushes and of
+   * changes to the organization's repositories from `webhooks`.
+   */
+  constructor(webhooks: GitHubWebhooks = githubWebhooks) {
+    this.#webhooks = webhooks;
+    this.#listing = new Freshness(
+      webhooks,
+      (delivery) => delivery.event === "repository",
+    );
+    webhooks.listen((delivery) => {
+      const push = pushOf(delivery);
+      if (push !== undefined && push.ref === `refs/heads/${push.defaultBranch}`) {
+        this.#pushed.set(push.repo.toLowerCase(), {
+          after: push.after,
+          delivery: webhooks.deliveries,
+        });
+      }
+      const change = repositoryChangeOf(delivery);
+      if (change === undefined) return;
+      const key = change.repo.toLowerCase();
+      if (change.gone) {
+        // A repository that leaves the organization takes its pushes and its
+        // commits with it.
+        this.#gone.add(key);
+        this.#pushed.delete(key);
+        for (const name of this.#held.keys()) {
+          if (name.toLowerCase() === key && this.#held.delete(name)) {
+            this.#dropped = true;
+          }
+        }
+      } else this.#gone.delete(key);
+    });
+  }
+
+  /**
+   * Whether a refresh would read nothing: the relay vouches for the last
+   * listing, no push has been delivered that the commits held do not show,
+   * and every repository listed has had its commits read since its last push
+   * or been refused.
+   */
+  get current(): boolean {
+    const repos = this.#repos;
+    return repos !== undefined && this.#listing.current &&
+      this.#pushed.size === 0 &&
+      repos.every((repo) =>
+        this.#held.get(repo.name)?.pushedAt === repo.pushedAt ||
+        this.#refused.has(repo.name)
+      );
+  }
+
   /** Every commit held, of every repository. */
   get commits(): Commit[] {
     return [...this.#held.values()].flatMap((held) => held.commits);
@@ -260,16 +387,44 @@ export class OrganizationCommits {
   }
 
   /**
-   * Lists the organization's repositories and reads the commits of each one
-   * pushed to since its commits were read. A repository whose commits cannot
-   * be read keeps those it had. It is read again by the next refresh when
-   * GitHub failed, and after its next push when GitHub refused the request.
-   * Returns whether the commits held, or the repositories refused, changed.
+   * Lists the organization's repositories, unless the relay vouches for the
+   * last listing and it holds every repository delivered as pushed to, and
+   * reads the commits of each one pushed to since its commits were read, or
+   * delivered as pushed to. A repository a delivery said left the
+   * organization is left out of every listing until one leaves it out
+   * itself. A repository whose commits
+   * cannot be read keeps those it had. It is read again by the next refresh
+   * when GitHub failed, and after its next push when GitHub refused the
+   * request. Returns whether the commits held, or the repositories refused,
+   * changed.
    */
   async refresh(credential: GitHubCredential): Promise<boolean> {
-    const repos = await organizationRepos(credential);
+    if (
+      this.#repos === undefined || !this.#listing.current ||
+      this.#pushedUnlisted()
+    ) {
+      const listed = this.#listing.reading();
+      const listedAfter = this.#webhooks.deliveries;
+      const repos = await organizationRepos(credential);
+      listed();
+      const names = new Set(repos.map((repo) => repo.name.toLowerCase()));
+      for (const key of this.#gone) if (!names.has(key)) this.#gone.delete(key);
+      this.#repos = repos.filter((repo) =>
+        !this.#gone.has(repo.name.toLowerCase())
+      );
+      // A push to a repository this listing still leaves out is to one the
+      // credential cannot see, or one the listing is behind, which the next
+      // listing finds when its own push or the relay's vouching runs out.
+      for (const [key, pending] of this.#pushed) {
+        if (!names.has(key) && pending.delivery <= listedAfter) {
+          this.#pushed.delete(key);
+        }
+      }
+    }
+    const repos = this.#repos;
     const listed = new Set(repos.map((repo) => repo.name));
-    let changed = false;
+    let changed = this.#dropped;
+    this.#dropped = false;
     for (const name of this.#held.keys()) {
       if (!listed.has(name)) {
         this.#held.delete(name);
@@ -283,14 +438,23 @@ export class OrganizationCommits {
       }
     }
     const pushed = repos.filter((repo) =>
-      this.#held.get(repo.name)?.pushedAt !== repo.pushedAt
+      this.#held.get(repo.name)?.pushedAt !== repo.pushedAt ||
+      this.#pushed.has(repo.name.toLowerCase())
     );
     await inParallel(
       GITHUB_REQUEST_CONCURRENCY,
       pushed.map((repo) => async () => {
         const before = this.#held.get(repo.name)?.commits;
+        const key = repo.name.toLowerCase();
+        const expected = this.#pushed.get(key);
         try {
-          const commits = await readCommits(repo, credential);
+          const { head, commits } = await readCommits(repo, credential);
+          // A push delivered while the read ran stays, for the next one, and
+          // so does one the history does not show yet.
+          if (
+            this.#pushed.get(key) === expected &&
+            (head ?? DELETED) === expected?.after
+          ) this.#pushed.delete(key);
           if (before === undefined || before[0]?.sha !== commits[0]?.sha) {
             changed = true;
           }
@@ -304,6 +468,7 @@ export class OrganizationCommits {
           if (isRefusal(error)) {
             if (!this.#refused.has(repo.name)) changed = true;
             this.#refused.add(repo.name);
+            if (this.#pushed.get(key) === expected) this.#pushed.delete(key);
             this.#held.set(repo.name, {
               pushedAt: repo.pushedAt,
               commits: before ?? [],
@@ -313,6 +478,18 @@ export class OrganizationCommits {
       }),
     );
     return changed;
+  }
+
+  /**
+   * Helper for `refresh()`, which returns whether a push has been delivered
+   * to a repository the last listing does not hold, which the next listing
+   * may.
+   */
+  #pushedUnlisted(): boolean {
+    const names = new Set(
+      (this.#repos ?? []).map((repo) => repo.name.toLowerCase()),
+    );
+    return [...this.#pushed.keys()].some((key) => !names.has(key));
   }
 }
 
@@ -486,23 +663,35 @@ export interface RecentCommitsTile extends Tile {
 
 /**
  * Creates a recent commits tile that reads the organization's commits into
- * `organization`, which holds none until the tile's first collection.
+ * `organization`, which holds none until the tile's first collection, and
+ * learns from `webhooks` of the pushes and repository changes that ask for a
+ * read at once.
  */
 export function createRecentCommits(
   organization = new OrganizationCommits(),
+  webhooks: GitHubWebhooks = githubWebhooks,
 ): RecentCommitsTile {
   let reading: Promise<void> | undefined;
   let readStartedAt = -Infinity;
   let failure: string | undefined;
   let read = false;
+  let wanted = false;
+  let collectedWith:
+    | { collectAgain: (() => void) | undefined; credential: GitHubCredential }
+    | undefined;
 
-  // Starts a read of the organization's commits when one is due. Once it
-  // ends, the tile asks to be collected again if what it shows has changed.
+  // Starts a read of the organization's commits when one is due, which a
+  // delivery makes it at once, and never while the relay vouches that it
+  // would read nothing. Once it ends, the tile asks to be collected again if
+  // what it shows has changed, and a read a delivery asked for meanwhile
+  // starts.
   const startReading = (
     collectAgain: (() => void) | undefined,
     credential: GitHubCredential,
   ): void => {
-    if (reading || Date.now() - readStartedAt < COMMITS_REFRESH_MS) return;
+    if (reading || organization.current) return;
+    if (!wanted && Date.now() - readStartedAt < COMMITS_REFRESH_MS) return;
+    wanted = false;
     readStartedAt = Date.now();
     const failedBefore = failure;
     reading = organization.refresh(credential).then(
@@ -521,8 +710,23 @@ export function createRecentCommits(
       },
     ).finally(() => {
       reading = undefined;
+      if (wanted && collectedWith) {
+        startReading(collectedWith.collectAgain, collectedWith.credential);
+      }
     });
   };
+
+  webhooks.listen((delivery) => {
+    const push = pushOf(delivery);
+    if (
+      delivery.event !== "repository" &&
+      (push === undefined || push.ref !== `refs/heads/${push.defaultBranch}`)
+    ) return;
+    wanted = true;
+    if (collectedWith) {
+      startReading(collectedWith.collectAgain, collectedWith.credential);
+    }
+  });
 
   return {
     label: "recent commits",
@@ -532,7 +736,10 @@ export function createRecentCommits(
     reading: () => reading ?? Promise.resolve(),
     async collect(ctx): Promise<TileView> {
       const credential = dashboardGitHubCredential(ctx);
-      if (credential) startReading(ctx.collectAgain, credential);
+      if (credential) {
+        collectedWith = { collectAgain: ctx.collectAgain, credential };
+        startReading(ctx.collectAgain, credential);
+      }
       const runs = (await Promise.all(
         sources.map((source) => ctx.runsFor(source)),
       )).flat();
