@@ -19,7 +19,7 @@ interface FileStoreOutput {
   /** The outcome of each request, by its `requestId`. */
   requests: Record<
     string,
-    | { status: "done"; entry: Cell<FileEntry> }
+    | { status: "done"; entry: Cell<FileEntry>; name: string }
     | {
       status: "refused";
       reason: string;
@@ -90,7 +90,8 @@ between readers, so it is the same for every reader too.
   finds a file by its name. Names are unique within a store, so it holds each
   entry exactly once.
 - **`requests`** records each request's outcome under its `requestId`: `done`,
-  with the entry it added or changed, or `refused`, with a reason, prose for a
+  with the entry it added or changed and the name the request gave it, or
+  `refused`, with a reason, prose for a
   person, and a `code` a client can act on, which stays the same whatever the
   reason says. An implementation MAY discard an outcome after a retention period
   it documents.
@@ -137,6 +138,11 @@ number, onConflict?: "refuse" | "rename")`
   `photo (2).png`. A client adding a file whose name a person didn't choose,
   such as a pasted image, uses `"rename"`.
 
+The outcome's `name` is the name the entry was added under. It differs from the
+request's `name` exactly when the store chose a free one, so a client learns
+what became of its file from the outcome alone, without reading the entry, whose
+name a later `rename` can change. A client that tells a person where their file
+went names a `requestId`, since it can't know the event's own key.
 The store adds an entry with the request's fields, `addedAt` from the handler's
 clock, and `addedBy` the adder's profile, `wish({ query: "#profile" })`. An
 adder with no profile is refused, with `code: "not-permitted"`, so that no file
@@ -168,7 +174,8 @@ store.
 - `entry` — The entry to rename. One not in `entries` is refused, with
   `code: "not-found"`.
 - `name` and `onConflict` — As for [`add`](#add). Renaming an entry to its own
-  name changes nothing, and is `done`.
+  name changes nothing, and is `done`. The outcome's `name` is the name the
+  entry was given, as for `add`.
 
 Only the entry's adder, or a principal the store's space admits as OWNER, may
 rename it. Anyone else is refused, with `code: "not-permitted"`.

@@ -24,7 +24,9 @@ when it shows its files. A client that draws natively never instantiates it.
 - An upload control, `cf-file-input`, for a viewer the store's space admits with
   WRITE or OWNER. The control stores each chosen file's bytes in the store's
   space's blob store, and the view then sends the store's `add` for each, with
-  `onConflict: "rename"`, and the name the file had.
+  `onConflict: "rename"`, the name the file had, and a `requestId` of its own.
+  When the outcome's `name` differs from the file's, the view says which name
+  the file was added under.
 - For each entry the viewer may change, a control that removes it, and one that
   renames it, which sends `rename` with `onConflict: "refuse"`, and shows a
   refusal's reason beside the name.

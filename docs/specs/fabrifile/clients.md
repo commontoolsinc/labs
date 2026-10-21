@@ -1,4 +1,4 @@
-# File store: requirements on clients
+# FabriFile: requirements on clients
 
 A client is a program that reads and writes a store on a person's behalf: the
 shell, rendering [`FileStoreView`](FileStoreView.md), or a separate application
@@ -29,7 +29,10 @@ A client MUST name, in `add`, the blob it stored, with the media type it stored
 it with, since the store can't yet check either (see
 [prerequisites](README.md#prerequisites)). A client SHOULD send `onConflict:
 "rename"` for a name the person didn't choose, such as a pasted image's, and
-`"refuse"` for a name they typed, so that they can choose another.
+`"refuse"` for a name they typed, so that they can choose another. Either way,
+the client names a `requestId`, and reads the outcome's `name`: when it differs
+from the name the client sent, the store chose it, and the client tells the
+person which name their file has.
 
 A blob stored by step 1 and never added is not a file. Nothing lists it, and
 nothing deletes it.

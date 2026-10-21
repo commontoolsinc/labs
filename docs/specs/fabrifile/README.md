@@ -1,8 +1,9 @@
-# File store
+# FabriFile
 
-This directory describes a space's designated file storage: the patterns it is
-made of, the contracts they fill, and what they require of the runtime and of
-the programs that use them. It is a design. Nothing in it is built yet.
+FabriFile is a space's designated file storage. This directory describes the
+patterns it is made of, the contracts they fill, and what they require of the
+runtime and of the programs that use them. It is a design. Nothing in it is
+built yet.
 
 ## Quick links
 
@@ -30,7 +31,7 @@ file out of the set. Each pattern that takes files today keeps its own list of
 upload descriptors, so a space's files are scattered across its pieces and no
 program can enumerate them.
 
-A file store is that set, one per space. It is two patterns and one record:
+FabriFile's store is that set, one per space. It is two patterns and one record:
 
 - **The store** ([`FileStore.md`](FileStore.md)) is the set of files in one
   space. It finds a file by its name, takes new files, and removes, renames
