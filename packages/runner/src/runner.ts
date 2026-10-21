@@ -1154,16 +1154,13 @@ function pendingInstances(
   );
   if (instances.length === 0) return undefined;
   const manifest = storedManifestOf(parent);
-  if (!manifest.some((entry) => isPositionalPartialCause(entry.partialCause))) {
-    return undefined;
-  }
+  if (recordedPositionalSpots(manifest).size === 0) return undefined;
   const recordedChildren = readInstanceChildren(parent);
+  const recordedNames = recordedInstanceNames(manifest);
   const pending = instances.filter((descriptor) => {
     const name = instanceNameOfPartialCause(descriptor.partialCause);
     return name !== undefined && recordedChildren[name] === undefined &&
-      !manifest.some((entry) =>
-        deepEqual(entry.partialCause, descriptor.partialCause)
-      );
+      !recordedNames.has(name);
   });
   return pending.length === 0
     ? undefined
@@ -15220,9 +15217,7 @@ export class Runner {
       });
     }
     const previous = this.#previouslySetUpPattern(resultCell, pattern);
-    const recorded = convertibleJsFromFabricValue(
-      resultCell.getMetaRaw("internal", { meta: ignoreReadForScheduling }),
-    );
+    const manifest = storedManifestOf(resultCell);
     // Each candidate child, once per document. A module changes which
     // document a cause names only through its target space, a space-root
     // reservation and its scope, so most modules name the same one, and what
@@ -15231,19 +15226,17 @@ export class Runner {
     const children = new Map<string, Cell<any>>();
     const addChild = (child: Cell<any>) =>
       children.set(documentKey(child.getAsNormalizedFullLink()), child);
-    if (Array.isArray(recorded)) {
-      for (const { module } of subPatternNodes(pattern)) {
-        for (const entry of recorded as InternalCellDescriptor[]) {
-          if (!isPositionalPartialCause(entry.partialCause)) continue;
-          addChild(
-            this.#childAtPartialCause(
-              undefined,
-              resultCell,
-              module,
-              entry.partialCause,
-            ),
-          );
-        }
+    for (const { module } of subPatternNodes(pattern)) {
+      for (const entry of manifest) {
+        if (!isPositionalPartialCause(entry.partialCause)) continue;
+        addChild(
+          this.#childAtPartialCause(
+            undefined,
+            resultCell,
+            module,
+            entry.partialCause,
+          ),
+        );
       }
     }
     if (previous !== undefined) {

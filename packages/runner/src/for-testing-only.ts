@@ -11,8 +11,13 @@ import { instancePartialCause } from "./builder/instance-name.ts";
 import { freezePartialCauses } from "./builder/pattern.ts";
 import type { JSONObject, Pattern } from "./builder/types.ts";
 
-// A test in another package sets a pattern up as a runtime without instance
-// names does, then updates it; nothing public turns naming off.
+/**
+ * `stopNamingInstancesForTestingOnly()` from `builder/instance-name.ts`, for a
+ * test in another package that sets a pattern up as a runtime without
+ * instance names does, and then updates it. `nameInstance()` names instances
+ * unless a test turns it off through here, and no public export reaches the
+ * switch.
+ */
 export { stopNamingInstancesForTestingOnly } from "./builder/instance-name.ts";
 
 /**
