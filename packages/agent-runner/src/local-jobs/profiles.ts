@@ -66,7 +66,11 @@ export interface LocalJobProfile {
 
   /**
    * The reasoning effort a job runs at, and the most a request may ask for;
-   * the provider's default when absent, and then a request may name none.
+   * the provider's default when absent, and then a request may name none. It
+   * sets the effort of the job's own model calls and of children that share
+   * its model. The research tool runs at the runner's research effort, and a
+   * child on another model at that provider's default, so it does not bound
+   * every model call in the job.
    */
   reasoningEffort?: ReasoningEffort;
 

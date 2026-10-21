@@ -2076,6 +2076,9 @@ The caller chooses the run's depth before it starts, with `--depth quick`,
 and the depth how far to take it. It selects prompt sections and grants no
 authority. An agent-runner local job takes `depth` from its request, and
 `reasoningEffort` from its profile, which a request may lower but not raise.
+Only `deep` changes a run today, adding the opening research pass for a
+classified task of any kind. The effort applies to the job's own model calls and
+children on its model; research keeps its own effort setting.
 
 A tool descriptor is a contract: its name, its parameters with one-line
 descriptions, and a sentence or two on what the tool does and returns. Task tags

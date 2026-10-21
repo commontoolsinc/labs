@@ -1,9 +1,13 @@
 /**
  * How much a run's caller wants it to do: answer `quick`ly, work at the
- * `standard` depth every run had before callers could choose, or go `deep`.
+ * `standard` depth, the default, or go `deep`.
  * The caller decides it, before the run starts; the run's task classification
  * says what kind of work it is, and the depth how far to take it. It selects
  * prompt sections and the opening research pass, and grants no authority.
+ *
+ * Only `deep` changes a run today: it gives a classified task of any kind the
+ * opening research pass, which a run that was never classified already gets.
+ * A `quick` run is a `standard` one until a section names `quick`.
  */
 export const HARNESS_RUN_DEPTHS = ["quick", "standard", "deep"] as const;
 

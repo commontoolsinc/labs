@@ -3739,12 +3739,6 @@ export class CfHarnessPromptLoop {
     return { index: taskIndex, inserted: true };
   }
 
-  /**
-   * Tags a fresh root task with the kinds of work it calls for and records
-   * them on the run, before the host assembles the prompt the tags shape.
-   * The tags gate the opening research pass and the parent's browser
-   * guidance here.
-   */
   /** What decides which sections a run of this loop is sent. */
   #shapeOf(
     runState: Pick<HarnessRunState, "taskClassification">,
@@ -3753,6 +3747,12 @@ export class CfHarnessPromptLoop {
     return { ...(tags !== undefined ? { tags } : {}), depth: this.#depth };
   }
 
+  /**
+   * Tags a fresh root task with the kinds of work it calls for and records
+   * them on the run, before the host assembles the prompt the tags shape.
+   * The tags gate the opening research pass and the parent's browser
+   * guidance here.
+   */
   async classifyTask(task: string): Promise<HarnessTaskClassification> {
     const runState = this.engine.getRunState();
     const classification = classifyTask(task, {
