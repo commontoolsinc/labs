@@ -206,11 +206,12 @@ deno run -A packages/patterns/integration/topic-board-seed.ts \
 ```
 
 `GET /api/health/stats` before and after gives the memory server's
-`timingStats` (the `memory/*` rows live here on every arm), the serving
-loop's counters under `servingLoop`, and, with the loop in the worker, the
-loop's own timing rows under `servingLoopRealm.timingStats` rather than
-`timingStats`. The 30-topic seed read 42 s on the worker arm with the
-read-through before the port levers and 34 s after.
+`timingStats` (the `memory/*` rows live here on every arm) and the serving
+loop's counters under `servingLoop`. With the loop in the worker, the loop's
+own timing rows are the worker realm's, which
+`GET /api/health/serving-loop-realm` answers with (`timingStats` there) and
+`stats` does not hold; read both before and after. The 30-topic seed read 42 s
+on the worker arm with the read-through before the port levers and 34 s after.
 
 Spans and a CPU profile come from a throwaway probe, which stays uncommitted
 because the workload stays uninstrumented

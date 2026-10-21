@@ -1,5 +1,9 @@
-// Shared by browser-reachable piece operations and the serving worker port.
-// Keep these result types independent of the executor host and its store.
+/**
+ * What running a lifecycle verb yields or fails with, as the serving worker's
+ * port and the browser-reachable piece operations both name it. Nothing here
+ * imports the executor host or its store, which is what lets a browser bundle
+ * hold these types without the SQLite module behind the host.
+ */
 
 /**
  * One step the serving side timed while running a lifecycle verb: `phase`
@@ -22,17 +26,27 @@ export type LifecycleVerbRun = {
 
 /** A failed lifecycle verb, retaining the phases completed before failure. */
 export class LifecycleVerbFailure extends Error {
-  readonly timings: LifecyclePhaseTiming[];
-  readonly code: string | undefined;
+  readonly #timings: readonly LifecyclePhaseTiming[];
+  readonly #code: string | undefined;
 
-  constructor(cause: unknown, timings: LifecyclePhaseTiming[]) {
+  constructor(cause: unknown, timings: readonly LifecyclePhaseTiming[]) {
     super(cause instanceof Error ? cause.message : String(cause), { cause });
-    this.timings = [...timings];
+    this.#timings = [...timings];
     this.name = cause instanceof Error ? cause.name : "Error";
     if (cause instanceof Error) this.stack = cause.stack;
     const code = cause instanceof Error
       ? (cause as { code?: unknown }).code
       : undefined;
-    this.code = typeof code === "string" ? code : undefined;
+    this.#code = typeof code === "string" ? code : undefined;
+  }
+
+  /** The steps that completed before the failure, in the order they ran. */
+  get timings(): readonly LifecyclePhaseTiming[] {
+    return this.#timings;
+  }
+
+  /** The cause's refusal code, when it carried one as a string. */
+  get code(): string | undefined {
+    return this.#code;
   }
 }

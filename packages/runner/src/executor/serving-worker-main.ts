@@ -1,10 +1,12 @@
-// What a serving worker's entry module does once loaded: installs the port's
-// endpoint on the worker's global scope, waits for the `worker.init` request,
-// which carries the service key and the host's options, builds the
-// `ExecutorHost` over a `ServingPlane`, and answers once the host serves. The
-// runner's own entry (`serving-worker.ts`) calls this bare; an entry in a
-// higher layer calls it with the lifecycle verbs it can build and the fetch
-// and module cache its deployment uses.
+/**
+ * What a serving worker's entry module does once loaded: installs the port's
+ * endpoint on the worker's global scope, waits for the `worker.init` request,
+ * which carries the service key and the host's options, builds the
+ * `ExecutorHost` over a `ServingPlane`, and answers once the host serves. The
+ * runner's own entry (`serving-worker.ts`) calls this bare; an entry in a
+ * higher layer calls it with the lifecycle verbs it can build and the fetch
+ * and module cache its deployment uses.
+ */
 
 import { Identity, keyPairFromRealmValue } from "@commonfabric/identity";
 import type { MemorySpace } from "@commonfabric/memory/interface";

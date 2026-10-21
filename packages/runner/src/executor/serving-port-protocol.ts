@@ -1,10 +1,12 @@
-// The wire between a serving loop in a worker and the memory server on the
-// thread that owns the store: the messages each side sends, and the endpoint
-// both sides build on, which frames requests with ids and settles their
-// replies. `serving-port-plane.ts` is the worker side; `serving-port-bridge.ts`
-// the main-thread side. Everything that crosses is data a structured clone
-// keeps, except a wave batch and a delegated append, whose values are the
-// memory boundary's and cross as its encoding.
+/**
+ * The wire between a serving loop in a worker and the memory server on the
+ * thread that owns the store: the messages each side sends, and the endpoint
+ * both sides build on, which frames requests with ids and settles their
+ * replies. `serving-port-plane.ts` is the worker side; `serving-port-bridge.ts`
+ * the main-thread side. Everything that crosses is data a structured clone
+ * keeps, except a wave batch and a delegated append, whose values are the
+ * memory boundary's and cross as its encoding.
+ */
 
 import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
 import type {
@@ -291,7 +293,7 @@ const faultOf = (error: unknown): PortFault => {
     stack: error.stack,
     code: typeof code === "string" ? code : undefined,
     ...(error instanceof LifecycleVerbFailure
-      ? { timings: error.timings }
+      ? { timings: [...error.timings] }
       : {}),
   };
 };

@@ -1,11 +1,13 @@
-// The worker side of the serving port (serving-loop-worker.md): the memory
-// server as the host in a worker reaches it. Reads of the store stay on the
-// worker's own engine connections, which this module opens at the file the
-// server's thread names; the three session questions the loop asks
-// synchronously are answered from a mirror the server's lifecycle events keep
-// current; everything else crosses the port as a request, a notice, or a
-// loopback frame. Wave commits cross to the sink the server's thread keeps,
-// under the counter this side owns.
+/**
+ * The worker side of the serving port (serving-loop-worker.md): the memory
+ * server as the host in a worker reaches it. Reads of the store stay on the
+ * worker's own engine connections, which this module opens at the file the
+ * server's thread names; the three session questions the loop asks
+ * synchronously are answered from a mirror the server's lifecycle events keep
+ * current; everything else crosses the port as a request, a notice, or a
+ * loopback frame. Wave commits cross to the sink the server's thread keeps,
+ * under the counter this side owns.
+ */
 
 import type { CellScope } from "@commonfabric/api";
 import type { FabricValue } from "@commonfabric/data-model";

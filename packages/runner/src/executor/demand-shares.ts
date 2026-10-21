@@ -58,6 +58,8 @@ export class DemandShareCache {
    * left out, in the order given: each held share that is not stale as it
    * is, and the rest read through `read` in one call. A session `read` does
    * not return is one the server no longer holds, and contributes nothing.
+   * An excluded session's stale mark is carried, not consumed, so the pass
+   * that first includes it reads its share afresh.
    */
   async sharesFor(
     space: string,

@@ -129,16 +129,41 @@ export const stats = createRoute({
           ),
         }).optional(),
         // The serving loop's counters (server-execution v2,
-        // serving-loop.md §7) — present only while an ExecutorHost runs
-        // in this process (the ON arm).
+        // serving-loop.md §7) — present only while the loop runs in this
+        // process (the ON arm), on this thread or in its worker.
         servingLoop: z.any().optional(),
-        // The serving loop's realm's own logger counts and timing
-        // statistics — present only while the loop runs in a worker of
-        // this process, whose loggers `logCounts` and `timingStats` above
-        // do not reach.
-        servingLoopRealm: z.any().optional(),
       }),
       "Logger counts and timing statistics",
+    ),
+  },
+});
+
+/**
+ * The serving loop's realm's own logger counts and timing statistics. With
+ * the loop in a worker, `/api/health/stats` reads this thread's loggers,
+ * which hold none of the loop's; this route asks the worker, so an answer
+ * waits for the worker's turn, which is why it is not part of `stats`.
+ */
+export const servingLoopRealm = createRoute({
+  path: "/api/health/serving-loop-realm",
+  method: "get",
+  tags,
+  responses: {
+    [HttpStatusCodes.OK]: jsonContent(
+      z.object({
+        timestamp: z.number(),
+        loggerCounts: z.any(),
+        timingStats: z.any(),
+      }),
+      "The serving loop's realm's logger counts and timing statistics",
+    ),
+    [HttpStatusCodes.NOT_FOUND]: jsonContent(
+      z.object({ error: z.string() }),
+      "No serving loop runs in this process",
+    ),
+    [HttpStatusCodes.SERVICE_UNAVAILABLE]: jsonContent(
+      z.object({ error: z.string() }),
+      "The serving loop's worker is not serving",
     ),
   },
 });
@@ -211,6 +236,7 @@ export const documentInterests = createRoute({
 
 export type IndexRoute = typeof index;
 export type StatsRoute = typeof stats;
+export type ServingLoopRealmRoute = typeof servingLoopRealm;
 export type DashRoute = typeof dash;
 
 /** Handler contract for the document-interest diagnostic. */

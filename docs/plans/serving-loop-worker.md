@@ -117,12 +117,14 @@ as data.
 **Stats cross on every cycle.** The worker posts the host's `ServingLoopStats`
 at the end of each wave cycle, at each activation and park, and on request;
 the main thread registers a stats provider that returns the latest copy, so
-`/api/health/stats` keeps its shape. The loop's own logger counts and timing
-statistics are the worker realm's, so they cross on request
-(`ServingLoopHandle.diagnostics()`): the health route adds them as
-`servingLoopRealm` while the loop runs in a worker, and a test that reads a
-refusal the loop's own CFC gate logged asks the handle rather than its own
-process's loggers.
+`/api/health/stats` keeps its shape and waits on nothing. The loop's own
+logger counts and timing statistics are the worker realm's, so they cross on
+request (`ServingLoopHandle.diagnostics()`), and a request waits for the
+worker's turn: `/api/health/serving-loop-realm` is the route that asks, kept
+apart from `stats` so that a worker in a long settle, or one that is hung,
+delays only the caller who asked for its loggers. A test that reads a refusal
+the loop's own CFC gate logged asks the handle rather than its own process's
+loggers.
 
 **The main thread holds two things on the worker's behalf.** The ambient
 server-execution flag, which the memory server's admission of derived

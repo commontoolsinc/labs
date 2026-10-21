@@ -1,8 +1,10 @@
-// Starts the serving loop in a Worker of this process and keeps it running
-// (serving-loop-worker.md): one `ServingPortBridge` per worker over the
-// worker's own port, the service key and the host's options handed over as
-// the first request, and a fresh worker, under a fresh lease-holder process
-// component, when one dies.
+/**
+ * Starts the serving loop in a Worker of this process and keeps it running
+ * (serving-loop-worker.md): one `ServingPortBridge` per worker over the
+ * worker's own port, the service key and the host's options handed over as
+ * the first request, and a fresh worker, under a fresh lease-holder process
+ * component, when one dies.
+ */
 
 import { type Identity, realmValueFromKeyPair } from "@commonfabric/identity";
 import {

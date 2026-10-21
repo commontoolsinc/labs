@@ -107,10 +107,23 @@ const browsers: Browser[] = [];
 const pages: Page[] = [];
 const browserErrors: string[] = [];
 
+/**
+ * The server's health stats, with the serving loop's realm's loggers under
+ * `servingLoopRealm` when a loop runs there: that route answers 404 with the
+ * loop off, which is this measurement's OFF arm.
+ */
 async function health(): Promise<unknown> {
   const response = await fetch(new URL("api/health/stats", env.API_URL));
   if (!response.ok) throw new Error(`Health stats returned ${response.status}`);
-  return response.json();
+  const stats = await response.json() as Record<string, unknown>;
+  const realm = await fetch(
+    new URL("api/health/serving-loop-realm", env.API_URL),
+  );
+  if (realm.status === 404) return stats;
+  if (!realm.ok) {
+    throw new Error(`Serving-loop realm returned ${realm.status}`);
+  }
+  return { ...stats, servingLoopRealm: await realm.json() };
 }
 
 /** Full logger rows from both browser realms, outside the timed bursts. */

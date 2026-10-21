@@ -787,6 +787,11 @@ FROM "commit"
 
 const SELECT_DATA_VERSION = `PRAGMA data_version`;
 
+const SELECT_AUTHORED_SEQ_THROUGH = `
+SELECT COALESCE(MAX(seq), 0) AS seq FROM "commit"
+WHERE class = 'authored' AND seq <= :seq AND branch = :branch
+`;
+
 const SELECT_EXISTING_COMMIT = `
 SELECT seq, branch, original, resolution, class, holder
 FROM "commit"
@@ -967,6 +972,7 @@ interface PreparedStatements {
   insertRevision: PreparedStatement;
   insertSnapshot: PreparedStatement;
   selectAtSeqLocal: PreparedStatement;
+  selectAuthoredSeqThrough: PreparedStatement;
   selectBlob: PreparedStatement;
   selectBranch: PreparedStatement;
   selectBranches: PreparedStatement;
@@ -1768,6 +1774,7 @@ const prepareStatements = (database: Database): PreparedStatements => ({
   insertRevision: database.prepare(INSERT_REVISION),
   insertSnapshot: database.prepare(INSERT_SNAPSHOT),
   selectAtSeqLocal: database.prepare(SELECT_AT_SEQ_LOCAL),
+  selectAuthoredSeqThrough: database.prepare(SELECT_AUTHORED_SEQ_THROUGH),
   selectBlob: database.prepare(SELECT_BLOB),
   selectBranch: database.prepare(SELECT_BRANCH),
   selectBranches: database.prepare(SELECT_BRANCHES),
@@ -2973,10 +2980,10 @@ export const authoredSeqThrough = (
   if (!Number.isSafeInteger(throughSeq) || throughSeq < 0) {
     throw new Error("Authored commit boundary must be a nonnegative integer");
   }
-  const row = engine.database.prepare(`
-SELECT COALESCE(MAX(seq), 0) AS seq FROM "commit"
-WHERE class = 'authored' AND seq <= :seq AND branch = :branch
-`).get({ seq: throughSeq, branch }) as { seq: number };
+  const row = engine.statements.selectAuthoredSeqThrough.get({
+    seq: throughSeq,
+    branch,
+  }) as { seq: number };
   return row.seq;
 };
 

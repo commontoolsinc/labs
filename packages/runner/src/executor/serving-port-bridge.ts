@@ -1,9 +1,11 @@
-// The main-thread side of the serving port (serving-loop-worker.md): serves
-// the worker's requests against the memory server it holds, forwards the
-// server's observer events, owns one server connection per loopback transport
-// the worker opens, applies the worker's wave commits through a sink of its
-// own per session, and keeps the latest counters the worker posted for the
-// health route.
+/**
+ * The main-thread side of the serving port (serving-loop-worker.md): serves
+ * the worker's requests against the memory server it holds, forwards the
+ * server's observer events, owns one server connection per loopback transport
+ * the worker opens, applies the worker's wave commits through a sink of its
+ * own per session, and keeps the latest counters the worker posted for the
+ * health route.
+ */
 
 import type { FabricValue } from "@commonfabric/data-model";
 import {

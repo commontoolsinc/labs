@@ -1,8 +1,10 @@
-// The memory server as a serving host reaches it. The host, the space
-// server, the outbox and the view-plan publisher name this type rather than
-// the server class, so that the host can run where the server's object is
-// not at hand (a worker of the same process) behind an implementation that
-// carries each member across. The in-process server satisfies it as it is.
+/**
+ * The memory server as a serving host reaches it. The host, the space
+ * server, the outbox and the view-plan publisher name this type rather than
+ * the server class, so that the host can run where the server's object is
+ * not at hand (a worker of the same process) behind an implementation that
+ * carries each member across. The in-process server satisfies it as it is.
+ */
 
 import type { ServerMessage } from "@commonfabric/memory/v2";
 import type { Server } from "@commonfabric/memory/v2/server";

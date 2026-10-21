@@ -225,7 +225,8 @@ export class SessionRegistry {
 
   /**
    * Installs the one observer of this registry's changes, replacing any
-   * installed before; `undefined` removes it. It is called as each change
+   * installed before, so a registry two servers share reports to the one
+   * that installed last; `undefined` removes it. It is called as each change
    * is made, with the registry already reflecting it, and a detached
    * session that lapses is reported when a read prunes it.
    */
