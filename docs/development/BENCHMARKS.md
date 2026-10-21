@@ -836,6 +836,35 @@ half of the same property: it counts rolled-back writes instead of timing them,
 and requires none, so a regression that this benchmark shows as trend drift
 also fails a test.
 
+### The browser copy of the vote burst
+
+`packages/patterns/integration/lunch-poll-vote-burst.browser.ts` measures the
+same burst through real browsers, and is a separate series from the worker
+benchmark above: the production lunch poll rather than the keyed-votes fixture,
+five independent Chromium profiles that create a profile, join the poll and add
+its options through the UI, votes cast as trusted CDP clicks, and an endpoint
+that is every page's rendered swatches. A burst ends when every page holds the
+exact option, name and color tuple for every voter on every option, with no
+duplicate row, and two animation frames have passed since the last change, so
+the endpoint is a paint opportunity in every browser rather than a runtime's
+quiescence. Driver completion, which includes the CDP teardown, is reported
+apart from that headline. Two warmup bursts precede the measured rounds.
+
+It is a `deno run -A` script rather than a `Deno.bench` file, so the Benchmarks
+workflow does not run it and the dashboard carries no series for it; it is run
+by hand, against a source toolshed and a shell build whose
+`EXPERIMENTAL_SERVER_EXECUTION`, `SERVER_EXECUTION_WORKER` and
+`SERVER_EXECUTION_STORE_READ_THROUGH` match the arm under measurement, with
+`API_URL` and `FRONTEND_URL` naming them. `CF_LUNCH_POLL_VOTERS` and
+`CF_LUNCH_POLL_OPTIONS` size the poll (five and five unless set),
+`CF_LUNCH_POLL_BROWSER_ROUNDS` sets the measured rounds (three unless set), and
+`CF_LUNCH_POLL_BROWSER_OUT` names a JSON file for the samples, every client's
+logger rows and the server's health snapshots, all captured outside the timed
+intervals. The rows a page shows may include that page's own speculation, so a
+converged DOM is not a proof of durable serving coverage; the consequence and
+settle checks run after the timed burst, as the worker benchmark's do. Arms
+compare only within one sitting, for the reason the worker benchmark gives.
+
 ## Rendered lunch-poll read scaling
 
 `packages/patterns/integration/lunch-poll-read-scale.bench.ts` measures a vote

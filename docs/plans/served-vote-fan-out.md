@@ -16,12 +16,8 @@ and the encode of the frame that follows, once per session per flush pass.
 This plan is for whoever picks that up on the branch, with everything they
 need that the records do not carry.
 
-## Where the branch stands
+## Where things stand
 
-The continuation is on `codex/served-vote-fan-out`. Its source branch is
-`claude/clever-franklin-crfiah`,
-[commonfabric/labs#8691](https://github.com/commonfabric/labs/pull/8691). Keep the
-continuation PR body current as the arc summary, with a section per record.
 Read, in this order, before changing anything:
 
 1. `AGENTS.md`, `docs/development/DEVELOPMENT.md`,
@@ -34,7 +30,7 @@ Read, in this order, before changing anything:
    [the serving loop off the request thread](serving-loop-worker.md), whose
    stage 6, the worker's default flip, is still pending.
 
-What is on by default and what is not, as the branch leaves it:
+What is on by default and what is not:
 
 - The serving loop itself (`EXPERIMENTAL_SERVER_EXECUTION`) is off by default;
   every served-arm measurement here sets it on, and the loop-off arm leaves it
@@ -52,11 +48,6 @@ What is on by default and what is not, as the branch leaves it:
 - The lunch poll's tally rows no longer carry the viewer
   (`packages/patterns/lunch-poll/main.tsx`), and
   `docs/common/patterns/multi-user-patterns.md` carries the rule.
-
-The PR is driven to green on every push: Cubic reviews each head a few
-minutes after it lands, and its findings are inline review comments that
-`gh pr view` does not show (`docs/development/pr-review-comments.md`). A new
-session has no check-in timer of its own; arm one if the PR is to be watched.
 
 ## What is established
 
@@ -287,13 +278,22 @@ Before a push: repo-wide `deno fmt --check`, `deno lint`, `deno task check`,
        loop-off arm, with the probe, and write the answers into a
        [record](../history/development/performance/2026-10-19-served-vote-fan-out.md).
 2. [ ] Explain execution frequency before selecting another optimization.
-       Compare one and five clients against one server on both arms, keeping
-       client computations, effects, server instance runs, conflict repairs,
-       affected documents, and root-selector evaluations separate. Capture
-       logger measures with occurrence details alongside each realm's CPU
-       profile; the [profiling guide](../development/debugging/profiling.md)
-       describes the refresh fields and clock boundaries. Keep selective
-       replication off and the browser measurement as a separate series.
+       The counts are in the record: one and five clients against one server
+       on both arms, with client computations, effects, server instance runs,
+       conflict repairs, affected documents, and root-selector evaluations
+       kept separate, captured as logger measures with occurrence details
+       beside each realm's CPU profile (the
+       [profiling guide](../development/debugging/profiling.md) describes
+       the refresh fields and clock boundaries). What remains is the
+       classification those counts call for, one kind of work at a time: a
+       client computation that still runs under serving, a serving instance
+       run, a memory root evaluation. For each, which notification or demand
+       requires it, which is a duplicate of work another realm or session
+       already did, and which can be removed outright. The leaves have been
+       timed; this stage is about taking work out, not making a leaf faster,
+       and it ends with a list of removable work and the invariant each
+       removal has to keep. Keep selective replication off and the browser
+       measurement as a separate series.
 3. [ ] Build the change the answers select, behind nothing where it is a
        pure cost reduction and behind a registry entry where it changes what
        a session receives.
