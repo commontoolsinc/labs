@@ -72,8 +72,9 @@ export type SessionState = {
    * removing it leaves its branch's graph as it stands, and removing a
    * walked watch of the same branch evaluates that graph again and walks
    * each of these that the rebuilt graph no longer covers. Every other
-   * graph watch was walked into its graph. A full replacement of the watch
-   * set walks every watch, so it empties this set.
+   * graph watch was walked into its graph. A full evaluation of the watch
+   * set, whether a replacement or a catch-up, walks every watch, so it
+   * empties this set.
    */
   coveredWatchIds: Set<string>;
 

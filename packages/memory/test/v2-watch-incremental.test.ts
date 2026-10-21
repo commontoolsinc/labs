@@ -1141,6 +1141,47 @@ describe("Server", () => {
         }
       });
 
+      it("walks every watch at a full re-evaluation, so a removal after one retracts what only the removed watch reaches", async () => {
+        // The permissive watch on `of:a` covers a watch on `of:x` while the
+        // link stands. Once the link is gone and the session is evaluated
+        // in full, the watch on `of:x` is what keeps `of:x` delivered.
+        const fixture = await openFixture(0);
+        try {
+          await fixture.writer.transact({
+            localSeq: 2,
+            reads: { confirmed: [], pending: [] },
+            operations: [
+              {
+                op: "set",
+                id: "of:a",
+                value: { value: { child: link(fixture.space, "of:x") } },
+              },
+              { op: "set", id: "of:x", value: { value: { name: "x" } } },
+            ],
+          });
+          await fixture.server.flushSessions();
+          await fixture.reader.watchAddSync([permissive("of:a")]);
+          await fixture.reader.watchAddSync([watch("of:x")]);
+          expect([...fixture.state.coveredWatchIds]).toEqual(["of:x"]);
+          await fixture.writer.transact({
+            localSeq: 3,
+            reads: { confirmed: [], pending: [] },
+            operations: [{ op: "set", id: "of:a", value: { value: {} } }],
+          });
+          await fixture.server.flushSessions();
+          await fixture.server.syncSessionForConnection(
+            fixture.space,
+            fixture.reader.sessionId,
+          );
+          expect(fixture.state.coveredWatchIds.size).toBe(0);
+          const removal = await fixture.reader.watchRemoveSync(["of:x"]);
+          expect(ids(removal.sync.removes)).toEqual(["of:x"]);
+          expect(ids([...fixture.state.entities.values()])).toEqual(["of:a"]);
+        } finally {
+          await fixture.close();
+        }
+      });
+
       it("keeps the graph of a branch the removal does not touch", async () => {
         const fixture = await openCoveredFixture();
         try {
