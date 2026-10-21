@@ -3242,6 +3242,16 @@ function transformReadsFor(runtime: Runtime): TransformReads {
   return reads;
 }
 
+/** `error`, reported as a failure to apply a get transform. */
+function transformError(error: unknown): CellSelectionError {
+  return new CellSelectionError(
+    `Could not apply get transform: ${
+      error instanceof Error ? error.message : String(error)
+    }`,
+    { cause: error },
+  );
+}
+
 /** Optional hooks into {@link deriveSelectedValue}'s internals. */
 export interface DeriveSelectedValueDependencies {
   /** Called with the cell the returned value was read from. */
@@ -3594,7 +3604,11 @@ export async function deriveSelectedValue(
     // The repeat sets up again over the piece the first read stored, and a
     // release pass may have dropped that piece's documents since. Setup reads
     // them in `tx`, so they are loaded first.
-    await runtime.runner.syncStoredPieceCells(resultCell, installedPattern);
+    try {
+      await runtime.runner.syncStoredPieceCells(resultCell, installedPattern);
+    } catch (error) {
+      throw transformError(error);
+    }
   }
   const errors = runtimeErrorLog(runtime);
   const errorCountBefore = errors.length;
@@ -3639,11 +3653,7 @@ export async function deriveSelectedValue(
           throw new Error("projection did not start");
         }
       } catch (error) {
-        throw new CellSelectionError(
-          `Could not apply get transform: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
+        throw transformError(error);
       }
     });
     // pull() is the readiness boundary for this output: it drives transitive

@@ -3812,6 +3812,25 @@ describe("cf cell get transforms", () => {
       });
     });
 
+    it("reports a repeat whose stored piece could not be loaded", async () => {
+      const source = await seededSource(runtime, "repeat-unloaded-source", [
+        { id: 1, title: "First" },
+      ]);
+      const selection = { projection: await parseSelectionProjection("id") };
+      await readWithCell(runtime, source, selection);
+
+      using sync = stub(
+        runtime.runner,
+        "syncStoredPieceCells",
+        () => Promise.reject(new Error("stored piece sync failed")),
+      );
+      await expect(deriveSelectedValue(runtime, space, source, selection))
+        .rejects.toThrow(
+          "Could not apply get transform: stored piece sync failed",
+        );
+      expect(sync.calls).toHaveLength(1);
+    });
+
     it("returns each differing selection from its own cell", async () => {
       const source = await seededSource(runtime, "repeat-distinct-source", [
         { id: 1, title: "First" },
