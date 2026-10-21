@@ -146,6 +146,7 @@ async function withGitHub(
         full_name: `${ORG}/${repo.name}`,
         default_branch: repo.defaultBranch ?? "main",
         archived: repo.archived ?? false,
+        pushed_at: null,
       }));
       return Promise.resolve(Response.json(
         pages === 1 ? listed : listed.slice((page - 1) * 100, page * 100),

@@ -1000,6 +1000,12 @@ export class Scheduler {
     for (const observer of [...this.#unsubscribeObservers]) observer(action);
   }
 
+  /** Whether a registered action's last run read the document `entity` names. */
+  readsEntity(entity: SpaceScopeAndURI): boolean {
+    return this.#triggerIndex.triggers.has(entity) ||
+      this.#triggerIndex.nonRecursiveTriggers.has(entity);
+  }
+
   /**
    * Calls `observer` with each action this scheduler unsubscribes, so that
    * something holding an action for a later purpose can let it go. Returns a

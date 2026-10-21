@@ -49,7 +49,7 @@ function startedBefore(run: GitHubRun, cutoff: number): boolean {
 
 // Up to CI_RUNS_MAX runs of one source, newest first, stopping early once runs
 // pass the age cutoff — i.e. min(CI_RUNS_MAX, ~2 months). Each run is tagged
-// with the repo it came from so a combined stream (recent-runs) can link each
+// with the repo it came from so a combined stream (recent commits) can link each
 // row to the right repo, and a run on main with what the repo's green branch
 // says of its commit, read alongside the runs. Each tile slices this base to
 // its own window.

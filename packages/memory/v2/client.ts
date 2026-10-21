@@ -1704,11 +1704,15 @@ export class Client {
     this.#signedOpens = Promise.resolve();
     const ack = Promise.withResolvers<void>();
     this.#helloPending = ack;
-    // `sessionReportV1` is the server's capability alone: the client reads it
-    // from `hello.ok` and never offers it, since an older routed host refuses
-    // a hello carrying a flag it does not know.
-    const { sessionReportV1: _serverOnly, ...expectedFlags } =
-      getMemoryProtocolFlags();
+    // `sessionReportV1` and `watchRemoveV1` are the server's capabilities
+    // alone: the client reads them from `hello.ok` and never offers them,
+    // since an older routed host refuses a hello carrying a flag it does not
+    // know.
+    const {
+      sessionReportV1: _reportsServerOnly,
+      watchRemoveV1: _removalServerOnly,
+      ...expectedFlags
+    } = getMemoryProtocolFlags();
     try {
       const hello = {
         type: "hello",
@@ -1912,7 +1916,7 @@ export class Client {
       return;
     }
     if (isSessionRevoked(message)) {
-      for (const session of this.#spaces) {
+      for (const session of [...this.#spaces]) {
         if (
           session.sessionId === message.sessionId &&
           session.space === message.space
@@ -2090,7 +2094,7 @@ export class Client {
       this.#noteStateChange();
       this.#endHeldMounts(err);
       this.#rejectPending(err);
-      for (const session of this.#spaces) {
+      for (const session of [...this.#spaces]) {
         session.handleConnectionFailure(err);
       }
       return false;
@@ -2162,7 +2166,7 @@ export class SpaceSession {
   #viewIntentVersion = 0;
   #restoreComplete: PromiseWithResolvers<void> | undefined;
   #viewCapabilityLostObservers = new Set<() => void>();
-  #accessLossObservers = new Set<(error: Error) => void>();
+  #terminationObservers = new Set<(error: Error) => void>();
   #watchSpecPositions = new Map<string, number[]>();
   #watchView: WatchView | null = null;
   #precedingWatchSyncs: SessionSync[] = [];
@@ -2208,6 +2212,7 @@ export class SpaceSession {
   #concurrentWatchRefresh = false;
 
   #closed = false;
+  #terminated = false;
   #closeError: Error | null = null;
   #readyOnConnection = true;
   #restoring = false;
@@ -2826,22 +2831,25 @@ export class SpaceSession {
   }
 
   /**
-   * Observes an authoritative loss of this session's access. A permanent
-   * denial is replayed synchronously to late observers; normal closure,
-   * takeover, and transient connection failures do not report access loss.
+   * Observes this session ending with an error, which `closeError` then
+   * holds: a revocation (a takeover or an authorization denial), a permanent
+   * reopen denial, a restore the server cannot base on declared holdings, or
+   * a client that gives up reconnecting. A session that has already ended
+   * that way reports to a late observer synchronously. Normal closure and
+   * ordinary reconnects do not report.
    */
-  subscribeAccessLoss(observer: (error: Error) => void): () => void {
-    if (isPermanentAuthorizationError(this.#closeError)) {
+  subscribeTermination(observer: (error: Error) => void): () => void {
+    if (this.#terminated) {
       try {
         observer(this.#closeError!);
       } catch (cause) {
-        console.error("session-access-loss subscriber threw:", cause);
+        console.error("session-termination subscriber threw:", cause);
       }
       return () => {};
     }
     if (this.#closed) return () => {};
-    this.#accessLossObservers.add(observer);
-    return () => this.#accessLossObservers.delete(observer);
+    this.#terminationObservers.add(observer);
+    return () => this.#terminationObservers.delete(observer);
   }
 
   /**
@@ -2965,6 +2973,8 @@ export class SpaceSession {
   /**
    * Removes watches from both the live session and reconnect intent, retaining
    * unrelated watches acquired by preceding mutations during concurrent refresh.
+   * A server advertising `watchRemoveV1` is sent the ids alone, and answers
+   * with what changed; any other is sent the whole remaining set.
    */
   async watchRemoveSync(
     watchIds: readonly string[],
@@ -2973,13 +2983,23 @@ export class SpaceSession {
     let watches: WatchSpec[] = [];
     return await this.#runWatchMutation(
       () =>
-        this.#client.request<WatchSetResult>({
-          type: "session.watch.set",
-          requestId: crypto.randomUUID(),
-          space: this.space,
-          sessionId: this.#sessionId,
-          watches,
-        }),
+        this.#client.request<WatchSetResult>(
+          this.#client.serverFlags?.watchRemoveV1 === true
+            ? {
+              type: "session.watch.remove",
+              requestId: crypto.randomUUID(),
+              space: this.space,
+              sessionId: this.#sessionId,
+              watchIds: [...removed],
+            }
+            : {
+              type: "session.watch.set",
+              requestId: crypto.randomUUID(),
+              space: this.space,
+              sessionId: this.#sessionId,
+              watches,
+            },
+        ),
       (result) => {
         this.#noteResult(result.serverSeq);
         this.#noteOperationWatchCursors(result.sync);
@@ -3353,7 +3373,7 @@ export class SpaceSession {
     this.#replaceWatchSpecs([]);
     this.#viewInterests = [];
     this.#viewCapabilityLostObservers.clear();
-    this.#accessLossObservers.clear();
+    this.#terminationObservers.clear();
     this.#watchView?.close();
     this.#watchView = null;
   }
@@ -3379,13 +3399,14 @@ export class SpaceSession {
    * a permanent connection failure.
    */
   #terminateSession(error: Error): void {
-    // Terminal: nothing on this session works again, and the replica above it
-    // reports the error only when asked. This line is the record of why.
+    // Terminal: nothing on this session works again. Termination observers
+    // hear the error below; this line is the record of why.
     logger.error("session-terminated", () => [
       `session ${JSON.stringify(this.#sessionId)} on ` +
       `${JSON.stringify(this.space)} ended: ${describeError(error)}`,
     ]);
     this.#closed = true;
+    this.#terminated = true;
     this.#closeError = error;
     this.#endHold();
     this.#restoreComplete?.reject(error);
@@ -3403,15 +3424,13 @@ export class SpaceSession {
     this.#watchView?.close();
     this.#watchView = null;
     this.#endPresenceRooms(error);
-    const observers = [...this.#accessLossObservers];
-    this.#accessLossObservers.clear();
-    if (isPermanentAuthorizationError(error)) {
-      for (const observer of observers) {
-        try {
-          observer(error);
-        } catch (cause) {
-          console.error("session-access-loss subscriber threw:", cause);
-        }
+    const observers = [...this.#terminationObservers];
+    this.#terminationObservers.clear();
+    for (const observer of observers) {
+      try {
+        observer(error);
+      } catch (cause) {
+        console.error("session-termination subscriber threw:", cause);
       }
     }
   }

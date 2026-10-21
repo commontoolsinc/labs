@@ -4,12 +4,13 @@ import { describe, it } from "@std/testing/bdd";
 import { ChangeSet } from "@codemirror/state";
 
 import {
+  decodeMemoryBoundary,
   type GraphWatchSpec,
   toDirtyKey,
   toValuePath,
   type WatchSpec,
 } from "../v2.ts";
-import { connect, loopback } from "../v2/client.ts";
+import { connect, loopback, type Transport } from "../v2/client.ts";
 import { createBranch } from "../v2/engine.ts";
 import {
   CODEMIRROR_CHANGESET_CODEC,
@@ -97,6 +98,7 @@ async function openFixture(size: number) {
     server,
     writer,
     reader,
+    readerClient,
     state,
     ids,
     space,
@@ -396,6 +398,111 @@ describe("Server", () => {
           ).toBe(true);
           await fixture.reader.watchRemoveSync(["operations"]);
           expect(fixture.state.trackedIds.has(toDirtyKey("of:x"))).toBe(false);
+        } finally {
+          await fixture.close();
+        }
+      });
+
+      for (const removeById of [true, false]) {
+        it(
+          `removes a watch and the documents only it covered, by ${
+            removeById ? "id" : "replacing the set"
+          }`,
+          async () => {
+            const fixture = await openFixture(0);
+            try {
+              if (!removeById) {
+                fixture.readerClient.serverFlags!.watchRemoveV1 = false;
+              }
+              await fixture.writer.transact({
+                localSeq: 2,
+                reads: { confirmed: [], pending: [] },
+                operations: [
+                  {
+                    op: "set",
+                    id: "of:a",
+                    value: { value: { child: link(fixture.space, "of:x") } },
+                  },
+                  {
+                    op: "set",
+                    id: "of:b",
+                    value: {
+                      value: {
+                        child: link(fixture.space, "of:x"),
+                        second: link(fixture.space, "of:y"),
+                      },
+                    },
+                  },
+                  { op: "set", id: "of:x", value: { value: { name: "x" } } },
+                  { op: "set", id: "of:y", value: { value: { name: "y" } } },
+                ],
+              });
+              await fixture.server.flushSessions();
+              await fixture.reader.watchAddSync([
+                linkedWatch("of:a"),
+                linkedWatch("of:b"),
+              ]);
+              await fixture.reader.ack(2);
+              const removal = await fixture.reader.watchRemoveSync(["of:b"]);
+              const ids = (entries: readonly { id: string }[]) =>
+                entries.map((entry) => entry.id).toSorted();
+              expect(ids(removal.sync.removes)).toEqual(["of:b", "of:y"]);
+              // A removal by id resends nothing the session still holds; a
+              // replacement without holdings resends the whole union.
+              expect(ids(removal.sync.upserts)).toEqual(
+                removeById ? [] : ["of:a", "of:x"],
+              );
+              expect(fixture.state.watches.map((watch) => watch.id)).toEqual([
+                "of:a",
+              ]);
+              expect([...fixture.state.entities.keys()].toSorted()).toEqual(
+                [
+                  cacheKeyForEntity("", "of:a"),
+                  cacheKeyForEntity("", "of:x"),
+                ].toSorted(),
+              );
+            } finally {
+              await fixture.close();
+            }
+          },
+        );
+      }
+
+      it("reads removal by id from the server, and leaves it out of the client's own hello", async () => {
+        // An older routed host refuses a `hello` carrying a flag it does not
+        // know, so the capability travels only in `hello.ok`.
+        const fixture = await openFixture(0);
+        try {
+          const inner = loopback(fixture.server);
+          const sent: unknown[] = [];
+          const transport: Transport = Object.assign(Object.create(inner), {
+            send: (payload: string) => {
+              sent.push(decodeMemoryBoundary(payload));
+              return inner.send(payload);
+            },
+          });
+          const client = await connect({ transport });
+          const hello = sent.find((frame) =>
+            (frame as { type?: unknown }).type === "hello"
+          ) as { flags: Record<string, unknown> } | undefined;
+          expect(hello).toBeDefined();
+          expect(hello!.flags).not.toHaveProperty("watchRemoveV1");
+          expect(client.serverFlags?.watchRemoveV1).toBe(true);
+          await client.close();
+        } finally {
+          await fixture.close();
+        }
+      });
+
+      it("ignores a removal naming a watch the session does not hold", async () => {
+        const fixture = await openFixture(1);
+        try {
+          const removal = await fixture.reader.watchRemoveSync(["unknown"]);
+          expect(removal.sync.upserts).toEqual([]);
+          expect(removal.sync.removes).toEqual([]);
+          expect(fixture.state.watches.map((watch) => watch.id)).toEqual([
+            fixture.ids[0],
+          ]);
         } finally {
           await fixture.close();
         }

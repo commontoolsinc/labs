@@ -36,8 +36,9 @@ const graphWatch = (id: string) => ({
  * server process. While the host is down every send rejects, as a WebSocket to
  * a closed port does, so the client's reconnect loop keeps retrying its
  * handshake until `comeBack()`. `onSend` sees each decoded frame after it has
- * been handed to the live server, and `watchSets` holds the watch ids of each
- * `session.watch.set` frame handed to one, in wire order.
+ * been handed to the live server, `watchSets` holds the watch ids of each
+ * `session.watch.set` frame handed to one, in wire order, and `watchRemovals`
+ * holds the ids each `session.watch.remove` frame names.
  */
 function outageTransport(server: Server) {
   let host = server;
@@ -46,6 +47,7 @@ function outageTransport(server: Server) {
   let disconnected = (_error?: Error) => {};
   const sent: string[] = [];
   const watchSets: string[][] = [];
+  const watchRemovals: string[][] = [];
   let onSend = (_message: { type: string }) => {};
   const transport: Transport = {
     async send(payload) {
@@ -53,10 +55,14 @@ function outageTransport(server: Server) {
       const message = decodeMemoryBoundary(payload) as {
         type: string;
         watches?: { id: string }[];
+        watchIds?: string[];
       };
       sent.push(message.type);
       if (message.type === "session.watch.set") {
         watchSets.push((message.watches ?? []).map((watch) => watch.id));
+      }
+      if (message.type === "session.watch.remove") {
+        watchRemovals.push(message.watchIds ?? []);
       }
       await active.send(payload);
       onSend(message);
@@ -80,6 +86,7 @@ function outageTransport(server: Server) {
     transport,
     sent,
     watchSets,
+    watchRemovals,
     set onSend(next: (message: { type: string }) => void) {
       onSend = next;
     },
@@ -430,8 +437,9 @@ describe("v2-client-reconnect-watch", () => {
 
           await client.restoreConnection();
           await removal;
-          // The restore's `watch.set`, then the removal's.
-          expect(host.watchSets).toEqual([["kept"], ["kept"]]);
+          // The restore's `watch.set`, then the removal.
+          expect(host.watchSets).toEqual([["kept"]]);
+          expect(host.watchRemovals).toEqual([["removed"]]);
         } finally {
           await client.close();
           await before.close();
