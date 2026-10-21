@@ -39,6 +39,9 @@ describe("strategy", () => {
 
     expect(quick).toContain("Answer directly when you can, without research");
     expect(quick).toContain(
+      "with the wrong arguments for what they asked, you may correct once",
+    );
+    expect(quick).toContain(
       "the one tool call that best matches what they asked",
     );
     expect(quick).not.toContain("Search every source");
