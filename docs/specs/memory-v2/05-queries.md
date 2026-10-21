@@ -312,10 +312,10 @@ order in which documents changed or on which query first reached a
 document. Coverage follows the same rule: a later query naming a document
 an earlier evaluation reached is covered by existing watch state when the
 tracker already covers its selector. A server records each watch it leaves
-unwalked on that ground, because nothing in the tracker is attributable to it:
-removing such a watch changes nothing, and removing a walked watch of the same
-branch rebuilds the branch's tracker from the walked watches that remain and
-then walks each recorded watch the rebuilt tracker no longer covers.
+unwalked on that ground, since nothing in the tracker is attributable to it.
+Removing such a watch changes nothing. Removing a walked watch rebuilds its
+branch's tracker from the walked watches that remain. The server then walks
+each recorded watch of that branch that the rebuilt tracker no longer covers.
 
 Content-addressed schema documents ride the same mechanism
 (`docs/specs/content-addressed-schemas.md`): a link or selector schema

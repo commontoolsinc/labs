@@ -87,15 +87,16 @@ holds it.
 
 The server records which documents a session's watches reach, not which watch
 reached each one, so it answers the removal of a watch it walked by walking the
-remaining watches of that watch's branch again. Two things keep that short of
-watching the space from scratch: a branch the removal names no watch of keeps
-its graph, and a watch that was never walked, because the graph of its branch
-already covered every root of it when it was added, costs nothing to remove.
-The server records those covered watches. A watch is covered by the graph as
-a whole, which several walked watches may contribute to, so when a walked
-watch is removed the server checks each covered watch of the branch against
-the rebuilt graph: one still covered stays unwalked, and one no longer covered
-is walked into the rebuilt graph, so the documents it names stay delivered.
+remaining watches of that watch's branch again. That is less than watching the
+space from scratch, for two reasons. A branch the removal names no watch of
+keeps its graph. And some watches were never walked at all: when such a watch
+was added, the graph of its branch already covered every root of it. Removing
+one of those costs nothing. The server records those covered watches. A watch
+is covered by the graph as a whole, and several walked watches may contribute
+to that graph. So when a walked watch is removed, the server checks each
+covered watch of the branch against the rebuilt graph. One still covered stays
+unwalked. One no longer covered is walked into the rebuilt graph, so the
+documents it names stay delivered.
 
 A server that does not advertise `watchRemoveV1` could only be asked to remove
 a watch by replacing the whole watch set, which sends the whole union back.
