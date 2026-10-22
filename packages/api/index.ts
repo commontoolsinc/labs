@@ -4219,8 +4219,8 @@ export declare function revokeSpaceAccess(
  * so fetching it takes knowing the name already.
  *
  * Available only in a handler, and throws anywhere else. Throws too when
- * `blobId` is not a string, or `name` is not a non-empty string of well-formed
- * Unicode.
+ * `blobId` is not a non-empty string, or `name` is not a non-empty string of
+ * well-formed Unicode.
  */
 export declare function nameBlob(
   target: AnyCell<unknown>,

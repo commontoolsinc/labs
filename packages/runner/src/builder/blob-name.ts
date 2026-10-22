@@ -29,8 +29,8 @@ import { spaceOfTarget } from "./space-access.ts";
  * already.
  *
  * @throws Error when called anywhere but a handler, when `target` is not a
- *   cell, when `blobId` is not a string, or when `name` is not a file name a
- *   blob may hold (see {@link isBlobFileName}).
+ *   cell, when `blobId` is not a non-empty string, or when `name` is not a
+ *   file name a blob may hold (see {@link isBlobFileName}).
  */
 export function nameBlob(
   target: unknown,
