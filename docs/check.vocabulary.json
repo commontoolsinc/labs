@@ -52,6 +52,7 @@
     "schema",
     "spaceAccess",
     "spaceAccessOf",
+    "spaceMembers",
     "spaceOf",
     "sqliteDatabase",
     "str",

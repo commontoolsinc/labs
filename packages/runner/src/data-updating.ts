@@ -1299,12 +1299,7 @@ function realizesAt(
   link: NormalizedFullLink,
   target: NormalizedFullLink,
 ): boolean {
-  if (
-    !areNormalizedLinksSameIgnoringScope(target, link) ||
-    scopeRank(target.scope) >= scopeRank(link.scope)
-  ) {
-    return false;
-  }
+  if (!isNarrowerInstanceOf(link, target)) return false;
   let scope: CellScope | undefined = target.scope;
   while (scope !== undefined && scopeRank(scope) < scopeRank(link.scope)) {
     scope = realizationScope(tx, { ...target, scope });
@@ -1327,10 +1322,7 @@ function realizationScope(
     const position = { ...slot, path: slot.path.slice(0, depth) };
     const hop = readMaybeLink(tx, position);
     if (hop === undefined) continue;
-    return areNormalizedLinksSameIgnoringScope(hop, position) &&
-        scopeRank(hop.scope) > scopeRank(position.scope)
-      ? hop.scope
-      : undefined;
+    return isNarrowerInstanceOf(hop, position) ? hop.scope : undefined;
   }
   return undefined;
 }

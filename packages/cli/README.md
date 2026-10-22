@@ -543,8 +543,9 @@ as it stands, to the branch of the same name on `origin`. The push is forced,
 but fails rather than discard commits on `origin` that the branch has never
 included, even when they have been fetched. A dialog shows git's output as it
 arrives, with an Abort button that stops the push. When the push ends, the
-dialog adds how it ended and the button becomes Close, which leaves that summary
-in the status line. When the server's reply offers a page for creating a pull
+dialog adds how it ended, and two buttons replace Abort. Close leaves that
+summary in the status line. Quit (`Q`) closes the viewer, first offering to save
+any unsaved edits. When the server's reply offers a page for creating a pull
 request, the viewer opens it in the browser. Git asks nothing on the terminal
 while the viewer holds it; a question such as a key's passphrase goes to the
 program `SSH_ASKPASS` names, and fails when it names none. `P` refuses to push
@@ -1036,8 +1037,7 @@ reference, and both are read on exactly as if they had been written, so
 
 Those three each sit under the noun they act on: `get` and `set` name a cell, so
 they are `cf cell` subcommands, while `call` invokes a verb on a piece and is a
-`cf piece` one. The bare `cf get`, `cf set` and `cf call` still answer, hidden
-and superseded — see [Superseded spellings](#superseded-spellings).
+`cf piece` one.
 
 A target may select `#argument` on its piece segment, before any qualifiers or
 path, which selects the piece's arguments cell the way `--input` does — on a
@@ -1072,8 +1072,7 @@ link is also checked against its destination's contract, which still refuses a
 required field it cannot reach. Addressing the raw argument cell by id avoids
 that whole-document check, but it is an unsafe recovery tool: it can erase
 link-bearing data that a later `cf cell set` will refuse to restore because the
-serialized link has no durable source contract. The superseded `cf set` spelling
-mounts this same command and has identical validation behavior.
+serialized link has no durable source contract.
 
 ## Linking piece inputs
 
@@ -1315,6 +1314,13 @@ a DID or a legacy space name, and a legacy name resolves, without the network,
 to the DID it has always reached. A name or DID that reaches no space opens
 nothing: `cf piece new` there reports that no space answers to it, and names
 `cf space create` as the way to make one.
+
+A Home's source is changed in place, with
+`cf piece setsrc --cell <home-root> ./my-home.tsx`, where the root is the link
+`cf wish '#default' --select @` answers with in the Home space; no command
+installs or replaces a Home root.
+[Custom Home pattern](../../docs/common/conventions/HOME_SPACE.md#custom-home-pattern)
+walks through it.
 
 ## Where a piece is created
 
@@ -2691,51 +2697,12 @@ ID from it, as [Space invitations](#space-invitations) describes.
 
 ## Command visibility
 
-A registered command appears in `cf --help` unless it is one of the two kinds
-below. The direct `fuse-daemon` and `fuse-supervisor` entry points are visible
+A registered command appears in `cf --help` unless it is hidden, as
+`cf completion complete` is: the completion scripts call it, and nobody types
+it. The direct `fuse-daemon` and `fuse-supervisor` entry points are visible
 because packaged launchers use them. Shell completion drops commands whose
 description opens with `Internal:`, because those are spawned by `cf fuse` and
 never typed at a prompt.
-
-### Superseded spellings
-
-Each command sits under the noun it acts on. Where that moved a command, the
-spelling it had is still accepted and still completes its own flags and
-arguments, so a script written against it keeps working; it is hidden from
-`cf --help` and never offered as a completion, and a run that reaches it says on
-stderr what to write instead — its help page included, whether `--help` asked
-for that page or a refusal printed it, since the page is otherwise a screen of
-examples in the spelling that is going away. A line refused during argument
-parsing never reaches the command, and carries the notice only where the refusal
-prints a help page with it — the reads that reserve stdout for machine-readable
-output print none, so `cf get --bogus` says nothing. **These spellings are not
-guaranteed to work after 2026-09-11**, so migrate before then: a later change
-removes them, and nothing holds them open past that date.
-
-| Write this               | Instead of               |
-| ------------------------ | ------------------------ |
-| `cf cell get`            | `cf get`                 |
-| `cf cell set`            | `cf set`                 |
-| `cf cell get-label`      | `cf piece get-label`     |
-| `cf cell set-label`      | `cf piece set-label`     |
-| `cf piece call`          | `cf call`                |
-| `cf space recreate-root` | `cf piece recreate-root` |
-
-This is a migration aid rather than a second surface: nothing here teaches the
-right column as an alternative spelling to keep using. `--piece` is a different
-case — a deprecated name for `--cell` that carries no end date and no notice.
-
-### Retired: `cf space set-home`
-
-A Home is created on its user's first open and changed only in place, so a
-command that installs a Home root has no job. `cf space set-home` and its
-`cf piece set-home` mount are retired: both are hidden, and a run of either
-refuses and says what does each half of the work — first open for creation,
-`cf piece setsrc --cell <home-root> ./my-home.tsx` for the source, where the
-root is the link `cf wish '#default' --select @` answers with in the Home space.
-**The spelling stops answering after 2026-10-21**, when a later change removes
-the mounts. See
-[Custom Home pattern](../../docs/common/conventions/HOME_SPACE.md#custom-home-pattern).
 
 ## Evaluating patterns from another tool
 
