@@ -109,30 +109,28 @@ export const profileDisplayFromValue = (val: unknown): ProfileBadgeDisplay => {
  * `cf profile repair-root` does for an older one. So a document is taken for
  * a profile when it is the piece its space's root links, and anything else
  * carrying a principal's claim, a room's or a roster's record of the person
- * among them, is not. The space cell is loaded before its root is read. A
- * space whose root cannot be read has no profile here.
+ * among them, is not. The space cell is loaded before its root is read.
+ *
+ * @throws Error when the space's root cannot be read, which says nothing
+ * about whether the cell is a profile.
  */
 export const profileSpaceOf = async (
   cell: CellHandle,
 ): Promise<DID | undefined> => {
   if (cell.ref().path.length > 0) return undefined;
   const space = cell.space();
-  try {
-    const spaceCell = await cell.runtime().getCell<{ defaultPattern: unknown }>(
-      space,
-      space,
-    );
-    // Loaded first: a space cell this runtime has not received resolves to
-    // itself, which would answer "not a profile" for a profile that is one.
-    await spaceCell.sync();
-    const root = await spaceCell.key("defaultPattern").resolveAsCell();
-    return root.space() === space && root.id() === cell.id() &&
-        root.ref().path.length === 0
-      ? space
-      : undefined;
-  } catch {
-    return undefined;
-  }
+  const spaceCell = await cell.runtime().getCell<{ defaultPattern: unknown }>(
+    space,
+    space,
+  );
+  // Loaded first: a space cell this runtime has not received resolves to
+  // itself, which would answer "not a profile" for a profile that is one.
+  await spaceCell.sync();
+  const root = await spaceCell.key("defaultPattern").resolveAsCell();
+  return root.space() === space && root.id() === cell.id() &&
+      root.ref().path.length === 0
+    ? space
+    : undefined;
 };
 
 /**
@@ -578,15 +576,15 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
    * The resolved cell's space when the cell is a profile
    * ({@link profileSpaceOf}), which seeds the seal with it.
    */
-  private _profileSpace: DID | undefined = undefined;
+  #profileSpace: DID | undefined = undefined;
 
   /**
-   * Whether {@link profileSpaceOf} has answered for the resolved cell. The
+   * Whether {@link profileSpaceOf} has returned for the resolved cell. The
    * seal is not drawn until it has, so that a profile's badge does not show
-   * the principal's seal first and then change to its own.
+   * the principal's seal first and then change to its own, and it is never
+   * drawn when that call fails.
    */
-  @state()
-  private accessor _profileKnown = false;
+  #profileKnown = false;
 
   /**
    * Whether a click navigates, which is so only when `noNavigate` is unset and
@@ -642,10 +640,10 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
         outerThis._seal = value;
       },
       get profileKnown() {
-        return outerThis._profileKnown;
+        return outerThis.#profileKnown;
       },
       set profileKnown(value) {
-        outerThis._profileKnown = value;
+        outerThis.#profileKnown = value;
       },
       get verified() {
         return outerThis._verified;
@@ -692,7 +690,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
    */
   private get _verified(): boolean {
     return this._resolved && this._state === "verified" &&
-      this._seal !== undefined && this._profileKnown;
+      this._seal !== undefined && this.#profileKnown;
   }
 
   protected override updated(changed: PropertyValues): void {
@@ -787,8 +785,8 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
     // Drop navigation state until the (new) cell resolves — a stale link must
     // not survive a re-bind.
     this._resolvedCell = undefined;
-    this._profileSpace = undefined;
-    this._profileKnown = false;
+    this.#profileSpace = undefined;
+    this.#profileKnown = false;
     this._navigable = false;
 
     const cell = this.profile;
@@ -842,10 +840,24 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
       });
       // Whether the cell is a profile is read after the subscription, so
       // the name shows without waiting on it; the seal follows when it
-      // arrives.
-      const profileSpace = await profileSpaceOf(resolved);
+      // arrives. When it cannot be decided, the name stays and no seal is
+      // drawn, since neither the profile's seal nor the principal's is known
+      // to be the right one.
+      let profileSpace: DID | undefined;
+      try {
+        profileSpace = await profileSpaceOf(resolved);
+      } catch (e) {
+        if (generation !== this._resolveGeneration || !this.isConnected) return;
+        if (resolved.runtime().signal.aborted) return;
+        console.error(
+          "cf-profile-badge: cannot tell whether the cell is a profile, so " +
+            "the badge draws no seal",
+          e,
+        );
+        return;
+      }
       if (generation !== this._resolveGeneration || !this.isConnected) return;
-      this._applyProfileSpace(profileSpace);
+      this.#applyProfileSpace(profileSpace);
     } catch (e) {
       if (generation !== this._resolveGeneration || !this.isConnected) return;
       // A disposal race (logout, runtime swap) cancels the resolve; that is
@@ -929,12 +941,13 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
    * Records `profileSpace` as the resolved cell's profile space, which lets
    * the seal be drawn, and derives a seal already derived again with it.
    */
-  private _applyProfileSpace(profileSpace: DID | undefined): void {
-    this._profileSpace = profileSpace;
-    this._profileKnown = true;
+  #applyProfileSpace(profileSpace: DID | undefined): void {
+    this.#profileSpace = profileSpace;
+    this.#profileKnown = true;
     if (this._seal !== undefined) {
       this._seal = identitySeal(this._seal.did, profileSpace);
     }
+    this.requestUpdate();
   }
 
   /**
@@ -961,7 +974,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
     // `represents-principal` integrity atom that unlocks the seal.
     const owner = ownerPrincipalFromLabel(cfcLabel);
     if (owner) {
-      this._seal = identitySeal(owner, this._profileSpace);
+      this._seal = identitySeal(owner, this.#profileSpace);
       this._state = "verified";
     } else {
       this._seal = undefined;
