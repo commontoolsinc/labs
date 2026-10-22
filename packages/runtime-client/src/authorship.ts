@@ -18,6 +18,7 @@ import {
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import {
+  type CellDelivery,
   type CellHandleRead,
   CellReadRefusedError,
   type CellSubscribeOptions,
@@ -71,7 +72,11 @@ type CfcLabelResolvableValue = {
 
 type CfcLabelSubscribableValue = {
   subscribe(
-    callback: (value: unknown, cfcLabel?: CfcLabelView | undefined) => void,
+    callback: (
+      value: unknown,
+      cfcLabel?: CfcLabelView | undefined,
+      delivery?: CellDelivery,
+    ) => void,
     options: CellSubscribeOptions,
   ): () => void;
 
@@ -300,22 +305,39 @@ const cellTargetKey = (value: unknown): string | undefined => {
 };
 
 /**
- * The label of `value`, read as the verdict reads it: `delivered`, the label
- * the subscription on `value` carried with its latest update, when it carried
- * one, else the worker's answer to `getCfcLabel()`. A delivery without a
- * label says nothing about whether the cell has one, since only a
- * subscription the connection opened label-aware carries them, so the worker
- * is asked. When the direct label lacks a root claim of
- * `requiredRootIntegrityKind`, the label of the cell `value` resolves to is
- * read and merged in.
+ * A label a subscription delivered as the one the worker read with the value:
+ * `undefined` inside for a cell the worker read no label for.
+ */
+type DeliveredLabel = { readonly cfcLabel: CfcLabelView | undefined };
+
+/**
+ * The label a delivery hands a subscriber, as a read of it, when the delivery
+ * says it is the label the worker read with the value; `undefined` for a
+ * delivery carrying the label the handle last received, which may predate
+ * the value.
+ */
+const deliveredLabel = (
+  cfcLabel: CfcLabelView | undefined,
+  delivery: CellDelivery | undefined,
+): DeliveredLabel | undefined =>
+  delivery?.cfcLabelCurrent === true ? { cfcLabel } : undefined;
+
+/**
+ * The label of `value`, read as the verdict reads it: `delivered`, when the
+ * subscription on `value` delivered the label the worker read with its latest
+ * value, else the worker's answer to `getCfcLabel()`. When the direct label
+ * lacks a root claim of `requiredRootIntegrityKind`, the label of the cell
+ * `value` resolves to is read and merged in.
  */
 const readLabelView = async (
   value: unknown,
   requiredRootIntegrityKind?: string,
-  delivered?: CfcLabelView,
+  delivered?: DeliveredLabel,
 ): Promise<LabelViewResult> => {
-  let direct = delivered;
-  if (direct === undefined && hasLabelQuery(value)) {
+  let direct: CfcLabelView | undefined;
+  if (delivered !== undefined) {
+    direct = delivered.cfcLabel;
+  } else if (hasLabelQuery(value)) {
     direct = await value.getCfcLabel();
   }
 
@@ -476,10 +498,10 @@ export const authorshipStateForLabel = (
  * `$author` on `cf-cfc-authorship`). Either may also be a plain value, which
  * has no label to load. A label counts as loaded once a read of it has
  * finished with nothing left waiting: the value's own label, or that of the
- * cell it resolves to, is read, from the subscription's update when it
- * carries the label and from the worker otherwise; when the resolved cell's
- * label reads as missing, the observation watches that cell and reads again
- * once an update
+ * cell it resolves to, is read, from the subscription's update when that
+ * delivers the label the worker read with the value and from the worker
+ * otherwise; when the resolved cell's label reads as missing, the
+ * observation watches that cell and reads again once an update
  * or a read of it shows it has loaded, and a read that still finds none then
  * is final. A source the worker refuses carries no attestation, so its
  * refusal ends the wait, and the verdict is reached without that label, as
@@ -579,10 +601,10 @@ class AuthorshipObservationState {
     // includeCfcLabel makes the worker read this cell's label (and that of
     // the document its path resolves to) on the sink's tracked tx, so a
     // label-only change re-fires this subscription with the new label, which
-    // `#refreshLabel()` takes as read. The first delivery is synchronous, and
-    // starts the first read.
-    this.#unsubscribeValue = value.subscribe((_value, cfcLabel) => {
-      void this.#refreshLabel(cfcLabel);
+    // `#refreshLabel()` takes as read when the delivery says it is the
+    // worker's. The first delivery is synchronous, and starts the first read.
+    this.#unsubscribeValue = value.subscribe((_value, cfcLabel, delivery) => {
+      void this.#refreshLabel(deliveredLabel(cfcLabel, delivery));
     }, {
       includeCfcLabel: true,
       // A value the worker will not show carries no attestation here, and
@@ -604,25 +626,28 @@ class AuthorshipObservationState {
       // author's label, that read carries the label the delivery brought,
       // and the read below would only ask the worker for the same label.
       let readStarted = false;
-      this.#unsubscribeAuthor = author.subscribe((claim, cfcLabel) => {
-        if (hasLabelQuery(author) || hasLabelResolution(author)) {
-          readStarted = true;
-          void this.#refreshAuthorClaim(cfcLabel);
-          return;
-        }
-        this.#authorClaim = claim;
-        this.#report();
-      }, {
-        includeCfcLabel: true,
-        // An author the worker will not show makes no claim here, and the
-        // watch on the cell it resolved to ends.
-        onRefused: () => {
-          this.#authorRequestId++;
-          this.#authorClaim = undefined;
-          this.#endLabelWatch("author");
-          this.#settleLabel("author");
+      this.#unsubscribeAuthor = author.subscribe(
+        (claim, cfcLabel, delivery) => {
+          if (hasLabelQuery(author) || hasLabelResolution(author)) {
+            readStarted = true;
+            void this.#refreshAuthorClaim(deliveredLabel(cfcLabel, delivery));
+            return;
+          }
+          this.#authorClaim = claim;
+          this.#report();
         },
-      });
+        {
+          includeCfcLabel: true,
+          // An author the worker will not show makes no claim here, and the
+          // watch on the cell it resolved to ends.
+          onRefused: () => {
+            this.#authorRequestId++;
+            this.#authorClaim = undefined;
+            this.#endLabelWatch("author");
+            this.#settleLabel("author");
+          },
+        },
+      );
       if (readStarted) return;
     }
     void this.#refreshAuthorClaim();
@@ -630,10 +655,10 @@ class AuthorshipObservationState {
 
   /**
    * Reads the value's label, taking `delivered`, the label the value's
-   * subscription carried with its latest update, as the read when there is
-   * one, and records it if no later read has started.
+   * subscription delivered as the worker's read of its latest value, as the
+   * read when there is one, and records it if no later read has started.
    */
-  async #refreshLabel(delivered?: CfcLabelView): Promise<void> {
+  async #refreshLabel(delivered?: DeliveredLabel): Promise<void> {
     const requestId = ++this.#labelRequestId;
     let result: LabelViewResult;
     try {
@@ -664,10 +689,11 @@ class AuthorshipObservationState {
 
   /**
    * Reads the author's claim, taking `delivered`, the label the author's
-   * subscription carried with its latest update, as the author's label when
-   * there is one, and records the claim if no later read has started.
+   * subscription delivered as the worker's read of its latest value, as the
+   * author's label when there is one, and records the claim if no later read
+   * has started.
    */
-  async #refreshAuthorClaim(delivered?: CfcLabelView): Promise<void> {
+  async #refreshAuthorClaim(delivered?: DeliveredLabel): Promise<void> {
     const requestId = ++this.#authorRequestId;
     const author = this.#author;
     const canReadAuthor = hasReadableClaim(author);

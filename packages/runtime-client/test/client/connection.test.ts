@@ -343,6 +343,115 @@ describe("connection", () => {
     });
   });
 
+  describe("label currency across handles of one cell", () => {
+    // Each case delivers the worker's updates through the realm encoding, as
+    // the refusal cases above do, so that a handle hears what a real
+    // transport hands over.
+
+    const ref: CellRef = {
+      id: "of:connection-label-currency-cell" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const label = (sender: string) => ({
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: { integrity: [{ kind: "authored-by", subject: sender }] },
+      }],
+    });
+    const runtimeOf = (connection: RuntimeConnection) =>
+      ({ [$conn]: () => connection }) as unknown as RuntimeClient;
+    const posted = (message: Record<string, FabricValue>) => {
+      const arrived = fabricFromRealmValue(
+        structuredClone(realmFromFabricValue({
+          type: NotificationType.CellUpdate,
+          cell: ref,
+          ...message,
+        })),
+      );
+      if (!isCellUpdateNotification(arrived)) {
+        throw new Error("The encoding did not carry a cell update.");
+      }
+      return arrived;
+    };
+    /** Subscribes label-aware, keeping each delivery's label and currency. */
+    const listen = (cell: CellHandle<string>) => {
+      const heard: Array<{ cfcLabel: unknown; current: boolean | undefined }> =
+        [];
+      const cancel = cell.subscribe((_value, cfcLabel, delivery) => {
+        heard.push({ cfcLabel, current: delivery?.cfcLabelCurrent });
+      }, { includeCfcLabel: true, onRefused: () => {} });
+      return { heard, cancel };
+    };
+
+    it("hands a handle that rejoins a cell another handle watches without labels its retained label as not current, with each value-only update", async () => {
+      // The handle heard a label, left, and came back to a subscription a
+      // value-only handle had opened in the meantime: the worker's label has
+      // moved on, and the connection delivers no labels on that subscription.
+      const transport = new FakeTransport();
+      const connection = await initializedConnection(transport);
+      const runtime = runtimeOf(connection);
+      const labeled = new CellHandle<string>(runtime, ref);
+      const first = listen(labeled);
+      transport.emit(
+        "message",
+        posted({ value: "by alice", cfcLabel: label("alice") }),
+      );
+      expect(first.heard.at(-1)).toEqual({
+        cfcLabel: label("alice"),
+        current: true,
+      });
+      first.cancel();
+      const valueOnly = new CellHandle<string>(runtime, ref);
+      const valueOnlyCancel = valueOnly.subscribe(() => {}, {
+        onRefused: () => {},
+      });
+
+      const again = listen(labeled);
+      transport.emit("message", posted({ value: "revised by bob" }));
+
+      expect(again.heard).toEqual([
+        { cfcLabel: label("alice"), current: false },
+        { cfcLabel: label("alice"), current: false },
+      ]);
+      expect(labeled.get()).toBe("revised by bob");
+      again.cancel();
+      valueOnlyCancel();
+      await connection.dispose();
+    });
+
+    it("seeds a handle new to a cell with another handle's label, as current as it is there", async () => {
+      const transport = new FakeTransport();
+      const connection = await initializedConnection(transport);
+      const runtime = runtimeOf(connection);
+      const holder = new CellHandle<string>(runtime, ref);
+      const holding = listen(holder);
+      transport.emit(
+        "message",
+        posted({ value: "by alice", cfcLabel: label("alice") }),
+      );
+
+      const seededCurrent = listen(new CellHandle<string>(runtime, ref));
+      transport.emit("message", posted({ value: "revised by bob" }));
+      const seededStale = listen(new CellHandle<string>(runtime, ref));
+
+      expect(seededCurrent.heard[0]).toEqual({
+        cfcLabel: label("alice"),
+        current: true,
+      });
+      expect(seededStale.heard[0]).toEqual({
+        cfcLabel: label("alice"),
+        current: false,
+      });
+      holding.cancel();
+      seededCurrent.cancel();
+      seededStale.cancel();
+      await connection.dispose();
+    });
+  });
+
   describe("RuntimeConnection disposal", () => {
     it("settles in-flight requests as cancellation on dispose", async () => {
       const transport = new FakeTransport([RequestType.Idle]);

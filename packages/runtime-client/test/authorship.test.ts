@@ -153,24 +153,37 @@ const valueCell = (resolveTo: () => unknown) => {
   };
 };
 
+type DeliveryCallback = (
+  value: unknown,
+  cfcLabel?: unknown,
+  delivery?: { cfcLabelCurrent: boolean },
+) => void;
+
 /**
- * A cell whose subscription carries its label with every delivery, as a
- * label-aware subscription the connection opened does, and which counts the
- * reads of its label the worker is asked for. `deliver()` sends `value` with
- * the label `label` holds at the time, as an update does.
+ * A cell whose subscription hands each delivery a label and says whether it
+ * is the one the worker read with the value, as a `CellHandle` does, and
+ * which counts the reads of its label the worker is asked for. The worker's
+ * own answer is `worker`, which `deliver()` hands over as the label when it
+ * delivers as current, and which a delivery that is not current keeps from
+ * the subscriber, handing `stale` instead.
  */
-const labelDeliveringCell = (initial: unknown) => {
-  let label = initial;
+const labelDeliveringCell = (
+  worker: unknown,
+  options: { current?: boolean; stale?: unknown } = {},
+) => {
+  let current = options.current ?? true;
+  let stale = options.stale;
   let workerReads = 0;
-  const subscribers = new Set<(value: unknown, cfcLabel?: unknown) => void>();
+  const subscribers = new Set<DeliveryCallback>();
+  const handed = () => (current ? worker : stale);
   return {
     getCfcLabel: () => {
       workerReads++;
-      return Promise.resolve(label);
+      return Promise.resolve(worker);
     },
-    subscribe(callback: (value: unknown, cfcLabel?: unknown) => void) {
+    subscribe(callback: DeliveryCallback) {
       subscribers.add(callback);
-      callback({ loaded: true }, label);
+      callback({ loaded: true }, handed(), { cfcLabelCurrent: current });
       return () => {
         subscribers.delete(callback);
       };
@@ -180,13 +193,19 @@ const labelDeliveringCell = (initial: unknown) => {
     workerReads: () => workerReads,
 
     /**
-     * Delivers an update carrying `next` as the label, and settles the reads
-     * it starts.
+     * Delivers an update with `next` as the worker's label, as current, or
+     * as not current when `delivery.current` is false, handing `stale` in
+     * place of the worker's label; settles the reads it starts.
      */
-    async deliver(next: unknown) {
-      label = next;
+    async deliver(
+      next: unknown,
+      delivery: { current?: boolean; stale?: unknown } = {},
+    ) {
+      worker = next;
+      current = delivery.current ?? true;
+      stale = delivery.stale;
       for (const callback of [...subscribers]) {
-        callback({ loaded: true }, label);
+        callback({ loaded: true }, handed(), { cfcLabelCurrent: current });
       }
       await settle();
     },
@@ -471,9 +490,7 @@ describe("authorship", () => {
       }
     });
 
-    it("asks the worker for the value's label when the delivery carries none", async () => {
-      // Only a subscription the connection opened label-aware carries labels,
-      // so a delivery without one does not say the cell has none.
+    it("takes a current delivery without a label as the value having none, asking the worker for none", async () => {
       const value = labelDeliveringCell(undefined);
       const observation = observe(value, "alice");
 
@@ -481,6 +498,43 @@ describe("authorship", () => {
         await settle();
 
         expect(observation.states()).toEqual(["unknown"]);
+        expect(value.workerReads()).toBe(0);
+      } finally {
+        observation.cancel();
+      }
+    });
+
+    it("asks the worker for the value's label when the delivery's label is not current, and reports the worker's answer", async () => {
+      // A handle re-sends the label it last received with a value the worker
+      // read a newer label for; the verdict is on the worker's label.
+      const value = labelDeliveringCell(authoredByLabel("bob"), {
+        current: false,
+        stale: authoredByLabel("alice"),
+      });
+      const observation = observe(value, "alice");
+
+      try {
+        await settle();
+
+        expect(observation.states()).toEqual(["unverified"]);
+        expect(value.workerReads()).toBe(1);
+      } finally {
+        observation.cancel();
+      }
+    });
+
+    it("asks the worker again when a later delivery's label is not current", async () => {
+      const value = labelDeliveringCell(authoredByLabel("alice"));
+      const observation = observe(value, "alice");
+
+      try {
+        await settle();
+        await value.deliver(authoredByLabel("bob"), {
+          current: false,
+          stale: authoredByLabel("alice"),
+        });
+
+        expect(observation.states()).toEqual(["verified", "unverified"]);
         expect(value.workerReads()).toBe(1);
       } finally {
         observation.cancel();
