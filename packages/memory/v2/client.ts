@@ -759,6 +759,15 @@ export class Client {
   }
 
   /**
+   * How many requests this client has sent and not yet seen answered or
+   * settled: a diagnostic, since every entry is dropped when its response
+   * arrives, its send is refused, or its connection closes.
+   */
+  get pendingRequestCount(): number {
+    return this.#pending.size;
+  }
+
+  /**
    * Resolves once every server frame the transport held at the call has
    * reached this client. What a frame goes on to do from there — a response resolving, a
    * sync frame handed to its session — is microtask work after that.
@@ -911,7 +920,15 @@ export class Client {
     pending.promise.catch(() => {});
     this.#pending.set(requestId, pending);
     logOutgoingFrame(message, memoryMessageFrameBytes(encoded));
-    await this.#transport.send(encoded);
+    try {
+      await this.#transport.send(encoded);
+    } catch (error) {
+      // A send the transport refused outright gets no response, so its entry
+      // would otherwise stay until the connection closes. A send lost with its
+      // connection is settled by the close that reports the loss.
+      if (!isConnectionError(error)) this.#pending.delete(requestId);
+      throw error;
+    }
     const result = await pending.promise as ResponseMessage<Result>;
     if (result.error) {
       const error = new Error(result.error.message);
