@@ -95,4 +95,38 @@ describe("stream-send-origin-transaction", () => {
     await runtime.idle();
     expect(appended).toEqual([{ n: 4 }]);
   });
+
+  it("appends a fire made while its transaction's commit is in flight once the commit lands", async () => {
+    const tx = runtime.edit();
+    // A write, so that the commit has a round trip to be in flight for.
+    runtime.getCell<number>(
+      space,
+      "stream-send-origin-in-flight",
+      undefined,
+      tx,
+    )
+      .set(1);
+    const commit = tx.commit();
+    expect(tx.status().status).toBe("pending");
+    stream.withTx(tx).send({ n: 5 });
+    expect(appended).toEqual([]);
+    await commit.settled;
+    await runtime.idle();
+    expect(appended).toEqual([{ n: 5 }]);
+  });
+
+  it("appends a fire made through a transaction that already committed at once", async () => {
+    const tx = runtime.edit();
+    await tx.commit().settled;
+    stream.withTx(tx).send({ n: 6 });
+    expect(appended).toEqual([{ n: 6 }]);
+  });
+
+  it("appends nothing for a fire made through a transaction that already failed", async () => {
+    const tx = runtime.edit();
+    tx.abort("the transaction failed before the fire");
+    stream.withTx(tx).send({ n: 7 });
+    await runtime.idle();
+    expect(appended).toEqual([]);
+  });
 });

@@ -14,8 +14,13 @@ const space = signer.did();
 describe("scheduler serving event batch", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
+  let releaseLoad: (() => void) | undefined;
 
   afterEach(async () => {
+    // A load a test holds in flight would keep the parked event, and the
+    // runtime's disposal behind it, waiting.
+    releaseLoad?.();
+    releaseLoad = undefined;
     await runtime?.dispose();
     await storageManager?.close();
     runtime = undefined;
@@ -109,5 +114,139 @@ describe("scheduler serving event batch", () => {
     const derived = await queueThreeEvents(false);
     // A run behind each event, the first reading only its write.
     expect(derived).toEqual([0, 1, 3, 6]);
+  });
+
+  /**
+   * A serving runtime holding a cell, a derivation whose runs record what it
+   * read, a stream whose handler writes the cell, and a stream whose
+   * handler's inputs read a document whose load stays in flight until the
+   * test ends, so an event on it parks at the head. A pass
+   * the test starts runs whatever the two streams are sent: until then,
+   * queueing an event schedules nothing.
+   */
+  async function parkingRuntime() {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      servingPosture: true,
+    });
+    const tx = runtime.edit();
+    const cell = <T>(name: string) =>
+      runtime!.getCell<T>(space, `parking ${name}`, undefined, tx);
+    const slot = cell<number>("slot");
+    slot.set(0);
+    const cold = cell<number>("cold");
+    cold.set(0);
+    const writing = cell<unknown>("writing stream");
+    writing.setRaw({ $stream: true });
+    const parking = cell<unknown>("parking stream");
+    parking.setRaw({ $stream: true });
+    tx.commit();
+    await runtime.idle();
+
+    const derived: number[] = [];
+    runtime.scheduler.subscribe((readTx) => {
+      derived.push(slot.withTx(readTx).get());
+    }, {
+      reads: [toMemorySpaceAddress(slot.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [],
+    }, { isEffect: true });
+    await runtime.idle();
+    expect(derived).toEqual([0]);
+
+    runtime.scheduler.addEventHandler(
+      (handlerTx: IExtendedStorageTransaction, event: { value: number }) => {
+        slot.withTx(handlerTx).set(event.value);
+      },
+      writing.getAsNormalizedFullLink(),
+    );
+    runtime.scheduler.addEventHandler(
+      () => {},
+      parking.getAsNormalizedFullLink(),
+      (depTx: IExtendedStorageTransaction) => {
+        cold.withTx(depTx).get();
+      },
+    );
+
+    const coldLink = cold.getAsNormalizedFullLink();
+    const coldKey = `${coldLink.space}/${coldLink.scope}/${coldLink.id}`;
+    const load = Promise.withResolvers<void>();
+    const manager = storageManager as unknown as {
+      pendingLoadAddresses(): readonly {
+        space: string;
+        scope: string;
+        id: string;
+      }[];
+      pendingLoadGeneration(key: string): number | undefined;
+      loadsSettled(keys: readonly string[]): Promise<void>;
+    };
+    manager.pendingLoadAddresses = () => [{
+      space: coldLink.space,
+      scope: coldLink.scope,
+      id: coldLink.id,
+    }];
+    manager.pendingLoadGeneration = (key) => key === coldKey ? 1 : undefined;
+    manager.loadsSettled = () => load.promise;
+    releaseLoad = () => load.resolve();
+
+    // Marked as running a pass, the scheduler latches the passes the events
+    // ask for rather than scheduling them; the pass the test runs ends that.
+    const access = runtime.scheduler.accessForTestingOnly;
+    access.scheduled = true;
+    return {
+      runtime,
+      slot,
+      derived,
+      writing: writing.getAsNormalizedFullLink(),
+      parking: parking.getAsNormalizedFullLink(),
+      pass: () => access.execute(),
+    };
+  }
+
+  it("settles the events a pass ran once a drop takes its parked head off the queue", async () => {
+    // The flush deadline's purge drops a parked in-process event before its
+    // loads settle. The settle the pass left to the park's release runs
+    // all the same, for a waiter that parked on it, as the serving loop's
+    // settle does.
+    const env = await parkingRuntime();
+    env.runtime.scheduler.queueEvent(env.writing, { value: 1 });
+    env.runtime.scheduler.queueEvent(env.parking, {});
+    await env.pass();
+    // The handler ran, and its settle waits behind the parked event.
+    expect(env.derived).toEqual([0]);
+
+    const settled = env.runtime.idle();
+    const purged = env.runtime.scheduler.purgeQueuedEvents(
+      (event) => event.eventLink.id === env.parking.id,
+      "the test drops the parked event",
+    );
+    expect(purged).toBe(1);
+    await settled;
+    expect(env.derived).toEqual([0, 1]);
+  });
+
+  it("settles in the pass when the event before a parked head was dropped rather than run", async () => {
+    // An event whose origin transaction failed drops at the head without a
+    // handler running, so nothing waits to be settled behind the parked
+    // event, and the derivation the direct write dirtied runs in the pass.
+    const env = await parkingRuntime();
+    const write = env.runtime.edit();
+    env.slot.withTx(write).set(2);
+    await write.commit().settled;
+    const failed = env.runtime.edit();
+    failed.abort("the test's origin fails");
+    env.runtime.scheduler.queueEvent(
+      env.writing,
+      { value: 3 },
+      true,
+      undefined,
+      false,
+      { originTx: failed },
+    );
+    env.runtime.scheduler.queueEvent(env.parking, {});
+    await env.pass();
+    expect(env.derived).toEqual([0, 2]);
   });
 });

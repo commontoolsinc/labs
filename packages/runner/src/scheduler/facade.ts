@@ -581,6 +581,12 @@ export class Scheduler {
    * continuation queues no pass for the deferred derivations.
    */
   #settleDeferredForLoadPark = false;
+
+  /**
+   * How many event handlers the event phases have started. A phase that
+   * moves past its head without starting one dropped or deferred it.
+   */
+  #eventHandlerRuns = 0;
   #actionRunState!: SchedulerActionRunState;
   #graphSnapshotState!: SchedulerGraphSnapshotState;
   #settleLoopState!: SchedulerSettleLoopState;
@@ -2810,9 +2816,9 @@ export class Scheduler {
    * of each dispatch recomputes an invalid input the handler reads, and an
    * event the preflight holds for such a dependency ends the phases, so the
    * settle runs it. The run stops at an event that is not ready, at the
-   * events the pass began with, and at a phase that dispatched nothing.
-   * Returns the dependencies those events wait on and how many events the
-   * phases dispatched.
+   * events the pass began with, and at a phase that left its head in place.
+   * Returns the dependencies those events wait on and how many handlers the
+   * phases ran: a head they dropped or deferred instead is not counted.
    */
   async #processExecuteEventPhases(): Promise<{
     eventBlockingDeps: Set<Action>;
@@ -2820,12 +2826,11 @@ export class Scheduler {
   }> {
     const eventBlockingDeps = new Set<Action>();
     let remaining = this.#eventQueue.length;
-    let dispatched = 0;
+    const runsBefore = this.#eventHandlerRuns;
     while (true) {
       const head = this.#eventQueue[0];
       const deps = await this.#processExecuteEventPhase();
       for (const dep of deps) eventBlockingDeps.add(dep);
-      if (head !== undefined && this.#eventQueue[0] !== head) dispatched++;
       if (
         !this.runtime.servingPosture || deps.size > 0 || head === undefined ||
         this.#eventQueue[0] === head
@@ -2835,7 +2840,10 @@ export class Scheduler {
       // reads what it wrote.
       if (this.runningPromise) await this.runningPromise;
     }
-    return { eventBlockingDeps, dispatched };
+    return {
+      eventBlockingDeps,
+      dispatched: this.#eventHandlerRuns - runsBefore,
+    };
   }
 
   async #processExecuteEventPhase(): Promise<Set<Action>> {
@@ -3471,6 +3479,7 @@ export class Scheduler {
         return getEventPreflightTelemetryEnabled();
       },
       setRunningPromise: (promise) => {
+        this.#eventHandlerRuns++;
         this.runningPromise = promise;
       },
       getActionId: (target) => this.#getActionId(target),
@@ -4074,7 +4083,12 @@ export class Scheduler {
     } = {},
   ): void {
     if (this.#headEventLoadPark?.eventId === event.id) {
+      // The park's release finds no park once the drop has cleared it, so
+      // the drop queues the pass the release would have: the events behind
+      // the head wait for it, and so does a settle a pass deferred to the
+      // release (`#settleDeferredForLoadPark`).
       this.#headEventLoadPark = null;
+      this.queueExecution();
     }
     if (this.#headEventLoadParkHistory?.eventId === event.id) {
       this.#headEventLoadParkHistory = null;

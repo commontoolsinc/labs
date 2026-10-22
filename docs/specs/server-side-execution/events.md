@@ -109,13 +109,15 @@ handler fires
    state now authoritative
 ```
 
-- A client fire made inside an open, writable transaction (an imperative
+- A client fire made inside a writable transaction (an imperative
   `send` within `editWithRetry`, say) is work that transaction launched
   (scheduler-v2 I10): its event append waits for the transaction to
   commit, and a transaction that fails or is aborted drops it, so an
   attempt run again fires its event once, under the id that attempt
-  minted. A fire with no transaction, or through a read-only one, appends
-  at once.
+  minted. A fire through a transaction that has already committed
+  appends at once, and one through a transaction that has already failed
+  is refused. A fire with no transaction, or through a read-only one,
+  appends at once.
 - Server-originated events (`stream.send()` from a handler cascade
   or a served computation, piece-to-piece) enter at "enqueue" and
   are otherwise identical — one path, two producers — but their
@@ -229,11 +231,14 @@ handler fires
   them (`facade.ts`, `#processExecuteEventPhases`): the demanded
   derivations several events invalidate run once per pass rather than
   once per event. A head the preflight parks on its loads, behind events
-  the pass already dispatched, ends the pass without its settle: the pass
-  the park's release starts dispatches it and settles behind it, and the
+  the pass already ran, ends the pass without its settle: the pass the
+  park's release starts dispatches it and settles behind it, and the
   continuation queues no pass for the work that waits, so the serving loop
-  keeps cycling while the loads are in flight. A head that parks before
-  the pass dispatched anything leaves the settle to run as before. An
+  keeps cycling while the loads are in flight. A drop that takes the
+  parked head off the queue before its loads settle, as the flush
+  deadline's purge of an in-process leftover does, queues that pass in the
+  release's place. A head that parks before the pass ran any handler
+  leaves the settle to run as before. An
   event whose preflight finds an invalid input ends the run, so the
   settle recomputes that input before the event dispatches. Undemanded
   intermediates are skipped by pull-based

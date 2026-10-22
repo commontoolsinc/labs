@@ -2397,33 +2397,46 @@ export class CellImpl<T extends FabricValue>
                 ? { rendererTrusted: true }
                 : {}),
             });
-          // A fire made inside an open transaction is work that transaction
+          // A fire made inside a transaction is work that transaction
           // launched (scheduler-v2 I10): its append waits for the
           // transaction to commit, and one that fails or is aborted, as
           // `editWithRetry` aborts an attempt it runs again, drops it. So
           // an attempt run again fires its event once, under its own id,
           // rather than once per attempt. The local echo below follows the
-          // same transaction through its speculation lineage.
-          // A read-only transaction commits nothing and so launches nothing:
-          // a fire through one appends at once, as one with none does.
-          const originTx = this.#tx;
-          const outcome = (
-            originTx === undefined ||
-              originTx.status().status !== "ready" ||
-              originTx.isReadOnly?.() === true
-              ? append()
-              : new Promise<Awaited<ReturnType<typeof append>>>((resolve) => {
-                originTx.addCommitCallback((_tx, result) => {
-                  resolve(
-                    result.error === undefined ? append() : {
-                      delivered: false,
-                      refused: "the transaction that sent the event did " +
-                        `not commit: ${result.error.message}`,
-                    },
-                  );
-                });
-              })
-          ).then((delivery) => {
+          // same transaction through its speculation lineage, which reads
+          // the transaction's state the same way: a fire through one that
+          // already committed appends at once, and one through one that
+          // already failed is refused. A read-only transaction commits
+          // nothing and so launches nothing: a fire through one appends at
+          // once, as one with none does.
+          const refusal = (
+            error: { message: string },
+          ): EventAppendDeliveryOutcome => ({
+            delivered: false,
+            refused: "the transaction that sent the event did not " +
+              `commit: ${error.message}`,
+          });
+          const deliver = (): Promise<EventAppendDeliveryOutcome> => {
+            const originTx = this.#tx;
+            if (originTx === undefined || originTx.isReadOnly?.() === true) {
+              return append();
+            }
+            const origin = originTx.status();
+            if (origin.status === "done") {
+              return append();
+            }
+            if (origin.status === "error") {
+              return Promise.resolve(refusal(origin.error));
+            }
+            return new Promise((resolve) => {
+              originTx.addCommitCallback((_tx, result) => {
+                resolve(
+                  result.error === undefined ? append() : refusal(result.error),
+                );
+              });
+            });
+          };
+          const outcome = deliver().then((delivery) => {
             if (!delivery.delivered) {
               // Deterministic admission refusal: the intent is dead —
               // un-render the echo and signal (events.md §5).

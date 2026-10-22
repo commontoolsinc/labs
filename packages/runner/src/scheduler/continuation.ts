@@ -117,6 +117,10 @@ export function applyPullExecuteContinuation(
   // release, which queues the next pass; queueing one for the derivations it
   // left would run passes that defer again until the loads settle.
   if (hasLoadParkedHeadEvent && state.settleDeferredForLoadPark()) {
+    // The release's pass settles whatever this one was asked to run again
+    // for, so the request is taken here rather than left latched, where it
+    // would queue a pass behind the release's own.
+    state.consumeRerunAfterCurrentExecute();
     applyQuiescentContinuation(state, { hasParkedHeadEvent: true });
     return;
   }
