@@ -12,6 +12,10 @@ export const MAX_NAME_BYTES = 255;
 /** The characters no name may hold: `/`, `\`, and every control character. */
 const FORBIDDEN = /[/\\\u0000-\u001f\u007f]/;
 
+/** An unpaired surrogate, which no well-formed string holds. */
+const LONE_SURROGATE =
+  /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+
 /** Returns how many bytes `text`, which is well-formed, takes as UTF-8. */
 export function utf8Length(text: string): number {
   let length = 0;
@@ -29,7 +33,8 @@ export function utf8Length(text: string): number {
  * not ending with a space or a `.`.
  */
 export function isValidName(name: unknown): name is string {
-  return typeof name === "string" && name.length > 0 && name.isWellFormed() &&
+  return typeof name === "string" && name.length > 0 &&
+    !LONE_SURROGATE.test(name) &&
     name.normalize("NFC") === name &&
     utf8Length(name) <= MAX_NAME_BYTES &&
     !FORBIDDEN.test(name) &&
