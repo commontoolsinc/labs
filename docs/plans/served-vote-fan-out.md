@@ -291,19 +291,31 @@ Before a push: repo-wide `deno fmt --check`, `deno lint`, `deno task check`,
        the same way every burst (a quarter to a third of traversals), a
        vote's cascade cut into 2.7 waves (each a flush pass, five walks and
        five frames), and, under serving, every client re-running every
-       served action (about half of a client's runs). It ends with seven removals
-       and the invariant each keeps.
-3. [ ] Build the removals the census selects, cheapest and least entangled
-       first: one root evaluation per (document, path) per walk with its
-       schemas validated against it, and a memo for a selector that failed
-       against a document version (the memory server, every arm); then the
-       client integrating a served value as a result rather than a trigger
-       (the client, under serving); then the serving loop's wave and flush
-       coalescing and the bookkeeping-only commits that skip the walk. Each
-       lands behind nothing where it is a pure cost reduction and behind a
-       registry entry where it changes what a session receives, and each is
-       measured against the census's counts before its headline: a removal
-       that does not move its count did not remove the work.
+       served action (about half of a client's runs). It ends with seven
+       removals and the invariant each keeps.
+3. [ ] Build the removals the census selects, each measured against the
+       census's counts before its headline: a removal that does not move its
+       count did not remove the work. Each lands behind nothing where it is
+       a pure cost reduction and behind a registry entry where it changes
+       what a session receives.
+   - [x] The serving loop's wave coalescing: a flush deadline that grows
+         after a cut settle, capped by `SERVER_EXECUTION_FLUSH_DEADLINE_MAX_MS`.
+         The [wave-costs record](../history/development/performance/2026-10-22-served-vote-wave-costs.md)
+         reads what a cut wave costs and measures the cap: 68 waves to 8 on
+         the main thread, passes, walks, frames and client runs falling with
+         them, the serving scheduler's runs not. Still open on it: counting
+         the seed with a cap, and choosing the default cap.
+   - [ ] The server deciding what each session receives
+         (`EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION`), which stands to retire
+         most of the subscriptions the walks serve. It measured slow when
+         last tried, so it is turned on, counted with the probe, and read
+         for the naive step before anything else is built on it.
+   - [ ] One root evaluation per (document, path) per walk with its schemas
+         validated against it, and a memo for a selector that failed against
+         a document version (the memory server, every arm).
+   - [ ] The client integrating a served value as a result rather than a
+         trigger (the client, under serving).
+   - [ ] The bookkeeping-only commits that skip the walk.
 4. [ ] Measure the burst on both arms and the seed, twice each, and record
        them beside the serving-side rows.
 5. [ ] Revisit the overlap's default under the worker once the floor has

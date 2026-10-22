@@ -17,6 +17,7 @@ import {
 import { publishServingExperimentalOverrides } from "./experimental-posture.ts";
 import { serverExecutionEnabledFromEnv } from "./server-execution-flag.ts";
 import { ExecutorHost } from "@commonfabric/runner/executor/host";
+import { DEFAULT_FLUSH_DEADLINE_MS } from "@commonfabric/runner/executor/space-server";
 import {
   SERVING_RUNTIME_EXPERIMENTAL,
   servingRuntimeFactory,
@@ -315,11 +316,21 @@ export function startServerExecutionHost(options: {
     );
   }
   if (policy.flushDeadlineMaxMs !== undefined) {
-    console.log(
-      "Server-execution v2: flush deadline grows after a cut settle, up to " +
-        `${policy.flushDeadlineMaxMs} ms, by ` +
-        "SERVER_EXECUTION_FLUSH_DEADLINE_MAX_MS (default is a fixed deadline)",
-    );
+    // The space server treats a cap no longer than the deadline as no cap.
+    const base = policy.flushDeadlineMs ?? DEFAULT_FLUSH_DEADLINE_MS;
+    if (policy.flushDeadlineMaxMs > base) {
+      console.log(
+        "Server-execution v2: flush deadline grows after a cut settle, up " +
+          `to ${policy.flushDeadlineMaxMs} ms, by ` +
+          "SERVER_EXECUTION_FLUSH_DEADLINE_MAX_MS (default is a fixed deadline)",
+      );
+    } else {
+      console.warn(
+        "Server-execution v2: ignoring SERVER_EXECUTION_FLUSH_DEADLINE_MAX_MS=" +
+          `${policy.flushDeadlineMaxMs} (no longer than the ${base} ms ` +
+          "deadline); the deadline stays fixed",
+      );
+    }
   }
   if (policy.overlapWaveCommit === true) {
     console.log(

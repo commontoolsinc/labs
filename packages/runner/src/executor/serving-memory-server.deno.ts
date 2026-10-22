@@ -134,9 +134,9 @@ export type ServingMemoryServerOptions =
      * literal `true` in this process's environment, which is how a lane runs
      * every test that leaves this unset under the worker. A worker takes no
      * closure, so `prepareStorageManager`, `fetch`, `moduleByteCache`,
-     * `policy.flushDeadlineNow`, and the host's diagnostic hooks
-     * other than `onActivationSettled` and `onSpaceParked` are refused under
-     * it; a test that needs one says `false` here.
+     * `policy.flushDeadlineNow`, `policy.onFlushDeadline`, and the host's
+     * diagnostic hooks other than `onActivationSettled` and `onSpaceParked`
+     * are refused under it; a test that needs one says `false` here.
      *
      * The environment fills three more of the policy's fields when they are
      * left unset, as a toolshed's bootstrap does: `storeReadThrough` takes
@@ -182,6 +182,9 @@ const runsInWorker = (options: ServingMemoryServerOptions): boolean =>
  * milliseconds. A lane sets the first two to run every test that leaves them
  * unset under the posture; a benchmark sets the others to measure a cadence.
  */
+/** The longest delay a timer takes; a longer one fires at once. */
+const TIMER_DELAY_MAX_MS = 2_147_483_647;
+
 const policyFromEnvironment = (
   policy: SpaceServerPolicy | undefined,
 ): SpaceServerPolicy | undefined => {
@@ -200,11 +203,13 @@ const policyFromEnvironment = (
   }
   // A positive decimal integer, as the toolshed bootstrap reads it; a
   // fraction, an exponent or a prefix would select a cadence the toolshed
-  // refuses.
+  // refuses. The deadline arms a timer, and a delay past a timer's range
+  // fires at once, so a value past it reads as unset rather than as a
+  // cadence of immediate cuts.
   const milliseconds = (name: string): number | undefined => {
     const raw = Deno.env.get(name) ?? "";
     const value = /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : 0;
-    return value > 0 ? value : undefined;
+    return value > 0 && value <= TIMER_DELAY_MAX_MS ? value : undefined;
   };
   if (resolved?.flushDeadlineMs === undefined) {
     const deadline = milliseconds("SERVER_EXECUTION_FLUSH_DEADLINE_MS");
@@ -369,6 +374,9 @@ async function attachServingLoop(params: {
     );
     if (policy?.flushDeadlineNow !== undefined) {
       refused.push("policy.flushDeadlineNow");
+    }
+    if (policy?.onFlushDeadline !== undefined) {
+      refused.push("policy.onFlushDeadline");
     }
     if (refused.length > 0) {
       await params.close();

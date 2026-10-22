@@ -525,7 +525,8 @@ export type SpaceServerOptions = {
   ) => void;
 };
 
-const DEFAULT_FLUSH_DEADLINE_MS = 100;
+/** The flush deadline a policy that names none takes (serving-loop.md §3). */
+export const DEFAULT_FLUSH_DEADLINE_MS = 100;
 const DEFAULT_IDLE_PARK_MS = 30_000;
 const DEFAULT_PARK_DISPOSE_TIMEOUT_MS = 5_000;
 
