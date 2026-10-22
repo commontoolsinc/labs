@@ -2221,8 +2221,6 @@ export class Client {
   /**
    * Helper for the reconnect loop and `restartConnection()`, which discards
    * the connection after `err` and reports whether a reconnect can follow.
-   * Each discard logs the original error and its immediate error cause with
-   * names capped at 50 characters and messages at 500, plus connection counts.
    */
   #discardConnection(err: Error): boolean {
     logger.warn("connection-discarded", () => [

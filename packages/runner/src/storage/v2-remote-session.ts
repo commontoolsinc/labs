@@ -66,6 +66,13 @@ export const ROUTED_FRAME_SLOTS = 150_000;
  */
 export const ROUTER_CREDIT_WAIT_MS = 60_000;
 
+/**
+ * Bound on the native WebSocket send queue while streaming records without
+ * peer credit. Credit, when negotiated, is the signal that lets the queue
+ * drain, so this check is live only for a streaming selection that has none.
+ */
+const ROUTER_NATIVE_QUEUE_BYTES = 4 * 1024 * 1024;
+
 /** Credit accounting for one selection on one socket. */
 type RouterUploadCredits = {
   /** Maximum bytes sent without an acknowledgement. */
@@ -363,7 +370,11 @@ export class WebSocketTransport implements MemoryClient.Transport {
     return this.#socket?.readyState === WebSocket.OPEN;
   }
 
-  /** What this transport has handed to its sockets and received from them. */
+  /**
+   * What this transport has handed to its sockets and received from them.
+   * `messagesSent` counts logical messages: a streamed message's records
+   * count once, though `bytesSent` counts every record's bytes.
+   */
   getSizes(): TransportSizes {
     return {
       messagesSent: this.#messagesSent,
@@ -373,10 +384,12 @@ export class WebSocketTransport implements MemoryClient.Transport {
     };
   }
 
-  /** Support for separately negotiated bounded router transport records. */
-  get supportsRouterStreaming(): boolean {
-    return true;
-  }
+  /**
+   * This transport always supports the separately negotiated router transport
+   * records; a transport that cannot send them leaves the property false or
+   * absent, and the client then selects legacy routed framing.
+   */
+  readonly supportsRouterStreaming = true;
 
   setReceiver(receiver: (payload: string) => void): void {
     this.#receiver = receiver;
@@ -425,6 +438,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
       const selection = this.#uploadCredits === undefined
         ? 'fvj1:{"type":"router.transport","version":1}'
         : 'fvj1:{"type":"router.transport","version":1,"uploadCredits":true}';
+      this.#messagesSent++;
       const send = this.#sending.then(async () => {
         const connection = await opening;
         if (this.#socket !== connection.socket) {
@@ -473,6 +487,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
     const frameSlots = this.#routedFrameSlots;
     const streaming = this.#routerStreaming;
     const credits = this.#uploadCredits;
+    this.#messagesSent++;
     const send = this.#sending.then(async () => {
       const connection = await opening;
       const decoded = streaming
@@ -790,6 +805,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
       }
     }
     const opening = this.#open();
+    this.#messagesSent++;
     const send = this.#sending.then(async () => {
       const connection = await opening;
       if (this.#socket !== connection.socket) {
@@ -836,7 +852,6 @@ export class WebSocketTransport implements MemoryClient.Transport {
     frame: EncodedMemoryMessage,
     credits?: RouterUploadCredits,
   ): Promise<void> {
-    this.#messagesSent++;
     this.#bytesSent += frameSize(frame);
     try {
       if (credits !== undefined) {
@@ -881,7 +896,10 @@ export class WebSocketTransport implements MemoryClient.Transport {
         const bytes = typeof frame === "string"
           ? new TextEncoder().encode(frame).length
           : frame.length;
-        if ((connection.socket.bufferedAmount ?? 0) + bytes > 4 * 1024 * 1024) {
+        if (
+          (connection.socket.bufferedAmount ?? 0) + bytes >
+            ROUTER_NATIVE_QUEUE_BYTES
+        ) {
           throw new Error("Router socket output limit");
         }
       }

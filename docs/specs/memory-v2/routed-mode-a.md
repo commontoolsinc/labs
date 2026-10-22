@@ -41,8 +41,9 @@ clients use its `hello`, `connection.challenge`, `connection.auth`,
   `fvj1:{"type":"router.transport","version":1,"uploadCredits":true}` as text
   before authentication, on the same ordered send queue as its requests. Every
   subsequent logical Memory upload, including authentication, compression
-  controls, session opens and watch mutations, uses the bounded `mrt1` records
-  described below. The router assembles controls completely and applies their
+  controls, session opens and watch mutations, uses the `mrt\x01` records
+  described below (at most 32 KiB of body per record, at most 512 records per
+  message). The router assembles control messages completely and applies their
   byte, slot and admission limits before processing them; ordinary data is
   forwarded incrementally.
 - The upload window counts complete on-wire record bytes, including the header,
@@ -50,9 +51,10 @@ clients use its `hello`, `connection.challenge`, `connection.auth`,
   each record before sending it and waits for enough credit for the entire next
   record. The router returns additive binary acknowledgements for accepted
   record bytes, possibly coalesced. Each is exactly eight bytes: magic
-  `6d 72 63 01` (`mrc` followed by byte `01`), then a four-byte unsigned
-  big-endian grant. The grant must be positive and no greater than the client's
-  outstanding sent bytes. Unsolicited or invalid grants close the connection.
+  `6d 72 63 01` (`mrc\x01`; the ASCII `mrc1` tag names the signed challenge
+  issuance record, a different format), then a four-byte unsigned big-endian
+  credit amount. The amount must be positive and no greater than the client's
+  outstanding sent bytes. Unsolicited or invalid credits close the connection.
   Text `router.credit` messages cannot grant credit and close the connection.
   On credited public connections, the router rejects every private upstream
   header with `binary:true` before emitting public fragments. This reserves
@@ -63,11 +65,12 @@ clients use its `hello`, `connection.challenge`, `connection.auth`,
   execution, and provides the event that permits a browser's native send queue
   to drain. The SDK retains its separate 4 MiB native queue cap. Closing,
   resetting or replacing the socket rejects blocked uploads and discards credit;
-  grants and writes never transfer to a replacement connection.
+  credit and writes never transfer to a replacement connection.
 - Initial client hellos remain compatible with routers that do not offer
   streaming. A streaming router without a supported upload window is selected
   with `fvj1:{"type":"router.transport","version":1}`. That mode streams ordinary
-  data and sends controls as complete public envelopes, with the same limits.
+  data and sends control messages as complete public envelopes, with the same
+  limits.
 - The router pings a quiet client and closes the connection when no frame
   answers, so a vanished client releases its worker.
 
@@ -204,9 +207,9 @@ attested receipt. The router refuses a longer lease for good
 (`lease-too-long`) rather than disconnecting the client, and a toolshed refuses
 one by closing the context, so the labs SDK, which asks for ten minutes, ships
 first, then the router, then the toolsheds. No router that admits an hour is in
-service: the rehearsal is the only deployment. Positive client skew is bounded
-to 120 seconds; the router answers a refusal that honest timing, clock skew
-within that bound or load can cause, and the router README lists each.
+service: the rehearsal is the only deployment. Positive client skew is allowed
+up to 120 seconds; the router answers a refusal that honest timing, clock skew
+within that allowance or load can cause, and the router README lists each.
 
 Each toolshed link has its own epoch, fresh for every connection, and a
 toolshed checks a proof only against its own link. A challenge records the
@@ -304,7 +307,8 @@ boolean and string-set member, at the same cell mode. Additional support cannot
 expand the snapshot: a capability advertised as false, or omitted, remains
 unavailable even for new public connections until the router restarts.
 
-Capability descriptors contain bounded boolean values or sets of string names.
+Capability descriptors contain at most 64 capabilities, each a boolean value or
+a set of at most 16 string names.
 Their public intersection uses logical AND and set intersection, including names
 the router has never seen. `modernCellRep` is a wire mode and must match the
 deployment; absence means false and a present value must be boolean.
@@ -335,8 +339,10 @@ request-admission byte cannot register a control link. A supporting endpoint
 refuses a data hello without the separate selected descriptor, both signed
 hashes, or the request-admission assertion.
 Private transport version 1, public `mrt\x01` streaming, binary `mrc\x01` upload
-credits and the signed `mrc1` challenge issuance format keep their existing
-framing.
+credits and the signed ASCII `mrc1` challenge issuance format keep their
+existing framing. The binary prefixes `mrt\x01`, `mrc\x01` and `mri\x01` end in
+byte `0x01`; the signed record tags in the table above, `mrc1` among them, end
+in the ASCII digit `1`.
 
 Every data record is one complete binary WebSocket message. It starts with bytes
 `6d 72 74 01` and a one-byte kind:
@@ -357,17 +363,17 @@ the final `FIN` is withheld until valid completion. Private admission grants may
 interleave between response records and are consumed by the router; only
 WebSocket control frames may interleave with the resulting public fragments.
 Other upstreams pause while one owns public message output; local
-responses wait in a bounded queue. Blocked output stops source reads and resumes
+responses wait in a queue. Blocked output stops source reads and resumes
 on writable readiness. A truncated, malformed or lost source closes the affected
 connection; the router never replays a partially forwarded mutation.
 
 Streamed public requests use these same records. For ordinary data, the router
 reserves request capacity from the header before reading its body and forwards
-each chunk to the selected toolshed. Credited uploads carry controls in these
-records too; the router assembles them, checks that their routing projection
-matches the header, then parses and admits the complete control. A refused
-request's body is discarded within its declared bound. Held controls cannot
-interleave an admitted upload. The toolshed reserves
+each chunk to the selected toolshed. Credited uploads carry control messages in
+these records too; the router assembles them, checks that their routing
+projection matches the header, then parses and admits the complete control
+message. A refused request's body is discarded within its declared bound. Held
+control messages cannot interleave an admitted upload. The toolshed reserves
 its assembly budget and grants private request admission before the router sends
 body bytes, requires completion,
 validates the payload, and compares its routing projection with the header before
@@ -382,18 +388,18 @@ increasing by exactly one through `2^53 - 1`, without wrapping. Ordinals belong
 to that socket, not to a session, a request ID, or a replacement connection.
 The router sends the header, then sends neither a body chunk nor the completion
 record until the endpoint grants that exact request. This applies to ordinary
-streamed requests, buffered admission controls and legacy public envelopes
+streamed requests, buffered control messages and legacy public envelopes
 forwarded over the private socket. Public upload headers do not supply ordinals.
 
 The endpoint reserves the declared body bytes against its 4 MiB pending-input
 budget before allocating the body. If existing requests leave insufficient
-capacity, it retains at most one header, bounded by 4,096 bytes including the
+capacity, it retains at most one header, of at most 4,096 bytes including the
 record prefix, without allocating its body. A body larger than the total budget
 is refused. Releasing a request's reservation in its finalizer reconsiders the
 waiting header; capacity is signaled by that release, not inferred from spare
 TCP buffering or a larger queue cap.
 
-Once reserved, the endpoint sends one binary WebSocket admission message of
+Once reserved, the endpoint sends one binary WebSocket admission grant of
 exactly 16 bytes:
 
 | Offset | Width | Value |
@@ -404,20 +410,20 @@ exactly 16 bytes:
 
 Both count and ordinal must equal the outstanding header's values. The ordinal
 must also be in the safe-integer range above. The host enables body reception
-only after the admission message's successful socket-write callback. Admission
-reserves input capacity; it does not acknowledge execution or replenish public
-upload credit. Public `mrc\x01` credit retains its independent record-byte
-accounting and format.
+only after the grant's successful socket-write callback. A grant reserves input
+capacity; it does not acknowledge execution or replenish public upload credit.
+Public `mrc\x01` credit retains its independent record-byte accounting and
+format.
 
-The endpoint sender has one bounded admission-control slot, serialized with
-response-record writes. A grant may appear between private response records;
-the router intercepts it before response assembly and public-output ownership
+The endpoint sender has one grant slot, holding at most one grant, serialized
+with response-record writes. A grant may appear between private response
+records; the router intercepts it before response assembly and public-output ownership
 checks, never forwarding it to the public client. Sending or completing a grant
 does not release retained logical response-body bytes or complete a response's
 output-drain wait. A response already owning public output can finish while an
 upload waits for admission. A blocked public downstream may delay a grant: the
-router preserves its bounded output ownership and does not read arbitrarily
-ahead to find one.
+router keeps public output owned by one response at a time and does not read
+arbitrarily ahead to find one.
 
 A wrong or reused ordinal, duplicate or unsolicited grant, mismatched byte
 count, malformed record, second waiting header, or body/end record received
@@ -432,13 +438,14 @@ Private sockets enforce the 32 KiB plus five-byte record limit at WebSocket
 assembly, not just after decoding. Endpoints retain complete logical bodies under
 the existing message and queue bounds. Toolshed output waits for each record's
 socket write callback. Negotiated public uploads wait for the peer's byte credit
-before each record. Browser output also has a bounded native `bufferedAmount`
-admission check; exhaustion terminates the connection rather than polling for
-drain. Session-open and watch-control payloads require full router parsing;
-ordinary streamed requests and private responses do not.
+before each record. Browser output also checks the native `bufferedAmount`
+against a 4 MiB cap when streaming without credit; exhaustion terminates the
+connection rather than polling for drain. Session-open and watch-mutation
+control messages require full router parsing; ordinary streamed requests and
+private responses do not.
 
 Toolshed request dispatch and decoding, including host refusals, wait until the
-bounded sender retains zero logical output bytes. That wait resolves only after
+sender retains zero logical output bytes. That wait resolves only after
 the completion-record socket callbacks have released the bodies. One cancellable
 Node `setImmediate` separates completed backend request turns so I/O callbacks
 can run. While output is pending, the input socket pauses at body boundaries;
@@ -446,12 +453,13 @@ an already admitted partial body completes with its assembly reservation held.
 Already-buffered receiver events remain subject to the hard input bounds. Close
 cancels both the output wait and the scheduled turn. This pacing covers
 request-driven production. Unsolicited effects, presence and revocation remain
-bounded output producers that close the connection on output exhaustion.
+output producers under the same 4 MiB cap, which close the connection on output
+exhaustion.
 
 Whole-envelope forwarding also drains one record at a time. A blocked private
 socket retains one body cursor and pauses public reads and held-request dispatch
 until writable readiness resumes it. This preserves admission at the logical
-message's byte limit while bounding socket-buffer growth to one record at a time.
+message's byte limit while socket buffers grow by one record at a time.
 
 The router accepts the toolshed's `serverExecution` flag but omits it from
 the client handshake. Execution posture is therefore unknown on a routed
@@ -553,9 +561,9 @@ socket/backend and requires a full interest restore. A new public connection
 uses new client signing. Until detached-session handling exists, the Rust router
 uses section 5.2's permitted whole-public-connection close on upstream loss.
 
-The private listener uses TLS 1.3 and bounded `ws` framing before application
-parsing. It exposes only `/memory/router-link` and `/memory/router-data`, and
-serves no toolshed HTTP API. Routing headers reject duplicate JSON keys,
+The private listener uses TLS 1.3 and `ws` framing with a 32 KiB plus five-byte
+record limit before application parsing. It exposes only `/memory/router-link`
+and `/memory/router-data`, and serves no toolshed HTTP API. Routing headers reject duplicate JSON keys,
 ambiguous security tags, invalid UTF-8/DIDs and unsupported versions. Endpoints
 validate complete application bodies, including compressed envelope hints and
 gzip expansion/CRC/member checks when applicable. A decoded application's
@@ -681,7 +689,7 @@ failed send, before socket accounting can change during close:
   sender; omitted for binary control records and data greetings.
 - `diagnostics`: for structured data output, separate socket and retained-body
   bytes, queue depth, lifetime body/record counters, active-body written progress,
-  queue/callback ages, and bounded source attribution. Its sixteen-entry history
+  queue/callback ages, and source attribution. Its sixteen-entry history
   records enqueues and high-water progress without payloads. At 2 MiB retained
   output a single `setImmediate` marker measures event-loop opportunity; recovery
   to 1 MiB or close cancels it. It changes neither admission nor write scheduling.

@@ -1638,6 +1638,48 @@ describe("WebSocketTransport failure signaling", () => {
     });
   });
 
+  it("counts a streamed message once in `messagesSent` and every record in `bytesSent`", async () => {
+    const space = (await Identity.fromPassphrase("streaming-sizes")).did();
+    await withTransport(async (transport, socket) => {
+      try {
+        const opening = transport.send('fvj1:{"type":"hello"}');
+        socket().openConnection();
+        await opening;
+        transport.setRoutedMessagesEnabled(true, 1);
+        await socket().whenSent(2);
+        const payload = `fvj1:${
+          JSON.stringify({
+            type: "transact",
+            requestId: "r",
+            space,
+            sessionId: "s",
+            value: "x".repeat(100_000),
+          })
+        }`;
+        await transport.send(payload);
+        const records = socket().sent.slice(2);
+        expect(records.length).toBeGreaterThan(3);
+        const bytesSent = socket().sent.reduce(
+          (sum, frame) =>
+            sum +
+            (typeof frame === "string"
+              ? new TextEncoder().encode(frame).length
+              : frame.length),
+          0,
+        );
+        // The hello, the transport selection, and one streamed message.
+        expect(transport.getSizes()).toEqual({
+          messagesSent: 3,
+          bytesSent,
+          messagesReceived: 0,
+          bytesReceived: 0,
+        });
+      } finally {
+        await transport.close();
+      }
+    });
+  });
+
   it("reports the bytes the open socket holds queued, and none without a socket", async () => {
     await withTransport(async (transport, socket) => {
       expect(transport.bufferedAmount).toBe(0);
