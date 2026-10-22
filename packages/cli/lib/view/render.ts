@@ -418,10 +418,13 @@ export interface DialogState {
   readonly body: readonly string[];
   readonly buttons: readonly DialogButton[];
 
-  /** Whether the body is program output, which starts at the left margin of a
-   * box as wide as the screen, rather than centered text in a box that fits
-   * it. */
+  /** Whether the body is program output, which starts at the left margin
+   * rather than being centered. */
   readonly output?: boolean;
+
+  /** The width the box gives the body, in columns, when that is fixed rather
+   * than fitted to the body's lines. */
+  readonly width?: number;
 
   /** Index of the focused button — the one Space and Enter activate, drawn
    * highlighted. When absent, the default button (if any) is highlighted. */
@@ -1471,13 +1474,14 @@ export interface DialogBox {
 }
 
 /** Geometry of the centered dialog box, sized to its content (title, body and
- * button row), or as wide as the screen for program output, and clamped to
- * leave two cells for the drop shadow. */
+ * button row) or to the body's fixed width, and clamped to leave two cells for
+ * the drop shadow. */
 export function dialogBox(view: ViewState, dialog: DialogState): DialogBox {
   const titleW = cpLen(dialog.title) + 4; // the padding spaces and some fill
-  const bodyW = dialog.body.reduce((m, l) => Math.max(m, cpLen(l)), 0);
+  const bodyW = dialog.width ??
+    dialog.body.reduce((m, l) => Math.max(m, cpLen(l)), 0);
   const btnW = buttonsWidth(dialog.buttons);
-  const contentW = dialog.output ? view.width : Math.max(titleW, bodyW, btnW);
+  const contentW = Math.max(titleW, bodyW, btnW);
   // The margin columns each side, then the two borders.
   // Inner rows: a blank under the title, the body, a blank, the buttons, and the
   // buttons' shadow.
@@ -1582,8 +1586,8 @@ function applyDialog(
   if (view.color) castShadow(rows, view, x, y, boxW, boxH);
 }
 
-/** Write `text` centered (or at the left) in `cells`, one blank margin column
- * inside each edge. */
+/** Write `text` in `cells`, centered or starting after the dialog's margin,
+ * and clipped to leave one blank column inside each edge. */
 function placeText(
   cells: Cell[],
   text: string,
@@ -1592,10 +1596,9 @@ function placeText(
 ): void {
   const innerW = cells.length;
   const chars = [...showControls(text)];
-  const start = 1 +
-    (leftAligned
-      ? 0
-      : Math.max(0, Math.floor((innerW - 2 - chars.length) / 2)));
+  const start = leftAligned
+    ? DIALOG_HMARGIN
+    : 1 + Math.max(0, Math.floor((innerW - 2 - chars.length) / 2));
   for (let j = 0; j < chars.length; j++) {
     const col = start + j;
     if (col >= 1 && col <= innerW - 2) cells[col] = { ch: chars[j], style };
