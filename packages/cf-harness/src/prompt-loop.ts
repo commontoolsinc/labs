@@ -201,6 +201,7 @@ import { collapseSupersededRunPatternDiagnostics } from "./run-pattern-diagnosti
 import { collapseSupersededRunPatternSources } from "./run-pattern-source-collapse.ts";
 import {
   type HarnessOpeningResearch,
+  type HarnessRunState,
   isTerminalHarnessRunStatus,
 } from "./run-state.ts";
 import {
@@ -223,7 +224,17 @@ import {
 import {
   classifyTask,
   type HarnessTaskClassification,
+  type HarnessTaskShape,
 } from "./task-classification.ts";
+import {
+  classifiedShape,
+  type RunShape,
+  sendsSection,
+} from "./prompt-sections.ts";
+import {
+  DEFAULT_HARNESS_RUN_DEPTH,
+  type HarnessRunDepth,
+} from "./contracts/run-depth.ts";
 import { createResearchRunner } from "./research/runner.ts";
 import { researchPatternRecords } from "./research/context.ts";
 import { REVISION_VERIFICATION_GUIDANCE } from "./revision-verification.ts";
@@ -311,6 +322,19 @@ export interface CreateHarnessPromptLoopOptions
 
   promptCacheMode?: "implicit" | "explicit";
   reasoningEffort?: string;
+
+  /**
+   * How far the caller wants the run taken; `standard` when absent. A deep
+   * run in the `fabric` domain gets the opening research pass, as an `author`
+   * task does at any depth.
+   */
+  depth?: HarnessRunDepth;
+
+  /**
+   * What the caller says about a fresh root task: its tags, its domains, or
+   * both, each taken in place of the classifier's.
+   */
+  taskShape?: HarnessTaskShape;
 
   /**
    * Reasoning effort for the `research` tool's private model turns. Research
@@ -3088,6 +3112,8 @@ export class CfHarnessPromptLoop {
   readonly #cacheAffinityKey?: string;
   readonly #promptCacheMode?: "implicit" | "explicit";
   readonly #reasoningEffort?: string;
+  readonly #depth: HarnessRunDepth;
+  readonly #taskShape: HarnessTaskShape;
   readonly #researchReasoningEffort?: string;
   readonly #compactThreshold?: number;
   readonly #subagentCompositionGuidance: boolean;
@@ -3235,6 +3261,8 @@ export class CfHarnessPromptLoop {
     this.#cacheAffinityKey = options.cacheAffinityKey;
     this.#promptCacheMode = options.promptCacheMode;
     this.#reasoningEffort = options.reasoningEffort;
+    this.#depth = options.depth ?? DEFAULT_HARNESS_RUN_DEPTH;
+    this.#taskShape = options.taskShape ?? {};
     this.#researchReasoningEffort = options.researchReasoningEffort;
     this.#compactThreshold = options.compactThreshold;
     this.#subagentCompositionGuidance = options.subagentCompositionGuidance ??
@@ -3598,7 +3626,7 @@ export class CfHarnessPromptLoop {
     if (
       options.task === undefined || this.engine.resumedRun ||
       runState.lineage !== undefined || !this.#allowedToolIds.has("research") ||
-      runState.taskClassification?.tags.includes("author") === false ||
+      !sendsSection("opening-research", this.#shapeOf(runState)) ||
       isClosedResearchTask(options.task, runState)
     ) {
       return undefined;
@@ -3721,10 +3749,18 @@ export class CfHarnessPromptLoop {
     return { index: taskIndex, inserted: true };
   }
 
+  /** What decides which sections a run of this loop is sent. */
+  #shapeOf(
+    runState: Pick<HarnessRunState, "taskClassification">,
+  ): RunShape {
+    return classifiedShape(runState.taskClassification, this.#depth);
+  }
+
   /**
-   * Tags a fresh root task with the kinds of work it calls for and records
-   * them on the run, before the host assembles the prompt the tags shape.
-   * The tags gate the opening research pass and the parent's browser
+   * Tags a fresh root task with the kinds of work it calls for and the
+   * domains it happens in, taking each part the caller stated in its task
+   * shape, and records them on the run, before the host assembles the prompt
+   * they shape. They gate the opening research pass and the parent's browser
    * guidance here.
    */
   async classifyTask(task: string): Promise<HarnessTaskClassification> {
@@ -3735,7 +3771,7 @@ export class CfHarnessPromptLoop {
       inputCells: runState.inputCells,
       browserHost: this.engine.browserHost !== undefined &&
         this.#allowedSubagentProfiles.has(BROWSER_SUBAGENT_PROFILE),
-    });
+    }, this.#taskShape);
     await this.engine.recordTaskClassification(classification);
     return classification;
   }
@@ -3828,7 +3864,7 @@ export class CfHarnessPromptLoop {
     const browserHost = this.#allowedSubagentProfiles.has(
         BROWSER_SUBAGENT_PROFILE,
       ) &&
-        initialRunState.taskClassification?.tags.includes("act") !== false
+        sendsSection("browser-host-parent", this.#shapeOf(initialRunState))
       ? this.engine.browserHost
       : undefined;
     if (this.#requirePieceOutput || browserHost !== undefined) {
@@ -5621,10 +5657,15 @@ export class CfHarnessPromptLoop {
       };
     }
     if (toolId === "assign_slug" && isObjectNotArray(output)) {
-      // The slug is the model's own word and the URL is composed from the
-      // session's API URL and space name, so neither is a fabric identifier;
-      // the piece id stays in the artifact, and the error text is scrubbed.
-      const { pieceId: _pieceId, ...publicOutput } = output;
+      // The slug is the model's own word. The piece id, the space's DID, and
+      // the URL that carries it stay in the artifact, where the console reads
+      // the address a person opens; the error text is scrubbed.
+      const {
+        pieceId: _pieceId,
+        space: _space,
+        url: _url,
+        ...publicOutput
+      } = output;
       const scrubbed: Record<string, unknown> = { ...publicOutput };
       if (typeof scrubbed.message === "string") {
         scrubbed.message = scrubBareFabricIdentifiers(scrubbed.message);
@@ -5635,7 +5676,7 @@ export class CfHarnessPromptLoop {
           createHarnessTranscriptOmissionRuleRecord(
             "artifact-only",
             resultRef,
-            presentFieldPointers(output, ["pieceId"]),
+            presentFieldPointers(output, ["pieceId", "space", "url"]),
           ),
           createHarnessTranscriptOmissionRuleRecord(
             "bare-fabric-identifier-scrub",

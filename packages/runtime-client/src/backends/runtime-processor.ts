@@ -176,6 +176,8 @@ import {
 } from "./worker-client.ts";
 import {
   type ActionRunTraceResponse,
+  type BlobUrlRequest,
+  type BlobUrlResponse,
   BooleanResponse,
   type CellFieldsRequest,
   type CellFieldsResponse,
@@ -1518,7 +1520,8 @@ export class RuntimeProcessor {
    * Tears down everything one client owns, leaving the runtime and every other
    * client's work running. This is what a client's departure costs: its cell
    * and operation subscriptions stop, its presence memberships end, its VDOM
-   * trees unmount, and nothing else moves.
+   * trees unmount, and the documents nothing reads any longer are released
+   * (`Runtime.releaseUnreadDocuments()`).
    *
    * The runtime itself is never touched here, however the departing client
    * came to leave. Only {@link dispose} ends a runtime, and only the client
@@ -1581,6 +1584,9 @@ export class RuntimeProcessor {
       if (membership.client.id !== client.id) continue;
       void this.#endPresenceMembership(subscriptionId);
     }
+
+    // What only this client read is now read by nothing.
+    void this.#runtime.releaseUnreadDocuments();
   }
 
   #hostSelectedCell(ref: CellRef): Cell<unknown> {
@@ -3821,14 +3827,14 @@ export class RuntimeProcessor {
     if (!isDID(request.space)) {
       throw new Error("uploadBlob requires a space DID");
     }
-    const suffix = (request.suffix ?? "bin").replace(/^\./, "") || "bin";
+    // With no suffix, the upload names no blob in its path, and the store
+    // chooses the suffix itself.
+    const suffix = request.suffix?.replace(/^\./, "");
+    const blobPath = suffix ? `/upload.${encodeURIComponent(suffix)}` : "";
     // The blob belongs to the named space, so it uploads to — and its
     // returned URL resolves against — THAT space's host.
     const host = this.#runtime.hostForSpace(request.space);
-    const target = new URL(
-      `/${request.space}/blobs/upload.${encodeURIComponent(suffix)}`,
-      host,
-    );
+    const target = new URL(`/${request.space}/blobs${blobPath}`, host);
     // The envelope's decode already produced this; `request.body` is a
     // `FabricBytes` by the time it arrives, and a handler owns the values its
     // request carries per `BaseRequest`, so nothing else is reading it. The
@@ -3838,11 +3844,19 @@ export class RuntimeProcessor {
     if (!(bytes instanceof FabricBytes)) {
       throw new Error("uploadBlob requires bytes as its body");
     }
+    if (request.name !== undefined && typeof request.name !== "string") {
+      throw new Error(
+        "uploadBlob requires any name it is given to be a string",
+      );
+    }
     // Blob upload payloads must preserve FabricBytes even when the wider
-    // process is running with legacy memory JSON flags.
+    // process is running with legacy memory JSON flags. A blob with no name
+    // has no `name` key at all, since its id is the hash of exactly what is
+    // sent.
     const body = blobUploadCodec.encode({
       type: request.contentType,
       body: bytes,
+      ...(request.name === undefined ? {} : { name: request.name }),
     });
     const response = await fetch(target, {
       method: "POST",
@@ -3861,6 +3875,32 @@ export class RuntimeProcessor {
     return {
       id: result.id,
       url: resolveBlobUrl(result.url, host, request.space),
+    };
+  }
+
+  /**
+   * Returns the URL the host of the request's space serves the request's blob
+   * at: the URL an upload of it returns, without the file suffix, and with
+   * `?download` for a request to save it.
+   */
+  handleBlobUrl(request: BlobUrlRequest): BlobUrlResponse {
+    if (!isDID(request.space)) {
+      throw new Error("blobUrl requires a space DID");
+    }
+    if (typeof request.id !== "string" || request.id.length === 0) {
+      throw new Error("blobUrl requires a blob id");
+    }
+    const hash = request.id.startsWith("fid1:")
+      ? request.id.slice("fid1:".length)
+      : request.id;
+    const host = this.#runtime.hostForSpace(request.space);
+    const query = request.download === true ? "?download" : "";
+    return {
+      url: resolveBlobUrl(
+        `blobs/${encodeURIComponent(hash)}${query}`,
+        host,
+        request.space,
+      ),
     };
   }
 
@@ -4126,6 +4166,8 @@ export class RuntimeProcessor {
         return this.setBreakpoints(request);
       case RequestType.UploadBlob:
         return await this.handleUploadBlob(request);
+      case RequestType.BlobUrl:
+        return this.handleBlobUrl(request);
       case RequestType.VDomMount:
         return this.handleVDomMount(request, client);
       case RequestType.VDomUnmount:

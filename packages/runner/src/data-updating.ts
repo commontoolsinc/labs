@@ -57,6 +57,7 @@ import { findAndInlineDataUriLinks } from "./data-uri.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
   areNormalizedLinksSame,
+  areNormalizedLinksSameIgnoringScope,
   createSigilLinkFromParsedLink,
   declareStreamSchema,
   isCellLink,
@@ -1258,6 +1259,67 @@ function consumeSteeringSlot(
 }
 
 /**
+ * Whether `target`, a link about to be written at `link`, names the same
+ * position of the same document at a broader scope, and that position is
+ * realized at `link`. A broader-scope slot whose content lives at a narrower
+ * scope holds a same-document link to that instance: a write redirect, or
+ * the plain link scope narrowing stores. It sits at the position itself or at
+ * an ancestor, which hands over the whole subtree, and a session realization
+ * of a space slot reaches the session instance through the user instance.
+ * Written at `link`, a link to a slot realized there would point the instance
+ * back at the slot that points at it: a link cycle every later read meets.
+ * Written there, the link refers to the instance itself.
+ */
+function realizesAt(
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  target: NormalizedFullLink,
+  options: DiffAndUpdateOptions | undefined,
+): boolean {
+  if (
+    !areNormalizedLinksSameIgnoringScope(target, link) ||
+    scopeRank(target.scope) >= scopeRank(link.scope)
+  ) {
+    return false;
+  }
+  const readOptions = {
+    ...options,
+    meta: { ...options?.meta, ...writeDestinationRead },
+  };
+  let scope: CellScope | undefined = target.scope;
+  while (scope !== undefined && scopeRank(scope) < scopeRank(link.scope)) {
+    scope = realizationScope(tx, { ...target, scope }, readOptions);
+  }
+  return scope === link.scope;
+}
+
+/**
+ * The narrower scope `slot` hands its content to, decided as link resolution
+ * decides it: by the stored value at `slot`'s path or, where that path is
+ * absent, at the nearest ancestor present. `undefined` when that value is
+ * content, or a link anywhere but the same position of the same document at a
+ * narrower scope.
+ */
+function realizationScope(
+  tx: IExtendedStorageTransaction,
+  slot: NormalizedFullLink,
+  readOptions: DiffAndUpdateOptions,
+): CellScope | undefined {
+  for (let depth = slot.path.length; depth >= 0; depth--) {
+    const position = { ...slot, path: slot.path.slice(0, depth) };
+    const stored = tx.readValueOrThrow(position, readOptions);
+    if (stored === undefined) continue;
+    if (!isPrimitiveCellLink(stored)) return undefined;
+    const hop = parseLink(stored, position);
+    return areNormalizedLinksSameIgnoringScope(hop, position) &&
+        scopeRank(hop.scope) > scopeRank(position.scope)
+      ? hop.scope
+      : undefined;
+  }
+  return undefined;
+}
+
+/**
  * Traverses objects and returns an array of changes that should be written. An
  * empty array means no changes.
  *
@@ -1759,9 +1821,12 @@ export function normalizeAndDiff(
     );
   }
 
-  // If we're about to create a reference to ourselves, no-op
+  // If we're about to create a reference to ourselves, no-op: a link to this
+  // very slot, or to the broader-scope slot whose realization this is.
   if (
-    newValueLink !== undefined && areNormalizedLinksSame(link, newValueLink)
+    newValueLink !== undefined &&
+    (areNormalizedLinksSame(link, newValueLink) ||
+      realizesAt(tx, link, newValueLink, options))
   ) {
     diffLogger.debug(
       "diff",

@@ -9,6 +9,11 @@ import type {
   ViewQuery,
   WatchSpec,
 } from "../v2.ts";
+import {
+  type DocumentInterestQuery,
+  type DocumentInterestsReport,
+  inspectDocumentInterests,
+} from "./document-interests.ts";
 import type { TrackedGraphState } from "./query.ts";
 import type { SessionCacheEntry } from "./server-sync.ts";
 import { trackedIdsFromEntries } from "./server-sync.ts";
@@ -64,6 +69,19 @@ export type SessionState = {
 
   /** Watch declarations by id, updated with the array at publication. */
   watchIndex: Map<string, WatchSpec>;
+
+  /**
+   * The graph watches, by id, that `session.watch.add` left unwalked
+   * because the graph of their branch already covered every root of
+   * theirs. Nothing in a graph is attributable to one of these, so
+   * removing it leaves its branch's graph as it stands, and removing a
+   * walked watch of the same branch evaluates that graph again and walks
+   * each of these that the rebuilt graph no longer covers. Every other
+   * graph watch was walked into its graph. A full evaluation of the watch
+   * set, whether a replacement or a catch-up, walks every watch, so it
+   * empties this set.
+   */
+  coveredWatchIds: Set<string>;
 
   /** Scoped dirty keys owned by operation watches. Rebuilt on replacement. */
   operationTrackedIds: Set<string>;
@@ -262,6 +280,7 @@ export class SessionRegistry {
       viewDemandGraphs: existing?.viewDemandGraphs ?? new Map(),
       viewDemandEntities: existing?.viewDemandEntities ?? new Map(),
       watchIndex: existing?.watchIndex ?? new Map(),
+      coveredWatchIds: existing?.coveredWatchIds ?? new Set(),
       operationTrackedIds: existing?.operationTrackedIds ?? new Set(),
       operationWatches: existing?.operationWatches ?? [],
       operationCursors: existing?.operationCursors ?? new Map(),
@@ -349,6 +368,11 @@ export class SessionRegistry {
       }
     }
     return sessions;
+  }
+
+  /** Attributes a document to retained sessions without pruning or mutation. */
+  documentInterests(query: DocumentInterestQuery): DocumentInterestsReport {
+    return inspectDocumentInterests(this.#sessions.values(), query);
   }
 
   /** Every live session of one principal across ALL spaces — the

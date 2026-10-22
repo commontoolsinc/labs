@@ -26,7 +26,9 @@ function reconnectableTransport(
   options: {
     holdFirstTransact?: boolean;
     loseFirstTransact?: boolean;
-    refuseWritesOf?: { localSeq: number; cause: unknown };
+    /** Refuses the writes of the commit `localSeq`, or else of each
+     * `session.watch.add` naming the watch `watchId`. */
+    refuseWritesOf?: { localSeq?: number; watchId?: string; cause: unknown };
     /** Resolve a send once the frame is handed over, as a socket does,
      * rather than once the server has handled it. */
     sendResolvesOnWrite?: boolean;
@@ -70,13 +72,19 @@ function reconnectableTransport(
       const message = decodeMemoryBoundary(payload) as {
         type: string;
         commit?: { localSeq: number };
+        watches?: { id: string }[];
       };
       const refusal = options.refuseWritesOf;
       if (
-        refusal && message.type === "transact" &&
-        message.commit?.localSeq === refusal.localSeq
+        refusal &&
+        (message.type === "transact"
+          ? message.commit?.localSeq === refusal.localSeq
+          : message.type === "session.watch.add" &&
+            (message.watches ?? []).some((watch) =>
+              watch.id === refusal.watchId
+            ))
       ) {
-        // The socket refuses this commit's own write on an open connection,
+        // The socket refuses this frame's own write on an open connection,
         // and the transport tears the connection down, as a socket transport
         // does: the loss reported first, then the send rejected.
         refusedWrites++;
@@ -689,6 +697,47 @@ describe("v2-client-reconnect-recovery", () => {
       expect(wire.refusedWrites).toBe(5);
       await client.restoreConnection();
       expect(client.isConnected()).toBe(true);
+    } finally {
+      await client.close();
+      await pending?.catch(() => {});
+      await server.close();
+    }
+  });
+
+  it("rejects a watch request with its own write's error once that write has failed five times", async () => {
+    const server = new Server({
+      ...testSessionOpenServerOptions,
+      store: new URL("memory://reconnect-refused-watch-write"),
+    });
+    const writeFailure = new Error("frame refused by socket");
+    const wire = reconnectableTransport(server, {
+      refuseWritesOf: { watchId: "refused", cause: writeFailure },
+    });
+    const client = await connect({ transport: wire.transport });
+    const session = await client.mount(
+      "did:key:z6Mk-reconnect-refused-watch-write",
+      {},
+      testSessionOpenAuthFactory,
+    );
+    const watch = (id: string) => ({
+      id,
+      kind: "graph" as const,
+      query: {
+        roots: [{ id: `of:${id}`, selector: { path: [], schema: false } }],
+      },
+    });
+    let pending: ReturnType<typeof session.watchAddSync> | undefined;
+    try {
+      pending = session.watchAddSync([watch("refused")]);
+      await expect(pending).rejects.toBe(writeFailure);
+      expect(wire.refusedWrites).toBe(5);
+      await client.restoreConnection();
+      await session.watchAddSync([watch("accepted")]);
+      expect(
+        server.demandedInstancesForSpace(
+          "did:key:z6Mk-reconnect-refused-watch-write",
+        ).map((row) => row.id),
+      ).toEqual(["of:accepted"]);
     } finally {
       await client.close();
       await pending?.catch(() => {});

@@ -2166,6 +2166,30 @@ ADD COLUMN source_event TEXT;
   }
 };
 
+// An outbox row's payload is stored in the memory boundary's encoding, which
+// keeps a property holding `undefined`. A row whose payload is plain JSON
+// text is rewritten to that encoding; plain JSON holds nothing the encoding
+// cannot, so the value is unchanged. Undelivered rows are few, as delivery
+// deletes them, so the scan is short.
+const migrateExecutionOutboxPayloadEncoding = (database: Database): void => {
+  const plain = database.prepare(`
+SELECT id, payload FROM execution_outbox
+WHERE substr(payload, 1, 5) <> 'fvj1:'
+`).all() as Array<{ id: number; payload: string }>;
+  if (plain.length === 0) return;
+  const update = database.prepare(
+    `UPDATE execution_outbox SET payload = :payload WHERE id = :id`,
+  );
+  database.transaction(() => {
+    for (const row of plain) {
+      update.run({
+        id: row.id,
+        payload: encodeMemoryBoundary(JSON.parse(row.payload)),
+      });
+    }
+  }).immediate();
+};
+
 // Server-execution v2 Phase 1 stage C.2: the observation-payload tables are
 // REPLACED by the scheduler_basis index (serving-loop.md §3b). The drop list
 // is §3b's SEVEN tables, deliberately not a constant enumerating six (D6 —
@@ -2228,6 +2252,7 @@ export const open = async (
   migrateCommitDerivedThrough(database);
   migrateCommitDelegation(database);
   migrateExecutionOutboxEventCarriage(database);
+  migrateExecutionOutboxPayloadEncoding(database);
   migrateSchedulerObservationTablesToBasis(database);
   migrateIntegratedOperationIds(database);
   return {

@@ -65,6 +65,16 @@ export interface LocalJobProfile {
   model?: string;
 
   /**
+   * The reasoning effort a job runs at, and the most a request may ask for;
+   * the provider's default when absent, and then a request may name none. It
+   * sets the effort of the job's own model calls and of children that share
+   * its model. The research tool runs at the runner's research effort, and a
+   * child on another model at that provider's default, so it does not bound
+   * every model call in the job.
+   */
+  reasoningEffort?: ReasoningEffort;
+
+  /**
    * Whether a job may declare a browser host. A job that does browses
    * through it: the lane adds `delegate_task` and the `browser` subagent
    * profile to that job alone, so a job without a host never gains them.
@@ -120,6 +130,7 @@ export type LocalJobProfiles = ReadonlyMap<string, LocalJobProfile>;
 export interface LocalJobNarrowing {
   tools?: readonly string[];
   maxModelTurns?: number;
+  reasoningEffort?: ReasoningEffort;
 
   /** The request's browser host declaration, when it made one. */
   browserHost?: unknown;
@@ -132,6 +143,28 @@ export interface LocalJobNarrowing {
 }
 
 const ROLES: readonly PromptSlotRole[] = ["direct-command", "context", "quote"];
+
+/**
+ * Reasoning efforts from least to most, as the providers the harness speaks
+ * to name them; a model may support only some of them.
+ */
+export const REASONING_EFFORTS = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+
+export type ReasoningEffort = typeof REASONING_EFFORTS[number];
+
+/** `value` as a reasoning effort, or undefined when it names none. */
+export const reasoningEffortOf = (
+  value: unknown,
+): ReasoningEffort | undefined =>
+  REASONING_EFFORTS.find((effort) => effort === value);
 
 /** The tool that spawns a subagent. */
 const DELEGATE_TOOL: BuiltinToolId = "delegate_task";
@@ -189,6 +222,7 @@ const profileOf = (name: string, value: unknown): LocalJobProfile => {
     loomRetrievalConfig,
     loomCommandsConfig,
     model,
+    reasoningEffort,
     browserHost,
     fabric,
     patternIndexUrl,
@@ -229,6 +263,10 @@ const profileOf = (name: string, value: unknown): LocalJobProfile => {
   }
   if (model !== undefined && typeof model !== "string") {
     fail("`model` must be a string");
+  }
+  const effort = reasoningEffortOf(reasoningEffort);
+  if (reasoningEffort !== undefined && effort === undefined) {
+    fail(`\`reasoningEffort\` must be one of ${REASONING_EFFORTS.join(", ")}`);
   }
   if (browserHost !== undefined && typeof browserHost !== "boolean") {
     fail("`browserHost` must be true or false");
@@ -305,6 +343,7 @@ const profileOf = (name: string, value: unknown): LocalJobProfile => {
       ? { loomCommandsConfig: loomCommandsConfig as string }
       : {}),
     ...(model !== undefined ? { model: model as string } : {}),
+    ...(effort !== undefined ? { reasoningEffort: effort } : {}),
     ...(browserHost === true ? { browserHost: true } : {}),
     ...(session !== undefined ? { fabric: session } : {}),
     ...(patternIndexUrl !== undefined
@@ -418,9 +457,11 @@ export const localJobForeignSpaces = (
  * never assumed to, since a space it does not serve reads as empty and
  * nothing reports it — and every space `foreignSpaces` lists must be one an
  * input names. A piece address names a slug, which resolves only in the
- * profile's own space, so one naming another space is refused, as is one
- * qualified by name under a profile naming its space by DID, since only a
- * session can resolve the name to compare them.
+ * profile's own space, so one naming another space is refused. Under a profile
+ * naming its space by DID, an address names it by that DID, and one qualified
+ * by a name is refused, since that space has none. Under a profile naming its
+ * space by a legacy name, an address naming a space by DID is left to the
+ * session, which alone knows the DID that name resolves to.
  */
 const refuseInputs = (
   profile: LocalJobProfile,
@@ -464,21 +505,27 @@ const refuseInputs = (
     }
     let address;
     try {
+      address = parseNamedPieceAddress(ref);
+    } catch {
+      // A malformed address is the harness check's to describe, below.
+    }
+    if (
+      byDid && address?.spaceName !== undefined && !isDID(address.spaceName)
+    ) {
+      return `Input \`${name}\` names its space by name, and the profile names its space by DID; name the space by its DID, or send the space-relative /of:<id> form.`;
+    }
+    try {
       checkInputCellSpec(
         { name, ref },
         byDid ? fabric.space as MemorySpace : undefined,
         byDid ? undefined : fabric.space,
         routes,
       );
-      address = parseNamedPieceAddress(ref);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return message.includes(`\`${name}\``)
         ? message
         : `Input \`${name}\`: ${message}`;
-    }
-    if (byDid && address?.spaceName !== undefined) {
-      return `Input \`${name}\` names its space by name, and the profile names its space by DID, so it cannot be checked against the profile's space; send the space-relative /of:<id> form.`;
     }
   }
   return undefined;
@@ -494,7 +541,7 @@ export const narrowLocalJobProfile = (
   profile: LocalJobProfile,
   narrowing: LocalJobNarrowing,
 ): { profile: LocalJobProfile } | { refusal: string } => {
-  const { tools, maxModelTurns, browserHost } = narrowing;
+  const { tools, maxModelTurns, reasoningEffort, browserHost } = narrowing;
   const beyond = tools?.filter((tool) => !profile.tools.includes(tool)) ?? [];
   if (beyond.length > 0) {
     return {
@@ -508,6 +555,23 @@ export const narrowLocalJobProfile = (
       refusal:
         `The profile allows at most ${profile.maxModelTurns} model turns.`,
     };
+  }
+  if (reasoningEffort !== undefined) {
+    if (profile.reasoningEffort === undefined) {
+      return {
+        refusal:
+          "The profile sets no reasoning effort, so a request may not name one.",
+      };
+    }
+    if (
+      REASONING_EFFORTS.indexOf(reasoningEffort) >
+        REASONING_EFFORTS.indexOf(profile.reasoningEffort)
+    ) {
+      return {
+        refusal:
+          `The profile allows at most \`${profile.reasoningEffort}\` reasoning effort.`,
+      };
+    }
   }
   if (browserHost !== undefined && profile.browserHost !== true) {
     return { refusal: "The profile does not admit a browser host." };
@@ -532,6 +596,7 @@ export const narrowLocalJobProfile = (
         : {}),
       ...(tools !== undefined ? { tools: [...tools] } : {}),
       ...(maxModelTurns !== undefined ? { maxModelTurns } : {}),
+      ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
       ...(browserHost !== undefined ? { browserHost: true } : {}),
     },
   };

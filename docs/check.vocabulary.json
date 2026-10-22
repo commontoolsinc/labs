@@ -43,6 +43,7 @@
     "ifElse",
     "isWellFormedDID",
     "lift",
+    "nameBlob",
     "navigateTo",
     "pattern",
     "principalOf",

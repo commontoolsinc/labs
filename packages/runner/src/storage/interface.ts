@@ -255,6 +255,17 @@ export type StoreReadThrough = (
   address: { id: URI; scopeKey: ScopeKey },
 ) => SessionSyncUpsert | undefined;
 
+/**
+ * A stored document: its space and id, and the scope it is read in, with the
+ * scope instance when the read names one.
+ */
+export type StoredDocumentAddress = {
+  space: MemorySpace;
+  id: URI;
+  scope?: CellScope;
+  scopeKey?: ScopeKey;
+};
+
 export interface IStorageManager extends IStorageSubscriptionCapability {
   id: string;
 
@@ -551,6 +562,21 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   ): Cancel;
 
   /**
+   * Observes a space's remote subscription ending with an error, which
+   * `spaceSessionError()` reports from then on: for example a takeover, an
+   * authorization denial, or a client that gives up reconnecting. The space's
+   * documents receive no further updates unless a reopen after an access
+   * change (see `subscribeSpaceAccessChange()`) replaces the session, after
+   * which `spaceSessionError()` returns undefined again. An authorization
+   * denial also reaches `subscribeSpaceAccessLoss()` observers. Ordinary
+   * reconnects, normal closure, and spaces whose reads an authoritative local
+   * store supplies do not emit.
+   */
+  subscribeSpaceSessionError?(
+    observer: (space: MemorySpace, error: Error) => void,
+  ): Cancel;
+
+  /**
    * Register an in-flight commit so the durability barrier
    * (`hasPendingCommits` / `pendingCommitsSettled`) covers it. Called by the
    * transaction layer at `commit()` entry, synchronously with the commit
@@ -641,6 +667,57 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
      * replica seen the doc" check are then per that INSTANCE. */
     identity?: ScopeKeyIdentity,
   ): boolean;
+
+  /**
+   * Returns the token that keeps a document loaded: while anything holds a
+   * strong reference to it, `releaseUnreadDocuments()` keeps the document.
+   * A cell that has loaded its document holds it. Each call for a document
+   * returns the same token while one is held. A read under `identity`, when it
+   * is not the manager's own, holds that identity's instance of a scoped
+   * document.
+   */
+  holdDocument?(
+    address: StoredDocumentAddress,
+    identity?: ScopeKeyIdentity,
+  ): object;
+
+  /**
+   * Adds a way for the manager to learn whether something reads a document;
+   * a document any of them reads keeps its watches through
+   * `releaseUnreadDocuments()` and stays loaded when its watches go. Returns
+   * a cancel that removes it.
+   */
+  addDocumentReader?(
+    reads: (address: StoredDocumentAddress) => boolean,
+  ): Cancel;
+
+  /**
+   * Removes the watches rooted at documents nothing keeps, and drops the
+   * documents those watches alone kept loaded. A document is kept while a
+   * reader (`addDocumentReader()`) reads it, while its hold token
+   * (`holdDocument()`) is reachable, while a sink on the replica names it,
+   * or while a local write to it is pending; a root loaded or read since
+   * the previous call began keeps its watch through this one. A later read
+   * of a dropped document loads it again. A space whose server does not
+   * advertise `watchRemoveV1` keeps every watch. Resolves once every space's
+   * session has answered.
+   */
+  releaseUnreadDocuments?(): Promise<void>;
+
+  /**
+   * How many documents this manager has dropped. A cell loaded before the
+   * count last moved checks on its next read whether its replica still holds
+   * its document, and loads it again only if it does not.
+   */
+  droppedDocuments?(): number;
+
+  /** Calls `observer` with each batch of documents a space's replica drops. */
+  subscribeDocumentsDropped?(
+    observer: (
+      space: MemorySpace,
+      addresses: readonly Omit<StoredDocumentAddress, "space">[],
+    ) => void,
+  ): Cancel;
 
   /**
    * Undo a `shouldPullDoc` reservation after the kicked sync FAILED, so a
@@ -3363,18 +3440,25 @@ export interface ISpaceReplica extends ISpace {
    * server runs server execution or does not say whether it does, since its
    * executor commits waves outside the publication turn a push is complete
    * under. A document a watch mutation delivered may hold a later state than
-   * this sequence.
+   * this sequence. When `documents` is supplied, returns `undefined` if any
+   * mutable document has no delivered watch: an accepted write alone proves
+   * its stored version, not coverage of subsequent changes.
    */
-  completeThroughSeq?(): number | undefined;
+  completeThroughSeq?(
+    documents?: readonly Pick<IMemorySpaceAddress, "id" | "scope">[],
+  ): number | undefined;
 
   /**
-   * Whether the replica's state for the document is confirmed: the document
-   * is watched and delivered, no local write to it is pending, and its value
-   * is neither a refused write folded locally nor an own write promoted past
-   * what a push has covered. An absent document a push delivered is
-   * confirmed, and so is a content-addressed document in space scope holding
-   * the content its id names that the replica's own accepted commit stored,
-   * whether or not a frame delivered it.
+   * Whether the replica holds a known stored version of the document, with
+   * no pending local write, refused local fold, or incomplete wave promotion.
+   * A watched delivery establishes it, including absence; a newer own write
+   * over that delivery waits for a covering push. An accepted whole-document
+   * set or deletion also establishes a version without a frame delivery, as
+   * does a write the server elided as an identity against the commit's read
+   * of the document, and verified content under its content-addressed id in
+   * space scope. A mutable version without a delivered watch may be stale:
+   * use `completeThroughSeq()` with the read documents to ask about coverage
+   * of later changes.
    */
   isConfirmedDocument?(
     id: URI,

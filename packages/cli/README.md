@@ -418,17 +418,26 @@ uses this fixture mechanism at both postures.
 
 `cf view [file]` is an interactive pager for transformed TypeScript, source
 files, and unified diffs. Named Markdown, JSON, JSONC, JSON Lines, YAML, Python,
-Swift, Kotlin, TOML, shell, Java properties, ProGuard, and XML files use their
-own syntax highlighting. Shell covers Bash and POSIX shell scripts named `.sh`,
-`.bash`, or `.command`, and Bash's startup files, such as `.bashrc` and
-`.profile`. A heredoc's body is colored as a string, with the expansions its
-delimiter allows. A Swift package manifest is Swift source under its `.swift`
-extension, and a module's `.swiftinterface` is Swift as well. Gradle build and
-settings scripts are Kotlin scripts under the `.kts` extension. Gradle version
-catalogs and Cargo manifests are TOML, as are Cargo lock files. The ProGuard
-language covers the keep rules that ProGuard and R8 read: `proguard-rules.pro`
-and `consumer-rules.pro` select it by name, and another `.pro` file uses it when
-one of its lines starts with one of ProGuard's option names, because Qt project
+Swift, Kotlin, TOML, HCL, shell, makefile, Java properties, INI, ProGuard, and
+XML files use their own syntax highlighting. HCL covers OpenTofu and Terraform
+configuration named `.tf` or `.tofu`, variable definitions files named
+`.tfvars`, backend configuration files named `.tfbackend`, and other `.hcl`
+files, such as dependency lock files. A string's interpolations and template
+directives are colored as code inside the string. Shell covers Bash and POSIX
+shell scripts named `.sh`, `.bash`, or `.command`, and Bash's startup files,
+such as `.bashrc` and `.profile`. A heredoc's body is colored as a string, with
+the expansions its delimiter allows. The makefile language reads GNU make's
+syntax in files named `Makefile`, `makefile`, `GNUmakefile`, or `.mk`. Make
+passes recipe lines to the shell, so they are colored as shell. The same is true
+of the command in a `!=` assignment and the argument of the `shell` function.
+Make's own variable references and function calls are colored inside that shell
+text. A Swift package manifest is Swift source under its `.swift` extension, and
+a module's `.swiftinterface` is Swift as well. Gradle build and settings scripts
+are Kotlin scripts under the `.kts` extension. Gradle version catalogs and Cargo
+manifests are TOML, as are Cargo lock files. The ProGuard language covers the
+keep rules that ProGuard and R8 read: `proguard-rules.pro` and
+`consumer-rules.pro` select it by name, and another `.pro` file uses it when one
+of its lines starts with one of ProGuard's option names, because Qt project
 files and Prolog use that suffix as well. XML covers Android manifests,
 resources, and layouts, SVG images, and Apple property lists, entitlements, and
 privacy manifests. Web manifests, TLDraw documents, Deno lock files, editor
@@ -440,16 +449,30 @@ without a filename keeps TypeScript highlighting when its module header
 identifies it. Python interpreter shebangs select Python for otherwise
 unrecognized names, `swift` and `xcrun swift` shebangs select Swift, and
 `kotlin` shebangs select Kotlin. `sh`, `bash`, `dash`, and `ash` shebangs select
-shell, which covers Git hooks and other extensionless programs. Node, Deno, and
-Bun shebangs select the TypeScript and JavaScript language family. A diff reads
-a shebang for a file whose path selects no language, from a hunk that starts at
-the file's first line, from the workspace file, or from the old Git blob. Other
-filename-free source and named files with unrecognized syntax are shown as plain
-text. For piped source, `--filename` selects syntax as though the input had that
-name. `--language` selects a language by its stable identifier or alias. Both
-options keep the pipe read-only and suppress unified-diff auto-detection. An
-explicit language takes priority when both options are present. Use `--diff`
-instead when the pipe is a unified diff.
+shell, which covers Git hooks and other extensionless programs. `make` and
+`gmake` shebangs select the makefile language. Node, Deno, and Bun shebangs
+select the TypeScript and JavaScript language family. For an otherwise
+unrecognized name, source that starts with an XML declaration (`<?xml`), after
+any byte order mark, selects XML, which covers Interface Builder documents,
+project files, and the other XML formats that no extension announces. A diff
+reads a shebang or an XML declaration for a file whose path selects no language,
+from a hunk that starts at the file's first line, from the workspace file, or
+from the old Git blob. Other filename-free source and named files with
+unrecognized syntax are shown as plain text. For piped source, `--filename`
+selects syntax as though the input had that name. `--language` selects a
+language by its stable identifier or alias. Both options keep the pipe read-only
+and suppress unified-diff auto-detection. An explicit language takes priority
+when both options are present. Use `--diff` instead when the pipe is a unified
+diff.
+
+INI covers `.ini` files, which include Ansible inventories with that suffix,
+Ansible's `ansible.cfg` and `.ansible.cfg`, and the configuration files of
+Python tools such as `setup.cfg`, `.coveragerc`, `.flake8`, `pylintrc`, and
+`.codespellrc`. Another `.cfg` file is INI when its first line other than blank
+lines and comments heads a section whose name does not start the way a JSON
+array's first value does. A line in an Ansible inventory that names a host and
+then sets `name=value` variables colors the host and each variable. The
+structure tree lists sections with the keys and hosts in each.
 
 The binary language handles known binary filenames, input containing a NUL byte,
 and input that is not valid UTF-8. It starts in a read-only rendered view with
@@ -470,10 +493,11 @@ and TypeScript semantic lookup.
 
 Automatic content detection is limited to binary input, structurally identified
 raw unified diffs, and standard Git commit output. A raw diff starts at the
-first nonblank line. Recognized shebangs and transformed compiler headers remain
-explicit selectors. A shared extension such as `.cfg` consults the source for
-the one pattern its metadata names. JSON-, YAML-, Markdown-, Python-, and other
-language-shaped source is otherwise not guessed from its syntax.
+first nonblank line. Recognized shebangs, XML declarations, and transformed
+compiler headers remain explicit selectors. A shared extension such as `.cfg`
+consults the source for the pattern each language's metadata pairs with it.
+JSON-, YAML-, Markdown-, Python-, and other language-shaped source is otherwise
+not guessed from its syntax.
 
 A diff shows its whole-diff change totals at the top right corner of its first
 line: the added line count and the removed line count, colored like additions
@@ -513,6 +537,41 @@ Markdown files can switch between the source and a rendered terminal view with
 markers, tables, rules, and code. The same view is available for Markdown files
 inside a unified diff; diff markers, addition and deletion tints, line
 positions, and hunk expansion remain in place.
+
+Press `P` to push the branch checked out in the repository the viewer runs in,
+as it stands, to the branch of the same name on `origin`. The push is forced,
+but fails rather than discard commits on `origin` that the branch has never
+included, even when they have been fetched. A dialog shows git's output as it
+arrives, with an Abort button that stops the push. When the push ends, the
+dialog adds how it ended and the button becomes Close, which leaves that summary
+in the status line. When the server's reply offers a page for creating a pull
+request, the viewer opens it in the browser. Git asks nothing on the terminal
+while the viewer holds it; a question such as a key's passphrase goes to the
+program `SSH_ASKPASS` names, and fails when it names none. `P` refuses to push
+`origin`'s default branch, and refuses when `origin` names no default branch
+(`git remote set-head origin --auto` finds it). It also refuses a checkout not
+on a branch, and refuses when git started the viewer as its pager for a
+different repository.
+
+In the main view, `b` shows or hides the blame column in place of paging up;
+Page Up and Ctrl-B still page up there. The column takes the right 20 columns of
+the screen when the terminal is at least 40 columns wide. Each line's entry is
+how long ago the commit that last changed it was written, then the author's
+name, cut to fit. The age is a whole number of seconds under a minute, minutes
+under an hour, hours under a day, days under a year, and years after that, each
+rounded to the nearest, so that 59.6 seconds reads `1m`: `45s`, `3h`, `168d`,
+`2y`. When the repository's default remote (the one `git fetch` uses when given
+none), or else `origin`, or else another remote, is on GitHub, each entry is a
+link to its commit's page there, for terminals that open links. Links are drawn
+only when color is on. A run of adjacent lines from one commit shows its entry
+once, on the first of them on screen. A file's lines are blamed as the viewer's
+text, so edited lines read `uncommitted` before they are saved. In a diff, a
+file that follows a commit header is blamed as it stands in that commit. Any
+other hunk is blamed as its file stands in the working tree, and only while that
+file still holds the hunk's added and context lines where the hunk places them.
+Removed lines show nothing. The column fills in as `git blame` finishes for each
+file in view. When git cannot blame a file, the status line says why, and the
+viewer does not try that file again.
 
 Press `\` in the interactive pager to cycle through unwrapped lines, hard
 wrapping, and word wrapping. Hard wrapping fills every screen row before it
@@ -1713,21 +1772,25 @@ The door is HTTP on the Unix socket, mode 0600, with a bearer token in
 `<socket>.token`, also 0600 and minted at each start: reaching the socket is the
 authority. A caller enqueues
 `{caller, profile, idempotencyKey, task,
-instructions?, context?, resultSchema, tools?, maxModelTurns?, browserHost?,
-inputs?, foreignSpaces?}`
+instructions?, context?, resultSchema, tools?, maxModelTurns?, depth?, tags?,
+domains?, reasoningEffort?, browserHost?, inputs?, foreignSpaces?}`
 with `POST /jobs`, reads a job with `GET /jobs/<id>` or the newest with
 `GET /jobs?limit=n`, stops one with `POST /jobs/<id>/cancel`, and watches one
 with `GET /jobs/<id>/events?after=<seq>`, a stream of server-sent events that
-ends after the job's terminal state. `GET /health` keeps `lanes.local` and
-`lanes.fabric` as booleans and adds `readiness.local` and `readiness.fabric`,
-each `{state, since, reason}`. States are `starting`, `up`, `down`, or
-`refused`; `since` is an ISO timestamp of the last state or reason change.
-`reason` is null for an up lane. Fabric remains `starting` until its first
-successful queue scan; `--local-only` leaves it `down` with that reason, and a
-failed start leaves it `refused` with the error. Observed queue scan or
-record-follow failures mark it `down`; a successful scan marks it `up`. An idle
-queue is healthy: this does not detect a subscription that silently stops
-delivering changes.
+ends after the job's terminal state. A request's `depth` (`quick`, `standard` or
+`deep`), `tags` and `domains` say how far to take the task, what kind of work it
+is and where it happens, each of the last two in place of the harness's
+classification. `domains: []` states no domain; `tags` must name at least one
+known tag. They grant nothing. `reasoningEffort` may lower the profile's, never
+raise it. `GET /health` keeps `lanes.local` and `lanes.fabric` as booleans and
+adds `readiness.local` and `readiness.fabric`, each `{state, since, reason}`.
+States are `starting`, `up`, `down`, or `refused`; `since` is an ISO timestamp
+of the last state or reason change. `reason` is null for an up lane. Fabric
+remains `starting` until its first successful queue scan; `--local-only` leaves
+it `down` with that reason, and a failed start leaves it `refused` with the
+error. Observed queue scan or record-follow failures mark it `down`; a
+successful scan marks it `up`. An idle queue is healthy: this does not detect a
+subscription that silently stops delivering changes.
 
 Health also lists `routes` as `{method, path}` entries (`:id` is a path
 parameter), the loaded `profileFile`, the resolved SQLite `storePath`, and
