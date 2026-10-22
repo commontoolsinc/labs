@@ -906,6 +906,49 @@ describe("console/turn-result", () => {
     }
   });
 
+  it("finds a persisted output whose recorded path uses the other platform's separator", async () => {
+    const artifactRoot = await Deno.makeTempDir({
+      prefix: "cf-harness-console-result-",
+    });
+    try {
+      const turnId = "turn-recorded-on-windows";
+      await writeTranscript(artifactRoot, turnId, [
+        { role: "user", content: "build a reading list" },
+        {
+          role: "tool",
+          toolCallId: "call-1",
+          toolName: "assign_slug",
+          content: JSON.stringify({
+            status: "ok",
+            slug: "reading-list",
+            url: "http://localhost:8000/console-test/reading-list",
+          }),
+        },
+        { role: "assistant", content: "Your reading list is ready." },
+      ]);
+      const transcriptPath = join(artifactRoot, turnId, "transcript.json");
+      const transcript = JSON.parse(await Deno.readTextFile(transcriptPath));
+      transcript[1].resultRef.artifactPath =
+        "C:\\runs\\turn-recorded-on-windows\\tool-outputs\\1-assign_slug.json";
+      await Deno.writeTextFile(transcriptPath, JSON.stringify(transcript));
+
+      expect(
+        (await readConsoleTurnResult({
+          sessionId: "session",
+          continuable: true,
+          artifactRoot,
+          turnId,
+          spaceName: "console-test",
+        }))?.pieces,
+      ).toEqual([{
+        slug: "reading-list",
+        url: "http://localhost:8000/console-test/reading-list",
+      }]);
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  });
+
   it("ignores malformed and unsuccessful `assign_slug` outputs", async () => {
     const artifactRoot = await Deno.makeTempDir({
       prefix: "cf-harness-console-result-",

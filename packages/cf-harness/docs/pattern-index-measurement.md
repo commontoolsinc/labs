@@ -260,7 +260,7 @@ passed.
   "requiredToolIds": ["run_pattern", "search_patterns", "record_feedback"],
   "forbiddenToolIds": ["web_search"],
   "requiredSubagentProfiles": ["pattern-author"],
-  "fabricSpace": "pattern-index-demo",
+  "fabricSpace": "<space-did>",
   "artifactRoot": "/Users/me/labs/packages/cf-harness/.cf-harness-console/runs",
   "sessionDbPath": "/Users/me/labs/packages/cf-harness/.cf-harness-console/sessions.sqlite"
 }

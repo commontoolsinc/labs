@@ -1,16 +1,18 @@
 /**
  * Projects a completed console turn from its durable run report and the
  * transcript the model received. The report identifies this run's transcript
- * messages and supplies its final assistant text. Missing or malformed
- * artifacts produce no result rather than a partial object that could be
- * mistaken for a completed contract.
+ * messages and supplies its final assistant text. A missing or malformed
+ * transcript, report, or run state produces no result rather than a partial
+ * object that could be mistaken for a completed contract. A named piece's URL
+ * comes from the output its `assign_slug` call persisted, and an output that
+ * does not read back leaves out that piece alone.
  */
 
 import {
   isLoomAuthoredObservation,
   type LoomAuthoredObservation,
 } from "../src/loom-authoring.ts";
-import { basename, join } from "@std/path";
+import { join } from "@std/path";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import {
@@ -29,6 +31,7 @@ import {
   publicConsoleDisplay,
 } from "./display-ceiling.ts";
 import {
+  artifactName,
   type ConsoleToolOutputArtifact,
   persistedToolOutput,
 } from "./steps.ts";
@@ -364,7 +367,7 @@ const readTurnRunArtifacts = async (
             artifactPath,
             value: JSON.parse(
               await Deno.readTextFile(
-                join(runRoot, "tool-outputs", basename(artifactPath)),
+                join(runRoot, "tool-outputs", artifactName(artifactPath)),
               ),
             ),
           }];

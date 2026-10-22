@@ -563,7 +563,8 @@ const childRunIdOf = (output: unknown): string | undefined => {
   return typeof childRunId === "string" ? childRunId : undefined;
 };
 
-const artifactName = (path: string): string =>
+/** The file name at the end of `path`, whichever separator it was written with. */
+export const artifactName = (path: string): string =>
   path.split(/[\\/]/).at(-1) ?? path;
 
 /**

@@ -2555,7 +2555,7 @@ The slug is validated, then checked for availability, before anything is
 written, so an unusable slug is a structured error that changes nothing. A slug
 already naming another piece is never repointed: the tool appends a counter —
 `-2`, `-3`, and so on — to the requested word until it reaches a free name, or
-one already naming this piece, and the receipt's `slug` and `url` carry the name
+one already naming this piece, and the receipt's `slug` carries the name
 assigned, which is where the model reads the address it got. A requested word so
 long that no counter fits under the slug length limit is the one collision that
 is refused. The availability question fails closed: a slug is free only on the

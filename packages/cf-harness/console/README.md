@@ -67,10 +67,10 @@ shared host, a tailnet with an access policy — and not behind a public address
 - **An identity keyfile.** A PKCS#8 key on this host, the same one the `cf` CLI
   uses. The fabric session loads it to sign with, and the pattern index signs
   its requests with the same identity.
-- **A space.** Opening a space never creates one, so the console needs the DID
-  of a space its identity can write to, such as one `cf space create` makes.
-  `assign_slug` composes the URL a person opens from the API URL, the space's
-  DID, and the slug.
+- **A space.** Opening a space never creates one, so the console needs a space
+  its identity can write to: the DID of one `cf space create` makes, or the
+  legacy name of one that already exists. `assign_slug` composes the URL a
+  person opens from the API URL, the space's DID, and the slug.
 - **A connected model provider.** The provider preference lives in
   `$CF_HARNESS_HOME/config.json` and its credentials in
   `$CF_HARNESS_HOME/auth.json`, both written by `cf-harness config set` and
@@ -181,7 +181,7 @@ Every environment variable has a flag, and the flag wins:
 | `--port`                      | `CF_HARNESS_CONSOLE_PORT`              | `8100`                                |
 | `--fabric-api-url`            | `CF_HARNESS_FABRIC_API_URL`            | `http://localhost:8000`               |
 | `--fabric-identity`           | `CF_HARNESS_FABRIC_IDENTITY`           | required                              |
-| `--fabric-space`              | `CF_HARNESS_FABRIC_SPACE`              | required, a name                      |
+| `--fabric-space`              | `CF_HARNESS_FABRIC_SPACE`              | required, a DID or a legacy name      |
 | `--fabric-foreign-spaces`     | `CF_HARNESS_FABRIC_FOREIGN_SPACES`     | no foreign spaces admitted            |
 | `--pattern-index-url`         | `CF_HARNESS_PATTERN_INDEX_URL`         | unset                                 |
 | `--skills-registry-url`       | `CF_HARNESS_SKILLS_REGISTRY_URL`       | unset                                 |
