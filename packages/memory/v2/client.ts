@@ -381,9 +381,49 @@ type OutstandingCommit = {
   /**
    * How many attempts failed because the commit's own write failed on an open
    * connection. The client stops replaying the commit once this reaches
-   * `MAX_COMMIT_WRITE_FAILURES`.
+   * `MAX_OWN_WRITE_FAILURES`.
    */
   writeFailures?: number;
+};
+
+/**
+ * A watch mutation's request, from its first send until its mutation has
+ * applied the response or failed. A session's restore sends it again when the
+ * server has not answered it (see `SpaceSession.#resendWatchRequests()`), and
+ * only the response to its latest send counts.
+ */
+type WatchRequest<R> = {
+  /** Sends the request, as it stands at the time of the call. */
+  readonly send: () => Promise<R>;
+
+  /** The response to the latest send. */
+  response: Promise<R>;
+
+  /**
+   * The server's answer to the latest send: `undefined` while there is none,
+   * which includes a send lost with its connection.
+   */
+  verdict: "ok" | "error" | undefined;
+
+  /**
+   * Resolves once the request has been sent again after its latest send, and
+   * rejects with the session's close error if the session closes first.
+   */
+  resent: PromiseWithResolvers<void>;
+
+  /**
+   * How many sends failed because the request's own write failed on an open
+   * connection. The request fails once this reaches `MAX_OWN_WRITE_FAILURES`.
+   */
+  writeFailures: number;
+};
+
+/** A `WatchRequest.resent` for a request just sent. */
+const awaitResend = (): PromiseWithResolvers<void> => {
+  const resent = Promise.withResolvers<void>();
+  // Rejected on close whether or not the request's mutation is waiting on it.
+  resent.promise.catch(() => {});
+  return resent;
 };
 
 export type WatchMutationResult = {
@@ -2197,11 +2237,10 @@ export class SpaceSession {
   #watchIssue: Promise<void> = Promise.resolve();
 
   /**
-   * The most recent watch mutation to put its request on the wire, settling
-   * once its response has been applied. The watch set a restore re-establishes
-   * is sent after it.
+   * The requests of watch mutations that have sent and not yet applied their
+   * responses or failed, in the order they were first sent.
    */
-  #lastSentWatchMutation: Promise<unknown> | undefined;
+  #unappliedWatchRequests = new Set<WatchRequest<unknown>>();
 
   /**
    * Whether watch-refresh round trips may overlap (default off). Per-session,
@@ -3201,6 +3240,9 @@ export class SpaceSession {
         if (!isEmptySync(sync)) {
           view.emit(sync);
         }
+      } else {
+        this.#throwIfDisconnectedDuringRestore();
+        this.#resendWatchRequests(restored.resumed !== true);
       }
       this.#rejoinPresenceRooms();
       await Promise.all(replayTasks);
@@ -3360,6 +3402,7 @@ export class SpaceSession {
     this.#endPresenceRooms(this.#closeError);
     this.#restoreComplete?.reject(this.#closeError);
     this.#restoreComplete = undefined;
+    this.#endWatchRequests(this.#closeError);
     this.#readyOnConnection = false;
     this.#client.forgetSession(this);
     this.#rejectCaughtUpLocalSeqWaiters(this.#closeError);
@@ -3411,6 +3454,7 @@ export class SpaceSession {
     this.#endHold();
     this.#restoreComplete?.reject(error);
     this.#restoreComplete = undefined;
+    this.#endWatchRequests(error);
     this.#readyOnConnection = false;
     this.#client.forgetSession(this);
     for (const pending of this.#outstandingCommits.values()) {
@@ -3673,8 +3717,10 @@ export class SpaceSession {
    * A mutation whose turn comes while its session is disconnected or has not
    * reopened keeps the turn and waits in it until the restore completes, so
    * mutations reach the wire in call order across a reconnect. `onTurn` runs
-   * when the turn comes, before that wait. `restoring` marks the watch set
-   * `restore()` re-establishes, which does not queue here at all.
+   * when the turn comes, before that wait. A request lost with its connection
+   * is sent again by the restore that follows, and its mutation applies the
+   * response to that (see `#applyWatchResponse()`). `restoring` marks the
+   * watch set `restore()` re-establishes, which does not queue here at all.
    */
   async #runWatchMutation<R, T>(
     send: () => Promise<R>,
@@ -3703,8 +3749,10 @@ export class SpaceSession {
             await this.#waitForSessionRestore();
           }
           this.#assertOpen();
-          this.#lastSentWatchMutation = current;
-          return apply(await send());
+          return await this.#applyWatchResponse(
+            this.#sendWatchRequest(send),
+            apply,
+          );
         },
       );
       this.#watchApply = current.then(() => undefined, () => undefined);
@@ -3726,27 +3774,21 @@ export class SpaceSession {
     const readyToIssue = sendAfter === "apply"
       ? Promise.all([this.#watchIssue, previousApply])
       : this.#watchIssue;
-    let response!: Promise<R>;
+    let request!: WatchRequest<R>;
     const issued = readyToIssue.catch(() => undefined).then(async () => {
       onTurn?.();
       while (this.#watchMutationWaitsForRestore()) {
         await this.#waitForSessionRestore();
       }
       this.#assertOpen();
-      this.#lastSentWatchMutation = current;
-      response = send();
-      // Attach a rejection handler immediately: a later request may reject
-      // while an earlier mutation is still pending, which would otherwise
-      // surface as an unhandled rejection even though the caller-facing
-      // apply-chain promise below has its own catch.
-      response.catch(() => undefined);
+      request = this.#sendWatchRequest(send);
     });
     this.#watchIssue = issued.then(() => undefined, () => undefined);
 
     const current: Promise<T> = Promise.all([
       previousApply.catch(() => undefined),
       issued,
-    ]).then(() => response).then((result) => apply(result));
+    ]).then(() => this.#applyWatchResponse(request, apply));
     this.#watchApply = current.then(() => undefined, () => undefined);
     return await current;
   }
@@ -3784,24 +3826,145 @@ export class SpaceSession {
   }
 
   /**
+   * Helper for `#runWatchMutation()`, which sends a mutation's request and
+   * tracks it until the mutation has applied the response or failed.
+   */
+  #sendWatchRequest<R>(send: () => Promise<R>): WatchRequest<R> {
+    const request: WatchRequest<R> = {
+      send,
+      response: send(),
+      verdict: undefined,
+      resent: awaitResend(),
+      writeFailures: 0,
+    };
+    this.#noteWatchVerdict(request);
+    this.#unappliedWatchRequests.add(request);
+    return request;
+  }
+
+  /**
+   * Records the server's answer to `request`'s latest send as its `verdict`
+   * once there is one. A send lost with its connection gets none, unless the
+   * request's own write has failed `MAX_OWN_WRITE_FAILURES` times. The
+   * handlers are attached before any other, so they run first.
+   */
+  #noteWatchVerdict<R>(request: WatchRequest<R>): void {
+    const { response } = request;
+    response.then(
+      () => {
+        if (request.response === response) request.verdict = "ok";
+      },
+      (error) => {
+        if (request.response !== response) return;
+        if (isOwnWriteFailure(error)) request.writeFailures++;
+        if (
+          !isConnectionError(error) ||
+          request.writeFailures >= MAX_OWN_WRITE_FAILURES
+        ) {
+          request.verdict = "error";
+        }
+      },
+    );
+  }
+
+  /**
+   * Helper for `#runWatchMutation()`, which applies the response to
+   * `request`'s latest send, and rejects with the server's error when that
+   * response is one. A send lost with its connection is followed by the
+   * restore that sends the request again, so the mutation waits for that
+   * send and then for its response. The session's close ends the wait for a
+   * send that will not come, and the mutation rejects with the close error.
+   */
+  async #applyWatchResponse<R, T>(
+    request: WatchRequest<R>,
+    apply: (result: R) => T,
+  ): Promise<T> {
+    try {
+      for (;;) {
+        const { response, resent } = request;
+        const answered = response.then((result) => ({ result }));
+        let answer: { result: R } | void;
+        try {
+          // Sending the request again ends this wait as well. The session's
+          // close, which rejects `resent`, does not: the response is still
+          // the server's own answer to the request.
+          answer = await Promise.race([
+            answered,
+            resent.promise.then(() => undefined, () => answered),
+          ]);
+        } catch (error) {
+          if (response !== request.response) continue;
+          if (request.verdict !== undefined) {
+            throw request.writeFailures >= MAX_OWN_WRITE_FAILURES
+              ? ownWriteError(error as Error)
+              : error;
+          }
+          await resent.promise;
+          continue;
+        }
+        if (answer !== undefined && response === request.response) {
+          return apply(answer.result);
+        }
+      }
+    } finally {
+      this.#unappliedWatchRequests.delete(request);
+    }
+  }
+
+  /**
+   * Fails every watch mutation waiting for its request to be sent again with
+   * `error`, as the session closes.
+   */
+  #endWatchRequests(error: Error): void {
+    for (const request of this.#unappliedWatchRequests) {
+      request.resent.reject(error);
+    }
+  }
+
+  /**
+   * Helper for `restore()`, which sends again, in the order they were first
+   * sent, the watch requests from the first one the server has not answered
+   * onwards, its refusals excepted: the server applies them in that order
+   * again, so a request sent again cannot undo a later one. When
+   * `reestablished`, the server holds a session other than the one that
+   * answered the rest, so every request not refused is sent again. A mutation
+   * applies only the response to its request's latest send. Called in the
+   * same synchronous step as the reopen's completion, after the watch set the
+   * restore re-establishes if it sends one, so that these precede on the wire
+   * every mutation made after them. The caller checks first that the client is
+   * still connected.
+   */
+  #resendWatchRequests(reestablished: boolean): void {
+    let resending = reestablished;
+    for (const request of this.#unappliedWatchRequests) {
+      resending ||= request.verdict === undefined;
+      if (resending && request.verdict !== "error") {
+        const { resent } = request;
+        request.response = request.send();
+        request.verdict = undefined;
+        request.resent = awaitResend();
+        this.#noteWatchVerdict(request);
+        resent.resolve();
+      }
+    }
+  }
+
+  /**
    * Helper for `restore()`, which sends the watch set it re-establishes
-   * without queuing on the watch-mutation chain. Mutations waiting on that
-   * chain hold their turns until the restore completes, so queuing behind
-   * them would wait on the restore itself; they follow it instead, in call
-   * order. The re-establishment is sent after the last mutation already on the
-   * wire has been applied.
+   * without queuing on the watch-mutation chain, followed by the watch requests
+   * the session has to send again (see `#resendWatchRequests()`). Mutations
+   * waiting on that chain hold their turns until the restore completes, so
+   * queuing behind them would wait on the restore itself; they follow it
+   * instead, in call order.
    */
   async #sendRestoreWatchMutation<R, T>(
     send: () => Promise<R>,
     apply: (result: R) => T,
   ): Promise<T> {
-    for (;;) {
-      const last = this.#lastSentWatchMutation;
-      await last?.then(() => undefined, () => undefined);
-      if (this.#lastSentWatchMutation === last) break;
-    }
     this.#throwIfDisconnectedDuringRestore();
-    return apply(await send());
+    const response = send();
+    this.#resendWatchRequests(true);
+    return apply(await response);
   }
 
   /**
@@ -4069,16 +4232,11 @@ export class SpaceSession {
             pendingCommit.writeFailures = (pendingCommit.writeFailures ?? 0) +
               1;
           }
-          if ((pendingCommit.writeFailures ?? 0) >= MAX_COMMIT_WRITE_FAILURES) {
+          if ((pendingCommit.writeFailures ?? 0) >= MAX_OWN_WRITE_FAILURES) {
             if (this.#outstandingCommits.get(localSeq) === pendingCommit) {
               this.#outstandingCommits.delete(localSeq);
             }
-            const cause = (error as Error).cause;
-            pendingCommit.pending.reject(
-              cause instanceof Error
-                ? cause
-                : new Error((error as Error).message, { cause }),
-            );
+            pendingCommit.pending.reject(ownWriteError(error as Error));
           }
           if (options.throwOnConnectionError) {
             throw error;
@@ -4502,20 +4660,31 @@ export const connectionError = (message: string, cause?: unknown): Error => {
  * Like `connectionError()`, except that it also marks the payload's own write
  * as what failed, on a connection that was open until then, as opposed to a
  * payload lost because the connection closed under it. The client counts such
- * failures against a commit, and stops replaying a commit whose own write has
- * failed `MAX_COMMIT_WRITE_FAILURES` times.
+ * failures against a commit or a watch request, and stops sending again one
+ * whose own write has failed `MAX_OWN_WRITE_FAILURES` times.
  */
 export const writeFailedError = (message: string, cause?: unknown): Error =>
   Object.assign(connectionError(message, cause), { ownWriteFailed: true });
 
 /**
- * How many attempts may fail because one commit's own write failed before the
- * client stops replaying it and rejects it with the write's error.
+ * How many attempts may fail because one commit's or watch request's own write
+ * failed before the client stops sending it again and rejects it with the
+ * write's error (see `ownWriteError()`).
  */
-const MAX_COMMIT_WRITE_FAILURES = 5;
+const MAX_OWN_WRITE_FAILURES = 5;
 
 const isOwnWriteFailure = (error: unknown): boolean =>
   (error as { ownWriteFailed?: unknown } | null)?.ownWriteFailed === true;
+
+/**
+ * The error a request whose own write failed `MAX_OWN_WRITE_FAILURES` times is
+ * rejected with: the write's own error rather than a `ConnectionError`, which a
+ * caller would retry.
+ */
+const ownWriteError = (error: Error): Error =>
+  error.cause instanceof Error
+    ? error.cause
+    : new Error(error.message, { cause: error.cause });
 
 const toConnectionError = (error?: Error): Error =>
   connectionError(error?.message ?? "memory transport closed", error);

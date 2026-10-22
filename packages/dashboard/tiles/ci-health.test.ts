@@ -13,7 +13,13 @@ import {
   LOOM_REPO,
   REPO,
 } from "../config.ts";
+import { RunLists } from "../github-runs.ts";
 import { compactSpan } from "../lib.ts";
+import {
+  FakeRelay,
+  pushPayload,
+  workflowRunPayload,
+} from "../test/webhook-relay.ts";
 import { type Ctx, type Run, type RunSource, runSource, type TileView } from "../types.ts";
 import { type CiHealthTile, createCiHealth, SWEEP_TTL_MS } from "./ci-health.ts";
 
@@ -1633,4 +1639,126 @@ Deno.test("ci: a stale inventory is read again on the next collection", async ()
       2,
     );
   });
+});
+
+// A run of pond's nightly job, as the relay delivers it: `newer` places above
+// the runs the stand-in lists, which is where a run starting now lands.
+const pondRun = (newer: number, event = "push") =>
+  workflowRunPayload(
+    `${ORG}/pond`,
+    {
+      id: workflowId(`${ORG}/pond`, "nightly.yml") * 100 + newer,
+      event,
+      head_branch: "main",
+      head_sha: "sha",
+      status: "completed",
+      conclusion: "failure",
+      run_attempt: 1,
+      display_title: "Nightly",
+      created_at: new Date(T0).toISOString(),
+      run_started_at: new Date(T0).toISOString(),
+      updated_at: new Date(T0).toISOString(),
+      html_url: "",
+      head_commit: null,
+    },
+    ".github/workflows/nightly.yml",
+    workflowId(`${ORG}/pond`, "nightly.yml"),
+  );
+
+Deno.test("ci: a delivered run of a job the sweep reads starts a sweep at once", async () => {
+  const runs: RunSpec[] = [{ conclusion: "success", minutesAgo: 60 }];
+  await withGitHub(standingOrg(green, green, [pond(runs)]), async () => {
+    const relay = new FakeRelay();
+    await relay.open();
+    const tile = createCiHealth(
+      new RunLists(undefined, relay.webhooks),
+      relay.webhooks,
+    );
+    assertEquals((await collectSwept(tile)).status, "good");
+
+    runs.unshift({ conclusion: "failure", minutesAgo: 5 });
+    await relay.deliver("workflow_run", pondRun(1));
+    await tile.sweeping();
+
+    assertEquals((await tile.collect(ctx())).value, "pond failing");
+  });
+});
+
+Deno.test("ci: a delivered run for a pull request, or one not finished, starts no sweep", async () => {
+  await withGitHub(standingOrg(green, green, [pond(green)]), async (wire) => {
+    const relay = new FakeRelay();
+    await relay.open();
+    const tile = createCiHealth(
+      new RunLists(undefined, relay.webhooks),
+      relay.webhooks,
+    );
+    await collectSwept(tile);
+    const made = wire.calls.length;
+
+    await relay.deliver("workflow_run", pondRun(1, "pull_request"));
+    const queued = pondRun(2);
+    await relay.deliver("workflow_run", {
+      ...queued,
+      workflow_run: { ...queued.workflow_run, status: "in_progress" },
+    });
+    await tile.sweeping();
+
+    assertEquals(wire.calls.length, made);
+  });
+});
+
+Deno.test("ci: a sweep reads no runs the relay vouches for", async () => {
+  await withGitHub(standingOrg(green, green, [pond(green)]), async (wire) => {
+    const relay = new FakeRelay();
+    await relay.open();
+    const tile = createCiHealth(
+      new RunLists(undefined, relay.webhooks),
+      relay.webhooks,
+    );
+    await collectSwept(tile);
+    const read = pondPages(wire);
+
+    // The relay carries a delivery after the sweep's interval, so that its
+    // connection is still heard.
+    wire.sweepAgain();
+    await relay.deliver("ping", {});
+    await collectSwept(tile);
+
+    assertEquals(pondPages(wire), read);
+  });
+});
+
+Deno.test("ci: a failing build's workflow history is read again only once its repository's default branch is pushed to", async () => {
+  await withGitHub(
+    standingOrg([{ conclusion: "failure", minutesAgo: 30 }], green),
+    async (wire) => {
+      const histories = () =>
+        wire.calls.filter((call) => call.startsWith(`/repos/${REPO}/commits`))
+          .length;
+      const relay = new FakeRelay();
+      await relay.open();
+      const tile = createCiHealth(
+        new RunLists(undefined, relay.webhooks),
+        relay.webhooks,
+      );
+      await collectSwept(tile);
+      assertEquals(histories(), 1);
+
+      // Two sweep intervals stay inside the time the relay vouches for a
+      // read.
+      wire.sweepAgain();
+      await relay.deliver(
+        "push",
+        pushPayload(`${ORG}/elsewhere`, "refs/heads/main"),
+      );
+      await relay.deliver("push", pushPayload(REPO, "refs/heads/feature"));
+      await collectSwept(tile);
+      assertEquals(histories(), 1);
+
+      wire.sweepAgain();
+      await relay.deliver("push", pushPayload(REPO, "refs/heads/main"));
+      assertEquals((await collectSwept(tile)).value, "labs failing");
+      assertEquals(histories(), 2);
+    },
+  );
 });

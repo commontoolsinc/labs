@@ -1,10 +1,15 @@
 /**
- * Builds the shared collection context handed to every tile. Its data sources
- * are memoized, so several tiles reading the same source — one repository's CI
- * runs, say — trigger only one fetch between them.
+ * Builds the shared collection context handed to every tile, and says which
+ * deliveries of the GitHub webhook relay change the runs a source reads.
  */
 
-import { github, memo } from "./lib.ts";
+import {
+  type GitHubDelivery,
+  pushOf,
+  sameRepo,
+  workflowRunOf,
+} from "./github-webhooks.ts";
+import { github } from "./lib.ts";
 import {
   CI_RUNS_MAX,
   CI_RUNS_MAX_AGE_DAYS,
@@ -89,26 +94,38 @@ async function fetchRuns(
 }
 
 /**
+ * Returns whether `delivery` changes what `source` reads: the activity of one
+ * of its runs, or, for a source of runs on main, a push to the repository's
+ * green branch, which `green` names.
+ */
+export function changesRunSource(
+  source: RunSource,
+  delivery: GitHubDelivery,
+  green: (repo: string) => GreenBranch | undefined = greenBranchOf,
+): boolean {
+  const activity = workflowRunOf(delivery);
+  if (activity !== undefined) {
+    return sameRepo(activity.repo, source.repo) &&
+      activity.workflowFile === source.workflow &&
+      SCOPES[source.scope].has(activity.run);
+  }
+  const push = pushOf(delivery);
+  return push !== undefined && source.scope === "main" &&
+    green(source.repo)?.isPushedBy(push.repo, push.ref) === true;
+}
+
+/**
  * Builds the context, reading each repository's green branch through
  * `green`, which defaults to the branches `GREEN_BRANCHES` names, and the
- * runs of every source through `lists`.
+ * runs of every source through `lists`. Each call reads the source again
+ * through `lists`, which shares the reads made close together.
  */
 export function makeCtx(
   green: (repo: string) => GreenBranch | undefined = greenBranchOf,
   lists: RunLists = new RunLists(),
 ): Ctx {
-  // One memoized fetcher per source, created on first use and shared for ~20s
-  // across every tile that reads it.
-  const fetchers = new Map<string, () => Promise<Run[]>>();
-  const runsFor = (source: RunSource): Promise<Run[]> => {
-    const key = runSourceKey(source);
-    let fetch = fetchers.get(key);
-    if (!fetch) {
-      fetch = memo(20_000, () => fetchRuns(lists, source, green));
-      fetchers.set(key, fetch);
-    }
-    return fetch();
-  };
+  const runsFor = (source: RunSource): Promise<Run[]> =>
+    fetchRuns(lists, source, green);
   return {
     runs: () => runsFor(runSource(REPO, CI_WORKFLOW, "main")),
     runsFor,

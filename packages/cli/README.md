@@ -553,6 +553,26 @@ program `SSH_ASKPASS` names, and fails when it names none. `P` refuses to push
 on a branch, and refuses when git started the viewer as its pager for a
 different repository.
 
+In the main view, `b` shows or hides the blame column in place of paging up;
+Page Up and Ctrl-B still page up there. The column takes the right 20 columns of
+the screen when the terminal is at least 40 columns wide. Each line's entry is
+how long ago the commit that last changed it was written, then the author's
+name, cut to fit. The age is a whole number of seconds under a minute, minutes
+under an hour, hours under a day, days under a year, and years after that, each
+rounded to the nearest, so that 59.6 seconds reads `1m`: `45s`, `3h`, `168d`,
+`2y`. When the repository's default remote (the one `git fetch` uses when given
+none), or else `origin`, or else another remote, is on GitHub, each entry is a
+link to its commit's page there, for terminals that open links. Links are drawn
+only when color is on. A run of adjacent lines from one commit shows its entry
+once, on the first of them on screen. A file's lines are blamed as the viewer's
+text, so edited lines read `uncommitted` before they are saved. In a diff, a
+file that follows a commit header is blamed as it stands in that commit. Any
+other hunk is blamed as its file stands in the working tree, and only while that
+file still holds the hunk's added and context lines where the hunk places them.
+Removed lines show nothing. The column fills in as `git blame` finishes for each
+file in view. When git cannot blame a file, the status line says why, and the
+viewer does not try that file again.
+
 Press `\` in the interactive pager to cycle through unwrapped lines, hard
 wrapping, and word wrapping. Hard wrapping fills every screen row before it
 continues. Word wrapping breaks at whitespace and repeats the line's leading
@@ -1752,21 +1772,25 @@ The door is HTTP on the Unix socket, mode 0600, with a bearer token in
 `<socket>.token`, also 0600 and minted at each start: reaching the socket is the
 authority. A caller enqueues
 `{caller, profile, idempotencyKey, task,
-instructions?, context?, resultSchema, tools?, maxModelTurns?, browserHost?,
-inputs?, foreignSpaces?}`
+instructions?, context?, resultSchema, tools?, maxModelTurns?, depth?, tags?,
+domains?, reasoningEffort?, browserHost?, inputs?, foreignSpaces?}`
 with `POST /jobs`, reads a job with `GET /jobs/<id>` or the newest with
 `GET /jobs?limit=n`, stops one with `POST /jobs/<id>/cancel`, and watches one
 with `GET /jobs/<id>/events?after=<seq>`, a stream of server-sent events that
-ends after the job's terminal state. `GET /health` keeps `lanes.local` and
-`lanes.fabric` as booleans and adds `readiness.local` and `readiness.fabric`,
-each `{state, since, reason}`. States are `starting`, `up`, `down`, or
-`refused`; `since` is an ISO timestamp of the last state or reason change.
-`reason` is null for an up lane. Fabric remains `starting` until its first
-successful queue scan; `--local-only` leaves it `down` with that reason, and a
-failed start leaves it `refused` with the error. Observed queue scan or
-record-follow failures mark it `down`; a successful scan marks it `up`. An idle
-queue is healthy: this does not detect a subscription that silently stops
-delivering changes.
+ends after the job's terminal state. A request's `depth` (`quick`, `standard` or
+`deep`), `tags` and `domains` say how far to take the task, what kind of work it
+is and where it happens, each of the last two in place of the harness's
+classification. `domains: []` states no domain; `tags` must name at least one
+known tag. They grant nothing. `reasoningEffort` may lower the profile's, never
+raise it. `GET /health` keeps `lanes.local` and `lanes.fabric` as booleans and
+adds `readiness.local` and `readiness.fabric`, each `{state, since, reason}`.
+States are `starting`, `up`, `down`, or `refused`; `since` is an ISO timestamp
+of the last state or reason change. `reason` is null for an up lane. Fabric
+remains `starting` until its first successful queue scan; `--local-only` leaves
+it `down` with that reason, and a failed start leaves it `refused` with the
+error. Observed queue scan or record-follow failures mark it `down`; a
+successful scan marks it `up`. An idle queue is healthy: this does not detect a
+subscription that silently stops delivering changes.
 
 Health also lists `routes` as `{method, path}` entries (`:id` is a path
 parameter), the loaded `profileFile`, the resolved SQLite `storePath`, and

@@ -168,7 +168,6 @@ import {
   extendTrackedGraph,
   fromDirtyKey,
   fromDocKey,
-  isGraphQueryCoveredByState,
   type QueryDocKey,
   type QueryEvaluationCache,
   type QueryEvaluationCacheDiagnostics,
@@ -189,10 +188,12 @@ import {
   buildFullSync,
   cacheKeyForEntity,
   compareSyncAddress,
+  graphWatchesByBranch,
   groupedQueries,
   holdingsToCacheEntries,
   isEmptySync,
   mergeWatchesById,
+  partitionWatchesByCoverage,
   sameSnapshot,
   sameWatchSpec,
   type SessionCacheEntry,
@@ -200,6 +201,7 @@ import {
   toWireRemove,
   toWireUpsert,
   trackedIdsFromEntries,
+  unionQuery,
 } from "./server-sync.ts";
 import { authorizationError } from "./session-open-auth.ts";
 import {
@@ -6787,7 +6789,18 @@ export class Server {
     }
   }
 
-  /** Helper for watchRemove(), which installs the union that remains. */
+  /**
+   * Helper for watchRemove(), which shrinks the session's graphs by the
+   * removed watches. A watch the session recorded as covered
+   * (`SessionState.coveredWatchIds`) has nothing in its branch's graph, so
+   * removing it leaves the graph as it stands. Removing a walked watch
+   * evaluates its branch again from the branch's remaining walked watches,
+   * and then walks each remaining covered watch of the branch that the
+   * rebuilt graph no longer covers. Branches the removal does not touch keep
+   * their graphs. A session that holds views, or one marked for a full
+   * re-evaluation, replaces its watch set with the remaining watches
+   * instead, which walks every one of them.
+   */
   async #watchRemove(
     message: WatchRemoveRequest,
   ): Promise<ResponseMessage<WatchSetResult>> {
@@ -6804,16 +6817,220 @@ export class Server {
           ?.watches ?? []).filter((watch) => !removed.has(watch.id)),
       };
     };
-    if (
-      (this.#sessions.get(message.space, message.sessionId)?.views.length ??
-        0) > 0
-    ) {
+    const session = this.#sessions.get(message.space, message.sessionId);
+    if (session !== null && session.views.length > 0) {
       return await this.#withSpacePublicationLock(
         message.space,
         () => this.#watchSet(remaining(), "remove"),
       );
     }
-    return await this.#watchSet(remaining(), "remove");
+    if (session === null || session.forceFullResync) {
+      return await this.#watchSet(remaining(), "remove");
+    }
+    return await this.#removeWatchesByCoverage(message, session);
+  }
+
+  /**
+   * Helper for `#watchRemove()`, which removes the named watches from
+   * `session` and re-evaluates only the branches that lose a walked watch.
+   */
+  async #removeWatchesByCoverage(
+    message: WatchRemoveRequest,
+    session: SessionState,
+  ): Promise<ResponseMessage<WatchSetResult>> {
+    const aclEngine = this.#aclMode() === "off"
+      ? undefined
+      : await this.#openEngine(message.space);
+    {
+      const deny = aclEngine === undefined
+        ? await this.#authorizeMessage(
+          message.space,
+          session.principal,
+          "READ",
+        )
+        : this.#authorizeCurrentSessionWithEngine(
+          aclEngine,
+          message.space,
+          message.sessionId,
+          session,
+          "READ",
+        );
+      if (deny) {
+        return respondTypedError<WatchSetResult>(message.requestId, deny);
+      }
+    }
+    try {
+      const startedAt = performance.now();
+      const engine = aclEngine ?? await this.#openEngine(message.space);
+      this.#assertRoutedAuthority(session);
+      // Resume can share watch containers with an older registry object. Only
+      // the current registry object may publish into those containers.
+      if (this.#sessions.get(message.space, message.sessionId) !== session) {
+        return respondTypedError<WatchSetResult>(
+          message.requestId,
+          toError("SessionError", "Unknown session for space"),
+        );
+      }
+      const removedIds = new Set(message.watchIds);
+      const removedWatches = session.watches.filter((watch) =>
+        removedIds.has(watch.id)
+      );
+      if (removedWatches.length === 0) {
+        const serverSeq = Engine.serverSeq(engine);
+        return {
+          type: "response",
+          requestId: message.requestId,
+          ok: {
+            serverSeq,
+            sync: {
+              type: "sync",
+              fromSeq: session.lastSyncedSeq,
+              toSeq: serverSeq,
+              upserts: [],
+              removes: [],
+            },
+          },
+        };
+      }
+      const remaining = session.watches.filter((watch) =>
+        !removedIds.has(watch.id)
+      );
+      const remainingByBranch = graphWatchesByBranch(remaining);
+      const coveredWatchIds = new Set(session.coveredWatchIds);
+      for (const id of removedIds) coveredWatchIds.delete(id);
+      const graphs = new StagedMap(session.graphs);
+      const attribution = createRootAttribution();
+      // The graphs the removal evaluated again, whose crossings the session
+      // may not have been told of.
+      const touchedGraphs: TrackedGraphState[] = [];
+      const options = {
+        principal: session.principal,
+        sessionId: session.id,
+        evaluationCache: this.#evaluationCacheFor(message.space),
+      };
+      for (
+        const [branch, removedGroup] of graphWatchesByBranch(removedWatches)
+      ) {
+        const group = remainingByBranch.get(branch) ?? [];
+        if (group.length === 0) {
+          graphs.delete(branch);
+          continue;
+        }
+        if (
+          removedGroup.every((watch) => session.coveredWatchIds.has(watch.id))
+        ) {
+          continue;
+        }
+        const walked = group.filter((watch) => !coveredWatchIds.has(watch.id));
+        const covered = group.filter((watch) => coveredWatchIds.has(watch.id));
+        // The branch is walked again from its remaining walked watches, or
+        // from its covered ones when no walked watch remains, every one of
+        // which is then walked.
+        const seed = walked.length > 0 ? walked : covered;
+        const tracked = trackGraph(
+          message.space,
+          engine,
+          unionQuery(branch, seed),
+          undefined,
+          options,
+        );
+        foldRootAttribution(attribution, tracked.stats);
+        // Enforced per evaluation, not per request: a later branch's
+        // failure must not leave an already-inserted entry over budget.
+        this.#enforceEvaluationCacheBudget();
+        const state = tracked.state;
+        const uncovered = walked.length > 0
+          ? partitionWatchesByCoverage(message.space, state, covered).uncovered
+          : covered;
+        if (walked.length > 0 && uncovered.length > 0) {
+          const extended = extendTrackedGraph(
+            message.space,
+            engine,
+            state,
+            unionQuery(branch, uncovered),
+          );
+          foldRootAttribution(attribution, extended.stats);
+        }
+        for (const watch of uncovered) coveredWatchIds.delete(watch.id);
+        graphs.set(branch, state);
+        touchedGraphs.push(state);
+      }
+      const identity = this.#sessionScopeIdentity(session);
+      const entities = this.#entriesFromGraphs(graphs.values(), identity);
+      // Stage A (OW17's wire leg): a lease-holder session's frames carry
+      // instance keys (see `#watchSet()`).
+      const keyed = session.leaseHolderReads === true;
+      const serverSeq = Engine.serverSeq(engine);
+      const sync = buildDiffSync(
+        session.entities,
+        entities,
+        session.lastSyncedSeq,
+        serverSeq,
+        undefined,
+        keyed,
+      );
+      const newCrossings = this.#undeliveredCrossings(session, touchedGraphs);
+      if (newCrossings.crossings.length > 0) {
+        sync.crossings = newCrossings.crossings;
+      }
+      const response: ResponseMessage<WatchSetResult> = {
+        type: "response",
+        requestId: message.requestId,
+        ok: { serverSeq, sync },
+      };
+      // There is no await between graph evaluation and publication.
+      graphs.commit();
+      this.#markCrossingsDelivered(session, newCrossings.keys);
+      this.#forgetUnfollowedCrossings(session, session.graphs.values());
+      const watchIdentity = {
+        principal: session.principal,
+        sessionId: session.id,
+      };
+      session.watches = remaining;
+      session.watchIndex = new Map(
+        remaining.map((watch) => [watch.id, watch]),
+      );
+      session.coveredWatchIds = coveredWatchIds;
+      session.operationWatches = remaining.filter((watch) =>
+        watch.kind === "operation"
+      );
+      for (const id of removedIds) session.operationCursors.delete(id);
+      session.operationTrackedIds = addOperationWatchTrackedIds(
+        new Set(),
+        remaining,
+        watchIdentity,
+      );
+      session.entities = entities;
+      session.trackedIds = addOperationWatchTrackedIds(
+        trackedIdsFromEntries(entities.values()),
+        remaining,
+        watchIdentity,
+      );
+      this.#addMissedToTrackedIds(session.trackedIds, session.graphs.values());
+      this.#touchDemand(session);
+      session.lastSyncedSeq = serverSeq;
+      this.#notifyDemandChanged(message.space, "watch", session.principal);
+      recordSlowQueryDuration(
+        "session.watch.remove",
+        message.space,
+        startedAt,
+        {
+          watches: message.watchIds.length,
+          ...attribution,
+        },
+      );
+      return response;
+    } catch (error) {
+      // Evaluation state is staged (the session's graphs and watches are
+      // assigned only on success), so a failure answers the requester.
+      return respondTypedError<WatchSetResult>(
+        message.requestId,
+        toError(
+          "QueryError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
   }
 
   /**
@@ -7079,6 +7296,7 @@ export class Server {
       session.watchIndex = new Map(
         message.watches.map((watch) => [watch.id, watch]),
       );
+      session.coveredWatchIds = new Set();
       session.operationTrackedIds = addOperationWatchTrackedIds(
         new Set(),
         message.watches,
@@ -7093,16 +7311,10 @@ export class Server {
         resetCrossings,
       );
       if (mode === "remove") {
-        // A crossing the remaining watches no longer follow is told again
-        // when a later watch follows it, so the client loads its target.
-        const followed = new Set(
-          [...graphs.values(), ...demandGraphs.values()].flatMap((graph) => [
-            ...syncCrossingsOf(graph).keys(),
-          ]),
-        );
-        for (const key of session.deliveredCrossings) {
-          if (!followed.has(key)) session.deliveredCrossings.delete(key);
-        }
+        this.#forgetUnfollowedCrossings(session, [
+          ...graphs.values(),
+          ...demandGraphs.values(),
+        ]);
       }
       session.trackedIds = addOperationWatchTrackedIds(
         trackedIdsFromEntries(entities.values()),
@@ -7172,14 +7384,14 @@ export class Server {
       );
     };
     const attribution = createRootAttribution();
-    for (const [branch, query] of groupedQueries(watches)) {
+    for (const [branch, group] of graphWatchesByBranch(watches)) {
       const key = keyOf(branch);
       const existing = graphs.get(key);
       if (existing === undefined) {
         const tracked = trackGraph(
           session.space,
           engine,
-          query,
+          unionQuery(branch, group),
           undefined,
           {
             principal: session.principal,
@@ -7199,7 +7411,12 @@ export class Server {
         continue;
       }
 
-      if (isGraphQueryCoveredByState(session.space, existing, query)) {
+      const { uncovered } = partitionWatchesByCoverage(
+        session.space,
+        existing,
+        group,
+      );
+      if (uncovered.length === 0) {
         continue;
       }
 
@@ -7209,7 +7426,7 @@ export class Server {
         session.space,
         engine,
         staged,
-        query,
+        unionQuery(branch, uncovered),
       );
       foldRootAttribution(attribution, extended.stats);
       for (const [docKey, entity] of extended.updates) {
@@ -7397,13 +7614,16 @@ export class Server {
       // a new graph's state, or an extended graph's STAGED state, which is
       // where the extension's crossings sit until it commits.
       const touchedGraphs: TrackedGraphState[] = [];
-      for (const [branch, query] of groupedQueries(newWatches)) {
+      // The added watches left unwalked because their branch's graph
+      // already covered them, recorded on the session at publication.
+      const coveredWatchIds: string[] = [];
+      for (const [branch, group] of graphWatchesByBranch(newWatches)) {
         const existing = graphs.get(branch);
         if (existing === undefined) {
           const tracked = trackGraph(
             message.space,
             engine,
-            query,
+            unionQuery(branch, group),
             undefined,
             {
               principal: session.principal,
@@ -7425,7 +7645,13 @@ export class Server {
           continue;
         }
 
-        if (isGraphQueryCoveredByState(message.space, existing, query)) {
+        const { covered, uncovered } = partitionWatchesByCoverage(
+          message.space,
+          existing,
+          group,
+        );
+        for (const watch of covered) coveredWatchIds.push(watch.id);
+        if (uncovered.length === 0) {
           continue;
         }
 
@@ -7436,7 +7662,7 @@ export class Server {
           message.space,
           engine,
           staged.value,
-          query,
+          unionQuery(branch, uncovered),
         );
         foldRootAttribution(attribution, extended.stats);
         for (const [docKey, entity] of extended.updates) {
@@ -7509,6 +7735,7 @@ export class Server {
       existingById.commit();
       for (const watch of addedWatches) nextWatches.push(watch);
       session.watches = nextWatches;
+      for (const id of coveredWatchIds) session.coveredWatchIds.add(id);
       for (const watch of addedOperationWatches) {
         nextOperationWatches.push(watch);
       }
@@ -8076,6 +8303,24 @@ export class Server {
   ): void {
     if (reset) session.deliveredCrossings.clear();
     for (const key of keys) session.deliveredCrossings.add(key);
+  }
+
+  /**
+   * Forgets the delivered crossings that none of `graphs` follows, so that
+   * a crossing a removed watch followed is told again when a later watch
+   * follows it, and the client loads its target.
+   */
+  #forgetUnfollowedCrossings(
+    session: SessionState,
+    graphs: Iterable<TrackedGraphState>,
+  ): void {
+    const followed = new Set<string>();
+    for (const graph of graphs) {
+      for (const key of syncCrossingsOf(graph).keys()) followed.add(key);
+    }
+    for (const key of session.deliveredCrossings) {
+      if (!followed.has(key)) session.deliveredCrossings.delete(key);
+    }
   }
 
   #addMissedToTrackedIds(
@@ -8805,6 +9050,8 @@ export class Server {
             // The full evaluation built the whole support graph, so a growth
             // an earlier selection owed is already in it.
             session.viewSupportGrown = false;
+            // The full evaluation walked every watch.
+            session.coveredWatchIds = new Set();
             session.entities = entities;
             this.#markCrossingsDelivered(session, newCrossings.keys);
             session.trackedIds = evaluatedTrackedIds;

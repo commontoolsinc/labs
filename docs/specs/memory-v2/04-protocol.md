@@ -1710,11 +1710,16 @@ the session cache rather than distinct server-routed effect streams.
 
 On disconnect:
 
-1. pending promises reject with `ConnectionError`
+1. requests awaiting a response get none; retained commits and watch mutations
+   stay pending, and every other request rejects with `ConnectionError`
 2. the logical session may still be resumable
 3. the client reconnects, replays retained commits, restores the watch set, and
    resumes integrating sync from `seenSeq` — declaring what its replica holds
    (section 4.1.2) so the server re-delivers exactly what it lacks
+4. the client sends again, in their original order, the pending watch
+   mutations from the first one whose answer it lacks onwards (every pending
+   one, when the session was re-established), and every watch mutation made
+   after them follows them
 
 ## 4.9 Blob Transfer
 

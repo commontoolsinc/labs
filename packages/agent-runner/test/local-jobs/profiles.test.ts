@@ -159,6 +159,11 @@ describe("local-jobs/profiles", () => {
       ],
       ["a model that is not a string", { ...ASK, model: 7 }, "`model`"],
       [
+        "a reasoning effort it does not know",
+        { ...ASK, reasoningEffort: "extreme" },
+        "`reasoningEffort`",
+      ],
+      [
         "a browser host grant that is not true or false",
         { ...ASK, browserHost: "yes" },
         "`browserHost`",
@@ -473,6 +478,29 @@ describe("local-jobs/profiles", () => {
           "name must match",
         );
       });
+    });
+
+    it("lowers the reasoning effort within the profile's, and refuses more than it", async () => {
+      const capped = (await read({ ask: { ...ASK, reasoningEffort: "high" } }))
+        .get("ask")!;
+
+      expect(capped.reasoningEffort).toBe("high");
+      expect(narrowLocalJobProfile(capped, { reasoningEffort: "low" }))
+        .toEqual({ profile: { ...capped, reasoningEffort: "low" } });
+      expect(narrowLocalJobProfile(capped, { reasoningEffort: "high" }))
+        .toEqual({ profile: capped });
+      expect(narrowLocalJobProfile(capped, { reasoningEffort: "xhigh" }))
+        .toEqual({
+          refusal: "The profile allows at most `high` reasoning effort.",
+        });
+    });
+
+    it("refuses a reasoning effort under a profile that sets none", () => {
+      expect(narrowLocalJobProfile(profile, { reasoningEffort: "low" }))
+        .toEqual({
+          refusal:
+            "The profile sets no reasoning effort, so a request may not name one.",
+        });
     });
 
     it("refuses more turns than the profile's cap", () => {

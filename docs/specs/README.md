@@ -113,3 +113,9 @@ entries; a new gap is filed as a specs pull request.
   README lists): a room per conversation, a
   per-user manager, and placements and adapters that show rooms in other
   spaces
+
+### Files
+
+- [FabriFile](fabrifile/README.md) (design; not built): a space's set of
+  named files, each a record linking a blob, with its rendering in a module of
+  its own

@@ -234,6 +234,7 @@ function pagerHarness(pushIo: (signal: AbortSignal) => PushIo) {
           },
         };
       },
+      blame: () => Promise.reject(new Error("these tests blame nothing")),
     };
     await runPager(
       parseDocument("const a = 1;\n"),
