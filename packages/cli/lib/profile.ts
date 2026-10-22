@@ -409,8 +409,8 @@ function pictureBytes(value: unknown): Uint8Array | undefined {
  * `config.space` is the identity's home space. The home root is read and not
  * started, and no profile runs.
  *
- * @throws Error when the profile `#profile` answers with failed to load, as
- * `#profile` itself throws; a later profile that failed is not listed.
+ * @throws Error when a listed profile failed to load, since leaving it out
+ * would report a profile that could not be read as one that is not there.
  */
 export async function listProfiles(
   config: SpaceConfig,
@@ -431,16 +431,13 @@ export async function listProfiles(
       root.space,
       candidates,
     );
-    const first = ordered[0];
-    if (first !== undefined && failures.has(first)) {
-      throw new Error(
-        `Cannot read the profile in ${first.space}, which '#profile' answers ` +
-          "with.",
-        { cause: failures.get(first) },
-      );
+    const failed = ordered.find((profile) => failures.has(profile));
+    if (failed !== undefined) {
+      throw new Error(`Cannot read the profile in ${failed.space}.`, {
+        cause: failures.get(failed),
+      });
     }
-    const readable = ordered.filter((profile) => !failures.has(profile));
-    return await Promise.all(readable.map(async (profile, index) => {
+    return await Promise.all(ordered.map(async (profile, index) => {
       const fields = profile.asSchema(profileFieldsSchema);
       await fields.sync();
       const value = fields.get();

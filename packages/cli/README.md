@@ -24,7 +24,8 @@ A profile's space lets anyone write, and each write labels the value with the
 principal who wrote it, so `byOwner` is `true` only where the value's own label
 attests the profile's owner and no one else; a value stored without a label is
 not attested to its owner. A retired profile is not listed, and neither is one
-whose document is gone. Listing reads the home root and runs nothing.
+whose document is gone; a listed profile that cannot be read fails the listing.
+Listing reads the home root and runs nothing.
 
 `cf profile get-picture <space> <file>` writes the bytes of the picture of the
 profile that lives in `<space>` to `<file>`, or to standard output when `<file>`

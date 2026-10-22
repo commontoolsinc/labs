@@ -8,6 +8,7 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { stub } from "@std/testing/mock";
 
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
@@ -153,6 +154,26 @@ describe("profile management", () => {
         undefined,
         undefined,
       ]);
+    });
+
+    it("throws, naming the space, when a profile after the current one cannot be read", async () => {
+      await createProfile({ ...CONFIG, name: "Ada" }, { loadPieces });
+      const alan = await createProfile({ ...CONFIG, name: "Alan" }, {
+        loadPieces,
+      });
+      const sync = manager.syncCell.bind(manager);
+      using _refused = stub(
+        manager,
+        "syncCell",
+        (cell, options) =>
+          cell.space === alan.space
+            ? Promise.reject(new Error("access refused"))
+            : sync(cell, options),
+      );
+
+      await expect(listProfiles(CONFIG, { loadPieces })).rejects.toThrow(
+        `Cannot read the profile in ${alan.space}.`,
+      );
     });
   });
 
