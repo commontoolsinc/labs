@@ -319,9 +319,23 @@ Before a push: repo-wide `deno fmt --check`, `deno lint`, `deno task check`,
          next frame, for 9.1 s on the main thread and 5.4 s in the worker,
          against 4.8 s and 4.7 s with the flag off on this workload, where
          every viewer sees everything.
-   - [ ] What the view-scoped record leaves: one plan per snapshot rather than
-         per session, manifests only when they change, and whether plans
-         defer to quiescence as the UI walk does.
+   - [x] The serving pass running every ready event before one derivation
+         pass, a head the preflight parked on its own loads retried within
+         the pass: 51 scheduler passes to 4 and a 6.2 s probe burst to 3.3 s
+         with the flag off
+         ([record](../history/development/performance/2026-10-22-served-vote-batching-and-planner-reads.md)).
+   - [x] Of what the view-scoped record left: a grown delivery extends the
+         session's support graph in place, the committed documents reach the
+         sessions before the planner walks, three costs a cell read repeated
+         are gone (the view-reference hash of the renderer schema, a
+         decomposer refusal rebuilt per read, equality by hashing), and the
+         walk keeps what it found at each cell between walks, for a plan of
+         220 to 266 ms where it was 442 ms; the benchmark's worker arm with
+         the flag on reads level with the loop off (same record).
+   - [ ] What that record leaves: the plan's size (548 roots, the same 548 as
+         inputs, 1,058 producer bases, to each session at each quiescent
+         settlement), a plan per session, and the planning tail on the main
+         thread.
    - [ ] One root evaluation per (document, path) per walk with its schemas
          validated against it, and a memo for a selector that failed against
          a document version (the memory server, every arm).
