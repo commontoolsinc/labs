@@ -597,10 +597,10 @@ flags it adopts from the deployment it runs against.
 - **Status (2026-10-22):** off by default. Under the served vote burst at
   5x5, with the flush deadline capped at 1000 ms, the benchmark with the flag
   on reads faster than with the serving loop off on the main thread, 3.4 s
-  against 4.3 s, and about the same in the worker, 3.8 to 3.9 s, a difference
-  within the half second its readings vary by between runs. Under the
-  FabriChat send burst the
-  worker arm with it on reads 3.6 s against 3.1 s with the loop off. The
+  against 4.3 s, and about the same in the worker, 3.5 to 3.6 s against 3.7
+  to 3.8 s, a difference within the half second its readings vary by between
+  runs. Under the FabriChat send burst the worker arm with it on reads 3.8 to
+  5.1 s against 3.0 s with the loop off. The
   planner plans a wave the deadline cut over its last UI walk; a
   plan whose delivery is unchanged reaches the session without a watch-set
   evaluation, and one whose delivery only grew without a full re-evaluation
@@ -609,10 +609,13 @@ flags it adopts from the deployment it runs against.
   walks; and a walk after a change reads again only the cells whose recorded
   reads it touched, for a plan of 220 to 266 ms where it was 442 ms. What
   remains is a plan per session carrying about 320,000 characters of roots
-  and producer bases, and a window in which a client that runs nothing of a
-  piece itself has received an event's consequence and not yet the
-  derivations that read it, which the server can commit a wave later
-  ([chat record](../history/development/performance/2026-10-22-served-chat-burst-and-the-deferred-settle.md),
+  and producer bases. A client that runs nothing of a piece itself shows an
+  event's consequence a wave before the derivations that read it whenever a
+  flush deadline comes between them, the trade
+  [the events specification](../specs/server-side-execution/events.md) states
+  in §2
+  ([read-through record](../history/development/performance/2026-10-22-served-chat-burst-event-view-under-read-through.md),
+  [chat record](../history/development/performance/2026-10-22-served-chat-burst-and-the-deferred-settle.md),
   [vote record](../history/development/performance/2026-10-22-served-vote-batching-and-planner-reads.md),
   [the earlier record](../history/development/performance/2026-10-22-view-scoped-replication-vote-burst.md)).
 

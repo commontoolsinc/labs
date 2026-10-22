@@ -17,12 +17,15 @@ every ready event before one derivation pass have taken out most of the
 per-wave and per-event machinery, and view-scoped replication now plans less
 and walks less: with it on, the vote burst reads faster than with the loop
 off on the main thread and about the same in the worker, and the FabriChat
-send burst half a second slower. What is left is the memory server's root evaluations, once
-per session per flush pass with a tuple evaluated under every schema a
-reader declared; each client re-running what the server ran; and, with
-view-scoped replication on, the plan's size, a room's creating space running
-the room's graph only to have its writes refused, and the window in which a
-client has an event's consequence before the derivations that read it. This
+send burst slower in the worker than with the loop off. What is left is the
+memory server's root evaluations, once per session per flush pass with a
+tuple evaluated under every schema a reader declared; each client re-running
+what the server ran; and, with view-scoped replication on, the plan's size,
+the chat burst's head parks and the long settle they precede, and a room's
+creating space running the room's graph only to have its writes refused. A
+client that runs nothing of a piece shows an event's consequence a wave
+before the derivations that read it whenever a flush deadline comes between
+them, a trade `docs/specs/server-side-execution/events.md` §2 states. This
 plan is for whoever picks that up on the branch, with everything they need
 that the records do not carry.
 
@@ -350,14 +353,18 @@ Before a push: repo-wide `deno fmt --check`, `deno lint`, `deno task check`,
          walk keeps what it found at each cell between walks, for a plan of
          220 to 266 ms where it was 442 ms; the benchmark's worker arm with
          the flag on reads level with the loop off (same record).
+   - [x] A drain whose event view lags the feed reads the entries document
+         from the store under the read-through, rather than awaiting a
+         response the space's connection carries nothing on; the send
+         burst, which had stalled in four of six benchmark runs, completes
+         ([read-through record](../history/development/performance/2026-10-22-served-chat-burst-event-view-under-read-through.md)).
    - [ ] What those records leave: the plan's size (548 roots, the same 548
          as inputs, 1,058 producer bases, to each session at each quiescent
          settlement) and a plan per session; a room's creating space running
          the room's graph, whose writes into the room's space are all
-         refused (784 refusals in one send-burst run); and the window in
-         which a client that runs nothing of a piece has an event's
-         consequence and not yet the derivations the server committed a
-         wave later.
+         refused (784 refusals in one send-burst run); and, for the send
+         burst, the head parks that wait on other spaces' documents and the
+         long settle behind them.
    - [ ] One root evaluation per (document, path) per walk with its schemas
          validated against it, and a memo for a selector that failed against
          a document version (the memory server, every arm).

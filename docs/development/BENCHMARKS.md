@@ -322,6 +322,17 @@ measurement.
   through the shell's own navigation rather than by clicking, because a topic in
   the middle of the board is on no card or link the page is showing.
 
+Under server execution the serving runtime computes those derivations, and with
+web view-scoped replication on the page shows what it delivers without running
+any of them, so the browser completes no run during either operation. Both
+segments' timed samples declare `mayRunNothing` when the deployment serves with
+server execution on, which permits that zero rather than asserting it; with
+server execution off the browser computes the derivations, and the guard stays.
+Neither segment takes its read-accounted sample under server execution, and
+each writes a line saying so instead: the sample attributes the browser's reads
+to the derivations, and what the browser runs there is its echo of them, or
+nothing.
+
 The comment segment needs the viewer to have a Profile, since the composer's
 send button is disabled until `#profile` resolves to a named one. The field
 beside it is not gated, so the draft is typed either way and it is the send that
@@ -513,7 +524,10 @@ Each charts the interval `timeTopicsOperation()` brackets, and each writes a
 alongside it. `reopen` declares `mayRunNothing` on that sample, because a reopen
 completes no run for the call to attribute and the zero is what it has to
 record; it writes its timed sample as well, for the graph and timing the
-read-accounted half's elapsed time cannot speak for.
+read-accounted half's elapsed time cannot speak for. Under a deployment serving
+with server execution on, the two navigation series declare it on their timed
+samples instead and write no read-accounted sample, for the reasons their
+section gives.
 
 ### The posture a sample is labeled with
 
