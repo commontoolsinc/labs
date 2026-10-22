@@ -803,19 +803,19 @@ describe("cell-handle", () => {
       // Immediate call on subscribe with the current (empty) state.
       expect(calls).toEqual([[undefined, undefined]]);
 
-      cell[$onCellUpdate]("v1", { cfcLabel: labelA });
+      cell[$onCellUpdate]("v1", { cfcLabel: labelA, current: true });
       expect(calls.at(-1)).toEqual(["v1", labelA]);
       expect(cell.cfcLabel).toEqual(labelA);
 
       // Same VALUE, different LABEL → still fires (the reactivity that value
       // subscriptions miss).
-      cell[$onCellUpdate]("v1", { cfcLabel: labelB });
+      cell[$onCellUpdate]("v1", { cfcLabel: labelB, current: true });
       expect(calls.at(-1)).toEqual(["v1", labelB]);
       expect(cell.cfcLabel).toEqual(labelB);
 
       // Same value AND same label → deduped, no extra call.
       const before = calls.length;
-      cell[$onCellUpdate]("v1", { cfcLabel: labelB });
+      cell[$onCellUpdate]("v1", { cfcLabel: labelB, current: true });
       expect(calls.length).toBe(before);
     });
 
@@ -827,17 +827,17 @@ describe("cell-handle", () => {
       }, { onRefused: () => {} }); // no includeCfcLabel
 
       expect(cell.wantsCfcLabel).toBe(false);
-      cell[$onCellUpdate]("v1", { cfcLabel: labelA });
+      cell[$onCellUpdate]("v1", { cfcLabel: labelA, current: true });
       const afterValue = calls.length; // fired once for the value change
       // Label-only change must be invisible to a value-only subscriber.
-      cell[$onCellUpdate]("v1", { cfcLabel: labelB });
+      cell[$onCellUpdate]("v1", { cfcLabel: labelB, current: true });
       expect(calls.length).toBe(afterValue);
     });
 
     it("leaves the cached label untouched on a value-only update", () => {
       const cell = new CellHandle<string>(makeRuntime(), ref);
       cell.subscribe(() => {}, { includeCfcLabel: true, onRefused: () => {} });
-      cell[$onCellUpdate]("v1", { cfcLabel: labelA });
+      cell[$onCellUpdate]("v1", { cfcLabel: labelA, current: true });
       expect(cell.cfcLabel).toEqual(labelA);
       // No `labelUpdate` arg = value-only update; label stays.
       cell[$onCellUpdate]("v2");
@@ -996,7 +996,10 @@ describe("cell-handle", () => {
     it("drops the value and label it held, and throws from `get()`", () => {
       const cell = new CellHandle<string>(makeRuntime(), ref);
       cell.subscribe(() => {}, { includeCfcLabel: true, onRefused: () => {} });
-      cell[$onCellUpdate]("shown before the seal", { cfcLabel: label });
+      cell[$onCellUpdate]("shown before the seal", {
+        cfcLabel: label,
+        current: true,
+      });
 
       cell[$onCellRefused](refusal);
 
