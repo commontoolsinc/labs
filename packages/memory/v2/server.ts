@@ -2440,12 +2440,18 @@ function isSubset(subset: Set<string>, superset: Set<string>): boolean {
   return true;
 }
 
-/** The roots a planner delivery names, as `scope\0id` keys. */
+/**
+ * The roots a planner delivery names, each keyed with its selector: a root
+ * whose selector changed reaches different documents, which only a full
+ * evaluation diffs out, so it is not the same root.
+ */
 function deliveryRootKeys(delivery: readonly ViewQuery[]): Set<string> {
   const keys = new Set<string>();
   for (const query of delivery) {
     for (const root of query.roots) {
-      keys.add(`${root.scope ?? "space"}\0${root.id}`);
+      keys.add(
+        JSON.stringify([root.scope ?? "space", root.id, root.selector]),
+      );
     }
   }
   return keys;
@@ -7061,6 +7067,9 @@ export class Server {
         ),
       );
       session.forceFullResync = false;
+      // The full evaluation installed every view's whole support graph, so
+      // a growth an earlier selection owed is already in it.
+      session.viewSupportGrown = false;
       session.viewDemandGraphs = demandGraphs;
       session.viewDemandEntities = demandEntities;
       session.watches = [...message.watches];
@@ -8793,6 +8802,9 @@ export class Server {
             session.viewDemandGraphs = demandGraphs;
             session.viewDemandEntities = demandEntities;
             session.graphs = graphs;
+            // The full evaluation built the whole support graph, so a growth
+            // an earlier selection owed is already in it.
+            session.viewSupportGrown = false;
             session.entities = entities;
             this.#markCrossingsDelivered(session, newCrossings.keys);
             session.trackedIds = evaluatedTrackedIds;

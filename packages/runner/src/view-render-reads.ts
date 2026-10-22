@@ -16,7 +16,7 @@ import { sortAndCompactPaths } from "./reactive-dependencies.ts";
 import type { Runtime } from "./runtime.ts";
 import { txToReactivityLog } from "./scheduler/reactivity.ts";
 import { SchedulerTriggerIndex } from "./scheduler/trigger-index.ts";
-import type { Action } from "./scheduler/types.ts";
+import type { Action, SpaceScopeAndURI } from "./scheduler/types.ts";
 import { rendererVDOMSchema } from "./schemas.ts";
 import { UI } from "./shared.ts";
 import type {
@@ -45,16 +45,20 @@ type WalkedCell = ViewRenderReads & {
 
 /**
  * Keeps what a walk found at each visible cell, under one viewing identity,
- * until a storage notification changes a document that cell read. A walk
- * given the memo reads only the cells it holds nothing for, and takes the
- * rest from it, so a change to a few values the UI shows costs the walk
- * those cells rather than the whole tree. The index matches changes the way
- * the scheduler matches an action's reads: by path, under the identity's
- * scoped documents.
+ * until a storage notification changes a path that cell read. A walk given
+ * the memo reads only the cells it holds nothing for, and takes the rest from
+ * it, so a change to a few values the UI shows costs the walk those cells
+ * rather than the whole tree. The index matches changes the way the
+ * scheduler matches an action's reads: by path, under the identity's scoped
+ * documents. A cell the latest walk did not reach is forgotten with it.
  */
 export class ViewRenderWalkMemo {
   #index: SchedulerTriggerIndex;
-  #entries = new Map<string, WalkedCell>();
+  #entries = new Map<string, {
+    cell: WalkedCell;
+    /** The documents the index holds this cell's reader under. */
+    entities: Iterable<SpaceScopeAndURI>;
+  }>();
   #keysByReader = new Map<Action, string>();
   #walked = 0;
 
@@ -71,18 +75,26 @@ export class ViewRenderWalkMemo {
   }
 
   get(key: string): WalkedCell | undefined {
-    return this.#entries.get(key);
+    return this.#entries.get(key)?.cell;
   }
 
   set(key: string, cell: WalkedCell): void {
     this.#walked++;
-    this.#entries.set(key, cell);
-    this.#keysByReader.set(cell.reader, key);
-    this.#index.addActionReads(
+    this.#delete(key);
+    const { entities } = this.#index.addActionReads(
       cell.reader,
       sortAndCompactPaths(cell.reads),
       sortAndCompactPaths(cell.shallowReads, false),
     );
+    this.#entries.set(key, { cell, entities });
+    this.#keysByReader.set(cell.reader, key);
+  }
+
+  /** Forgets every cell whose key the latest walk did not reach. */
+  retainOnly(reached: ReadonlySet<string>): void {
+    for (const key of [...this.#entries.keys()]) {
+      if (!reached.has(key)) this.#delete(key);
+    }
   }
 
   /** Forgets every cell whose reads the notification's changes touch. */
@@ -99,20 +111,23 @@ export class ViewRenderWalkMemo {
       );
       for (const reader of triggeredActions) {
         const key = this.#keysByReader.get(reader);
-        if (key === undefined) continue;
-        this.#keysByReader.delete(reader);
-        this.#entries.delete(key);
+        if (key !== undefined) this.#delete(key);
       }
     }
-    // Readers forgotten above stay in the index until it is rebuilt; a
-    // trigger for one finds no key and is ignored.
-    if (this.#entries.size === 0) this.#index.clear();
   }
 
   clear(): void {
     this.#entries.clear();
     this.#keysByReader.clear();
     this.#index.clear();
+  }
+
+  #delete(key: string): void {
+    const entry = this.#entries.get(key);
+    if (entry === undefined) return;
+    this.#entries.delete(key);
+    this.#keysByReader.delete(entry.cell.reader);
+    this.#index.removeActionFromEntities(entry.cell.reader, entry.entities);
   }
 }
 
@@ -148,14 +163,17 @@ export function collectViewRenderReads(
     into.push(read);
   };
 
+  const reached = new Set<string>();
+
   function visitCell(link: NormalizedFullLink): void {
     const key = [link.space, link.scope, link.id, ...link.path];
     if (visited.has(key)) return;
     visited.set(key, true);
     const memoKey = JSON.stringify(key);
+    reached.add(memoKey);
     let cell = memo?.get(memoKey);
     if (cell === undefined) {
-      cell = walkCell(runtime, space, link, identity);
+      cell = walkCell(runtime, link, identity);
       memo?.set(memoKey, cell);
     }
     for (const read of cell.reads) addRead(reads, seenReads, read);
@@ -175,6 +193,7 @@ export function collectViewRenderReads(
       path: root.selector.path,
     });
   }
+  memo?.retainOnly(reached);
   return { reads, shallowReads, bindings, streams };
 }
 
@@ -185,7 +204,6 @@ export function collectViewRenderReads(
  */
 function walkCell(
   runtime: Runtime,
-  space: NormalizedFullLink["space"],
   link: NormalizedFullLink,
   identity: ScopeKeyIdentity,
 ): WalkedCell {
@@ -265,11 +283,7 @@ function walkCell(
 
   try {
     visit(
-      runtime.getCellFromLink(
-        { ...link, space },
-        rendererVDOMSchema,
-        tx,
-      ).get(),
+      runtime.getCellFromLink(link, rendererVDOMSchema, tx).get(),
     );
     const log = txToReactivityLog(tx);
     return {

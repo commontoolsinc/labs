@@ -598,11 +598,13 @@ flags it adopts from the deployment it runs against.
   the flush deadline capped at 1000 ms, the benchmark's worker arm with the
   flag on reads level with the serving loop off, 3.7 to 4.4 s against 3.8 to
   4.3 s across three series, and the main-thread arm with it on reads 5.6 to
-  6.0 s. The planner plans a wave the deadline cut over its last UI walk, a
-  plan whose delivery is unchanged or grown reaches the session without a
-  watch-set re-evaluation, the committed documents reach the sessions before
-  the planner walks, and a walk after a change reads only the cells whose
-  documents changed, for a plan of 220 to 266 ms where it was 442 ms. What
+  6.0 s. The planner plans a wave the deadline cut over its last UI walk; a
+  plan whose delivery is unchanged reaches the session without a watch-set
+  evaluation, and one whose delivery only grew without a full re-evaluation
+  of the session, its added roots evaluated and its support graph extended
+  by them; the committed documents reach the sessions before the planner
+  walks; and a walk after a change reads again only the cells whose recorded
+  reads it touched, for a plan of 220 to 266 ms where it was 442 ms. What
   remains is a plan per session carrying about 320,000 characters of roots
   and producer bases, and the planning tail on the main thread
   ([record](../history/development/performance/2026-10-22-served-vote-batching-and-planner-reads.md),

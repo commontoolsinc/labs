@@ -194,6 +194,79 @@ describe("view render reads", () => {
     }
   });
 
+  it("forgets the cells a later walk no longer reaches", async () => {
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: StorageManager.emulate({ as: signer }),
+    });
+    try {
+      const kept = runtime.getCell(space, "prune kept", undefined);
+      const dropped = runtime.getCell(space, "prune dropped", undefined);
+      const root = runtime.getCell(space, "prune root", undefined);
+      await runtime.editWithRetry((tx) => {
+        kept.withTx(tx).set("kept");
+        dropped.withTx(tx).set("dropped");
+        root.withTx(tx).set({
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [kept, dropped],
+        });
+      });
+      const view = {
+        id: "prune",
+        revision: 0,
+        mode: "speculate" as const,
+        componentContractVersion: "1",
+        query: {
+          roots: [{
+            id: root.getAsNormalizedFullLink().id,
+            selector: { path: [] },
+          }],
+        },
+      };
+      const memo = new ViewRenderWalkMemo(runtime.scopeKeyIdentity);
+      runtime.storageManager.subscribe({
+        next: (notification) => {
+          memo.notify(notification);
+          return { done: false };
+        },
+      });
+      collectViewRenderReads(
+        runtime,
+        space,
+        view,
+        runtime.scopeKeyIdentity,
+        memo,
+      );
+      const before = memo.accessForTestingOnly.size;
+
+      await runtime.editWithRetry((tx) =>
+        root.withTx(tx).set({
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [kept],
+        })
+      );
+      await runtime.idle();
+      const after = collectViewRenderReads(
+        runtime,
+        space,
+        view,
+        runtime.scopeKeyIdentity,
+        memo,
+      );
+      expect(after.reads.map((read) => read.id)).not.toContain(
+        dropped.getAsNormalizedFullLink().id,
+      );
+      expect(memo.accessForTestingOnly.size).toBeLessThan(before);
+    } finally {
+      await runtime.storageManager.synced();
+      await runtime.dispose();
+    }
+  });
+
   it("walks nested visible arrays and inline object properties", async () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),

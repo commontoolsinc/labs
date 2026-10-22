@@ -907,6 +907,36 @@ describe("view interests", () => {
     expect(removed).toEqual(["of:ordinary"]);
   });
 
+  it("re-evaluates the watch set for a plan that keeps a root under another selector", async () => {
+    await set([], [view()]);
+    const [{ handle }] = server.viewInterestsForSpace(space);
+    await server.setViewSelection(space, handle, {
+      generation: 1,
+      delivery: [query("of:support")],
+    });
+    await server.flushSessions();
+    const evaluations = spy(server, "evaluateWatchSet");
+    try {
+      // The root's id stays and its selector changes, beside an added root:
+      // the documents the old selector reached are diffed out only by a full
+      // evaluation, so this is not a delivery that only grew.
+      await server.setViewSelection(space, handle, {
+        generation: 2,
+        delivery: [{
+          roots: [{
+            id: "of:support",
+            selector: { path: ["label"], schema: false as const },
+          }],
+        }, query("of:ordinary")],
+      });
+      expect(evaluations.calls).toHaveLength(1);
+      await server.flushSessions();
+      expect(evaluations.calls.length).toBeGreaterThan(1);
+    } finally {
+      evaluations.restore();
+    }
+  });
+
   it("isolates a stored selection from its caller's later mutations", async () => {
     await set([], [view()]);
     const [{ handle }] = server.viewInterestsForSpace(space);

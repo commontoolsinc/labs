@@ -7273,8 +7273,19 @@ export class SpaceServer implements TransactionSealDestination {
       // memory server cannot spend sending the frames those documents owe.
       // A settle the deadline cut plans nothing a session already holds a
       // selection for, so its frames keep the refresh's own turn.
+      // The flush only orders work the memory server's own refresh turn would
+      // do anyway, and the wave is already durable, so a failed flush is
+      // logged and the plan and the outbox drain still run.
       if (!exhausted && this.#active && this.#runtime === runtime) {
-        await this.#options.server.flushSessions([this.#options.space]);
+        try {
+          await this.#options.server.flushSessions([this.#options.space]);
+        } catch (error) {
+          logger.warn("view-plan-session-flush-failed", () => [
+            `space ${this.#options.space}: the session flush before the view ` +
+            "plan failed; the plan publishes over the refresh's own turn",
+            error,
+          ]);
+        }
         if (!this.#active || this.#runtime !== runtime) return;
       }
       await this.#publishViewPlan(runtime, !exhausted);

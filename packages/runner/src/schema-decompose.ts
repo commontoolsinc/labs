@@ -283,7 +283,9 @@ export type DecomposeSchemaOptions = {
 
 // Memo for decompositions of interned inputs. `decomposeSchema` interns its
 // input, so in steady state every call after the first for a given schema is
-// one `WeakMap` probe. A refusal (throw) is never memoized.
+// one `WeakMap` probe. A refusal that depends on a resolver (an external ref
+// it could not supply, or supplied wrong) is never memoized; one the schema's
+// own structure decides is, in `structuralRefusalCache` below.
 //
 // A decomposition that consulted no resolver is a pure function of its input
 // and memoizes for the realm. One that resolved an external ref is a fact

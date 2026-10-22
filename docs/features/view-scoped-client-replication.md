@@ -63,11 +63,13 @@ the next settlement that reaches quiescence plans every view whose snapshot
 or walk changed, so a burst of cut waves plans each view once, as it ends,
 over the snapshot it left. The cap bounds each cut settle and not the
 deferral: a space under continuous input keeps its plans for as long as the
-input lasts. Before a settlement that reached quiescence plans, the serving
-loop has the memory server send the sessions the documents the wave
-committed: planning walks every viewing session's UI, and on a co-hosted
-server that is time the frames those documents owe would otherwise wait
-behind. Within one settlement, views whose snapshots carry the same
+input lasts. When a settlement that reached quiescence plans after its wave
+committed, the serving loop first has the memory server send the sessions
+the documents the wave committed: planning walks every viewing session's UI,
+and on a co-hosted server that is time the frames those documents owe would
+otherwise wait behind. With the overlapped commit
+(`SERVER_EXECUTION_OVERLAP_COMMIT`), the plan publishes while the commit is
+still in flight, and its frames keep the refresh's own turn. Within one settlement, views whose snapshots carry the same
 observations and whose walks read the same addresses select their cone once.
 Ordinary rendered attributes and object props contribute
 their reads. Declared bindings contribute their effective component projection;
@@ -108,9 +110,10 @@ looking up its observations.
 The publisher caches the visible tree walk under its session and view lifetime.
 Storage notifications invalidate it using the scheduler's scoped, path-sensitive
 read matching, including shallow reads and missing values. Within the walk,
-what was found at each visible cell is kept the same way, so a walk a change
-invalidated reads again only the cells whose documents changed and takes the
-rest from the last walk. Visible stream links
+what was found at each visible cell is kept the same way: a change forgets
+only the cells whose recorded reads it touches, a walk reads those again and
+takes the rest from the last walk, and a cell the walk no longer reaches is
+forgotten with it. Visible stream links
 are retained independently of handler observations, so new handler read sets can
 change eligibility without walking the UI again. Replica resets and replacement
 view lifetimes discard the cached walk.

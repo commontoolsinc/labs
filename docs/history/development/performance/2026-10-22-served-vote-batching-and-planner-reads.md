@@ -91,8 +91,9 @@ reading the pieces' registration metadata 10 ms, assembling the selection
 600 cell reads at 0.3 to 0.4 ms each.
 
 The profiler put 12.0 s of the run's 62 s of main-thread CPU in the
-planner, 8.7 s of it in the walk, and three leaves inside a cell read stood
-out, none of them the read itself:
+planner, 8.7 s of it in the walk, and three repeated costs stood out, two
+inside a cell read and one in the comparisons around the plan, none of them
+the read itself:
 
 1. **The view-reference hash.** Each read keys the transaction's read cache
    by a hash of the cell's link and label view, and the link carries the
@@ -101,9 +102,9 @@ out, none of them the read itself:
    ([`cell.ts`](../../../../packages/runner/src/cell.ts), `#viewRefHash`).
 2. **A refusal rebuilt per read.** A read of a cell not yet synced starts a
    load, whose selector is externalized by decomposing its schema. The
-   renderer schema declares `$id` and `$defs`, which the decomposer refuses
-   for structural reasons, and it built a new error, stack trace included,
-   for every read: 0.45 s. A structural refusal is kept per interned schema
+   renderer schema declares a `$id`, a resource scope the decomposer refuses
+   for structural reasons (its root `$defs` it supports), and it built a new
+   error, stack trace included, for every read: 0.45 s. A structural refusal is kept per interned schema
    ([`schema-decompose.ts`](../../../../packages/runner/src/schema-decompose.ts)).
 3. **Equality by hashing.** The planner compared a new selection with the
    published one, and the memory server a new delivery with the current one,

@@ -10,11 +10,17 @@ the serving loop's own waits
 ([the serving-cycle record](../history/development/performance/2026-10-11-serving-cycle-local-quiescence.md)),
 and the worker's port round trips, the publish and the commit, which the
 served-vote record's last section measures gone from the cycle with the burst
-unmoved. What is left is the memory server's work per viewing session on the
-main thread: the walk of the view-bearing documents under the view's schema
-and the encode of the frame that follows, once per session per flush pass.
-This plan is for whoever picks that up on the branch, with everything they
-need that the records do not carry.
+unmoved. The [work census](../history/development/performance/2026-10-21-served-vote-work-census.md)
+then counted what one burst causes and named seven removals, and stage 3
+below tracks them: the growing flush deadline and the serving pass that runs
+every ready event before one derivation pass have taken out most of the
+per-wave and per-event machinery, and view-scoped replication now plans less
+and walks less. What is left is the memory server's root evaluations, once
+per session per flush pass with a tuple evaluated under every schema a
+reader declared; each client re-running what the server ran; and, with
+view-scoped replication on, the plan's size and its planning tail on the main
+thread. This plan is for whoever picks that up on the branch, with everything
+they need that the records do not carry.
 
 ## Where things stand
 

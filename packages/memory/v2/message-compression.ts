@@ -106,9 +106,7 @@ export class MemoryMessageCompressionChannel {
         () =>
           JSON.stringify({
             payloadChars: payload.length,
-            frameBytes: typeof frame === "string"
-              ? frame.length
-              : frame.byteLength,
+            frameBytes: memoryMessageFrameBytes(frame),
           }),
         encodeStart,
         "send",

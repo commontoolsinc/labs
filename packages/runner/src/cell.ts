@@ -1575,21 +1575,20 @@ export class CellImpl<T extends FabricValue>
     if (cached?.link === link && cached.cfcLabelView === cfcLabelView) {
       return cached.hash;
     }
-    // The schema stands in by its interned hash: a link's schema is interned
-    // (`asSchema()`), so that hash is already computed, where hashing the
-    // schema's structure again costs as much as the whole of a small read.
-    // Two view refs hash alike exactly when their links, read with the same
-    // schema, and their label views agree, as before.
+    // An interned schema stands in by its interned hash, which is already
+    // computed, where hashing the schema's structure again costs as much as
+    // the whole of a small read. A schema that is not interned is hashed
+    // whole, as interning it here would freeze a schema its caller owns.
+    // Either way two view refs hash alike only when their links, schemas
+    // included, and their label views agree; the two forms never meet, since
+    // a schema is never a string.
     const { schema, ...rest } = link;
-    const hash = hashStringOf({
-      link: {
-        ...rest,
-        ...(schema === undefined
-          ? {}
-          : { schema: internSchema(schema, true).taggedHashString }),
-      },
-      cfcLabelView,
-    } as unknown as CellViewRef);
+    const hash = schema !== undefined && isInternedSchema(schema)
+      ? hashStringOf({
+        link: { ...rest, schema: internSchema(schema, true).taggedHashString },
+        cfcLabelView,
+      } as unknown as CellViewRef)
+      : hashStringOf({ link, cfcLabelView } satisfies CellViewRef);
     this.#viewRefHashCache = { link, cfcLabelView, hash };
     return hash;
   }
