@@ -4,7 +4,7 @@
 `schemas.tsx` defines its public contract and re-exports the participant
 roster's types from `participants.tsx`, which also holds the roster's one
 writer, `addParticipant`. The shared inputs are `title`, `panels`,
-`presentation`, `participants`, `chatRoom`, `meeting`, and `style`;
+`presentation`, `participants`, `chatRoom`, `fileStore`, `meeting`, and `style`;
 `hiddenPanels` and `privatePanels` belong to one user, and `viewerState` to one
 session.
 
@@ -267,6 +267,17 @@ shown looks for a piece panel whose piece `equals()` the room. A deleted room
 stays named until `setChatRoom` clears it, as any link does. The input holds the
 link in a record, `{ room? }`, because a handler's cell for a field holding a
 link writes through it, so replacing the link there would write into the room.
+
+`fileStore` is where the Loom keeps its space's file store
+([`FileStore`](../../../docs/specs/fabrifile/FileStore.md#where-it-lives)): a
+`FileStoreRecord`, `{}` until the store is first needed. The output's
+`fileStore` links the store, absent while the Loom names none, and
+`ensureFileStore()` creates one as a piece in the Loom's space, unless the Loom
+names one already, in which case it changes nothing. The store is added neither
+as a panel nor to `pieceRegistry`. The output also offers the record itself as
+`fileStoreRecord`, which is how the Loom's chat room, whose container the Loom
+is, finds the store and creates it: a room in the Loom's space has the Loom's
+store as its own.
 
 `meeting` is the Loom's shared, durable meeting association, a record with an
 optional `key`. An empty record, including the default for a root whose input
