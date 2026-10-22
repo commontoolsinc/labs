@@ -1261,9 +1261,9 @@ export class Session {
       const rowsOfLine: string[] = [];
       while (chars.length > columns) {
         const space = chars.lastIndexOf(" ", columns);
-        const end = space > 0 ? space + 1 : columns;
-        rowsOfLine.push(chars.slice(0, end).join("").trimEnd());
-        chars = chars.slice(end);
+        const words = chars.slice(0, space + 1).join("").trimEnd();
+        rowsOfLine.push(words || chars.slice(0, columns).join(""));
+        chars = chars.slice(words ? space + 1 : columns);
       }
       rowsOfLine.push(chars.join(""));
       return rowsOfLine;

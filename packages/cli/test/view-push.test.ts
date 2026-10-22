@@ -661,6 +661,20 @@ describe("view-push", () => {
       expect([box.x, box.y]).toEqual([57, 19]);
     });
 
+    it("breaks an indented word wider than the dialog without leaving an empty row", () => {
+      const session = editableSession();
+      session.beginBranchPush(() => {});
+      const word = "x".repeat(80);
+
+      session.appendPushOutput(`  ${word}\n`);
+
+      expect(session.view().dialog!.body.slice(0, 3)).toEqual([
+        `  ${word.slice(0, 70)}`,
+        word.slice(70),
+        "",
+      ]);
+    });
+
     it("keeps an address no wider than the dialog on one row", () => {
       const session = editableSession();
       session.resize(200, 60);
