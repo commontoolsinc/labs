@@ -107,7 +107,10 @@ looking up its observations.
 
 The publisher caches the visible tree walk under its session and view lifetime.
 Storage notifications invalidate it using the scheduler's scoped, path-sensitive
-read matching, including shallow reads and missing values. Visible stream links
+read matching, including shallow reads and missing values. Within the walk,
+what was found at each visible cell is kept the same way, so a walk a change
+invalidated reads again only the cells whose documents changed and takes the
+rest from the last walk. Visible stream links
 are retained independently of handler observations, so new handler read sets can
 change eligibility without walking the UI again. Replica resets and replacement
 view lifetimes discard the cached walk.

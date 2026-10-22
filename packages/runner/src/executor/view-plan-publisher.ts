@@ -30,6 +30,7 @@ import { viewInputBasis, viewInputFingerprint } from "../view-input-basis.ts";
 import {
   collectViewRenderReads,
   type ViewRenderReads,
+  ViewRenderWalkMemo,
 } from "../view-render-reads.ts";
 import {
   type ViewDataSelection,
@@ -48,6 +49,8 @@ type Selection = Omit<ViewPlan, "id" | "revision" | "generation"> & {
 /** Independent invalidation of rendered reads and execution-dependent output. */
 type CachedView = {
   render: ViewReadCache<ViewRenderReads>;
+  /** What the UI walk found at each visible cell, kept across walks. */
+  walk: ViewRenderWalkMemo;
   selection: ViewReadCache<true>;
   execution?: ViewExecutionNode[];
 };
@@ -80,6 +83,7 @@ export class ViewPlanPublisher {
     next: (notification) => {
       for (const view of this.#views.values()) {
         view.render.notify(notification);
+        view.walk.notify(notification);
         view.selection.notify(notification);
       }
       return { done: false };
@@ -162,6 +166,7 @@ export class ViewPlanPublisher {
       if (cache === undefined) {
         cache = {
           render: new ViewReadCache(identity),
+          walk: new ViewRenderWalkMemo(identity),
           selection: new ViewReadCache(identity),
         };
         this.#views.set(key, cache);
@@ -195,7 +200,13 @@ export class ViewPlanPublisher {
           render = sharedRenders.get(rootsKey);
           if (render === undefined) {
             const renderStart = performance.now();
-            render = collectViewRenderReads(runtime, space, view, identity);
+            render = collectViewRenderReads(
+              runtime,
+              space,
+              view,
+              identity,
+              cache.walk,
+            );
             logger.time(renderStart, "render");
             if (identityFree(render)) sharedRenders.set(rootsKey, render);
           }

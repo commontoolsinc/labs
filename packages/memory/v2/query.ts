@@ -1,4 +1,5 @@
 import type { FabricValue, JSONSchema } from "@commonfabric/api";
+import { LRUCache } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
 import { StagedMap } from "@commonfabric/utils/staged-map";
 import {
@@ -2366,7 +2367,30 @@ export const toDocKey = (
   identity: ScopeKeyIdentity,
 ): QueryDocKey => schemaTrackerKey(space, id, scope, identity);
 
+/** The parts of a query doc key, by the key, up to the newest 100,000 keys. */
+const parsedDocKeys = new LRUCache<QueryDocKey, {
+  space: string;
+  id: string;
+  scope: CellScope;
+  scopeKey: ScopeKey;
+}>({ capacity: 100_000 });
+
 export const fromDocKey = (key: QueryDocKey): {
+  space: string;
+  id: string;
+  scope: CellScope;
+  scopeKey: ScopeKey;
+} => {
+  // A session's refresh parses every key its graphs hold, and the keys are
+  // the same from one refresh to the next, so the parse is kept by key.
+  const parsed = parsedDocKeys.get(key);
+  if (parsed !== undefined) return parsed;
+  const result = parseDocKey(key);
+  parsedDocKeys.put(key, result);
+  return result;
+};
+
+const parseDocKey = (key: QueryDocKey): {
   space: string;
   id: string;
   scope: CellScope;
