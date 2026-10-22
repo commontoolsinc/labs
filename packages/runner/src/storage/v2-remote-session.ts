@@ -29,6 +29,7 @@ import {
 import {
   isRouterControl,
   ROUTER_CHUNK_BYTES,
+  ROUTER_UPLOAD_WINDOW,
   routerRecords,
   routerRoute,
 } from "@commonfabric/memory/v2/router-protocol";
@@ -55,9 +56,6 @@ const logger = getLogger("storage.v2.remote", {
  * disables slot counting while retaining the other routed frame checks.
  */
 export const ROUTED_FRAME_SLOTS = 150_000;
-
-/** Largest supported public upload credit window, in on-wire record bytes. */
-const ROUTER_UPLOAD_WINDOW = 262_144;
 
 /**
  * How long one credited record waits for the router's credit before its send

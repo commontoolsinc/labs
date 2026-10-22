@@ -10,6 +10,9 @@ import {
   isRouterControl,
   ROUTER_CHUNK_BYTES,
   ROUTER_CHUNK_COUNT,
+  ROUTER_HELLO_FRAME_SLOTS_POLICY,
+  ROUTER_MAX_REQUEST_ORDINAL,
+  ROUTER_UPLOAD_WINDOW,
   RouterAssembler,
   routerRecord,
   routerRecords,
@@ -32,6 +35,7 @@ describe("router-protocol", () => {
           "session.open",
           "session.watch.set",
           "session.watch.add",
+          "session.watch.remove",
         ]
       ) expect(isRouterControl(type)).toBe(true);
     });
@@ -44,7 +48,6 @@ describe("router-protocol", () => {
           "session.ack",
           "session.close",
           "session.report",
-          "session.watch.remove",
           "presence.join",
           "session/effect",
           "response",
@@ -69,6 +72,36 @@ describe("router-protocol", () => {
         ]
       ) expect(isRouterControl(type)).toBe(false);
     });
+  });
+
+  it("exports the cross-repo constants as one-line literals the infra preflight can read", async () => {
+    // The infra router's preflight reads these by name from the source text,
+    // so each must stay `export const NAME = <literal>;` on one line.
+    const source = await Deno.readTextFile(
+      new URL("../v2/router-protocol.ts", import.meta.url),
+    );
+    for (
+      const [name, value, literal] of [
+        ["ROUTER_UPLOAD_WINDOW", ROUTER_UPLOAD_WINDOW, "262_144"],
+        [
+          "ROUTER_MAX_REQUEST_ORDINAL",
+          ROUTER_MAX_REQUEST_ORDINAL,
+          "Number.MAX_SAFE_INTEGER",
+        ],
+        [
+          "ROUTER_HELLO_FRAME_SLOTS_POLICY",
+          ROUTER_HELLO_FRAME_SLOTS_POLICY,
+          "1",
+        ],
+      ] as const
+    ) {
+      expect(source).toContain(`\nexport const ${name} = ${literal};\n`);
+      expect(value).toBe(
+        name === "ROUTER_MAX_REQUEST_ORDINAL"
+          ? Number.MAX_SAFE_INTEGER
+          : Number(literal.replaceAll("_", "")),
+      );
+    }
   });
 
   it("preserves a leading BOM and reserves its exact wire length", () => {

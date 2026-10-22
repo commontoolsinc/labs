@@ -53,6 +53,7 @@ import type { RoutedEpochStore } from "./routed-epochs.ts";
 import {
   decodeRouterHeader,
   decodeRouterRecord,
+  ROUTER_MAX_REQUEST_ORDINAL,
   ROUTER_PROTOCOL_VERSION,
   RouterAssembler,
   routerRoute,
@@ -2249,7 +2250,7 @@ export class RoutedMemoryHost {
             const header = decodeRouterHeader(frame);
             requireRouted(
               header.requestOrdinal !== undefined &&
-                lastRequestOrdinal < Number.MAX_SAFE_INTEGER &&
+                lastRequestOrdinal < ROUTER_MAX_REQUEST_ORDINAL &&
                 header.requestOrdinal === lastRequestOrdinal + 1,
             );
             if (header.bytes > ROUTED_QUEUE_LIMIT) {

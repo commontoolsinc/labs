@@ -27,12 +27,40 @@ export const ROUTER_CHUNK_COUNT = 512;
 /** Maximum routing header bytes, including its record prefix. */
 export const ROUTER_HEADER_BYTES = 4096;
 
-/** Identifies bounded controls whose contents the router must process locally. */
+/**
+ * Largest public upload credit window the SDK accepts, in on-wire record
+ * bytes. The router offers it in `hello.ok.routerUploadWindow`.
+ */
+export const ROUTER_UPLOAD_WINDOW = 262_144;
+
+/**
+ * Largest private request ordinal. Ordinals start at 1 on each data socket
+ * and increase by exactly one; a socket that reaches this value accepts no
+ * further request header.
+ */
+export const ROUTER_MAX_REQUEST_ORDINAL = Number.MAX_SAFE_INTEGER;
+
+/**
+ * Frame-slot cap policy, version 1: the SDK learns the routed frame-slot cap
+ * from `hello.ok.routerFrameSlots` on every handshake (`null` disables slot
+ * counting, an absent field selects the default) and applies it to the frames
+ * it sends and receives. The infra router's preflight reads this constant to
+ * confirm the SDK it deploys against follows this policy.
+ */
+export const ROUTER_HELLO_FRAME_SLOTS_POLICY = 1;
+
+/**
+ * Identifies bounded controls whose contents the router must process locally:
+ * authentication, negotiation, session opens, and every watch mutation, since
+ * `session.watch.remove` counts against `max_watches_per_session` as the
+ * additions do.
+ */
 export function isRouterControl(kind: unknown): boolean {
   return typeof kind === "string" && (
     kind === "hello" || kind.startsWith("connection.") ||
     kind === "memory.compression" || kind === "session.open" ||
-    kind === "session.watch.set" || kind === "session.watch.add"
+    kind === "session.watch.set" || kind === "session.watch.add" ||
+    kind === "session.watch.remove"
   );
 }
 
@@ -178,7 +206,7 @@ export function decodeRouterAdmission(record: Uint8Array): {
   const ordinal = view.getBigUint64(8);
   requireRouted(
     bytes > 0 && bytes <= ROUTED_QUEUE_LIMIT && ordinal > 0n &&
-      ordinal <= BigInt(Number.MAX_SAFE_INTEGER),
+      ordinal <= BigInt(ROUTER_MAX_REQUEST_ORDINAL),
   );
   return { bytes, requestOrdinal: Number(ordinal) };
 }
