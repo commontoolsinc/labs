@@ -152,10 +152,13 @@ export function routedObject(value: unknown): Record<string, unknown> {
 }
 
 /** Validates a bounded routing/session/request identifier. */
+/** Whether `value` is a bounded identifier a routed header or reply may echo. */
+export function isRoutedIdentifier(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_:\-.@]{1,128}$/.test(value);
+}
+
 export function routedIdentifier(value: unknown): asserts value is string {
-  requireRouted(
-    typeof value === "string" && /^[A-Za-z0-9_:\-.@]{1,128}$/.test(value),
-  );
+  requireRouted(isRoutedIdentifier(value));
 }
 
 /** Canonical client flag bytes bound to the toolshed ticket. */

@@ -8,6 +8,7 @@ import {
   valueEqual,
 } from "@commonfabric/data-model";
 import { SlotLimitError } from "@commonfabric/data-model/codec-json";
+import { isRoutedIdentifier } from "./routed-parser.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { StagedMap } from "@commonfabric/utils/staged-map";
 import { metrics, SpanStatusCode, trace } from "@opentelemetry/api";
@@ -1678,7 +1679,7 @@ class Connection {
    * the lost message would have told it.
    */
   #answerFailedRequest(
-    parsed: ClientMessage | OversizedClientMessage | null,
+    parsed: ClientMessage | RejectedClientMessage | null,
     error: unknown,
   ): boolean {
     const requestId = requestIdOf(parsed);
@@ -1796,16 +1797,19 @@ class Connection {
   }
 
   async #receiveOrdered(
-    parsed: ClientMessage | OversizedClientMessage | null,
+    parsed: ClientMessage | RejectedClientMessage | null,
   ): Promise<void> {
     if (this.#closed) {
       return;
     }
 
-    if (parsed === null) {
+    if (parsed === null || parsed.type === "invalid") {
+      // Answered on the request the envelope named when it named one the
+      // reply may echo, so the client settles that request instead of
+      // waiting for its connection to close.
       this.#send({
         type: "response",
-        requestId: "invalid",
+        requestId: parsed?.requestId ?? "invalid",
         error: toError(
           "InvalidMessageError",
           "Unable to parse memory message",
@@ -2335,7 +2339,7 @@ class Connection {
  * at a time however many spaces the opens name.
  */
 const spaceOfFrame = (
-  message: ClientMessage | OversizedClientMessage | null,
+  message: ClientMessage | RejectedClientMessage | null,
 ): string | undefined => {
   if (message === null || !("space" in message)) return undefined;
   if (message.type === "session.open" && message.principal === undefined) {
@@ -2349,14 +2353,14 @@ const spaceOfFrame = (
  * could not be read, or a `hello`.
  */
 const requestIdOf = (
-  message: ClientMessage | OversizedClientMessage | null,
+  message: ClientMessage | RejectedClientMessage | null,
 ): string | undefined => {
   if (message === null || !("requestId" in message)) return undefined;
   return typeof message.requestId === "string" ? message.requestId : undefined;
 };
 
 const isPresenceClientMessage = (
-  message: ClientMessage | OversizedClientMessage,
+  message: ClientMessage | RejectedClientMessage,
 ): message is
   | PresenceJoinRequest
   | PresencePublishRequest
@@ -2375,7 +2379,7 @@ type ImmediateClientMessage =
   | SessionReportRequest;
 
 const isImmediateClientMessage = (
-  message: ClientMessage | OversizedClientMessage,
+  message: ClientMessage | RejectedClientMessage,
 ): message is ImmediateClientMessage =>
   isPresenceClientMessage(message) || message.type === "session.report";
 
@@ -10457,33 +10461,32 @@ function isSqliteNamedParamEntries(
 }
 
 /**
- * A client message refused for standing for more than
- * `MAX_UNTRUSTED_MESSAGE_SLOTS` slots, with the id of the request it carried
- * so that the refusal can be answered on that request.
+ * A client message refused before it was understood, with the id of the
+ * request it carried so that the refusal can be answered on that request:
+ * `oversized` for one standing for more than `MAX_UNTRUSTED_MESSAGE_SLOTS`
+ * slots, `invalid` for one that decoded but failed metadata expansion or
+ * request-shape validation.
  */
-export type OversizedClientMessage = {
-  type: "oversized";
+export type RejectedClientMessage = {
+  type: "oversized" | "invalid";
   requestId: string;
 };
 
 /**
- * Decodes and validates one message from a client. Returns `null` for a
- * message that is malformed, or that is refused for its size without carrying
- * a request id to answer it on. Negotiated commit metadata expands after bounded
+ * Decodes and validates one message from a client. A message that decodes but
+ * is then refused is reported as `invalid` on its root `requestId` when that
+ * is a bounded identifier (see `isRoutedIdentifier()`); the result is `null`
+ * for a message that cannot be decoded, or that is refused without a usable
+ * request id to answer it on. Negotiated commit metadata expands after bounded
  * wire decoding and before request-shape validation or downstream CFC checks.
  */
 export const parseClientMessage = (
   payload: string,
   options: { commitLabelTableV1?: boolean } = {},
-): ClientMessage | OversizedClientMessage | null => {
+): ClientMessage | RejectedClientMessage | null => {
   let parsed: FabricValue;
   try {
     parsed = decodeMemoryBoundary(payload);
-    if (options.commitLabelTableV1 === true) {
-      parsed = expandClientMessageLabels(parsed);
-    } else if (hasClientMessageLabelMetadata(parsed)) {
-      return null;
-    }
   } catch (error) {
     if (error instanceof SlotLimitError) {
       const requestId = error.rootScalar("requestId");
@@ -10493,7 +10496,26 @@ export const parseClientMessage = (
     }
     return null;
   }
+  const requestId = isFabricPlainObject(parsed) ? parsed.requestId : undefined;
+  const rejected: RejectedClientMessage | null = isRoutedIdentifier(requestId)
+    ? { type: "invalid", requestId }
+    : null;
+  try {
+    if (options.commitLabelTableV1 === true) {
+      parsed = expandClientMessageLabels(parsed);
+    } else if (hasClientMessageLabelMetadata(parsed)) {
+      return rejected;
+    }
+  } catch {
+    return rejected;
+  }
+  return parseDecodedClientMessage(parsed) ?? rejected;
+};
 
+/** Helper for `parseClientMessage()`, which checks a decoded message's shape. */
+const parseDecodedClientMessage = (
+  parsed: FabricValue,
+): ClientMessage | null => {
   if (!isFabricPlainObject(parsed)) {
     return null;
   }

@@ -253,9 +253,11 @@ describe("memory.handlers", () => {
           if (typeof response !== "string") {
             throw new Error("Expected text response");
           }
+          // Either refusal answers on the request's own id: an unsolicited
+          // table fails parsing, a negotiated one reaches session admission.
           expect(decodeMemoryBoundary(response)).toMatchObject({
             type: "response",
-            requestId: commitLabelTableV1 ? "compact" : "invalid",
+            requestId: "compact",
             error: {
               name: commitLabelTableV1 ? "SessionError" : "InvalidMessageError",
             },

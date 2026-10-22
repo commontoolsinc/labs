@@ -786,10 +786,9 @@ describe("commit-label-negotiation", () => {
             throw new Error("Expected a response");
           }
           // A negotiated request reaches session admission; an unsolicited table
-          // fails request parsing before any session or CFC store can handle it.
-          expect(response.requestId).toBe(
-            serverEnabled && clientEnabled === true ? "compact" : "invalid",
-          );
+          // fails request parsing before any session or CFC store can handle
+          // it. Either refusal answers on the request's own id.
+          expect(response.requestId).toBe("compact");
           expect(response.error).toBeDefined();
         } finally {
           connection.close();
@@ -802,7 +801,7 @@ describe("commit-label-negotiation", () => {
   it("rejects malformed and unsolicited commit tables during parsing and leaves table-free numbers to admission", () => {
     const base = {
       type: "transact",
-      requestId: "invalid",
+      requestId: "malformed-commit",
       space: "did:key:commit-invalid",
       sessionId: "session",
       commit: {
@@ -819,9 +818,26 @@ describe("commit-label-negotiation", () => {
         ...base,
         commit: { ...base.commit, ...fields },
       });
-      expect(parseClientMessage(payload)).toBeNull();
-      expect(parseClientMessage(payload, { commitLabelTableV1: true }))
-        .toBeNull();
+      // The refusal names the request when its id is a bounded identifier,
+      // and nothing when it is not.
+      for (const options of [{}, { commitLabelTableV1: true }]) {
+        expect(parseClientMessage(payload, options)).toEqual({
+          type: "invalid",
+          requestId: "malformed-commit",
+        });
+        for (
+          const requestId of [undefined, 7, "has a space", "x".repeat(129)]
+        ) {
+          expect(parseClientMessage(
+            encodeMemoryBoundary({
+              ...base,
+              requestId,
+              commit: { ...base.commit, ...fields },
+            }),
+            options,
+          )).toBeNull();
+        }
+      }
     }
     // A number without its table is not transport metadata: the request
     // parses on either arm, and commit admission refuses to store it (see
@@ -841,7 +857,7 @@ describe("commit-label-negotiation", () => {
       for (const options of [{}, { commitLabelTableV1: true }]) {
         expect(parseClientMessage(payload, options)).toMatchObject({
           type: "transact",
-          requestId: "invalid",
+          requestId: "malformed-commit",
         });
       }
     }
@@ -873,6 +889,22 @@ describe("commit-label-negotiation", () => {
       await wire.transport.send(encodeMemoryBoundary({
         ...originalRequest,
         requestId: "bad-table",
+        commit: {
+          ...commit,
+          localSeq: 2,
+          labelTable: [null],
+          operations: [{ op: "set", id: "of:donuts", value: document(2) }],
+        },
+      }));
+      expect(wire.messages.at(-1)).toMatchObject({
+        type: "response",
+        requestId: "bad-table",
+        error: { name: "InvalidMessageError" },
+      });
+      // Without a usable request id the refusal is answered on `invalid`.
+      await wire.transport.send(encodeMemoryBoundary({
+        ...originalRequest,
+        requestId: 7,
         commit: {
           ...commit,
           localSeq: 2,
