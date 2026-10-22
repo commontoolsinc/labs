@@ -4222,8 +4222,9 @@ finally:
 
   // Mode A runs at the deployment's cell representation. The router answers
   // every hello with the deployment's flags, which the SDK refuses
-  // permanently. A client that ignores them and opens a space anyway is
-  // refused by the toolshed's handshake, and the router closes its socket.
+  // permanently. A client that ignores them and opens a space anyway has that
+  // open answered with a final denial, before any directory or agent work,
+  // and the router then closes its socket (`incompatible-flags`).
   setModernCellRepConfig(!modernCellRep);
   try {
     const refused = await MemoryClient.connect({
@@ -4262,7 +4263,13 @@ finally:
     principal: alice.did(),
     session: {},
   }).then((reply) => JSON.stringify(reply), (error: Error) => error);
-  assert(otherOpen instanceof Error, String(otherOpen));
+  // The denial is answered when the router gets to it before the close;
+  // either way no session opens.
+  assert(
+    otherOpen instanceof Error ||
+      (JSON.parse(otherOpen) as { error?: unknown }).error !== undefined,
+    String(otherOpen),
+  );
   await Promise.race([
     otherRep.closed.promise,
     pause(6000).then(() => {
