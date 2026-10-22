@@ -5057,12 +5057,13 @@ export declare function revokeSpaceAccess(
  * the blob arrives.
  *
  * The record carries no label, as no blob does: `name` is readable by anyone
- * who can fetch the blob, as its bytes are. The blob's id hashes the name in,
- * so fetching it takes knowing the name already.
+ * who can fetch the blob, as its bytes are. The blob's id hashes the name in
+ * with the media type and bytes, so fetching it takes knowing all three
+ * already, and a correct guess at all three is confirmed by fetching.
  *
  * Available only in a handler, and throws anywhere else. Throws too when
  * `blobId` is not a non-empty string, or `name` is not a non-empty string of
- * well-formed Unicode.
+ * well-formed Unicode of at most 1024 bytes as UTF-8.
  */
 export declare function nameBlob(
   target: AnyCell<unknown>,

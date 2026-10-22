@@ -1,8 +1,7 @@
 import { debugStr } from "@commonfabric/data-model";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import {
+  asStoredBlobRecord,
   blobDocumentId,
   type BlobRecord,
   isBlobFileName,
@@ -19,14 +18,15 @@ import { spaceOfTarget } from "./space-access.ts";
  * space does not already hold it. A blob already named `name` is its own
  * answer, and nothing is staged.
  *
- * Returns `undefined` when the space holds no record of `blobId`. A record
- * still loading is not one of those: the handler is withdrawn, and runs again
+ * Returns `undefined` when the space holds no record of `blobId`, as
+ * `asStoredBlobRecord()` reads one. A record still loading is not one of
+ * those: the handler is withdrawn, and runs again
  * once the record arrives.
  *
  * The record staged carries no label, as no blob record does, so `name` is
  * readable by anyone who can fetch the blob. Its id is the hash of the name,
- * the media type and the bytes together, so fetching it takes knowing the name
- * already.
+ * the media type and the bytes together, so fetching it takes knowing all three
+ * already, and a correct guess at all three is confirmed by fetching.
  *
  * @throws Error when called anywhere but a handler, when `target` is not a
  *   cell, when `blobId` is not a non-empty string, or when `name` is not a
@@ -66,7 +66,7 @@ export function nameBlob(
   // A record is reached by its id, never through a link that would already
   // have started its load, so the load is started here.
   runtime.ensureLinkedDocLoaded(link);
-  const record = asBlobRecord(tx.readValueOrThrow(link));
+  const record = asStoredBlobRecord(tx.readValueOrThrow(link));
   withdrawHandlerWhileLoading(
     runtime,
     tx,
@@ -78,22 +78,4 @@ export function nameBlob(
 
   const named: BlobRecord = { type: record.type, body: record.body, name };
   return tx.stageContentAddressedDocument(space, named).slice("cid:".length);
-}
-
-/**
- * Helper for {@link nameBlob}, which returns `value` as a blob record when it
- * is one: a media type, and a body of bytes. The name it may hold is not
- * consulted beyond being compared, so a record written under a name no rule
- * would admit is still renamed.
- */
-function asBlobRecord(value: unknown): BlobRecord | undefined {
-  if (
-    !isObjectNotArray(value) || typeof value.type !== "string" ||
-    !(value.body instanceof FabricBytes)
-  ) {
-    return undefined;
-  }
-  return typeof value.name === "string"
-    ? { type: value.type, body: value.body, name: value.name }
-    : { type: value.type, body: value.body };
 }

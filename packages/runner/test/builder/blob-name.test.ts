@@ -194,6 +194,17 @@ describe("nameBlob()", () => {
     expect(await root.named()).toBe(idOf(photo));
   });
 
+  it("returns an id for a blob stored with its body as an array of byte values", async () => {
+    const stored = { type: photo.type, body: [137, 80, 78, 71] };
+    const blobId = hashOf(stored).toString();
+    await server.writeDocument(home, blobDocumentId(blobId), stored);
+    const root = await spawnRoot();
+
+    await root.rename(blobId, "photo.png");
+
+    expect(await root.named()).toBe(idOf(photo));
+  });
+
   it("returns `undefined` for a blob the space does not hold", async () => {
     const root = await spawnRoot();
 
@@ -214,15 +225,15 @@ describe("nameBlob()", () => {
     expect(root.seen.at(-1)).toBeUndefined();
   });
 
-  it("throws for a name that is not a non-empty string of well-formed Unicode", async () => {
+  it("throws for a name that is not a non-empty string of well-formed Unicode of at most 1024 bytes", async () => {
     const blobId = await storeBlob(photo);
     const root = await spawnRoot();
 
-    for (const name of ["", "\ud800.png", 7]) {
+    for (const name of ["", "\ud800.png", "é".repeat(513), 7]) {
       await root.rename(blobId, name);
     }
 
-    expect(root.refusals).toHaveLength(3);
+    expect(root.refusals).toHaveLength(4);
     expect(root.refusals.every((message) => message.includes("`name`")))
       .toBe(true);
   });

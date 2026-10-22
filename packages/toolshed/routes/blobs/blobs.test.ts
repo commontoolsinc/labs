@@ -430,11 +430,17 @@ describe("Blob Routes", () => {
       expect((await post.json()).url).toBe(`blobs/${hash}.pdf`);
     });
 
-    it("returns 400 for an upload whose name is not a non-empty well-formed string", async () => {
+    it("returns 400 for an upload whose name is not a non-empty well-formed string of at most 1024 bytes", async () => {
       const identity = await Identity.fromPassphrase(
         "toolshed-blob-named-invalid",
       );
-      const names: FabricValue[] = ["", "\ud800.gif", 7, ["photo.gif"]];
+      const names: FabricValue[] = [
+        "",
+        "\ud800.gif",
+        "é".repeat(512) + "x",
+        7,
+        ["photo.gif"],
+      ];
       for (const name of names) {
         const post = await uploadTo(`/${identity.did()}/blobs/image.gif`, {
           type: "image/gif",
@@ -443,6 +449,21 @@ describe("Blob Routes", () => {
         });
         expect({ name, status: post.status }).toEqual({ name, status: 400 });
       }
+    });
+
+    it("returns 201 for an upload whose name is 1024 bytes as UTF-8", async () => {
+      const identity = await Identity.fromPassphrase(
+        "toolshed-blob-named-longest",
+      );
+      await bootstrapHomeSpace(identity);
+
+      const post = await uploadTo(`/${identity.did()}/blobs/image.gif`, {
+        type: "image/gif",
+        body: new FabricBytes(bytes),
+        name: "é".repeat(512),
+      });
+
+      expect(post.status).toBe(201);
     });
 
     it("serves a name holding control characters encoded in the header", async () => {

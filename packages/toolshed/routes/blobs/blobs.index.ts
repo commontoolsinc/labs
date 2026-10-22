@@ -3,6 +3,7 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { isDID } from "@commonfabric/identity/did";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
 import {
+  asStoredBlobRecord,
   blobDocumentId,
   type BlobRecord,
   isBlobFileName,
@@ -44,48 +45,6 @@ class BlobPayloadTooLarge extends Error {
 }
 
 /**
- * Interprets a stored blob's body as bytes, or returns `undefined` when it is
- * not byte-shaped. The result is always freshly allocated and unshared, so
- * a caller may cede it to something that takes ownership of a buffer.
- */
-const toByteArray = (value: unknown): Uint8Array | undefined => {
-  // The copy is what makes the contract above hold for this arm, and so is what
-  // lets the caller cede the result.
-  // TODO(seefeldb): This arm may be unreachable. Every value reaching here is
-  // decoded from a string, and binary in a string form arrives as a
-  // `FabricBytes`, which the caller returns before asking this. Remove the arm
-  // and its copy once that is confirmed.
-  if (value instanceof Uint8Array) {
-    return new Uint8Array(value);
-  }
-  if (
-    Array.isArray(value) &&
-    value.every((item) => Number.isInteger(item) && item >= 0 && item <= 255)
-  ) {
-    return Uint8Array.from(value);
-  }
-  if (!isObjectNotArray(value)) {
-    return undefined;
-  }
-
-  const entries = Object.entries(value)
-    .map(([key, item]) => [Number(key), item] as const)
-    .filter(([index, item]) =>
-      Number.isInteger(index) && index >= 0 &&
-      typeof item === "number" && Number.isInteger(item) &&
-      item >= 0 && item <= 255
-    )
-    .toSorted(([left], [right]) => left - right);
-  if (
-    entries.length === 0 ||
-    entries.some(([index], position) => index !== position)
-  ) {
-    return undefined;
-  }
-  return Uint8Array.from(entries.map(([, item]) => item as number));
-};
-
-/**
  * Returns `value` as blob contents if its body is a `FabricBytes`, the one form
  * an upload may take, and its `name`, if it has one, is a file name (see
  * `isBlobFileName()`), or `undefined` otherwise.
@@ -103,27 +62,6 @@ const asBlobRecord = (value: unknown): BlobRecord | undefined => {
   return isBlobFileName(value.name)
     ? { type: value.type, body: value.body, name: value.name }
     : undefined;
-};
-
-/**
- * Like {@link asBlobRecord}, except that the body may also be one of the
- * byte-shaped forms {@link toByteArray} reads, which a stored blob may hold,
- * and that a `name` which is not a file name is dropped rather than refused, so
- * that the blob is still served, under no name.
- */
-const asStoredBlobRecord = (value: unknown): BlobRecord | undefined => {
-  if (!isObjectNotArray(value) || typeof value.type !== "string") {
-    return undefined;
-  }
-  const name = isBlobFileName(value.name) ? { name: value.name } : {};
-  if (value.body instanceof FabricBytes) {
-    return { type: value.type, body: value.body, ...name };
-  }
-  const bytes = toByteArray(value.body);
-  if (bytes) {
-    return { type: value.type, body: new FabricBytes(bytes, true), ...name };
-  }
-  return undefined;
 };
 
 const parseBlobName = (
