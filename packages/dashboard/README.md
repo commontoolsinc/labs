@@ -762,9 +762,11 @@ GitHub concludes a workflow run as `cancelled` for several reasons, among them a
 newer run replacing the run, or one of its jobs, while it is still queued, a job
 running past its `timeout-minutes`, and someone stopping the run while it runs.
 Of those, only the first says nothing about the commit. A run replaced while
-queued lists no jobs at all. A job replaced by a job-level concurrency group is
-listed as cancelled with an empty runner name, and its run is concluded
-`cancelled` even when the run's other jobs passed. Only a job a runner ran says
+queued lists no jobs at all, except a partial rerun (**Re-run failed jobs**),
+whose listing also carries the jobs it reused from the attempt before. A job
+replaced by a job-level concurrency group is listed as cancelled with an empty
+runner name, and its run is concluded `cancelled` even when the run's other
+jobs passed. Only a job a runner ran says
 anything about the commit, so the ci trust tiles pass over a cancelled attempt
 in which every job a runner ran succeeded. A cancelled attempt with a job a
 runner ran that ended in anything else, a job stopped while it ran among them,
