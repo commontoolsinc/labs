@@ -198,8 +198,8 @@ because it writes rather than returns.
 
 **Each noun keeps only what acts on it.** `piece` deploys, updates, removes,
 lists, searches, and inspects a piece. `cell` reads and writes a cell, which is
-what `get` and `set` were always doing. `space` rebuilds a space's root and home
-patterns and manages rehearsal clones of its store.
+what `get` and `set` were always doing. `space` rebuilds a space's root and
+manages rehearsal clones of its store.
 
 ### The exceptions, and why they are exceptions
 
@@ -646,12 +646,11 @@ than taking anything away.
    did, are gone.
 7. **Put each command under the noun it acts on.** `cf cell` gains `get`,
    `set`, `get-label` and `set-label`; `piece` gains `call`; `space` gains
-   `recreate-root` and `set-home`. Each moved command stays answerable at the
-   spelling it had, hidden and dated, so a script keeps working while it is
-   migrated; `set-home` has since been retired outright, and answers at both
-   spellings only with what replaced it, until its own date. The date bounds a guarantee rather than schedules an execution:
-   removing those mounts is 7b, a separate change, the way 6b was separate
-   from 6a. 7b takes the notice and its dated constant with the mounts, and
+   `recreate-root`. Each moved command stays answerable at the spelling it
+   had, hidden and dated, so a script keeps working while it is migrated. The
+   date bounds a guarantee rather than schedules an execution: removing those
+   mounts is 7b, a separate change, the way 6b was separate from 6a. 7b takes
+   the notice and its dated constant with the mounts, and
    `packages/cli/test/integration-command-spellings.test.ts` too — the check
    holding the integration drills to the blessed spellings has nothing left to
    find once no superseded spelling answers.
