@@ -145,7 +145,7 @@ which linear
    ```bash
    mktemp /tmp/bug-report-XXXXXX.md
    ```
-3. Create the issue in the CommonTools team, whose Linear key is `CT`:
+3. Create the issue:
    ```bash
    linear issue create --title "<Bug: concise title>" --description-file <tempfile> --team CT --label bug --priority <1-4>
    ```
