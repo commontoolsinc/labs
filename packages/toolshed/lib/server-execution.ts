@@ -59,6 +59,7 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
  * ExecutorHost (`SpaceServerPolicy`'s env-overridable subset). */
 export type ServerExecutionEnvPolicy = {
   flushDeadlineMs?: number;
+  flushDeadlineMaxMs?: number;
   maxOutstandingEffects?: number;
   egressRatePerSecond?: number;
   storeReadThrough?: boolean;
@@ -72,7 +73,8 @@ export type ServerExecutionEnvPolicy = {
  * budgets). Each is env-overridable; the defaults are the production
  * posture:
  * - T_flush stays the SpaceServer's built-in default (100 ms, the ruled
- *   50–100 ms order) unless overridden;
+ *   50–100 ms order) unless overridden, and grows after a cut settle only
+ *   when `SERVER_EXECUTION_FLUSH_DEADLINE_MAX_MS` names a longer cap;
  * - the outstanding-network-effect cap defaults to
  *   `DEFAULT_MAX_OUTSTANDING_EFFECTS` per space; the LITERAL `0` is the
  *   operator's explicit opt-out (unbounded);
@@ -128,6 +130,9 @@ export function serverExecutionPolicyFromEnv(
 
   const flushDeadlineMs = positiveOrDefault(
     "SERVER_EXECUTION_FLUSH_DEADLINE_MS",
+  );
+  const flushDeadlineMaxMs = positiveOrDefault(
+    "SERVER_EXECUTION_FLUSH_DEADLINE_MAX_MS",
   );
   const egressRatePerSecond = positiveOrDefault(
     "SERVER_EXECUTION_EGRESS_RATE_PER_S",
@@ -198,6 +203,7 @@ export function serverExecutionPolicyFromEnv(
   }
   return {
     ...(flushDeadlineMs !== undefined ? { flushDeadlineMs } : {}),
+    ...(flushDeadlineMaxMs !== undefined ? { flushDeadlineMaxMs } : {}),
     ...(maxOutstandingEffects !== undefined ? { maxOutstandingEffects } : {}),
     ...(egressRatePerSecond !== undefined ? { egressRatePerSecond } : {}),
     ...(storeReadThrough !== undefined ? { storeReadThrough } : {}),
@@ -306,6 +312,13 @@ export function startServerExecutionHost(options: {
       "Server-execution v2: store read-through ON by " +
         "SERVER_EXECUTION_STORE_READ_THROUGH=true (serving runtimes read " +
         "their home space from the engine; default is OFF)",
+    );
+  }
+  if (policy.flushDeadlineMaxMs !== undefined) {
+    console.log(
+      "Server-execution v2: flush deadline grows after a cut settle, up to " +
+        `${policy.flushDeadlineMaxMs} ms, by ` +
+        "SERVER_EXECUTION_FLUSH_DEADLINE_MAX_MS (default is a fixed deadline)",
     );
   }
   if (policy.overlapWaveCommit === true) {

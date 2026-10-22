@@ -62,6 +62,7 @@ was last checked against the code.
 | [`SERVER_EXECUTION_STORE_READ_THROUGH`](#server_execution_store_read_through) | `SERVER_EXECUTION_STORE_READ_THROUGH` env on toolshed, or `SpaceServerPolicy.storeReadThrough` | off | Bernhard Seefeld (store read-through) | soak with the posture forced on, flip on, then delete the knob and the home-space session read path | implemented, off by default |
 | [`SERVER_EXECUTION_WORKER`](#server_execution_worker) | `SERVER_EXECUTION_WORKER` env on toolshed | off | Bernhard Seefeld (the serving loop off the request thread) | soak with the worker on, flip on, then delete the knob and the in-process arm | implemented, off by default |
 | [`SERVER_EXECUTION_OVERLAP_COMMIT`](#server_execution_overlap_commit) | `SERVER_EXECUTION_OVERLAP_COMMIT` env on toolshed, or `SpaceServerPolicy.overlapWaveCommit` | off | Bernhard Seefeld (the wave commit overlapped with the next cycle) | measure under the worker, flip on where it pays, then delete the knob and the inline arm | implemented, off by default |
+| [`SERVER_EXECUTION_FLUSH_DEADLINE_MAX_MS`](#server_execution_flush_deadline_max_ms) | `SERVER_EXECUTION_FLUSH_DEADLINE_MAX_MS` env on toolshed, or `SpaceServerPolicy.flushDeadlineMaxMs` | off (a fixed deadline) | Bernhard Seefeld (the flush deadline that grows after a cut settle) | measure the vote burst and the seed with a cap, pick a default cap where it pays, then delete the knob | implemented, off by default |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning)                                 | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache`                                                             | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts                          | Ian Hickson                                           | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked                                                                                                                                      | implemented, on by default for FUSE-T, soak-validated                           |
 
 Removed or never-shipped flags that documentation elsewhere still references are
@@ -1904,6 +1905,47 @@ the per-epic implementation notes).
   7.8 s. It stays off until the fan-out floor moves.
 - **Path to removal.** Measure the vote burst and the seed under the worker
   with the overlap on, flip the default where it pays, then delete the knob.
+
+### `SERVER_EXECUTION_FLUSH_DEADLINE_MAX_MS`
+
+- **Toggle via.** The `SERVER_EXECUTION_FLUSH_DEADLINE_MAX_MS` environment
+  variable on toolshed, read by the serving-host bootstrap
+  ([`packages/toolshed/lib/server-execution.ts`](../../packages/toolshed/lib/server-execution.ts))
+  into `SpaceServerPolicy.flushDeadlineMaxMs` when it is a positive decimal
+  integer of milliseconds; a harness constructing an `ExecutorHost` sets the
+  policy field directly, and a test's serving memory server
+  (`packages/runner/src/executor/serving-memory-server.deno.ts`) reads the
+  same variable for a policy that leaves the field unset. Unset, or no longer
+  than the flush deadline itself (`SERVER_EXECUTION_FLUSH_DEADLINE_MS`, 100 ms
+  unless set), it changes nothing. Meaningful only with the serving loop
+  running ([`serverExecution`](#serverexecution) on).
+- **Added by.** Bernhard Seefeld, in the change that lets the flush deadline
+  grow after a cut settle.
+- **Purpose.** The flush deadline bounds how long a consequence waits to
+  become visible, and a wave it cuts commits what is sealed so far
+  ([`serving-loop.md`](../specs/server-side-execution/serving-loop.md) §3).
+  Under a burst that bound cuts every settle: a vote's cascade in the lunch
+  poll runs about 180 ms of scheduler work against a 100 ms deadline, so the
+  loop takes one event per wave and finishes each cascade over two more, and
+  every one of those partial waves costs the memory server a flush pass, a
+  walk per session tracking what it wrote, and a frame per session, and costs
+  each client an integration that re-triggers its derivations. With a cap
+  set, a settle the deadline cut hands the next cycle a deadline twice as
+  long, up to the cap, and a settle that reaches quiescence, or a loop that
+  finds no work, hands it the base again. The first consequence of a burst
+  stays visible within the base; the cascade behind it is cut less often as
+  it goes; and an event that arrives while a longer settle runs is drained
+  into the same wave by the settle's own re-drain, so the shared derivations
+  downstream run once for several events rather than once per event.
+- **Current default and planned end state.** Off by default: every settle
+  takes the base deadline. The end state is a default cap, chosen from the
+  vote burst's and the seed's counts of waves, flush passes, frames and
+  client integrations with the cap on, and then the knob goes.
+- **Status on 2026-10-22.** Implemented, off by default; the vote burst's
+  measurement with a cap is the next entry here.
+- **Path to removal.** Measure the vote burst and the seed with a cap on both
+  served arms, pick the default cap where the counts and the headline agree,
+  then delete the knob.
 
 ## Flag-gated tripwires
 

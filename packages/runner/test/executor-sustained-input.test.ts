@@ -133,6 +133,47 @@ describe("SpaceServer", () => {
       expect(host.stats().wavesBudgetExhausted).toBeGreaterThan(0);
     });
 
+    it("doubles the deadline of each settle after one the deadline cut, up to the cap, and takes the base again after one that reached quiescence", async () => {
+      // A deadline shorter than one stage of the cascade cuts the settle
+      // that has the cascade to run, so the settles after it grow: twice
+      // the one before, never past the cap, until the cascade finishes
+      // inside one and that settle reaches quiescence, after which the next
+      // settle takes the base again. Which settle finishes the cascade, and
+      // whether a cycle before the first input was already cut, depend on
+      // the machine, so the shape is asserted rather than the count: every
+      // deadline is the base, twice the one before it, or the cap; one grew;
+      // and one that followed a grown one is the base again.
+
+      const opened = await openSustainedInputFixture({
+        flushDeadlineMs: 10,
+        flushDeadlineMaxMs: 80,
+        stageSpins: 20_000_000,
+      });
+      fixture = opened;
+      const { cycles, deadlines, host } = opened;
+      const before = deadlines.entries.length;
+      const seq = await opened.write(3);
+      await cycles.matching((end) => end.watermark >= seq && end.total === 22);
+      const grown = deadlines.entries.slice(before);
+      expect(grown.some((deadline) => deadline > 10)).toBe(true);
+      for (const [index, deadline] of grown.entries()) {
+        const previous = grown[index - 1];
+        expect(
+          previous === undefined ? [10, 20, 40, 80] : [10, 80, previous * 2],
+        ).toContain(deadline);
+      }
+      expect(host.stats().wavesBudgetExhausted).toBeGreaterThan(0);
+
+      const next = await opened.write(4);
+      await cycles.matching((end) => end.watermark >= next && end.total === 29);
+      const taken = deadlines.entries.slice(before);
+      expect(
+        taken.some((deadline, index) =>
+          index > 0 && taken[index - 1] > 10 && deadline === 10
+        ),
+      ).toBe(true);
+    });
+
     it("holds the advance below input the serving replica still shadows while the stream runs", async () => {
       // The floor is stubbed, as the direct-drive clamp case in
       // `executor-space-server.test.ts` stubs it: what the replica shadows

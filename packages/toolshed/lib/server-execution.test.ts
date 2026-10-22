@@ -85,12 +85,17 @@ describe("serverExecutionPolicyFromEnv", () => {
       serverExecutionPolicyFromEnv(
         envOf({
           SERVER_EXECUTION_FLUSH_DEADLINE_MS: "250",
+          SERVER_EXECUTION_FLUSH_DEADLINE_MAX_MS: "1000",
           SERVER_EXECUTION_EGRESS_RATE_PER_S: "5",
           SERVER_EXECUTION_MAX_OUTSTANDING_EFFECTS: "0",
         }),
         (m) => warnings.push(m),
       ),
-    ).toEqual({ flushDeadlineMs: 250, egressRatePerSecond: 5 });
+    ).toEqual({
+      flushDeadlineMs: 250,
+      flushDeadlineMaxMs: 1000,
+      egressRatePerSecond: 5,
+    });
     expect(warnings).toEqual([]);
     expect(
       serverExecutionPolicyFromEnv(

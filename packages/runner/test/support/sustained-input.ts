@@ -98,6 +98,9 @@ export interface SustainedInputFixture {
   /** Each wave cycle as it ends. */
   readonly cycles: ArrivalLog<CycleEnd>;
 
+  /** The deadline each settle took, in milliseconds, as it began. */
+  readonly deadlines: ArrivalLog<number>;
+
   /** Writes `n` as the cascade's argument, returning the commit's seq. */
   write(n: number): Promise<number>;
 
@@ -122,17 +125,20 @@ export interface SustainedInputFixture {
  * stream runs. Every settle the stream feeds then ends exhausted at its
  * first barrier, with that barrier complete, on a machine of any speed. The
  * deadline's timer still counts real time, so such a fixture takes a
- * `flushDeadlineMs` no case runs long enough to reach.
+ * `flushDeadlineMs` no case runs long enough to reach. `flushDeadlineMaxMs`
+ * lets the deadline grow after a cut settle, as the policy field does.
  */
 export const openSustainedInputFixture = async (
   {
     flushDeadlineMs,
+    flushDeadlineMaxMs,
     stageSpins = DEFAULT_STAGE_SPINS,
     directInputs = false,
     lateBarriers = false,
     overlapWaveCommit,
   }: {
     flushDeadlineMs: number;
+    flushDeadlineMaxMs?: number;
     stageSpins?: number;
     directInputs?: boolean;
     lateBarriers?: boolean;
@@ -143,6 +149,7 @@ export const openSustainedInputFixture = async (
   const server = newSharedServer({ subscriptionRefreshDelayMs: 0 });
   const engine = await server.engineForSpace(space);
   const cycles = new ArrivalLog<CycleEnd>();
+  const deadlines = new ArrivalLog<number>();
   const activations = new ArrivalLog<string>();
   let onBarrier: (() => Promise<void>) | undefined;
   let flushDeadlineClock = 0;
@@ -208,6 +215,8 @@ export const openSustainedInputFixture = async (
     },
     policy: {
       flushDeadlineMs,
+      ...(flushDeadlineMaxMs === undefined ? {} : { flushDeadlineMaxMs }),
+      onFlushDeadline: (deadlineMs) => deadlines.record(deadlineMs),
       idleParkMs: 600_000,
       ...(overlapWaveCommit === undefined ? {} : { overlapWaveCommit }),
       ...(lateBarriers ? { flushDeadlineNow: () => flushDeadlineClock } : {}),
@@ -266,6 +275,7 @@ export const openSustainedInputFixture = async (
       return servingRuntime;
     },
     cycles,
+    deadlines,
     write,
     stream: () => {
       const inputs: StreamedInput[] = [];

@@ -238,6 +238,19 @@ export type SpaceServerPolicy = {
    */
   flushDeadlineNow?: () => number;
 
+  /**
+   * The longest deadline a settle may grow to. A cycle whose settle the
+   * deadline cut hands the next cycle a deadline twice as long, up to this,
+   * and a cycle whose settle reached quiescence, or a loop that found no
+   * work, hands it `flushDeadlineMs` again. Unset, or no longer than
+   * `flushDeadlineMs`, every settle takes `flushDeadlineMs`. The toolshed
+   * bootstrap reads SERVER_EXECUTION_FLUSH_DEADLINE_MAX_MS.
+   */
+  flushDeadlineMaxMs?: number;
+
+  /** DIAGNOSTIC (tests): the deadline each settle takes, as it begins. */
+  onFlushDeadline?: (deadlineMs: number) => void;
+
   /** Phase 6 (serving-loop.md §5's per-space budgets; README §3.8):
    * cap on dispatched-but-unsettled NETWORK effects per space —
    * "outstanding LLM calls". Undefined = unbounded. */
@@ -752,6 +765,12 @@ export class SpaceServer implements TransactionSealDestination {
   readonly #options: SpaceServerOptions;
   readonly #holder: string;
   #lease: ExecutionLeaseCycle | undefined;
+  /**
+   * The deadline the next settle takes where the one before it was cut,
+   * under `flushDeadlineMaxMs`; unset where the last settle reached
+   * quiescence or the loop found no work.
+   */
+  #grownFlushDeadlineMs: number | undefined;
   #initializing = false;
   #runtime: Runtime | undefined;
   #viewPlanPublisher = new ViewPlanPublisher();
@@ -3402,6 +3421,9 @@ export class SpaceServer implements TransactionSealDestination {
         }
         if (!this.#active || this.#parkRequested) break;
         if (!this.#hasWork()) {
+          // The next input starts a burst, whose first consequence the base
+          // deadline bounds, however long the settles before the quiet grew.
+          this.#grownFlushDeadlineMs = undefined;
           const idleParkMs = this.#options.policy?.idleParkMs ??
             DEFAULT_IDLE_PARK_MS;
           this.#idleSince ??= Date.now();
@@ -5943,6 +5965,46 @@ export class SpaceServer implements TransactionSealDestination {
     return this.#options.policy?.flushDeadlineNow?.() ?? Date.now();
   }
 
+  /** The base deadline and, where one is set, the cap the deadline grows to. */
+  #flushDeadlineBounds(): { base: number; max: number | undefined } {
+    const base = this.#options.policy?.flushDeadlineMs ??
+      DEFAULT_FLUSH_DEADLINE_MS;
+    const max = this.#options.policy?.flushDeadlineMaxMs;
+    return { base, max: max === undefined || max <= base ? undefined : max };
+  }
+
+  /**
+   * The deadline this settle takes: the base, or the length the cut settles
+   * before it grew it to, under the cap. A burst's first consequence is
+   * visible within the base; the cascade behind it is cut less often as it
+   * goes, so fewer partial waves fan out to the sessions, and an event that
+   * arrives while a longer settle runs is drained into the same wave.
+   */
+  #settleDeadlineMs(): number {
+    const { base, max } = this.#flushDeadlineBounds();
+    const grown = this.#grownFlushDeadlineMs;
+    if (max === undefined || grown === undefined) return base;
+    return Math.min(grown, max);
+  }
+
+  /**
+   * Doubles the next settle's deadline, under the cap, after a settle the
+   * deadline cut, and returns it to the base after one that reached
+   * quiescence.
+   */
+  #noteSettleEnded(exhausted: boolean): void {
+    if (!exhausted) {
+      this.#grownFlushDeadlineMs = undefined;
+      return;
+    }
+    const { base, max } = this.#flushDeadlineBounds();
+    if (max === undefined) return;
+    this.#grownFlushDeadlineMs = Math.min(
+      max,
+      (this.#grownFlushDeadlineMs ?? base) * 2,
+    );
+  }
+
   /**
    * The tenure's space-root ensure (OW45 arm-B server-ensure stage 1;
    * design PR #6209 §1/§4): make sure the space's default pattern
@@ -6381,8 +6443,8 @@ export class SpaceServer implements TransactionSealDestination {
     // scheduler saw every input ≤ batchHead before we call the wave
     // quiescent (snapshot discipline: records arriving after the drain
     // belong to the NEXT wave).
-    const deadlineMs = this.#options.policy?.flushDeadlineMs ??
-      DEFAULT_FLUSH_DEADLINE_MS;
+    const deadlineMs = this.#settleDeadlineMs();
+    this.#options.policy?.onFlushDeadline?.(deadlineMs);
     const deadline = this.#flushDeadlineNow() + deadlineMs;
     let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
     const deadlinePromise = new Promise<"deadline">((resolve) => {
@@ -6588,6 +6650,7 @@ export class SpaceServer implements TransactionSealDestination {
     // the cycle span is: a settle that threw is a failed wave, not a slow
     // one, and folding its duration in would blunt the measurement.
     timing.time(settleStart, "executor", "wave", "settle");
+    this.#noteSettleEnded(exhausted);
     if (!this.#active || this.#runtime !== runtime) return;
     // A settle the deadline cut leaves the predecessor's commit to finish
     // here: the advance below reads the watermark and the derived tail that

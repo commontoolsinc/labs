@@ -648,7 +648,15 @@ Light waves never reach the deadline and stay single-commit — the
 zero-delta case, which is why this is a trigger on the EXISTING
 exhaustion machinery rather than a new commit topology. T_flush is
 a policy knob (order 50–100 ms), tuned in Phase 6 with the other
-budgets. The configured default is 100 ms. `wavesBudgetExhausted` counts
+budgets. The configured default is 100 ms. A settle the deadline cut hands
+the next cycle a deadline twice as long, up to the policy's
+`flushDeadlineMaxMs` (`SERVER_EXECUTION_FLUSH_DEADLINE_MAX_MS`); a settle that
+reaches quiescence, or a loop that finds no work, hands it the base again. So
+a burst's first consequence is visible within the base, the cascade behind it
+is cut less often as it goes, and an event arriving while a longer settle
+runs is drained into the same wave, which is what spares the sessions a
+flush pass, a walk and a frame per partial wave. With no cap set, every
+settle takes the base. `wavesBudgetExhausted` counts
 exhausted cycles, including those with no wave closure or durable commit;
 `waves` counts closures, including vacuous or aborted outcomes. Their ratio
 is not a committed-wave exhaustion fraction. The amplification budget's
@@ -1797,7 +1805,8 @@ the durable rows of §5 carry APPENDS, never effect state).
   can never disable the production bound — FAIL-CLOSED;
   `SERVER_EXECUTION_EGRESS_RATE_PER_S`, default unpaced;
   `SERVER_EXECUTION_FLUSH_DEADLINE_MS` tunes §3's T_flush the same
-  way). The gate holds DISPATCH only: the in-flight dedupe entry exists
+  way, and `SERVER_EXECUTION_FLUSH_DEADLINE_MAX_MS` the cap it grows to
+  after a cut settle). The gate holds DISPATCH only: the in-flight dedupe entry exists
   from admission, so a re-admit during a hold attaches instead of
   double-firing. LOCAL kinds (sqlite-query — no egress) bypass the
   gate. On park/close, held dispatches DROP — the crash-equivalent

@@ -142,9 +142,10 @@ export type ServingMemoryServerOptions =
      * left unset, as a toolshed's bootstrap does: `storeReadThrough` takes
      * `true` when `SERVER_EXECUTION_STORE_READ_THROUGH` is the literal
      * `true`, `overlapWaveCommit` takes `true` when
-     * `SERVER_EXECUTION_OVERLAP_COMMIT` is, and `flushDeadlineMs` takes
-     * `SERVER_EXECUTION_FLUSH_DEADLINE_MS` when that is a positive decimal
-     * integer.
+     * `SERVER_EXECUTION_OVERLAP_COMMIT` is, and `flushDeadlineMs` and
+     * `flushDeadlineMaxMs` take `SERVER_EXECUTION_FLUSH_DEADLINE_MS` and
+     * `SERVER_EXECUTION_FLUSH_DEADLINE_MAX_MS` when those are positive
+     * decimal integers.
      */
     worker?: boolean;
   }
@@ -175,10 +176,11 @@ const runsInWorker = (options: ServingMemoryServerOptions): boolean =>
  * environment as the toolshed bootstrap takes it: the store read-through
  * from `SERVER_EXECUTION_STORE_READ_THROUGH` and the overlapped wave commit
  * from `SERVER_EXECUTION_OVERLAP_COMMIT`, each on for the literal `true`,
- * and the flush deadline from `SERVER_EXECUTION_FLUSH_DEADLINE_MS`, a
- * positive decimal integer of milliseconds. A lane sets the first two to run
- * every test that leaves them unset under the posture; a benchmark sets the
- * third to measure a cadence.
+ * and the flush deadline and the cap it grows to from
+ * `SERVER_EXECUTION_FLUSH_DEADLINE_MS` and
+ * `SERVER_EXECUTION_FLUSH_DEADLINE_MAX_MS`, positive decimal integers of
+ * milliseconds. A lane sets the first two to run every test that leaves them
+ * unset under the posture; a benchmark sets the others to measure a cadence.
  */
 const policyFromEnvironment = (
   policy: SpaceServerPolicy | undefined,
@@ -196,13 +198,23 @@ const policyFromEnvironment = (
   ) {
     resolved = { ...resolved, overlapWaveCommit: true };
   }
+  // A positive decimal integer, as the toolshed bootstrap reads it; a
+  // fraction, an exponent or a prefix would select a cadence the toolshed
+  // refuses.
+  const milliseconds = (name: string): number | undefined => {
+    const raw = Deno.env.get(name) ?? "";
+    const value = /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : 0;
+    return value > 0 ? value : undefined;
+  };
   if (resolved?.flushDeadlineMs === undefined) {
-    // A positive decimal integer, as the toolshed bootstrap reads it; a
-    // fraction, an exponent or a prefix would select a cadence the toolshed
-    // refuses.
-    const raw = Deno.env.get("SERVER_EXECUTION_FLUSH_DEADLINE_MS") ?? "";
-    const deadline = /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : 0;
-    if (deadline > 0) resolved = { ...resolved, flushDeadlineMs: deadline };
+    const deadline = milliseconds("SERVER_EXECUTION_FLUSH_DEADLINE_MS");
+    if (deadline !== undefined) {
+      resolved = { ...resolved, flushDeadlineMs: deadline };
+    }
+  }
+  if (resolved?.flushDeadlineMaxMs === undefined) {
+    const max = milliseconds("SERVER_EXECUTION_FLUSH_DEADLINE_MAX_MS");
+    if (max !== undefined) resolved = { ...resolved, flushDeadlineMaxMs: max };
   }
   return resolved;
 };
