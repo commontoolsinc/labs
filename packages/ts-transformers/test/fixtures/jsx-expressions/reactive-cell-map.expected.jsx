@@ -124,7 +124,7 @@ const createSimplePattern = handler({
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema).for("isInitialized", true);
     // Create the piece
-    const piece = __cfHelpers.nameInstance(SimplePattern({}), "piece");
+    const piece = SimplePattern({});
     // Store the piece in the array and navigate
     return addPieceAndNavigate({ piece, cellRef, isInitialized });
 });

@@ -663,7 +663,7 @@ export default pattern(() => {
     );
   });
 
-  it("wraps a pattern factory output a `const` binds in `nameInstance` with the binding's name", async () => {
+  describe("instance naming", () => {
     const source = `
 import { pattern, Writable } from "commonfabric";
 
@@ -679,27 +679,37 @@ export default pattern(() => {
 });
 `;
 
-    const output = await transformFiles({
-      "/main.tsx": source,
-    }, {
-      types: COMMONFABRIC_TYPES,
-    });
-    const root = parseModule(output["/main.tsx"]!);
+    // Each `nameInstance()` call in `source` compiled with `instanceNames`,
+    // as the pattern factory it wraps and the name it gives.
+    const namedInstances = async (instanceNames: boolean) => {
+      const output = await transformFiles({ "/main.tsx": source }, {
+        types: COMMONFABRIC_TYPES,
+        instanceNames,
+      });
+      return callsNamed(parseModule(output["/main.tsx"]!), "nameInstance").map(
+        (call) => {
+          const [instance, name] = call.arguments;
+          return {
+            instance: ts.isCallExpression(instance) &&
+                ts.isIdentifier(instance.expression)
+              ? instance.expression.text
+              : undefined,
+            name: ts.isStringLiteral(name) ? name.text : undefined,
+          };
+        },
+      );
+    };
 
-    const named = callsNamed(root, "nameInstance").map((call) => {
-      const [instance, name] = call.arguments;
-      return {
-        instance: ts.isCallExpression(instance) &&
-            ts.isIdentifier(instance.expression)
-          ? instance.expression.text
-          : undefined,
-        name: ts.isStringLiteral(name) ? name.text : undefined,
-      };
+    it("wraps a pattern factory output a `const` binds in `nameInstance` with the binding's name, when it is on", async () => {
+      assertEquals(await namedInstances(true), [
+        { instance: "Child", name: "child" },
+        { instance: "Child", name: "other" },
+      ]);
     });
-    assertEquals(named, [
-      { instance: "Child", name: "child" },
-      { instance: "Child", name: "other" },
-    ]);
+
+    it("wraps nothing in `nameInstance`, when it is off", async () => {
+      assertEquals(await namedInstances(false), []);
+    });
   });
 
   it("does not re-root pattern factory identifiers in tool descriptors", async () => {

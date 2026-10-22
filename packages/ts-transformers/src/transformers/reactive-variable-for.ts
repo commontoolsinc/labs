@@ -592,7 +592,8 @@ function visitObjectPropertyInitializerWithCausePath(
 
 /**
  * Reports whether `initializer` is a sub-pattern instance to give an instance
- * name: a call to a pattern factory, with no authored `.for()` in its chain.
+ * name: a call to a pattern factory, with no authored `.for()` in its chain,
+ * in a compile that names instances (`TransformationOptions.instanceNames`).
  * An instance takes no cause of its own, since a cause would outrank the name
  * the pattern builder takes from a result key or a node input; the instance
  * name ranks below both.
@@ -601,6 +602,7 @@ function isNameableInstance(
   initializer: ts.Expression,
   context: TransformationContext,
 ): boolean {
+  if (context.options.instanceNames !== true) return false;
   if (chainContainsForCall(initializer)) return false;
   const expression = unwrapExpression(initializer);
   return ts.isCallExpression(expression) &&

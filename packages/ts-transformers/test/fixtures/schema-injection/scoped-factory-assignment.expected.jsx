@@ -41,7 +41,7 @@ export default pattern((__cf_pattern_input) => {
     const label = __cf_pattern_input.key("label");
     const userChild: PerUser<ChildOutput> = Child.asScope("user")({ label });
     const sessionChild: PerSession<ChildOutput> = Child.asScope("session")({ label });
-    const plainChild: ChildOutput = __cfHelpers.nameInstance(Child({ label }), "plainChild");
+    const plainChild: ChildOutput = Child({ label });
     return {
         userChild,
         sessionChild,
