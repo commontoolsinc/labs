@@ -212,6 +212,7 @@ describe("RuntimeClient", () => {
         timing: {},
         flags: {},
         cfc: { cfcRelevantTx: 4, dereferenceTracesMax: 9 },
+        compileCache: { hits: 1, misses: 2, byIdentityHits: 3 },
       };
       const conn = {
         on: () => {},
@@ -221,9 +222,15 @@ describe("RuntimeClient", () => {
         new (conn: never, options: unknown): RuntimeClient;
       })(conn, undefined);
 
-      expect((await client.getLoggerCounts()).cfc).toEqual({
+      const counts = await client.getLoggerCounts();
+      expect(counts.cfc).toEqual({
         cfcRelevantTx: 4,
         dereferenceTracesMax: 9,
+      });
+      expect(counts.compileCache).toEqual({
+        hits: 1,
+        misses: 2,
+        byIdentityHits: 3,
       });
     });
   });
@@ -1279,6 +1286,63 @@ describe("RuntimeClient", () => {
 
       expect(request.body).toBeInstanceOf(FabricBytes);
       expect(request.body.slice()).toEqual(new Uint8Array([1, 2, 3]));
+    });
+
+    it("returns the URL a blob URL request returns", async () => {
+      const requests: unknown[] = [];
+      const conn = {
+        on: () => {},
+        request: (message: unknown) => {
+          requests.push(message);
+          return Promise.resolve({ url: "http://host/space/blobs/abc" });
+        },
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      const url = await client.blobUrl({
+        space: "did:key:z6Mk-runtime-client-blob" as never,
+        id: "fid1:abc",
+      });
+
+      expect(url).toBe("http://host/space/blobs/abc");
+      expect(requests).toEqual([{
+        type: RequestType.BlobUrl,
+        space: "did:key:z6Mk-runtime-client-blob",
+        id: "fid1:abc",
+      }]);
+
+      await client.blobUrl({
+        space: "did:key:z6Mk-runtime-client-blob" as never,
+        id: "fid1:abc",
+        download: true,
+      });
+
+      expect((requests[1] as { download?: boolean }).download).toBe(true);
+    });
+
+    it("sends the name of the file the bytes came from", async () => {
+      const requests: unknown[] = [];
+      const conn = {
+        on: () => {},
+        request: (message: unknown) => {
+          requests.push(message);
+          return Promise.resolve({ id: "fid1:blob", url: "blobs/blob.png" });
+        },
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      await client.uploadBlob({
+        space: "did:key:z6Mk-runtime-client-blob" as never,
+        contentType: "image/png",
+        body: new Uint8Array([1, 2, 3]),
+        name: "photo.png",
+      });
+
+      expect((requests[0] as UploadBlobRequest).name).toBe("photo.png");
     });
   });
 });

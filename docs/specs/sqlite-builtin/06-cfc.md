@@ -473,6 +473,13 @@ remain gated, including reads of a value already examined during preflight.
 Cell traversal caches are partitioned by ambient read metadata so a cached
 scheduling probe cannot supply an ordinary payload read.
 
+Before the runner runs a piece set up elsewhere, or swaps one to another
+pattern, it probes whether the documents that run reads are on the replica, so
+that it can name the piece's family first when they are not. Those probes are
+verifier-internal reads on a read-only transaction of their own, and do not
+require the read ceiling: a document whose value the ceiling withholds is
+present all the same. The run's own reads of it remain gated.
+
 A **session-scoped** query result (`PerSession<>`, `.asScope("session")`,
 `scope: "session"`, or a session-scoped db) meets the runtime ceiling with the
 query's declared ceiling before materialization. Placeholder atoms resolve

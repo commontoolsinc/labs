@@ -26,12 +26,16 @@ import {
   bindCurrentPrincipalToStoredClauses,
   isCurrentPrincipalUserClause,
 } from "./current-principal-confidentiality.ts";
+import { CfcEnvelopeStabilityError } from "./envelope-stability-reason.ts";
 import { CfcSchemaMigrationError } from "./migration-reason.ts";
 import { isValueStamp } from "./minted-integrity.ts";
 import {
+  canonicalizeCfcSchemaDocument,
   cfcSchemaResolvedRoot,
+  encodedLocalDefinitionRef,
   hoistCfcSchemaDefs,
   localDefinitionName,
+  pruneCfcSchemaDefinitionBody,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
 } from "./schema-refs.ts";
@@ -242,7 +246,9 @@ const mergeSetLikeIfcArray = (
     case "addIntegrity": {
       if (!Array.isArray(existing) || !Array.isArray(candidate)) {
         if (!deepEqual(existing, candidate)) {
-          throw new Error(`${key} must remain stable at ${path || "/"}`);
+          throw new CfcEnvelopeStabilityError(
+            `${key} must remain stable at ${path || "/"}`,
+          );
         }
         return existing;
       }
@@ -278,7 +284,9 @@ const mergeSetLikeIfcArray = (
         ? existingArray.filter((atom) => !isValueStamp(atom))
         : existingArray;
       if (!arraySubsetOf(comparableExisting, candidateArray)) {
-        throw new Error(`${key} cannot be weakened at ${path || "/"}`);
+        throw new CfcEnvelopeStabilityError(
+          `${key} cannot be weakened at ${path || "/"}`,
+        );
       }
       return mergeArraySet(existingArray, candidateArray);
     }
@@ -310,14 +318,18 @@ const mergeSetLikeIfcArray = (
               return reconciled;
             }
           }
-          throw new Error(`${key} must remain stable at ${path || "/"}`);
+          throw new CfcEnvelopeStabilityError(
+            `${key} must remain stable at ${path || "/"}`,
+          );
         }
         return existing;
       }
       const existingArray = existing as readonly unknown[];
       const candidateArray = candidate as readonly unknown[];
       if (!arraySubsetOf(candidateArray, existingArray)) {
-        throw new Error(`${key} cannot be weakened at ${path || "/"}`);
+        throw new CfcEnvelopeStabilityError(
+          `${key} cannot be weakened at ${path || "/"}`,
+        );
       }
       return mergeArraySet(candidateArray);
     }
@@ -328,13 +340,17 @@ const mergeSetLikeIfcArray = (
     case "collection":
     case "ownerPrincipal":
       if (!deepEqual(existing, candidate)) {
-        throw new Error(`${key} must remain stable at ${path || "/"}`);
+        throw new CfcEnvelopeStabilityError(
+          `${key} must remain stable at ${path || "/"}`,
+        );
       }
       return existing;
     case "flowPrecisionClaim":
     case "uiContract":
       if (!deepEqual(existing, candidate)) {
-        throw new Error(`${key} must remain stable at ${path || "/"}`);
+        throw new CfcEnvelopeStabilityError(
+          `${key} must remain stable at ${path || "/"}`,
+        );
       }
       return existing;
     default:
@@ -356,7 +372,9 @@ const mergeWritePolicyAnyOf = (
   adoptsStamp?: (claim: unknown) => boolean,
 ): unknown => {
   const unstable = () =>
-    new Error(`writePolicyAnyOf must remain stable at ${path || "/"}`);
+    new CfcEnvelopeStabilityError(
+      `writePolicyAnyOf must remain stable at ${path || "/"}`,
+    );
   if (
     !Array.isArray(existing) || !Array.isArray(candidate) ||
     existing.length !== candidate.length
@@ -671,20 +689,44 @@ type SchemaDefinitions = NonNullable<JSONSchemaObj["$defs"]>;
 
 /**
  * What a node merge resolves references against: the hoisted definitions,
- * and the pairs of references already resolved on the way down to this node.
+ * which the merge adds to; the pairs of references already resolved against
+ * each other on the way down to this node; and, by the pair's key, the
+ * definition minted for each pair of differing references met on the way
+ * down (`mergedDefinitionRef()`), in whose body the pair refers to it.
  */
 type MergeReferences = {
-  readonly definitions: SchemaDefinitions;
+  readonly definitions: Record<string, JSONSchema>;
   readonly active: ReadonlySet<string>;
+  readonly merged: ReadonlyMap<string, string>;
 };
+
+/** The key of a pair of references, one from each side of a merge. */
+const referencePair = (left: JSONSchemaObj, right: JSONSchemaObj): string =>
+  `${left.$ref ?? ""}\u0000${right.$ref ?? ""}`;
+
+/**
+ * Keywords that annotate a schema and constrain no value. `$comment` is not
+ * one of them here: the runtime reads some of its values as property markers
+ * (`schema-view.ts`), so a branch whose comment changes does not correspond.
+ */
+const BRANCH_ANNOTATION_KEYWORDS: ReadonlySet<string> = new Set([
+  "title",
+  "description",
+  "examples",
+  "deprecated",
+  "readOnly",
+  "writeOnly",
+]);
 
 /**
  * Whether a node merge has to walk the body `side`'s reference names rather
- * than the reference: the other side is anything but that same bare
- * reference. Merged unresolved, whatever the other side declares beside the
- * `$ref` (an `ifc`, `properties`, `items`, a combinator, another reference)
- * would take the place of the referenced body's own and drop the claims it
- * declares.
+ * than the reference: the other side is anything but that same reference,
+ * bare or beside annotations alone. Merged unresolved, whatever the other side
+ * declares beside the `$ref` (an `ifc`, `properties`, `items`, a combinator,
+ * another reference) would take the place of the referenced body's own and
+ * drop the claims it declares. An annotation constrains nothing, so two sides
+ * naming one definition merge as that reference, which is what keeps a
+ * recursive definition from unrolling one level further on each merge.
  */
 const referenceIsShadowed = (
   side: JSONSchemaObj,
@@ -692,7 +734,9 @@ const referenceIsShadowed = (
 ): boolean =>
   typeof side.$ref === "string" &&
   (other.$ref !== side.$ref ||
-    Object.keys(other).some((key) => key !== "$ref"));
+    Object.keys(other).some((key) =>
+      key !== "$ref" && !BRANCH_ANNOTATION_KEYWORDS.has(key)
+    ));
 
 /**
  * `schema`'s reference resolved in `root`, as a merge walks it. An `ifc` beside
@@ -718,6 +762,22 @@ const resolveKeepingBodyClaims = (
     : resolved;
 };
 
+/**
+ * `side`, a reference, with the `ifc` beside it read as it resolves: the
+ * referenced body's claims beneath it. A side carrying no `ifc` is returned
+ * as it is.
+ */
+const withBodyClaimsBeneathSibling = (
+  side: JSONSchemaObj,
+  definitions: SchemaDefinitions,
+): JSONSchemaObj => {
+  if (!isObjectNotArray(side.ifc)) return side;
+  const resolved = resolveKeepingBodyClaims(side, { $defs: definitions });
+  return isObjectNotArray(resolved) && isObjectNotArray(resolved.ifc)
+    ? { ...side, ifc: resolved.ifc }
+    : side;
+};
+
 const resolveReferenceSide = (
   side: JSONSchemaObj,
   definitions: SchemaDefinitions,
@@ -725,20 +785,6 @@ const resolveReferenceSide = (
   const resolved = resolveKeepingBodyClaims(side, { $defs: definitions });
   return isObjectNotArray(resolved) ? resolved as JSONSchemaObj : side;
 };
-
-/**
- * Keywords that annotate a branch and constrain no value. `$comment` is not
- * one of them here: the runtime reads some of its values as property markers
- * (`schema-view.ts`), so a branch whose comment changes does not correspond.
- */
-const BRANCH_ANNOTATION_KEYWORDS: ReadonlySet<string> = new Set([
-  "title",
-  "description",
-  "examples",
-  "deprecated",
-  "readOnly",
-  "writeOnly",
-]);
 
 /**
  * A branch's structural correspondence key. Policies and reference targets
@@ -843,6 +889,64 @@ const correspondingUnionBranches = (
   );
 };
 
+/**
+ * The reference a merge writes where `left` and `right` are references naming
+ * different definitions, at least one of them declaring a claim: one to the
+ * merged definition of the pair, minted here as the merge of the two
+ * definitions they name. Inside that merge the pair refers to the definition
+ * being minted, so the merge of two recursive definitions is itself a
+ * recursive definition, holding at every level the claims the node merge
+ * holds where it merges the two written out. Taking either side's definition
+ * would drop the other's claims beneath, and merging the two written out
+ * would write one more level out at each merge of the document.
+ *
+ * The definition is minted where the pair is first met below a position and
+ * describes every position beneath that reaches the pair from there; a pair
+ * met again beside that position is minted again, since a merge beneath a
+ * position depends on the position (the paths a release relaxes, the paths a
+ * module generates). Two mintings that mean the same definition fold into
+ * one when the document is canonicalized.
+ */
+const mergedDefinitionRef = (
+  left: JSONSchemaObj,
+  right: JSONSchemaObj,
+  path: string,
+  logicalPath: readonly string[],
+  options: MergeCfcSchemaEnvelopeOptions,
+  references: MergeReferences,
+): string => {
+  const pair = referencePair(left, right);
+  let name = references.merged.get(pair);
+  if (name === undefined) {
+    const base = localDefinitionName(left.$ref!) ??
+      localDefinitionName(right.$ref!) ?? "definition";
+    let suffix = 0;
+    do name = `__cfc_merged_${suffix++}_${base}`; while (
+      Object.hasOwn(references.definitions, name)
+    );
+    // Named before its body is merged, so that the name is taken while the
+    // pair meets itself inside that merge.
+    references.definitions[name] = {};
+    const scoped: MergeReferences = {
+      ...references,
+      merged: new Map([...references.merged, [pair, name]]),
+    };
+    // A resolved body carries the document's map; the definition is stored
+    // without it, as the hoisted ones are.
+    references.definitions[name] = pruneCfcSchemaDefinitionBody(
+      mergeSchemaNode(
+        resolveReferenceSide({ $ref: left.$ref }, references.definitions),
+        resolveReferenceSide({ $ref: right.$ref }, references.definitions),
+        path,
+        logicalPath,
+        options,
+        scoped,
+      ),
+    );
+  }
+  return encodedLocalDefinitionRef(name);
+};
+
 const mergeSchemaNode = (
   existing: JSONSchema,
   candidate: JSONSchema,
@@ -856,34 +960,44 @@ const mergeSchemaNode = (
   let right = asSchemaObject(candidate, path);
   const originalLeft = left;
   const originalRight = right;
-  // Two references already resolved against each other higher on this path
-  // are recursive definitions meeting themselves; resolving them again would
-  // not terminate, so they merge as references from there down. Against an
-  // inline schema a reference resolves at every depth, since the inline side
-  // runs out. Where neither side declares any `ifc`, there is no claim to
-  // lose, and references stay references.
+  // Where neither side declares any `ifc`, there is no claim to lose, and
+  // references stay references. Otherwise two references naming different
+  // definitions name the merged definition of the pair
+  // (`mergedDefinitionRef()`); against an inline schema a reference resolves
+  // at every depth, since the inline side runs out; and two references
+  // naming one definition resolve where one's siblings shadow the other,
+  // once on a path: met again further down they are a recursive definition
+  // meeting itself, and merge as that reference.
   const bothReferences = typeof left.$ref === "string" &&
     typeof right.$ref === "string";
-  const pair = `${left.$ref ?? ""}\u0000${right.$ref ?? ""}`;
+  const pair = referencePair(left, right);
+  const policyRoot = references === undefined
+    ? undefined
+    : { $defs: references.definitions };
+  const claims = policyRoot !== undefined &&
+    (hasReachableIfc(left, policyRoot) || hasReachableIfc(right, policyRoot));
+  const toMergedDefinition = claims && bothReferences &&
+    left.$ref !== right.$ref;
+  if (toMergedDefinition) {
+    // An `ifc` beside a reference takes the place of the body's on
+    // resolution, so each side's is read with the body's claims beneath it
+    // before the two merge, and what the merged site carries beside its
+    // reference is the merge of those (`resolveKeepingBodyClaims()`).
+    left = withBodyClaimsBeneathSibling(left, references!.definitions);
+    right = withBodyClaimsBeneathSibling(right, references!.definitions);
+  }
   let childReferences = references;
   if (
-    references !== undefined &&
+    references !== undefined && claims && !toMergedDefinition &&
     !(bothReferences && references.active.has(pair))
   ) {
-    // Where either side's body declares a claim, every shadowed reference is
-    // resolved, so a reference declaring nothing cannot stand in for one
-    // that does on the merged node.
-    const policyRoot = { $defs: references.definitions };
-    const claims = hasReachableIfc(left, policyRoot) ||
-      hasReachableIfc(right, policyRoot);
-    const resolveLeft = claims && referenceIsShadowed(left, right);
-    const resolveRight = claims && referenceIsShadowed(right, left);
+    // Every shadowed reference is resolved, so a reference declaring nothing
+    // cannot stand in for one that does on the merged node.
+    const resolveLeft = referenceIsShadowed(left, right);
+    const resolveRight = referenceIsShadowed(right, left);
     if (resolveLeft || resolveRight) {
       childReferences = bothReferences
-        ? {
-          definitions: references.definitions,
-          active: new Set([...references.active, pair]),
-        }
+        ? { ...references, active: new Set([...references.active, pair]) }
         : references;
       if (resolveLeft) {
         left = resolveReferenceSide(left, references.definitions);
@@ -1098,6 +1212,18 @@ const mergeSchemaNode = (
   } = { ...left, ...right };
   const merged: JSONSchemaObj = {
     ...rest,
+    ...(toMergedDefinition
+      ? {
+        $ref: mergedDefinitionRef(
+          left,
+          right,
+          path,
+          logicalPath,
+          options,
+          references!,
+        ),
+      }
+      : {}),
     ...unions,
     ...(Object.keys(mergedProperties).length > 0
       ? { properties: mergedProperties }
@@ -1467,7 +1593,14 @@ export const withoutUndefinedMembers = <T>(value: T): T => {
   return result as T;
 };
 
-export const mergeCfcSchemaEnvelopes = (
+/**
+ * The merged envelope of `existing` and `candidate` as
+ * {@link mergeCfcSchemaEnvelopes} builds it, before that canonicalizes it:
+ * both documents' definitions under the names the hoist gave them, every
+ * definition the merge minted, and the maps resolved bodies carry. It is what
+ * canonicalization is held to meaning the same as, and is persisted nowhere.
+ */
+export const mergeCfcSchemaEnvelopesBeforeCanonicalization = (
   existing: JSONSchema,
   candidate: JSONSchema,
   options: MergeCfcSchemaEnvelopeOptions = {},
@@ -1490,10 +1623,12 @@ export const mergeCfcSchemaEnvelopes = (
   // renamed apart on the candidate's side, refs included, so every
   // `#/$defs/<name>` below the merged root still names the definition its
   // own document declared.
-  const { fragments: [left, right], definitions } = hoistCfcSchemaDefs([
-    existing,
-    candidate,
-  ]);
+  const { fragments: [left, right], definitions: hoisted } = hoistCfcSchemaDefs(
+    [existing, candidate],
+  );
+  // The merged document's map: both sides' definitions, and the ones the
+  // merge mints where two differing references meet (`mergedDefinitionRef()`).
+  const definitions: Record<string, JSONSchema> = { ...hoisted };
   const merged = mergeSchemaNode(
     left,
     right,
@@ -1504,15 +1639,36 @@ export const mergeCfcSchemaEnvelopes = (
     // side could take its place. `cid:` references resolve through the schema
     // registry, so that holds even where neither side defines any.
     policiesDiffer
-      ? { definitions: definitions ?? {}, active: new Set() }
+      ? { definitions, active: new Set(), merged: new Map() }
       : undefined,
   );
-  return internSchema(
-    definitions !== undefined && isObjectOrArray(merged)
-      ? { ...merged, $defs: definitions }
-      : merged,
-  );
+  return Object.keys(definitions).length > 0 && isObjectOrArray(merged)
+    ? { ...merged, $defs: definitions }
+    : merged;
 };
+
+/**
+ * The merged envelope of `existing` and `candidate`, in canonical form.
+ * Throws where the two cannot merge.
+ */
+export const mergeCfcSchemaEnvelopes = (
+  existing: JSONSchema,
+  candidate: JSONSchema,
+  options: MergeCfcSchemaEnvelopeOptions = {},
+): JSONSchema =>
+  // The merged document is persisted and hashed as it is returned, so it
+  // leaves here in canonical form: one root map, every authored definition,
+  // one minted definition per meaning those do not carry, nothing minted
+  // that the document does not reach.
+  internSchema(
+    canonicalizeCfcSchemaDocument(
+      mergeCfcSchemaEnvelopesBeforeCanonicalization(
+        existing,
+        candidate,
+        options,
+      ),
+    ),
+  );
 
 /** Why a stored envelope and a candidate envelope cannot be merged. */
 export interface CfcSchemaMergeIssue {

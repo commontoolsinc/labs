@@ -17,7 +17,7 @@ import {
   parseRevisionPin,
 } from "../commands/piece.ts";
 import { followPieceSource, type PieceConfig } from "../lib/piece.ts";
-import { cf, stripAnsi } from "./utils.ts";
+import { argv, cf, stripAnsi } from "./utils.ts";
 
 const BASE_OPTIONS = {
   apiUrl: "http://127.0.0.1:8000",
@@ -29,9 +29,9 @@ const BASE_OPTIONS = {
 describe("cf piece follow", () => {
   it("accepts explicit confirmation while still requiring a source origin", async () => {
     const result = await cf(
-      "piece follow --dangerously-allow-incompatible-schema " +
-        "--identity /nonexistent-but-unread.key --space did:key:zSpace " +
-        '--cell of:profile --api-url http://127.0.0.1:8000 "   "',
+      argv`piece follow --dangerously-allow-incompatible-schema
+        --identity /nonexistent-but-unread.key --space did:key:zSpace
+        --cell of:profile --api-url http://127.0.0.1:8000 ${"   "}`,
     );
     expect(result.code).toBe(1);
     expect(stripAnsi(result.stdout.join("\n"))).toContain(

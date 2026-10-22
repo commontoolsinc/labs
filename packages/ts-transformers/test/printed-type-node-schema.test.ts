@@ -162,7 +162,7 @@ describe("printed type node schema", () => {
       const scoped = {
         type: "array",
         items: {
-          anyOf: [{ type: "array", items: false }, box({ type: "number" })],
+          anyOf: [box({ type: "number" }), { type: "array", items: false }],
         },
         scope: "user",
       };
@@ -180,13 +180,13 @@ describe("printed type node schema", () => {
         type: "array",
         items: {
           anyOf: [
-            { type: "array", items: false },
             box({
               type: "object",
               properties: { text: { type: "string" } },
               required: ["text"],
               asCell: ["cell"],
             }),
+            { type: "array", items: false },
           ],
         },
         scope: "user",

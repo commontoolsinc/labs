@@ -12,6 +12,7 @@ import type {
   FabricBytes,
   FabricHash,
   FabricPlainObjectPlus,
+  FabricPrimitive,
   FabricPrimitiveSchemaType,
   FabricValue,
   FabricValuePlus,
@@ -490,7 +491,8 @@ export interface IStreamable<T> {
   ): void;
 }
 
-// Lightweight HKT, so we can pass cell types to IKeyable<>.
+// Lightweight higher-kinded type (HKT), so we can pass cell types to
+// IKeyable<>.
 export interface HKT {
   _A: unknown;
   type: unknown;
@@ -934,8 +936,9 @@ export interface ICreatable<C extends AnyBrandedCell<any>> {
    * Set a cause for this cell. Used to create a link when the cell doesn't have
    * one yet.
    *
-   * Record causes may not use the top-level key `$generated` — it is
-   * reserved for system-generated causes and setting one throws.
+   * Record causes may not use the top-level key `$generated` or `$instance` —
+   * they are reserved for the causes the pattern builder mints, and setting
+   * one throws.
    * @param cause - The cause to associate with this cell
    * @returns This cell for method chaining
    */
@@ -2696,10 +2699,13 @@ export interface LiftFunction {
 // Helper type to make the plain data in handler state readonly. A cell of every
 // kind, a stream, and a SqliteDb are passed through whole: they are handle
 // interfaces with methods — `.get()/.set()`, `.send()`, `.exec()/.query()` —
-// not data containers to map over.
+// not data containers to map over. A fabric primitive, such as a
+// `FabricBytes`, is passed through whole too: it is an immutable value read
+// through its methods.
 export type HandlerState<T> = T extends AnyBrandedCell<any> ? T
   : T extends AnyStream ? T
   : T extends SqliteDb<any> ? T
+  : T extends FabricPrimitive ? T
   : T extends Array<infer U> ? ReadonlyArray<HandlerState<U>>
   : T extends object ? { readonly [K in keyof T]: HandlerState<T[K]> }
   : T;
@@ -4096,6 +4102,47 @@ export type SpaceAccessOfFunction = (
 export declare const spaceAccessOf: SpaceAccessOfFunction;
 
 /**
+ * The principals a space's access list names, each with its level, as
+ * `spaceMembers()` returns them.
+ */
+export interface SpaceMemberList {
+  /** Each principal the list names, with the level its entry grants. */
+  readonly principals: Readonly<Record<DID, SpaceGrantLevel>>;
+
+  /**
+   * The level the list's `"*"` entry grants anyone it does not name, absent
+   * when the list has no such entry. It names no one, so it adds no member.
+   */
+  readonly anyone?: SpaceGrantLevel;
+}
+
+/**
+ * Returns the principals the access list of the space `target`'s value lives
+ * in names, each with its level, so a pattern can list a space's members. The
+ * list's `"*"` entry is not a member, and is reported apart, as `anyone`. A
+ * service DID the deployment grants `OWNER` everywhere holds it without an
+ * entry, and is not listed.
+ *
+ * Only a principal the list grants access gets it: the current principal,
+ * found as `spaceAccess()` finds it, through its own entry or the `"*"`
+ * entry. Anyone else gets `undefined`, as does a call for which
+ * `spaceAccess()` would return `undefined`. It is never an empty list, so a
+ * reader can tell "not known yet" from "nobody". The list tells a member only
+ * what a member can already read, since any member can read the whole access
+ * list.
+ *
+ * As with `spaceAccess()`, a reactive computation calling it gets a value of
+ * its viewer's own, which updates when the access list changes. It can be
+ * called where `spaceAccess()` can, and throws where that does. The result
+ * carries no label.
+ */
+export type SpaceMembersFunction = (
+  target: AnyCell<unknown> | undefined,
+) => SpaceMemberList | undefined;
+
+export declare const spaceMembers: SpaceMembersFunction;
+
+/**
  * Returns the DID of the space `target`'s value lives in, after following any
  * links it holds: so a pattern can name a space it holds a cell of, such as
  * one a handler just created with `PatternFactory.inSpace()`, in data such as
@@ -4195,6 +4242,37 @@ export declare function revokeSpaceAccess(
 ): void;
 
 /**
+ * Returns the id of a blob holding the bytes and media type of the blob
+ * `blobId` under the file name `name`, in the space `target`'s value lives in.
+ * A blob's id is the hash of its name, media type and bytes, and a blob never
+ * changes, so this is how a file is renamed: the space then holds the same
+ * bytes under both names, and whatever names the file names the new blob. A
+ * blob already named `name` is its own answer.
+ *
+ * The new blob's record is staged in the handler's transaction, and is stored
+ * when the transaction commits. Its bytes travel with the commit, so a handler
+ * renaming a large file loads its bytes and then sends them back.
+ *
+ * Returns `undefined` when the space holds no blob `blobId`. A blob still
+ * loading is not one of those: the handler is withdrawn, and runs again once
+ * the blob arrives.
+ *
+ * The record carries no label, as no blob does: `name` is readable by anyone
+ * who can fetch the blob, as its bytes are. The blob's id hashes the name in
+ * with the media type and bytes, so fetching it takes knowing all three
+ * already, and a correct guess at all three is confirmed by fetching.
+ *
+ * Available only in a handler, and throws anywhere else. Throws too when
+ * `blobId` is not a non-empty string, or `name` is not a non-empty string of
+ * well-formed Unicode of at most 1024 bytes as UTF-8.
+ */
+export declare function nameBlob(
+  target: AnyCell<unknown>,
+  blobId: string,
+  name: string,
+): string | undefined;
+
+/**
  * Convert an entity-id reference — as produced by {@link getEntityId} or a
  * cell's `entityId` — to its tagged-hash string, in whichever form the active
  * cell representation uses (a `{ "/": "id-string" }` object or a `FabricHash`).
@@ -4255,11 +4333,15 @@ export type UIRenderable = {
 /**
  * JSX element type - the result of a JSX expression.
  * Can be a VNode, or a cell containing something with a [UI] property.
+ *
+ * A generated schema lists the members in the order they are written here,
+ * and nearly every pattern's schema holds one, so reordering them changes
+ * every such schema.
  */
 export type JSXElement =
   | VNode
-  | AnyBrandedCell<UIRenderable>
-  | Reactive<UIRenderable>;
+  | Reactive<UIRenderable>
+  | AnyBrandedCell<UIRenderable>;
 
 /** A "virtual view node", e.g. a virtual DOM element */
 export type VNode = {

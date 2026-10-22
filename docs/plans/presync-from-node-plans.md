@@ -54,11 +54,11 @@ calls it from `#instantiateNode`. The pre-sync calls it from
 from the plan. The list-children pass is the one caller that binds a node
 without it: `#syncListSlotResolutions` and `#syncResumeListChildren` derive a
 list coordinator's inputs through `#buildRawNodeInputs`, the binder a raw
-node's plan uses. The bindings a pre-sync's plan computes against a stored
-argument are held until the plan the node's instantiation makes takes them
-(`NodeBindingMemo`, `packages/runner/src/node-binding-memo.ts`); a binding
-against a stand-in is computed and not held. "One plan per node" below says
-which part of a plan that covers.
+node's plan uses. The bindings the first plan of a node computes against a
+stored argument are held for every later plan of it (`NodeBindingMemo`,
+`packages/runner/src/node-binding-memo.ts`); a binding against a stand-in is
+computed and not held. "One plan per node" below says which part of a plan
+that covers.
 
 The pre-sync (`#syncCellsForRunningPattern`) names the result document and
 then syncs what each node's plan names (`#cellsNodePlanReads`): a JavaScript
@@ -169,14 +169,17 @@ transaction: the result is a function of the node, its pattern's manifest and
 argument schema, the result cell's link and the argument link, for a given
 kind of module. The runner holds that part by those four and by the kind of
 module the node resolved to, with the pattern a pattern node's module holds,
-from the plan a pre-sync makes of a node until the plan its instantiation
-makes takes it (`NodeBindingMemo`,
-`packages/runner/src/node-binding-memo.ts`), so the two plans share one
-binding, a running node's bindings are held by the node alone, and a pattern
-node's bound child is the same pattern object in both plans, under which the
-child's own nodes are found again. A binding against a stand-in argument is
-not held: the instance it belongs to is instantiated against the argument
-document its setup writes.
+from the first plan made of a node for every later plan of it — a pre-sync's,
+a name-sync's, the instantiation's — across a load (`NodeBindingMemo`,
+`packages/runner/src/node-binding-memo.ts`), so every plan of a node shares
+one binding and one inputs document, and a pattern node's bound child is the
+same pattern object in every plan, under which the child's own nodes are
+found again. A pattern is named by its content identity when it has one and
+a node by its position among its nodes, since the pattern embedded in a
+parent's graph and the one loaded by identity for the instance's own start
+are two objects of one identity holding the same nodes. A binding against a
+stand-in argument is not held: the instance it belongs to is instantiated
+against the argument document its setup writes.
 
 Resolving what the bound outputs redirect to (`writes`, a raw node's resolved
 output spot, a pattern node's `childResultCell`) reads link slots through the

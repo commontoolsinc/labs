@@ -691,6 +691,33 @@ Deno.test("dialog: body sits two columns inside each border", () => {
   );
 });
 
+Deno.test("dialog: program output starts two columns inside a box as wide as its stated width", () => {
+  const widest = "x".repeat(20);
+  const rows = renderFrame(
+    parseDocument("x\n"),
+    baseView({
+      width: 120,
+      height: 12,
+      color: false,
+      dialog: {
+        title: "Push",
+        body: ["To origin", widest],
+        output: true,
+        width: 20,
+        buttons: [],
+      },
+    }),
+  ).map(stripAnsi);
+  const shortRow = rows.find((r) => r.includes("To origin"))!;
+  const left = shortRow.indexOf("║");
+  assertEquals(
+    shortRow.slice(left, left + 3 + "To origin".length),
+    "║  To origin",
+  );
+  const widestRow = rows.find((r) => r.includes(widest))!;
+  assertEquals(widestRow.slice(left, left + 26), `║  ${widest}  ║`);
+});
+
 Deno.test("dialog: the focused button — not just the default — is highlighted", () => {
   const dlg: DialogState = {
     title: "Pick",

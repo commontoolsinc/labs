@@ -127,6 +127,9 @@ export interface Cell {
   readonly lane: number;
 }
 
+/** A direction the keyboard moves the selection from one cell to the next. */
+export type CellMove = "clockwise" | "anticlockwise" | "outward" | "inward";
+
 /** The annular sector a cell occupies, in radii and fractions of a turn. */
 export interface CellShape extends RingBand {
   /** Where the cell begins, clockwise from the top; a note sounds here. */
@@ -358,6 +361,34 @@ export function ringBands(count: number): RingBand[] {
 }
 
 /**
+ * Returns the cell next to `cell` in direction `move`. Along a ring the step
+ * wraps around. Outward and inward, a move past the edge of the band lands in
+ * the neighboring ring, on the step at the nearest angle; there is nothing past
+ * the innermost and the outermost lane, so a move there returns `cell`.
+ */
+export function neighborCell(
+  layout: RingLayout,
+  cell: Cell,
+  move: CellMove,
+): Cell {
+  const { steps } = layout.rings[cell.ringIndex];
+  switch (move) {
+    case "clockwise":
+      return { ...cell, step: (cell.step + 1) % steps };
+    case "anticlockwise":
+      return { ...cell, step: (cell.step + steps - 1) % steps };
+    case "outward":
+      return cell.lane + 1 < layout.lanes
+        ? { ...cell, lane: cell.lane + 1 }
+        : crossedCell(layout, cell, cell.ringIndex + 1, 0);
+    case "inward":
+      return cell.lane > 0
+        ? { ...cell, lane: cell.lane - 1 }
+        : crossedCell(layout, cell, cell.ringIndex - 1, layout.lanes - 1);
+  }
+}
+
+/**
  * Returns the cell under the point (`x`, `y`), or `undefined` where the point
  * lies in the hub, in a gap between rings, or outside the outermost ring. The
  * point is measured from the center with `y` growing downward, in units of the
@@ -409,19 +440,23 @@ export function cellKey(ringId: string, step: number, lane: number): string {
 /**
  * Returns the notes of `notes` that the layout can draw and play: those whose
  * ring exists, whose step and lane fall inside it, and that sit under the key
- * of their own cell. A removed note, and one left over from a layout with
- * other rings, is not among them.
+ * of their own cell. A removed note, a value that is not a note, and a note
+ * left over from a layout with other rings are not among them. The values are
+ * read as anyone with write access to the space may have stored them, so an
+ * `authorName` is bounded as `noteAuthorName()` bounds it, and dropped where it
+ * is not a string.
  */
 export function liveNotes(
   layout: RingLayout,
-  notes: Readonly<Record<string, PlacedNote | null | undefined>>,
+  notes: Readonly<Record<string, unknown>>,
 ): LiveNote[] {
   const ringIndexById = new Map(
     layout.rings.map((ring, index) => [ring.id, index]),
   );
   const live: LiveNote[] = [];
-  for (const [key, note] of Object.entries(notes)) {
-    if (note === null || note === undefined) continue;
+  for (const [key, value] of Object.entries(notes)) {
+    const note = readNote(value);
+    if (!note) continue;
     const ringIndex = ringIndexById.get(note.ringId);
     if (ringIndex === undefined) continue;
     const { steps } = layout.rings[ringIndex];
@@ -509,6 +544,21 @@ export function uniqueCells(
     seen.add(key);
     return true;
   });
+}
+
+/**
+ * Returns the name a note records for its author: the agent's where one is
+ * given, else the viewer's. Every note a caller places carries a copy, so the
+ * name takes the bounded form a presence name takes (see
+ * `normalizePresenceParticipantName()`), and is the empty string where neither
+ * leaves anything.
+ */
+export function noteAuthorName(
+  agentName: string | undefined,
+  viewerName: string,
+): string {
+  return normalizePresenceParticipantName(agentName ?? "") ||
+    normalizePresenceParticipantName(viewerName);
 }
 
 /** Returns the name to show for whoever placed `note`. */
@@ -729,6 +779,57 @@ export function defaultColor(authorId: string): string {
 /** Returns whether `value` is a whole number indexing one of `length` slots. */
 function isIndexBelow(value: number, length: number): boolean {
   return Number.isInteger(value) && value >= 0 && value < length;
+}
+
+/** Returns whether `value` is a record whose fields can be read by name. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Helper for `neighborCell()`, which returns the cell of `lane` in ring
+ * `ringIndex` at the angle of the middle of `cell`, or `cell` where the layout
+ * has no such ring.
+ */
+function crossedCell(
+  layout: RingLayout,
+  cell: Cell,
+  ringIndex: number,
+  lane: number,
+): Cell {
+  const target = layout.rings[ringIndex];
+  if (!target) return cell;
+  const turn = (cell.step + 0.5) / layout.rings[cell.ringIndex].steps;
+  return { ringIndex, step: Math.floor(turn * target.steps), lane };
+}
+
+/**
+ * Helper for `liveNotes()`, which reads a stored value as a note, or returns
+ * `undefined` where a field of a note is missing or of the wrong type. The
+ * `authorName` is read in the bounded form `noteAuthorName()` writes, and reads
+ * as absent where it is not a string or nothing of it is left.
+ */
+function readNote(value: unknown): PlacedNote | undefined {
+  if (!isRecord(value)) return undefined;
+  const { ringId, step, lane, authorId, color } = value;
+  if (
+    typeof ringId !== "string" || typeof step !== "number" ||
+    typeof lane !== "number" || typeof authorId !== "string" ||
+    typeof color !== "string"
+  ) {
+    return undefined;
+  }
+  const authorName = typeof value.authorName === "string"
+    ? normalizePresenceParticipantName(value.authorName)
+    : "";
+  return {
+    ringId,
+    step,
+    lane,
+    authorId,
+    color,
+    ...(authorName !== "" && { authorName }),
+  };
 }
 
 //
@@ -1019,11 +1120,6 @@ export function padForKey(
 /** Returns the key that plays lane `lane` of ring `ringIndex`, if any. */
 export function keyForPad(ringIndex: number, lane: number): string | undefined {
   return PAD_KEY_ROWS[ringIndex]?.[lane];
-}
-
-/** Returns whether `value` is a record whose fields can be read by name. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** Helper for `readPeer()`, which reads a pointer facet. */

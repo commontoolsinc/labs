@@ -42,6 +42,17 @@ export default pattern(() => {
   const action_clear_everything = action(() => {
     loops.clearNotes.send({});
   });
+  // A caller's name is copied into every note it places, so it is stored in
+  // the bounded form a presence name takes: no control characters, and at most
+  // 80 code points.
+  const action_add_note_by_long_name = action(() => {
+    loops.addNote.send({
+      ring: "pluck",
+      step: 2,
+      lane: 3,
+      agentName: `Agent\u0007 ${"x".repeat(500)}`,
+    });
+  });
   const action_set_tempo = action(() => {
     loops.setTempo.send({ bpm: 132 });
   });
@@ -98,6 +109,10 @@ export default pattern(() => {
     loops.rings.every((ring) => ring.notes.length === 0)
   );
 
+  const assert_long_name_is_bounded = assert(() =>
+    loops.state.notes["pluck:2:3"]?.authorName === `Agent ${"x".repeat(74)}`
+  );
+
   const assert_tempo_starts_at_default = assert(() =>
     loops.state.tempoBpm === 96
   );
@@ -129,6 +144,9 @@ export default pattern(() => {
 
       { action: action_clear_everything },
       { assertion: assert_every_ring_is_empty },
+
+      { action: action_add_note_by_long_name },
+      { assertion: assert_long_name_is_bounded },
 
       { assertion: assert_tempo_starts_at_default },
       { action: action_set_tempo },

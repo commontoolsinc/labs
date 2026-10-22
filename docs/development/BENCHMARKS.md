@@ -125,6 +125,12 @@ Most packages with benches define a `bench` task for running them locally
 (see `packages/runner/deno.jsonc`); otherwise invoke `deno bench` on a
 single file.
 
+`packages/state-inspector/test/reconstruct-range.bench.ts` is a local replay
+benchmark. It holds the replay suffix fixed while growing the preceding history
+from 100 to 10,000 revisions, covering snapshot-backed reads and exact-row reads
+within a multi-operation commit. Fixture construction and output assertions are
+outside the timed interval. Run it with `deno bench -A` and the file path.
+
 `packages/runner/test/view-replication.bench.ts` measures view selection through
 chains of 100, 300, and 1,000 computations, each mixed with an equally large
 unrelated chain. Fixture construction stays outside timing; index construction
@@ -990,6 +996,15 @@ all stayed open would cost one recompute per member per message. A second member
 stays open throughout, to add a reaction to every third message while it is the
 newest, and to write the thread's replies alongside the last writer.
 
+Each act is followed by a wait for its effect in the acting member's copy of
+the room. A room handler refuses an act by throwing, which writes nothing, so a
+refused act's effect never arrives. The member's runtime reports the handler's
+error, and that report ends the pending wait instead: the seed fails with an
+error naming the member, the act, and the handler's message, and the child
+exits non-zero. The child writes to the benchmark's own stderr as it runs, so
+its progress and the reason for a failure reach the workflow log as they
+happen, not only once the child has exited.
+
 Every body is derived from its index, so two rooms of one size carry the same
 text. Each benchmark process derives its members from a passphrase new to that
 process, so each starter's Home lists only that process's room, and a toolshed
@@ -1017,16 +1032,19 @@ benchmark's do.
 and neither changes what another segment measures. Each `send` adds one message
 to its room, so the room holds thirty messages before the first send and
 thirty-six before the last; each `react` adds one reaction, to a different
-message each time, and leaves the messages as they were. One read-accounted sample each of
-`messages` and `send`, taken in a browser of its own, goes to stderr with the
-same counters the rendered lunch-poll benchmark records.
+message each time, and leaves the messages as they were. The three rooms seed
+together, each in a child of its own, and all three finish before the first
+segment starts, so no seed child is alive and no setup work runs in a measured
+interval. One read-accounted sample each of `messages` and `send`, taken in a
+browser of its own, goes to stderr with the same counters the rendered
+lunch-poll benchmark records.
 
 `react` adds to an existing reaction's tally rather than picking one from the
 row's reaction picker. At the shell's 1024-pixel viewport, the picker the row
 opens lays its quick reactions out under the row's author avatar, which takes
 the click.
 
-`CF_FABRICHAT_MEMBERS` and `CF_FABRICHAT_MESSAGES` resize both rooms for a
+`CF_FABRICHAT_MEMBERS` and `CF_FABRICHAT_MESSAGES` resize all three rooms for a
 local run. The `react` segment needs one seeded reaction per invocation, which
 a room of fewer than nineteen messages does not carry, and the file says so
 before it seeds anything.
@@ -1036,10 +1054,11 @@ before it seeds anything.
 `packages/patterns/integration/fabrichat-room-scale.bench.ts` measures two of
 those segments across rooms of 10, 30, 100 and 300 messages, all with twelve
 members, in a `fabrichat room scale` group: `<size>` is `messages`, and
-`send <size>` is `send`. A room renders a row for every message it holds and
-hides those outside the main conversation's view rather than leaving them out,
-so a room of three hundred messages builds three hundred rows although its
-`latest` holds a hundred; these curves say what that costs. Each size seeds two
+`send <size>` is `send`. A room renders a row for every message of its main
+conversation, however many its `latest` holds, so a room of three hundred
+messages builds a main-conversation row for each of them except the replies in
+the thread the fixture seeds, which render in the thread pane; these curves say
+what that costs. Each size seeds two
 rooms, one for each series, so that sends do not grow the room `<size>` loads.
 The `send <size>` room does grow, by one message per send: it holds `<size>`
 messages before the first of its five sends — one per invocation of the body,

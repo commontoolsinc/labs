@@ -329,6 +329,29 @@ Deno.test("memory v2 server parser ignores transact invocation and authorization
   );
 });
 
+Deno.test("memory v2 server parses a watch removal naming watch ids, and refuses one naming anything else", () => {
+  const request = {
+    type: "session.watch.remove" as const,
+    requestId: "remove-1",
+    space: "did:key:z6Mk-space",
+    sessionId: "session:1",
+  };
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary({
+      ...request,
+      watchIds: ["watch-a", "watch-b"],
+    })),
+    { ...request, watchIds: ["watch-a", "watch-b"] },
+  );
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary({
+      ...request,
+      watchIds: ["watch-a", 7],
+    })),
+    null,
+  );
+});
+
 Deno.test("memory v2 server parses entity identifier listing requests", () => {
   assertEquals(
     parseClientMessage(encodeMemoryBoundary({

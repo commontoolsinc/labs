@@ -109,13 +109,43 @@ Each profile lives in its own space, created with the anonymous
 a random DID owned by the creating user and writable by anyone, since its ACL
 grants the wildcard `"*"` WRITE: a runtime showing a profile writes into the
 profile's space, so a visitor needs more than READ. CFC owner-protects the
-profile's data fields, and its view state is per session; nothing else in the
-space is protected from a visitor (a *named* `inSpace(name)` would put every
+profile's data fields that store an owner policy (all but `picture`, as below),
+and its view state is per session; nothing else in the space is protected from
+a visitor (a *named* `inSpace(name)` would put every
 profile created under one name in one space) —
 running `/api/patterns/system/profile-home.tsx`; the link
 is appended to `profiles`. The home Profile tab renders the **profile picker**
 (`profile-picker.tsx`): it lists profiles, lets the user create more inline, pick
 the default, and stamp MRU. There is no `profileName` mirror field anymore.
+
+Each profile field holds a write redirect to an internal cell of the profile
+that holds the field's value, and the field's writer writes that cell. Two
+labels describe the field. The profile document's label at the field is
+minted when setup installs the field: it names the profile's creator on a
+profile created with the field, and no one on a profile that gained the field
+in a later release, since a source update is no principal's act. The value
+cell's own label is minted by the write that stored the value. Only the second
+says whose word the value is, so a reader that relies on who a field
+represents, such as a host showing a member's picture as their face, reads the
+value cell's label and takes the field as the owner's only when that label
+names the owner alone. A pattern reads it in a handler or a reactive
+computation, since the call throws in a pattern body, with
+`principalOf(profile.key(field), "represents-principal")`; a host reads it with
+`cfcLabelViewForResolvedTarget()`. Like every claim, it binds honest runtimes
+only: the memory server does not check a claim against the session that
+committed it ([`principal-of.md`](../../features/principal-of.md)).
+
+A field's writes are checked only once a write stores its policy in the value
+cell. A field with a default, such as `name` or `bio`, has its owner-protected
+policy stored with the default when setup writes it. On a profile created with
+the field, its creator is then its owner, and anyone else's write is refused.
+On a profile that gains the field in a later release, setup stores the policy
+on nobody's behalf, and the first principal to write the field becomes its
+owner. `picture` has no default. Its writer, `setPicture`, declares only that
+the value represents whoever writes it, so each write labels the picture with
+its writer, and no write is refused. A new field takes one of these two forms.
+A field with neither a default nor such a writer stores no policy, and nothing
+checks or labels its writes.
 
 The create passes `root: true`, so the profile is its space's root: the space's
 genesis commit reserves the root's address, the space cell's `defaultPattern`
@@ -383,9 +413,7 @@ identity Home, and nothing replaces or unlinks it: root
 recreation refuses a Home before stopping, unlinking or compiling anything,
 whether the Home is absent, installed, or pointing at a target that cannot
 currently be loaded, and the low-level link and unlink
-refuse to replace or drop a root a Home holds. (`cf space set-home` is
-retired; see
-[Retired: `cf space set-home`](../../../packages/cli/README.md#retired-cf-space-set-home).)
+refuse to replace or drop a root a Home holds.
 
 To run custom Home source, open the Home once so it exists, find its root, and
 update the root in place with the complete authored source and its tests. The

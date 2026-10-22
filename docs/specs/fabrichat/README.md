@@ -119,10 +119,13 @@ provide, the document says so, under the heading "Prerequisites".
 - **Room.** One conversation: a `FabriChatRoom` piece, the chat of a social
   space, which is either created for it, with the room as its root, or an
   existing one.
-- **Member.** A principal the room space's access list admits. A member with
-  READ reads only the newest messages; WRITE or OWNER is needed to act. Who is
-  a member changes through the space's own tools, such as the CLI's `cf acl`,
-  and, for a group room in a space of its own, through the room's add control.
+- **Member.** A principal the room space's access list names, with an entry
+  of its own at READ, WRITE, or OWNER. The list's `*` entry names no one, so
+  it makes no one a member, though whoever it admits can use the room as its
+  level allows. A member with READ reads only the newest messages; WRITE or
+  OWNER is needed to act. Who is a member changes through the space's own
+  tools, such as the CLI's `cf acl`, and, for a group room in a space of its
+  own, through the room's add control.
 - **Direct room.** A room created for exactly two members, found by the manager
   from either member's side by the other member's principal.
 - **Group room.** Any other room. Two group rooms can have the same members.
@@ -197,8 +200,9 @@ for a container, which decides who could see a room placed there. A space
 offers two halves of that:
 
 - **Its access list** says who can read and write. A pattern reads its own
-  principal's level (`spaceAccess()`), and the space's own tools change it.
-  No pattern can list the whole access list.
+  principal's level (`spaceAccess()`), and, for a principal the list
+  admits, the principals it names, with the `*` entry apart
+  (`spaceMembers()`). The space's own tools change it.
 - **Its participants**, the profiles its root lists (`participants`, which a
   pattern in the space reads through `wish({ query: "#default" })`), name
   people, but each entry is a claim: any participant can add any profile, by
@@ -206,9 +210,10 @@ offers two halves of that:
   room in a space of its own is that root, and keeps them itself.
 
 A **member set**, the participants whose profile represents a principal the
-access list admits, plus any admitted principal with no entry, would combine
-the two. It is a property of the space, the same for every pattern in it. Until
-a space offers one, a reader shows the participants as claims.
+access list names, plus any named principal with no entry, would combine the
+two. The `*` entry adds no one to it. It is a property of the space, the same
+for every pattern in it. Until a space offers one, a reader shows the
+participants as claims.
 
 With a member set:
 
@@ -236,6 +241,8 @@ names the ones it needs, and they are gathered here:
 
 - **A member set for a social space**, readable by the space's members and by
   patterns running there (see [Social spaces](#social-spaces)).
+  `spaceMembers()` gives its principals; pairing each with a participant's
+  profile is still to come.
 - **Creating a private space from a pattern.** `Factory.inSpace()` creates a
   space with a random DID whose genesis document grants only its creator
   (`{ [creator]: "OWNER" }`), or the grants `inSpace(name, { grants })` names
@@ -383,7 +390,8 @@ design, as below.
   Nothing delivers a notice yet (see
   [first contact](FabriChatManager.md#first-contact)), so the manager's
   rendering shows each queued notice with a link to its room, for the room's
-  creator to send on. Whoever opens the room's link, and whoever forgot the
+  creator to send on, until it is reported delivered or the room's roster
+  lists its recipient. Whoever opens the room's link, and whoever forgot the
   room, joins it by writing in it: the room sends the writer's manager
   `joinRoom`, which lists the room, or lists a forgotten one again.
 - **The index discovers rooms and keeps individual choices.** The manager

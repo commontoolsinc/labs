@@ -58,6 +58,7 @@ import {
   EventNeedsAttentionNotification,
   InitializationData,
   type LoggerCountsData,
+  type LoggerCountsResponse,
   type LoggerFlagsData,
   type LoggerMetadata,
   type LoggerTimingData,
@@ -1526,6 +1527,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     timing: LoggerTimingData;
     flags: LoggerFlagsData;
     cfc: Record<string, number>;
+    compileCache: Record<string, number>;
+    sizes: LoggerCountsResponse["sizes"];
   }> {
     const res = await this.#conn.request<RequestType.GetLoggerCounts>({
       type: RequestType.GetLoggerCounts,
@@ -1536,6 +1539,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       timing: res.timing,
       flags: res.flags,
       cfc: res.cfc,
+      compileCache: res.compileCache,
+      sizes: res.sizes,
     };
   }
 
@@ -1753,12 +1758,14 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   /**
    * Uploads a blob to the given space. `body` is given as a view or as a whole
    * buffer, and is copied into the immutable value that crosses, so the caller
-   * may keep using it.
+   * may keep using it. `name`, when given, is the name of the file the bytes
+   * came from, which the stored blob keeps (see `UploadBlobRequest`).
    */
   async uploadBlob(options: {
     space: DID;
     contentType: string;
     body: Uint8Array | ArrayBufferLike;
+    name?: string;
     suffix?: string;
   }): Promise<UploadBlobResponse> {
     return await this.#conn.request<RequestType.UploadBlob>({
@@ -1766,8 +1773,27 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       space: options.space,
       contentType: options.contentType,
       body: new FabricBytes(options.body),
+      name: options.name,
       suffix: options.suffix,
     });
+  }
+
+  /**
+   * Returns the URL the host of `options.space` serves the blob `options.id`
+   * at: the URL `uploadBlob()` returns for a blob it stores, without the file
+   * suffix it appends. With `options.download`, the URL is one to save the
+   * blob from, which its host serves as an attachment.
+   */
+  async blobUrl(
+    options: { space: DID; id: string; download?: boolean },
+  ): Promise<string> {
+    const response = await this.#conn.request<RequestType.BlobUrl>({
+      type: RequestType.BlobUrl,
+      space: options.space,
+      id: options.id,
+      ...(options.download === true ? { download: true } : {}),
+    });
+    return response.url;
   }
 
   async detectNonIdempotent(

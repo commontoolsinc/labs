@@ -35,7 +35,12 @@ import type { CellLinkRefPayload, URI } from "./sigil-types.ts";
 /** The addressing context needed to interpret a relative primitive link. */
 type SnapshotOrigin = Pick<NormalizedLink, "id" | "space" | "scope">;
 
-/** A frozen snapshot and its optional relative-link origin. */
+/**
+ * A frozen snapshot and its optional relative-link origin: the stored
+ * document the value was read out of, which a relative link inside the
+ * value resolves against. A snapshot minted from a value no space has stored
+ * (`Runtime.getImmutableCell()`) has none.
+ */
 export interface ImmutableSnapshot {
   readonly id: URI;
   readonly value: FabricValue;
@@ -427,6 +432,78 @@ export function hasInlineCellScheme(id: string): boolean {
 /** Whether an inline identifier is one the runtime can expand to a value. */
 export function isInlineCellId(id: string): boolean {
   return isImmutableCellId(id) || isFabricDataUri(id);
+}
+
+/**
+ * How many distinct snapshots any store in this process retains, element
+ * stores included. A snapshot several stores share counts once; one released
+ * by every owner, or whose owners were reclaimed, is gone from the count.
+ */
+export function liveImmutableSnapshotCount(): number {
+  return snapshots.size;
+}
+
+/** The key an unattributed snapshot counts under, by space. */
+export const IMMUTABLE_SNAPSHOTS_NO_SPACE = "(none)";
+
+/**
+ * The snapshots {@link liveImmutableSnapshotCount} counts, by the space of
+ * the stored document each was read out of, following an element's chain of
+ * origins to its root. A snapshot whose chain ends anywhere but a stored
+ * document, at a value no space has stored, at an inline document, or at an
+ * origin that has expired, and one whose own value has been reclaimed ahead
+ * of its identifier count under {@link IMMUTABLE_SNAPSHOTS_NO_SPACE}. One
+ * pass over the snapshot table, so the read costs what the table holds.
+ */
+export function liveImmutableSnapshotsBySpace(): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const { value } of snapshots.values()) {
+    const key = storedOriginSpace(value.deref()) ??
+      IMMUTABLE_SNAPSHOTS_NO_SPACE;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/**
+ * Helper for `liveImmutableSnapshotsBySpace()`: the space of the stored
+ * document at the root of `snapshot`'s chain of origins, or `undefined` when
+ * the chain ends at no stored document: at a snapshot with no origin, at an
+ * inline document, or at an origin that has expired.
+ */
+function storedOriginSpace(
+  snapshot: ImmutableSnapshot | undefined,
+): string | undefined {
+  let origin = snapshot?.origin;
+  while (origin !== undefined) {
+    const { id } = origin;
+    if (id === undefined) return origin.space;
+    if (!isImmutableCellId(id)) {
+      return hasInlineCellScheme(id) ? undefined : origin.space;
+    }
+    const next = snapshots.get(id)?.value.deref();
+    if (next === undefined) return undefined;
+    origin = next.origin;
+  }
+  return undefined;
+}
+
+/**
+ * Whether `id` names a snapshot minted from a value no space has stored: one
+ * read out of no stored document, so with no origin, or an element snapshot
+ * whose chain of origins ends at one rather than at a stored document. The
+ * links inside such a snapshot were never written, so no space holds the
+ * closure a reference among their schemas names; the registry that minted
+ * the reference does.
+ */
+export function mintedFromUnstoredValue(id: string): boolean {
+  while (isImmutableCellId(id)) {
+    const origin = immutableSnapshot(id).origin;
+    if (origin === undefined) return true;
+    if (origin.id === undefined) return false;
+    id = origin.id;
+  }
+  return false;
 }
 
 /** Looks up a runtime-local snapshot without retaining its runtime. */

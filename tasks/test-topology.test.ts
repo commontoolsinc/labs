@@ -25,6 +25,12 @@ import { readWorkspaceMembers } from "./workspace-tests.ts";
 const root = path.dirname(path.dirname(path.fromFileUrl(import.meta.url)));
 const suites = await loadTopology(root);
 
+/**
+ * The suites a lane runs. A suite of verdicts builds no command, since
+ * choosing one of its units runs the units it judges instead.
+ */
+const laneSuites = suites.filter((suite) => suite.judges === undefined);
+
 /** The Deno subcommands a suite's runner is allowed to be. */
 const SUBCOMMANDS = new Set(["task", "test", "run", "check", "fmt", "lint"]);
 
@@ -60,7 +66,7 @@ describe("the test topology", () => {
     const rootTasks = await tasksOf(root);
     const missing: string[] = [];
     const named: string[] = [];
-    for (const suite of suites) {
+    for (const suite of laneSuites) {
       const requests = suite.units.map((unit) => ({ unit, skip: [] }));
       for (
         const invocation of await suite.command(requests, {
@@ -167,7 +173,7 @@ describe("the test topology", () => {
     const outputDir = await Deno.makeTempDir({ prefix: "topology-whole-" });
     const spoolDir = `${outputDir}/spool`;
     const written: string[] = [];
-    for (const suite of suites) {
+    for (const suite of laneSuites) {
       if (suite.whole.length === 0) continue;
       const requests = suite.whole.map((unit) => ({
         unit,
@@ -298,7 +304,7 @@ describe("type checking in a test run", () => {
     const outputDir = await Deno.makeTempDir({ prefix: "topology-no-check-" });
     const checking: string[] = [];
     let started = 0;
-    for (const suite of suites) {
+    for (const suite of laneSuites) {
       const requests = suite.units.map((unit) => ({ unit, skip: [] }));
       for (
         const invocation of await suite.command(requests, {
@@ -385,7 +391,7 @@ describe("reading the topology as a whole", () => {
   });
 
   it("gives every measured set a member with lines a report can name", async () => {
-    // The coverage gate fails a forced set whose reports name no line of
+    // A chosen coverage gate fails where its set's reports name no line of
     // its member, which is sound only where the member has a line a
     // report could name. An empty report charges every such line, so a
     // member it charges nothing has none.

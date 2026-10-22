@@ -499,7 +499,8 @@ export function compiledDocKey(
  * resolves a module's edges from its own source, not its stored links).
  * Explicit source-package roots use {@link SOURCE_ROOT_SPECIFIER} and attached
  * data files use {@link DATA_FILE_SPECIFIER} instead; both participate in the
- * entry module's identity.
+ * identity of the module whose document carries them, which is the entry for a
+ * root and the reading module for a data file its source names.
  */
 export const ROOT_LINK_SPECIFIER = "cf:cache-root/";
 
@@ -1953,6 +1954,21 @@ export function planCompileCacheWriteChunks(
 }
 
 /**
+ * What a closure load found, for a caller that reports why a load missed:
+ * whether the entry document was absent, present but refused (no compiler
+ * integrity atom on its label, or a `code` link whose document did not
+ * arrive), verified, or verified and then refused with the whole closure
+ * because a link left the space; and how many distinct reached documents
+ * the walk refused the way an entry can be. A refused document drops
+ * silently from the closure, so without this a partial closure and a plain
+ * miss read alike.
+ */
+export type ClosureLoadTally = {
+  entry: "absent" | "unverified" | "verified" | "refused";
+  dropped: number;
+};
+
+/**
  * Load the integrity-valid compiled documents reachable from `entryIdentity` by
  * following import links. A **single** `sync()` on the entry cell under the
  * recursive {@link COMPILED_DOC_SCHEMA} transitively loads the whole closure
@@ -1978,10 +1994,13 @@ export async function loadCompiledClosure(
   entryIdentity: string,
   opts: { runtimeVersion: string },
   tx: IExtendedStorageTransaction,
+  tally?: ClosureLoadTally,
 ): Promise<Map<string, CompiledDoc>> {
   const atom = COMPILED_INTEGRITY_ATOM;
   const out = new Map<string, CompiledDoc>();
   const visited = new Set<string>();
+  // Refused documents by id, so one imported from several places counts once.
+  const refused = new Set<string>();
 
   // Integrity-gated read (fail-closed): the cell's stored doc only if its
   // persisted CFC label carries the compiler atom. No sync here — the entry's
@@ -2055,7 +2074,13 @@ export async function loadCompiledClosure(
   // One sync pulls the entire link closure (recursive schema). No further syncs.
   await entryCell.sync();
   const entryDoc = verifiedDoc(entryCell);
-  if (entryDoc === undefined) return out;
+  if (entryDoc === undefined) {
+    if (tally !== undefined) {
+      tally.entry = entryCell.getRaw() === undefined ? "absent" : "unverified";
+    }
+    return out;
+  }
+  if (tally !== undefined) tally.entry = "verified";
 
   const queue: { doc: VerifiedCompiledDoc }[] = [{ doc: entryDoc }];
   while (queue.length > 0) {
@@ -2083,9 +2108,19 @@ export async function loadCompiledClosure(
       // Compiled-cache integrity and module delegation authority are attested
       // only in the linked cell's space. Mixed-space cache graphs fail closed
       // instead of rebasing a child space's attestation onto `space`.
-      if (linkedCell.space !== space) return new Map();
+      if (linkedCell.space !== space) {
+        if (tally !== undefined) tally.entry = "refused";
+        return new Map();
+      }
       const child = verifiedDoc(linkedCell.asSchema(COMPILED_DOC_SCHEMA));
-      if (child === undefined) continue;
+      if (child === undefined) {
+        const refusedId = linkedCell.getAsNormalizedFullLink().id;
+        if (tally !== undefined && !refused.has(refusedId)) {
+          refused.add(refusedId);
+          tally.dropped++;
+        }
+        continue;
+      }
       imports.push({ specifier: imp.specifier, identity: child.identity });
       if (!visited.has(child.identity)) queue.push({ doc: child });
     }

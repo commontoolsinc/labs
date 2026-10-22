@@ -3,17 +3,20 @@ import {
   type FabricPlainObject,
   type FabricValue,
   hashOf,
+  hashStringOf,
   type MutableFabricPlainObjectLayer,
   shallowMutableClone,
   taggedHashStringOf,
   valueEqual,
 } from "@commonfabric/data-model";
+import { internSchema } from "@commonfabric/data-model-schema";
 import {
   classifySchemaMeta,
   collectSchemaMetaRefHashes,
   MalformedSchemaMetaError,
   SCHEMA_META_MEMBER,
 } from "@commonfabric/data-model-schema/schema-refs";
+import { isDID } from "@commonfabric/identity/did";
 import { aclDocId } from "@commonfabric/memory/acl";
 import {
   type CommitPrecondition,
@@ -28,12 +31,20 @@ import { isObjectOrArray, isPlainObject } from "@commonfabric/utils/types";
 
 import type { CellScope } from "../builder/types.ts";
 import {
+  type CfcConfidentialityRelease,
+  type CfcConfidentialityReleaseInput,
+  CONFIDENTIALITY_RELEASE_WRITER,
+  planConfidentialityRelease,
+} from "../cfc/confidentiality-release-plan.ts";
+import {
+  canonicalizeCfcMetadata,
   canonicalizeDocumentPath,
   canonicalizeLogicalPath,
   CFC_ENFORCEMENT_MODES,
   CFC_ENFORCING_STRICTNESS,
   CFC_GRANT_ID_PREFIX,
   type CfcAddress,
+  cfcCanonicalClauseDigest,
   type CfcContentAddressedLabels,
   type CfcDeclaredMonotonicityMode,
   type CfcDeclaredWideningExemption,
@@ -48,6 +59,7 @@ import {
   type CfcGrantWriteInput,
   type CfcLabelMetadataObservation,
   type CfcLabelMetadataProtectionMode,
+  type CfcMetadata,
   cfcMetadataPresent,
   type CfcPolicyEvaluationMode,
   type CfcPrefixProvenanceSummary,
@@ -87,7 +99,13 @@ import {
   type TrustSnapshot,
   type WritePolicyInput,
 } from "../cfc/mod.ts";
-import { prepareBoundaryCommitSteps } from "../cfc/prepare.ts";
+import { withoutEnvelopeStabilityToken } from "../cfc/envelope-stability-reason.ts";
+import {
+  ensureSchemaDocument,
+  loadStoredCfcEnvelope,
+  prepareBoundaryCommitSteps,
+  writeStoredCfcEnvelope,
+} from "../cfc/prepare.ts";
 import { CFC_POLICY_MANIFEST_ID_PREFIX } from "../cfc/policy.ts";
 import {
   runtimeOwnedStoreKey,
@@ -122,6 +140,7 @@ import {
   rawMetaWriteAuthorized,
   storedMetaFields,
 } from "../meta-seam.ts";
+import type { ModuleDelegationSnapshot } from "../module-delegations.ts";
 import {
   isReservedSibling,
   RESERVED_SIBLINGS,
@@ -338,6 +357,14 @@ export type CfcInstrumentationHooks = {
     terminal: boolean;
   }): void;
 
+  /**
+   * The commit boundary refused this transaction before it reached storage.
+   * `reasons` are the plain reason texts that refused it; a refusal the
+   * boundary decides on its own — a relevant transaction that never
+   * prepared, a prepared digest that changed — names that one cause.
+   */
+  onCommitRejected?(reasons: readonly string[]): void;
+
   onDigestInvalidation?(reason: string): void;
   onOutboxFlush?(effect: PostCommitSideEffect): void;
   onSinkDedupHit?(key: string): void;
@@ -466,20 +493,42 @@ const throwCfcReadOnly = (): never => {
   );
 };
 
+/**
+ * The Map intrinsics the read-only view dispatches through, captured when
+ * this module loads, so a `Map.prototype` member replaced afterwards cannot
+ * answer a view's read with the backing map.
+ */
+const mapIntrinsics = {
+  get: Map.prototype.get,
+  has: Map.prototype.has,
+  keys: Map.prototype.keys,
+  forEach: Map.prototype.forEach,
+  entries: Map.prototype.entries,
+  values: Map.prototype.values,
+  size: Object.getOwnPropertyDescriptor(Map.prototype, "size")!.get!,
+};
+
+const objectToString = Object.prototype.toString;
+
 // Exported for tests: the bypass vectors (descriptor recovery, Map
 // iteration leaks) are pinned by unit-testing the helper directly.
 export const readOnlyCfcView = <T>(value: T): T => {
   if (!isObjectOrArray(value)) return value;
-  if (Object.isFrozen(value)) return value;
+  // A frozen Map is not immutable: freezing fixes its properties and leaves
+  // its entries writable, so a Map is wrapped whether frozen or not.
+  if (!(value instanceof Map) && Object.isFrozen(value)) return value;
   const cached = readOnlyCfcViews.get(value);
   if (cached !== undefined) return cached as T;
   let view: object;
   if (value instanceof Map) {
     // Map methods work on an internal slot, so they must be called on the
-    // real Map, not the proxy. Read results are re-wrapped, and every API
-    // that would surface the backing map or its values raw is intercepted:
-    // forEach's third callback argument is the view, and get / entries /
-    // values / iteration yield wrapped values (cubic round 3 on #4517).
+    // real Map, not the proxy. The view exposes a Map's read surface and
+    // nothing else: each read is re-implemented over the backing map with
+    // its results re-wrapped (forEach's third callback argument is the view,
+    // and get / entries / values / iteration yield wrapped values), and no
+    // other function reaches a caller, since one bound to the backing map
+    // runs against it — inherited `valueOf` returns its receiver, and
+    // `__defineGetter__` installs a getter whose `this` is the receiver.
     // Keys pass raw on purpose — they are the frozen records whose
     // reference identity callers key on.
     const target = value as Map<unknown, unknown>;
@@ -490,37 +539,55 @@ export const readOnlyCfcView = <T>(value: T): T => {
           case "delete":
           case "clear":
             return throwCfcReadOnly;
+          case "size":
+            return mapIntrinsics.size.call(target);
+          case "has":
+            return (key: unknown) => mapIntrinsics.has.call(target, key);
+          case "keys":
+            return () => mapIntrinsics.keys.call(target);
+          case "valueOf":
+            return () => mapView;
+          case "toString":
+          case "toLocaleString":
+            return () => objectToString.call(target);
           case "get":
-            return (key: unknown) => readOnlyCfcView(target.get(key));
+            return (key: unknown) =>
+              readOnlyCfcView(mapIntrinsics.get.call(target, key));
           case "forEach":
             return (
               cb: (v: unknown, k: unknown, m: unknown) => void,
               thisArg?: unknown,
-            ) =>
-              target.forEach((v, k) =>
-                cb.call(thisArg, readOnlyCfcView(v), k, mapView)
+            ) => {
+              mapIntrinsics.forEach.call(
+                target,
+                (v, k) => cb.call(thisArg, readOnlyCfcView(v), k, mapView),
               );
+            };
           case "entries":
           case Symbol.iterator:
             return function* () {
-              for (const [k, v] of target.entries()) {
+              for (const [k, v] of mapIntrinsics.entries.call(target)) {
                 yield [k, readOnlyCfcView(v)];
               }
             };
           case "values":
             return function* () {
-              for (const v of target.values()) yield readOnlyCfcView(v);
+              for (const v of mapIntrinsics.values.call(target)) {
+                yield readOnlyCfcView(v);
+              }
             };
         }
         const member = Reflect.get(target, prop, target);
         return typeof member === "function"
-          ? member.bind(target)
+          ? undefined
           : readOnlyCfcView(member);
       },
       set: throwCfcReadOnly,
       defineProperty: throwCfcReadOnly,
       deleteProperty: throwCfcReadOnly,
       setPrototypeOf: throwCfcReadOnly,
+      // Without this trap `Object.freeze(view)` freezes the backing map.
+      preventExtensions: throwCfcReadOnly,
     });
     view = mapView;
   } else {
@@ -1425,32 +1492,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   /**
-   * Sets the module-update delegations, which are runtime-learned trust state.
-   * Snapshotted and pinned once at transaction creation: later module loads
-   * affect future transactions, never an authorization decision already in
-   * flight.
+   * Sets the module-update delegations, which are runtime-learned trust
+   * state, and pins them: the first call, the `Runtime`'s in `edit()`, is
+   * the one that counts, so later module loads affect future transactions,
+   * never an authorization decision already in flight. The snapshot is held
+   * by reference. The `Runtime` publishes a new one for every change and
+   * never mutates a published one, and `getCfcState()` hands it out
+   * read-only, so the reference pins it as a copy would.
    */
-  setCfcModuleDelegations(
-    delegations: ReadonlyMap<
-      MemorySpace,
-      ReadonlyMap<string, readonly string[]>
-    >,
-  ): void {
+  setCfcModuleDelegations(delegations: ModuleDelegationSnapshot): void {
     if (this.#cfcModuleDelegationsPinned) return;
     this.#noteCfcActivity();
     this.#cfcModuleDelegationsPinned = true;
-    const snapshot = new Map<
-      MemorySpace,
-      ReadonlyMap<string, readonly string[]>
-    >();
-    for (const [space, spaceDelegations] of delegations) {
-      const spaceSnapshot = new Map<string, readonly string[]>();
-      for (const [identity, predecessors] of spaceDelegations) {
-        spaceSnapshot.set(identity, [...predecessors]);
-      }
-      if (spaceSnapshot.size > 0) snapshot.set(space, spaceSnapshot);
-    }
-    this.#cfcState.moduleDelegations = snapshot;
+    this.#cfcState.moduleDelegations = delegations;
   }
 
   markCfcRelevant(reason?: string): void {
@@ -2567,6 +2621,107 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       }, prepared.value as unknown as FabricValue);
     });
     return { space: prepared.space, id: prepared.id };
+  }
+
+  releaseCfcConfidentiality(
+    input: CfcConfidentialityReleaseInput,
+  ): CfcConfidentialityRelease {
+    this.#assertWritable("releaseCfcConfidentiality()");
+    // A release lowers a stored label in place, which is durable release
+    // state like a grant, so authoring one takes the release writer's own
+    // builtin identity. Pattern and handler code runs under a `verified`
+    // identity or none, and is refused.
+    const identity = this.#cfcState.implementationIdentity;
+    if (
+      identity?.kind !== "builtin" ||
+      identity.builtinId !== CONFIDENTIALITY_RELEASE_WRITER
+    ) {
+      throw new Error(
+        "cfc-confidentiality-release: `releaseCfcConfidentiality()` requires " +
+          `the \`${CONFIDENTIALITY_RELEASE_WRITER}\` builtin implementation ` +
+          "identity",
+      );
+    }
+    const actor = this.#cfcState.trustSnapshot?.actingPrincipal;
+    if (!isDID(actor)) {
+      throw new Error(
+        "cfc-confidentiality-release: lowering confidentiality requires an " +
+          "authenticated acting principal",
+      );
+    }
+    // The space whose DID is the acting principal's is the one space that
+    // principal owns by construction, with no membership to consult.
+    if (input.space !== actor) {
+      throw new Error(
+        `Cannot lower confidentiality in ${input.space}: ${actor} may lower ` +
+          "it only in their own space, the one whose DID is theirs.",
+      );
+    }
+    const target = {
+      space: input.space,
+      id: input.id,
+      scope: normalizeCellScope(input.scope),
+    };
+    const stored = loadStoredCfcEnvelope(this, target);
+    if (stored.status === "unreadable") {
+      throw new Error(
+        `Cannot lower confidentiality in ${input.id}: ${stored.reason}`,
+      );
+    }
+    const existing = stored.status === "loaded" ? stored.metadata : undefined;
+    const storedSchema = stored.status === "loaded" ? stored.schema : undefined;
+    const plan = planConfidentialityRelease({
+      actor,
+      path: input.path,
+      entries: existing?.labelMap.entries ?? [],
+      schema: storedSchema,
+      keep: input.keep,
+    });
+    const priorEnvelopeDigest = hashStringOf(
+      existing === undefined ? null : canonicalizeCfcMetadata(existing),
+    );
+    if (
+      existing === undefined || plan.released.length === 0 ||
+      plan.schema === undefined
+    ) {
+      return {
+        actor,
+        released: [],
+        releasedDigests: [],
+        priorEnvelopeDigest,
+        envelopeDigest: priorEnvelopeDigest,
+      };
+    }
+    const lowered = plan.schema;
+    // Deliberately NOT marked CFC-relevant, like a grant write: the plan above
+    // is the whole of the verification, and a throw leaves nothing written.
+    const metadata = this.#runPrivilegedSystemWrite((): CfcMetadata => {
+      let schemaHash = existing.schemaHash;
+      if (lowered !== storedSchema) {
+        const interned = internSchema(lowered, true);
+        ensureSchemaDocument(
+          this,
+          target.space,
+          interned.taggedHashString,
+          interned.schema,
+        );
+        schemaHash = interned.taggedHashString;
+      }
+      const metadata: CfcMetadata = {
+        ...existing,
+        schemaHash,
+        labelMap: { ...existing.labelMap, entries: [...plan.entries] },
+      };
+      writeStoredCfcEnvelope(this, target, metadata);
+      return metadata;
+    });
+    return {
+      actor,
+      released: plan.released,
+      releasedDigests: plan.released.map(cfcCanonicalClauseDigest),
+      priorEnvelopeDigest,
+      envelopeDigest: hashStringOf(canonicalizeCfcMetadata(metadata)),
+    };
   }
 
   setCfcDeclaredWideningExemption(
@@ -4170,6 +4325,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         this.#cfcState.prepare.status !== "prepared"
       ) {
         if (this.#commitPreparationCrash !== undefined) {
+          this.#cfcInstrumentation.onCommitRejected?.([
+            `CFC commit preparation crashed: ${this.#commitPreparationCrash}`,
+          ]);
           return this.#rejectCommitBeforeStorage({
             error: {
               name: "CommitPreparationError",
@@ -4191,7 +4349,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         const reasons = this.#cfcState.prepare.status === "invalidated"
           ? this.#cfcState.prepare.reasons
           : [];
-        const detail = reasons.length > 0 ? `: ${plainReason(reasons[0])}` : "";
+        // The message is for a person, so it carries neither the verdict tag
+        // nor the envelope-stability token; `reasons` below keeps the token,
+        // which is where a consumer classifies the refusal.
+        const detail = reasons.length > 0
+          ? `: ${withoutEnvelopeStabilityToken(plainReason(reasons[0]))}`
+          : "";
         const plainReasons = reasons.map(plainReason);
         // Pair each detail to a reason that actually refused. A gate records
         // its detail when it decides, which is also how it records an
@@ -4217,6 +4380,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             }),
           );
         }
+        this.#cfcInstrumentation.onCommitRejected?.(
+          plainReasons.length > 0
+            ? plainReasons
+            : ["relevant transaction was not prepared"],
+        );
         const message =
           `${CFC_ENFORCEMENT_REJECTION_PREFIX}: relevant transaction was not prepared${detail}`;
         // WATCH(cfc-verdict): a refusal is terminal only when EVERY reason is
@@ -4259,6 +4427,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
                 dials: this.#cfcDials(),
               }),
             );
+            this.#cfcInstrumentation.onCommitRejected?.([
+              "prepared digest changed",
+            ]);
             return this.#rejectCommitBeforeStorage({
               error: {
                 name: "StorageTransactionAborted",
@@ -4814,6 +4985,12 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string } {
     return this.#wrapped.writeCfcGrant(input);
+  }
+
+  releaseCfcConfidentiality(
+    input: CfcConfidentialityReleaseInput,
+  ): CfcConfidentialityRelease {
+    return this.#wrapped.releaseCfcConfidentiality(input);
   }
 
   noteCfcSinkReleaseReject(

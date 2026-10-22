@@ -17,6 +17,13 @@ import type {
 import type { Key } from "./keys.ts";
 import { cpLen } from "./ansi.ts";
 import {
+  blameKey,
+  type BlameLine,
+  type BlameRequest,
+  type BlameTarget,
+} from "./blame.ts";
+import {
+  blameColumnWidth,
   type DialogButton,
   type DialogState,
   DIFF_MARGIN_WIDTH,
@@ -83,6 +90,7 @@ import {
   commitSubjects,
   findCommitHeaders,
   findCommitMessages,
+  withoutTransportCR,
 } from "./commitmsg.ts";
 import type { Highlighter, Semantics } from "./languages/language.ts";
 import { EditBuffer, type LineEndingProvenance } from "./editbuffer.ts";
@@ -111,6 +119,23 @@ export interface SessionOptions {
 
   /** Initial representation, falling back to source when none is available. */
   viewMode?: ViewMode;
+
+  /** The current time, in milliseconds since the epoch, which the blame
+   * column's ages are measured to. Defaults to the system clock. */
+  now?: () => number;
+}
+
+/** A `git blame` the session asks its driver to run, which the driver hands
+ * back with the result to {@link Session.finishBlameLoad}. */
+export interface BlameLoad {
+  readonly request: BlameRequest;
+}
+
+/** A file's blame: the load that fetches it, and its lines once it has
+ * finished. */
+interface BlameEntry {
+  readonly load: BlameLoad;
+  lines: readonly BlameLine[] | null;
 }
 
 type Mode =
@@ -120,6 +145,7 @@ type Mode =
   | "savePrompt"
   | "amendPrompt"
   | "revertPrompt"
+  | "pushPrompt"
   | "filePicker"
   | "jumpList";
 
@@ -153,6 +179,14 @@ interface PeekOverlay {
 
 const HORIZONTAL_STEP = 8;
 const MOUSE_WHEEL_STEP = 3;
+
+/** The size of the push dialog's body, before it is shrunk to fit the screen:
+ * the 13 lines that pushing a new branch to GitHub typically prints, then a
+ * blank line and a summary whose pull request address wraps onto a row of its
+ * own, in columns as wide as the widest that GitHub's line offering a pull
+ * request needs. */
+const PUSH_ROWS = 16;
+const PUSH_COLUMNS = 80;
 
 /** Whether two search matches occupy the same displayed range. */
 function sameDisplayedMatch(a: Match, b: Match): boolean {
@@ -249,6 +283,28 @@ export class Session {
 
   /** How non-printable characters are shown; edit mode forces the first mode. */
   #displayMode: DisplayMode = DISPLAY_MODES[0];
+
+  /** Whether the blame column is on. */
+  #blameOn = false;
+
+  /** The clock the blame column's ages are measured by. */
+  #now: () => number;
+
+  /** Each file's blame, by {@link blameKey}. */
+  #blames = new Map<string, BlameEntry>();
+
+  /** Loads the viewport needs that the driver has not yet taken. */
+  #blameWanted: BlameLoad[] = [];
+
+  /** The {@link blameKey}s of files git could not blame. */
+  #blameFailures = new Set<string>();
+
+  /** The source's blame targets, and the source and text they are for. */
+  #blameTargetCache?: {
+    source: EditableSource;
+    text: string;
+    targets: readonly (BlameTarget | null)[];
+  };
 
   /** Indices (document order) of the diff files collapsed to a summary line.
    * Cleared when the text cursor is revealed, since hidden lines cannot be
@@ -348,6 +404,10 @@ export class Session {
    * it. */
   pendingPush: { doc: Document; view: ViewState } | null = null;
 
+  /** The last key asked for the checked-out branch to be pushed. The driver
+   * starts the push, calls {@link beginBranchPush}, and clears this. */
+  branchPushRequested = false;
+
   /** The last key set a message that takes itself away again rather than sitting
    * in the bar — Ctrl-L pressed where it is not offered, which changed nothing
    * else. The driver leaves it up for a moment and then calls
@@ -356,6 +416,17 @@ export class Session {
 
   /** How much context each hunk can reveal, cached against the document. */
   #roomCache?: { doc: Document; room: ReadonlyMap<number, HunkRoom> };
+
+  /** The push dialog's output, a line per entry, the last one still being
+   * written. After a carriage return, the next text starts that line over. */
+  #pushLines: string[] = [""];
+  #pushReturned = false;
+
+  /** Stops the push the dialog shows, or null once it has finished. */
+  #abortPush: (() => void) | null = null;
+
+  /** How the push ended, once it has. */
+  #pushSummary = "";
 
   //
   // editing
@@ -436,6 +507,7 @@ export class Session {
     this.#sourceDoc = doc;
     this.#currentDoc = doc;
     this.#color = options.color;
+    this.#now = options.now ?? Date.now;
     this.#lineNumberMode = options.showLineNumbers ? "input" : "off";
     this.width = size.width;
     this.height = size.height;
@@ -1082,6 +1154,7 @@ export class Session {
       lineNumbers: this.#lineNumberMode === "off"
         ? null
         : this.#gutterNumbers(),
+      blame: this.#blameColumn(),
       displayMode: this.#displayMode,
       selected: this.#displaySelected(),
       matches: search?.matches ?? null,
@@ -1143,6 +1216,7 @@ export class Session {
     if (this.#mode === "savePrompt") dialog = this.#saveDialog();
     else if (this.#mode === "amendPrompt") dialog = this.#amendDialog();
     else if (this.#mode === "revertPrompt") dialog = this.#revertDialog();
+    else if (this.#mode === "pushPrompt") dialog = this.#pushDialog();
     if (!dialog) return null;
     // -1 means no button is focused (a prompt with no default, before Tab).
     const focus = this.#dialogFocus < 0
@@ -1158,6 +1232,57 @@ export class Session {
   #focusDefaultButton(): void {
     const buttons = this.#promptDialog()?.buttons ?? [];
     this.#dialogFocus = buttons.findIndex((b) => b.kind === "default");
+  }
+
+  /** Whether a modal prompt is up. */
+  #prompting(): boolean {
+    return this.#mode === "savePrompt" || this.#mode === "amendPrompt" ||
+      this.#mode === "revertPrompt" || this.#mode === "pushPrompt";
+  }
+
+  /** The push dialog: as much of the end of git's output as fits, then how the
+   * push ended, at a fixed size so that it holds still as the output grows.
+   * Abort stops the push; once it ends, Close takes the dialog down and Quit
+   * closes the viewer. */
+  #pushDialog(): DialogState {
+    const lines = this.#pushLines.at(-1) === ""
+      ? this.#pushLines.slice(0, -1)
+      : this.#pushLines;
+    const output = this.#pushSummary === ""
+      ? lines
+      : [...lines, "", this.#pushSummary];
+    // A line wider than the box wraps after its last space that fits, so that
+    // an address no wider than the box stays on one row, and a word wider than
+    // the box is broken. Git pads the lines a server sends with spaces when its
+    // output is not a terminal, and those would wrap onto rows of their own.
+    const columns = Math.max(1, Math.min(PUSH_COLUMNS, this.width - 8));
+    const wrapped = output.flatMap((line) => {
+      let chars = [...line.trimEnd()];
+      const rowsOfLine: string[] = [];
+      while (chars.length > columns) {
+        const space = chars.lastIndexOf(" ", columns);
+        const words = chars.slice(0, space + 1).join("").trimEnd();
+        rowsOfLine.push(words || chars.slice(0, columns).join(""));
+        chars = chars.slice(words ? space + 1 : columns);
+      }
+      rowsOfLine.push(chars.join(""));
+      return rowsOfLine;
+    });
+    const rows = Math.max(1, Math.min(PUSH_ROWS, this.height - 7));
+    const body = wrapped.slice(-rows);
+    while (body.length < rows) body.push("");
+    return {
+      title: "Push",
+      body,
+      output: true,
+      width: columns,
+      buttons: this.#abortPush
+        ? [{ label: "Abort", hotkey: "a", kind: "cancel" }]
+        : [
+          { label: "Close", hotkey: "c", kind: "cancel" },
+          { label: "Quit", hotkey: "Q" },
+        ],
+    };
   }
 
   /** The save-changes confirmation: names what a save writes, lists the files
@@ -1254,10 +1379,7 @@ export class Session {
       return;
     }
     if (this.#handleDialogNavigation(key)) return;
-    if (
-      this.#mode === "savePrompt" || this.#mode === "amendPrompt" ||
-      this.#mode === "revertPrompt"
-    ) {
+    if (this.#prompting()) {
       this.#handleDialogKey(key, beforeButtonAction);
       return;
     }
@@ -1296,9 +1418,7 @@ export class Session {
   #handleDialogNavigation(key: Key): boolean {
     const picker = this.#mode === "filePicker";
     const jump = this.#mode === "jumpList";
-    const prompt = this.#mode === "savePrompt" ||
-      this.#mode === "amendPrompt" ||
-      this.#mode === "revertPrompt";
+    const prompt = this.#prompting();
     const overlay = this.#mode === "normal" && !this.#chord
       ? this.#overlay
       : null;
@@ -1403,10 +1523,7 @@ export class Session {
   #handleWheel(direction: -1 | 1): void {
     this.#message = "";
     const delta = direction * MOUSE_WHEEL_STEP;
-    if (
-      this.#mode === "savePrompt" || this.#mode === "amendPrompt" ||
-      this.#mode === "revertPrompt"
-    ) return;
+    if (this.#prompting()) return;
     if (this.#mode === "filePicker") {
       const last = Math.max(0, this.#pickerEntries.length - 1);
       this.#pickerSel = clamp(this.#pickerSel + delta, 0, last);
@@ -2155,11 +2272,13 @@ export class Session {
       case "ctrl-f":
         this.top = clamp(this.top + rows - 1, 0, lastTop);
         return;
-      case "b":
-      case "B":
       case "pageup":
       case "ctrl-b":
         this.top = clamp(this.top - rows + 1, 0, lastTop);
+        return;
+      case "b":
+      case "B":
+        this.#toggleBlame();
         return;
       case "ctrl-d":
         this.top = clamp(this.top + (rows >> 1), 0, lastTop);
@@ -2260,6 +2379,9 @@ export class Session {
         return;
       case "M":
         this.#toggleFileCategory((file) => file.isMarkdown, "Markdown");
+        return;
+      case "P":
+        this.branchPushRequested = true;
         return;
       case "escape": {
         const anchor = this.#wrapLines ? this.#viewportAnchor() : null;
@@ -3352,6 +3474,44 @@ export class Session {
     this.transientMessage = false;
   }
 
+  /** Open the push dialog for a push that has started, which `abort` stops. */
+  beginBranchPush(abort: () => void): void {
+    this.#overlay = null;
+    this.#overlayStack = [];
+    this.#mode = "pushPrompt";
+    this.#pushLines = [""];
+    this.#pushReturned = false;
+    this.#pushSummary = "";
+    this.#abortPush = abort;
+    this.#dialogFocus = -1;
+  }
+
+  /** Add git's output to the push dialog. A carriage return starts the line
+   * over, which is how git redraws a progress report in place. */
+  appendPushOutput(text: string): void {
+    for (const part of text.split(/(\r\n|\n|\r)/)) {
+      if (part === "\r") {
+        this.#pushReturned = true;
+      } else if (part === "\n" || part === "\r\n") {
+        this.#pushLines.push("");
+        this.#pushReturned = false;
+      } else if (part !== "") {
+        const last = this.#pushLines.length - 1;
+        this.#pushLines[last] =
+          (this.#pushReturned ? "" : this.#pushLines[last]) + part;
+        this.#pushReturned = false;
+      }
+    }
+  }
+
+  /** End the push with `summary`, which the dialog shows under the output and
+   * the status line shows once the dialog closes. */
+  finishBranchPush(summary: string): void {
+    this.#abortPush = null;
+    this.#pushSummary = summary;
+    this.#dialogFocus = 0;
+  }
+
   /** Take away a message that was set to go away on its own, once the driver has
    * left it up for its moment. Does nothing to a message that is not one of
    * those, so a later one is never cleared out from under itself. */
@@ -3424,7 +3584,7 @@ export class Session {
 
   #contentWidth(): number {
     const fitted = fitViewLayout(
-      this.width,
+      this.width - blameColumnWidth(this.width, this.#blameShown()),
       this.#gutterWidth(),
       this.#selectedNode() ? 1 : 0,
       this.#hasDiffMargin() ? DIFF_MARGIN_WIDTH : 0,
@@ -3611,6 +3771,128 @@ export class Session {
     return out;
   }
 
+  /** Turn the blame column on or off, keeping the viewport's top line. It
+   * stays off when no line comes from a file git can blame. */
+  #toggleBlame(): void {
+    const source = this.#source;
+    if (
+      !this.#blameOn &&
+      !(source && this.#blameTargets(source).some((target) => target !== null))
+    ) {
+      this.#message = "No line here comes from a file git can blame";
+      return;
+    }
+    const anchor = this.#wrapLines ? this.#viewportAnchor() : null;
+    this.#blameOn = !this.#blameOn;
+    if (anchor) this.#restoreWrappedAnchor(anchor);
+    this.#message = !this.#blameOn
+      ? "Blame off"
+      : this.#blameShown()
+      ? "Blame on"
+      : blameColumnWidth(this.width, true) === 0
+      ? "Blame on; the screen is too narrow to show it"
+      : "Blame on; it shows in the source view";
+  }
+
+  /** Whether the blame column is drawn. */
+  #blameShown(): boolean {
+    return this.#blameSource() !== null;
+  }
+
+  /** The source whose lines the blame column attributes, or null when the
+   * column is not drawn: it is off, the screen is too narrow for it, or the
+   * displayed lines are not the source's lines. */
+  #blameSource(): EditableSource | null {
+    const source = this.#source;
+    return this.#blameOn && source?.blameTargets &&
+        blameColumnWidth(this.width, true) > 0 &&
+        (this.#viewMode === "source" ||
+          source.renderLineTopology !== "independent")
+      ? source
+      : null;
+  }
+
+  /** The source's blame targets for the current text, cached against both. */
+  #blameTargets(source: EditableSource): readonly (BlameTarget | null)[] {
+    if (!source.blameTargets) return [];
+    const text = this.#sourceDoc.text;
+    let cache = this.#blameTargetCache;
+    if (cache?.source !== source || cache.text !== text) {
+      cache = { source, text, targets: source.blameTargets(text) };
+      this.#blameTargetCache = cache;
+    }
+    return cache.targets;
+  }
+
+  /** The blame column: the attribution it shows on each display line in view,
+   * or null where it shows none, and the current time; null when the column
+   * is hidden. Asks for the blame of any file in view that it does not have
+   * yet. */
+  #blameColumn(): ViewState["blame"] {
+    const source = this.#blameSource();
+    if (!source) return null;
+    const targets = this.#blameTargets(source);
+    const plan = this.#foldPlan();
+    const column = new Array<BlameLine | null>(plan.displayLines.length)
+      .fill(null);
+    const first = this.#toFolded(this.#toDoc(this.top));
+    const last = this.#toFolded(
+      this.#toDoc(this.top + this.#contentRows() - 1),
+    );
+    for (let row = first; row <= last; row++) {
+      const target = targets[plan.displayToDoc(row)];
+      if (target) column[row] = this.#blameFor(target);
+    }
+    return { lines: column, now: this.#now() };
+  }
+
+  /** The attribution of `target`'s line, or null while it is unknown. Loads
+   * the blame of a file that has none, or has one taken of other text. */
+  #blameFor(target: BlameTarget): BlameLine | null {
+    const key = blameKey(target.request);
+    if (this.#blameFailures.has(key)) return null;
+    const entry = this.#blames.get(key);
+    const current = entry?.load.request.contents === target.request.contents;
+    if (!entry || (!current && entry.lines !== null)) {
+      const load = { request: target.request };
+      this.#blames.set(key, { load, lines: null });
+      this.#blameWanted.push(load);
+      return null;
+    }
+    const line = current ? entry.lines?.[target.line] : undefined;
+    if (!line) return null;
+    if (
+      target.text !== undefined &&
+      withoutTransportCR(line.text) !== withoutTransportCR(target.text)
+    ) return null;
+    return line;
+  }
+
+  /** The blame loads the viewport needs, for the driver to run. Each is
+   * returned once. */
+  takeBlameLoads(): BlameLoad[] {
+    const loads = this.#blameWanted;
+    this.#blameWanted = [];
+    return loads;
+  }
+
+  /** Record the lines of a load {@link takeBlameLoads} returned. A result for
+   * a load the session no longer wants is dropped. */
+  finishBlameLoad(load: BlameLoad, lines: readonly BlameLine[]): void {
+    const entry = this.#blames.get(blameKey(load.request));
+    if (entry?.load === load) entry.lines = lines;
+  }
+
+  /** Record that git could not blame a load's file, which is not tried
+   * again, and say why. */
+  failBlameLoad(load: BlameLoad, reason: string): void {
+    const key = blameKey(load.request);
+    if (this.#blames.get(key)?.load !== load) return;
+    this.#blames.delete(key);
+    this.#blameFailures.add(key);
+    if (this.#blameOn) this.#message = `Blame: ${reason}`;
+  }
+
   #handleChord(key: Key): void {
     this.#chord = null;
     this.#message = "";
@@ -3663,6 +3945,9 @@ export class Session {
         options,
       ) ?? current;
       this.#buffer.setBaseline(savedBaseline);
+      // The save rewrote files, and an amend replaced a commit, that blame
+      // attributed.
+      this.#blames.clear();
       const refreshedLineEndings = this.#source.lineEndingProvenance?.(current);
       if (refreshedLineEndings) {
         const retainedLineEndings = this.#buffer.lineEndingProvenance();
@@ -3735,19 +4020,25 @@ export class Session {
   }
 
   /**
-   * An interrupt (SIGINT) arrived. With unsaved edits and no prompt already up,
-   * raise the save prompt and return true so the driver keeps running and lets
-   * the user answer it. Otherwise return false: nothing to save, or a second
-   * interrupt during the prompt, so the driver should terminate.
+   * An interrupt (SIGINT) arrived. During a push, abort the push and return
+   * true so the driver keeps running and shows how it ended. With unsaved edits
+   * and no prompt already up, raise the save prompt and return true so the
+   * driver keeps running and lets the user answer it. Otherwise return false:
+   * nothing to save, or a second interrupt during the prompt, so the driver
+   * should terminate.
    */
   requestQuitFromSignal(): boolean {
+    if (this.#mode === "pushPrompt" && this.#abortPush) {
+      this.#abortPush();
+      return true;
+    }
     if (this.#mode === "savePrompt") return false;
     const willPrompt = this.#buffer?.dirty() ?? false;
     this.#requestQuit();
     return willPrompt;
   }
 
-  /** Keys while a modal prompt (save / amend / revert) is up. Tab and Shift-Tab
+  /** Keys while a modal prompt (save / amend / revert / push) is up. Tab and Shift-Tab
    * move the focus ring between buttons, wrapping around; Space and Enter
    * activate the focused button; Esc activates the cancel button; a button's
    * shortcut letter activates it directly. Any other key leaves the prompt up. */
@@ -3756,7 +4047,7 @@ export class Session {
     beforeButtonAction?: () => void,
   ): void {
     // Reached only from the prompt modes, each of which builds a dialog with at
-    // least two buttons, so the dialog is present and its row is non-empty.
+    // least one button, so the dialog is present and its row is non-empty.
     const dialog = this.#promptDialog()!;
     const buttons = dialog.buttons;
     const n = buttons.length;
@@ -3784,8 +4075,10 @@ export class Session {
     } else if (key.name === "escape") {
       index = buttons.findIndex((b) => b.kind === "cancel");
     } else {
-      const k = (key.char ?? key.name).toLowerCase();
-      index = buttons.findIndex((b) => b.hotkey.toLowerCase() === k);
+      const k = key.char ?? key.name;
+      index = buttons.findIndex((b) =>
+        b.hotkey === k || b.hotkey === k.toLowerCase()
+      );
     }
     if (index < 0 || index >= n) return; // an unbound key leaves the prompt up
     this.#activateButton(dialog, index, beforeButtonAction);
@@ -3813,6 +4106,20 @@ export class Session {
     if (this.#mode === "savePrompt") this.#applySaveButton(button);
     else if (this.#mode === "amendPrompt") this.#applyAmendButton(button);
     else if (this.#mode === "revertPrompt") this.#applyRevertButton(button);
+    else this.#applyPushButton(button);
+  }
+
+  /** Abort stops the push, which then ends; Close takes the dialog down and
+   * leaves how the push ended in the status line; Quit takes it down and quits,
+   * by way of the save prompt when there are unsaved edits. */
+  #applyPushButton(button: DialogButton): void {
+    if (this.#abortPush) {
+      this.#abortPush();
+    } else {
+      this.#mode = "normal";
+      this.#message = this.#pushSummary;
+      if (button.hotkey === "Q") this.#requestQuit();
+    }
   }
 
   #applySaveButton(button: DialogButton): void {
@@ -5252,7 +5559,7 @@ export function helpOverlay(hasMultipleCommits: boolean): {
     ["  H / L", "scroll left / right"],
     ["  ↑ ↓ ← →", "scroll / pan the view"],
     ["  ⌥↑ ⌥↓ ⌥← ⌥→", "scroll / pan while editing"],
-    ["  Space / B", "page down / up"],
+    ["  Space / PgUp", "page down / up"],
     ["  ^D / ^U", "half page down / up"],
     ["  g / G", "top / bottom"],
     ["", ""],
@@ -5301,9 +5608,13 @@ export function helpOverlay(hasMultipleCommits: boolean): {
     ["  Tab", "toggle info card ⇄ source"],
     ["  t", "look up a definition by name"],
     ["", ""],
+    ["Branch", ""],
+    ["  P", "push the branch to origin, open the pull request page"],
+    ["", ""],
     ["View", ""],
     ["  V", "toggle source / rendered view when the language supports it"],
     ["  #", "line numbers: off / input position / file or message line"],
+    ["  B", "blame: when each line last changed, and who changed it"],
     ["  \\", "line wrapping: off / hard / word"],
     ["  C", "cycle non-printables: pictures / ANSI color / hidden"],
     ["  ?", "this help   ·   Q  quit"],

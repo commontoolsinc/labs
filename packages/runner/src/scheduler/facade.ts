@@ -183,6 +183,7 @@ import type {
   QueuedEvent,
   ReactivityLog,
   SchedulerObservationIdentity,
+  SchedulerSizes,
   ServedEventDispatch,
   ServedEventFailureOutcome,
   SettleStats,
@@ -997,6 +998,12 @@ export class Scheduler {
     this.#echoBreaker.forget(this.#getActionId(action), performance.now());
     this.#gates.clearEchoBackoff(action);
     for (const observer of [...this.#unsubscribeObservers]) observer(action);
+  }
+
+  /** Whether a registered action's last run read the document `entity` names. */
+  readsEntity(entity: SpaceScopeAndURI): boolean {
+    return this.#triggerIndex.triggers.has(entity) ||
+      this.#triggerIndex.nonRecursiveTriggers.has(entity);
   }
 
   /**
@@ -2023,6 +2030,30 @@ export class Scheduler {
   }
 
   /**
+   * Whether an action registered here other than `except` declares a write to
+   * some instance of `address`'s document, at any scope.
+   *
+   * The lookup spans every scope because the write index keys a derivation by
+   * its declared scope, while a JavaScript derivation writes its output at the
+   * scope its reads narrowed to: a user instance of an output declared at
+   * space scope has a writer indexed only at space scope.
+   */
+  hasOtherWriterOf(
+    address: Pick<IMemorySpaceAddress, "space" | "id">,
+    except: object,
+  ): boolean {
+    for (const scope of ["space", "user", "session"] as const) {
+      const writers = this.#writeIndex.writersByEntity.get(
+        entityNameKey({ ...address, scope }),
+      );
+      for (const writer of writers ?? []) {
+        if (writer !== except) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Returns whether an action is registered as an effect.
    */
   isEffect(action: Action): boolean {
@@ -2421,6 +2452,18 @@ export class Scheduler {
    */
   getGraphSnapshot(): SchedulerGraphSnapshot {
     return buildSchedulerGraphSnapshot(this.#graphSnapshotState);
+  }
+
+  /** The sizes of the scheduler's live tables, read without walking them. */
+  getSizes(): SchedulerSizes {
+    return {
+      nodes: this.#nodes.activeCount,
+      invalidNodes: this.#nodes.invalidCount,
+      eventQueue: this.#eventQueue.length,
+      pendingActions: this.#pending.size,
+      backgroundTasks: this.#backgroundTasks.size,
+      actionStats: this.#actionStats.size,
+    };
   }
 
   //
@@ -3164,7 +3207,7 @@ export class Scheduler {
   }
 
   #resetConvergenceHoldPasses(): void {
-    for (const record of this.#nodes.nodes()) {
+    for (const record of this.#nodes.getBackedOffNodes()) {
       record.gate.convergenceHoldPasses = 0;
     }
   }
@@ -4040,7 +4083,9 @@ export class Scheduler {
 
   #clearBackoffForCleanNodes(): void {
     let clearedDeadline = false;
-    for (const record of this.#nodes.nodes()) {
+    // Clearing a node drops it from the set being walked; a `Set` iterator
+    // tolerates deletion of the current entry.
+    for (const record of this.#nodes.getBackedOffNodes()) {
       if (record.status === "clean") {
         clearedDeadline = this.#clearNodeBackoff(record) || clearedDeadline;
       }

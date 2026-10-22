@@ -16,6 +16,12 @@
  * manager answers. The one record written directly is a request still being
  * worked on, which no handler leaves behind on purpose.
  *
+ * The group room's view is read as a renderer reads it, before and after the
+ * release, so that its message rows exist as the nested pieces a browser
+ * leaves behind: a release sets each one up again with the argument the room
+ * carries, and a stored argument the new schema refuses fails every row's
+ * start on every later open.
+ *
  * It then serves the tree's source and opens Home and each room as a person
  * would. That open is how a deployed FabriChat piece takes a release: Home
  * follows `system:system/home.tsx`, each room the `system:fabrichat/room.tsx`
@@ -24,10 +30,11 @@
  * modules' write authority to their successors (`docs/specs/module-loading.md`,
  * "Module update delegation"), which is what lets the updated handlers write
  * the seeded records. The test checks that each piece adopted the tree's
- * source, that nothing logged a refused transition or a dropped stored slot,
- * that every stored slot and per-user outcome reads as it did, that the
- * updated room can edit and react to a seeded message, and that starting a
- * direct chat with the same person again finds the room the manager holds.
+ * source, that nothing logged a refused transition, a dropped stored slot or a
+ * failed start of a nested piece, that every stored slot and per-user outcome
+ * reads as it did, that the updated room can edit and react to a seeded
+ * message, and that starting a direct chat with the same person again finds
+ * the room the manager holds.
  *
  * The copy is only a rehearsal while it matches what is deployed, which is
  * `main`. `deno task refresh-fabrichat-rehearsal` replaces it with
@@ -52,6 +59,7 @@ import {
   type Cell,
   getPatternIdentityRef,
   getPatternSource,
+  isCell,
   Runtime,
 } from "@commonfabric/runner";
 import {
@@ -59,6 +67,7 @@ import {
   reviewedActionProvenance,
 } from "@commonfabric/runner/cfc";
 import { PatternsRoute } from "@commonfabric/runner/patterns-route.deno";
+import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import {
   EmulatedStorageManager,
   newLoopbackServer,
@@ -82,7 +91,8 @@ const FROZEN = fromFileUrl(
 /**
  * The log lines that say an update refused or lost stored data, by the logger
  * that writes them: a source transition its commit refused, a swap whose setup
- * failed, and a stored slot setup dropped.
+ * failed, a stored slot setup dropped, and a nested piece whose start the
+ * updated room's setup of it failed.
  */
 const UPDATE_FAILURES = [
   ["runner.source-reconcile", "reconcile-failed"],
@@ -90,6 +100,7 @@ const UPDATE_FAILURES = [
   ["runner", "pattern-swap-setup-error"],
   ["runner", "pattern-swap-setup-withdrawn"],
   ["runner", "setup-stored-slot-dropped"],
+  ["runner", "piece-start-commit-failed"],
 ] as const;
 
 /** How many of each of `UPDATE_FAILURES` have been logged in this process. */
@@ -184,6 +195,32 @@ const storedSlots = async (
     const { space, id, path } = stored.getAsNormalizedFullLink();
     return { name, address: { space, id, path }, value: stored.getRaw() };
   }));
+};
+
+/**
+ * Reads what a renderer reads of `piece`'s view: the view, through
+ * `rendererVDOMSchema`, and every cell it binds, each once. The nested pieces
+ * the view maps a list to, a room's message rows among them, are set up by
+ * that read, as a browser showing the room sets them up.
+ */
+const render = async (piece: Cell<unknown>): Promise<void> => {
+  const read = new Set<string>();
+  const visit = async (value: unknown): Promise<void> => {
+    if (isCell(value)) {
+      const { space, id, scope, path } = value.getAsNormalizedFullLink();
+      const address = JSON.stringify([space, id, scope, path]);
+      if (read.has(address)) return;
+      read.add(address);
+      await value.pull();
+      return visit(value.get());
+    }
+    if (Array.isArray(value)) {
+      for (const member of value) await visit(member);
+    } else if (value !== null && typeof value === "object") {
+      for (const member of Object.values(value)) await visit(member);
+    }
+  };
+  await visit(piece.key("$UI").asSchema(rendererVDOMSchema));
 };
 
 /** The slots of `after` that `before` holds too, in `after`'s order. */
@@ -438,6 +475,10 @@ describe("FabriChat update rehearsal", () => {
       ),
     );
     await runtime.idle();
+    // The rows a browser showing the room would have set up, the thread's
+    // root among them.
+    await render(room);
+    await runtime.idle();
 
     before = await snapshot();
 
@@ -472,6 +513,10 @@ describe("FabriChat update rehearsal", () => {
     // its origin to the source the route now serves, and waits for the
     // running piece to swap to it.
     for (const piece of [home, ...rooms]) await controller.openPiece(piece);
+    await runtime.idle();
+    // The rows again, as the browser that opened the room shows them: each
+    // is set up over the argument the updated room carries.
+    await render(room);
     await runtime.idle();
 
     failuresAfter = updateFailureCounts();

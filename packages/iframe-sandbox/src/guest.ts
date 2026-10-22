@@ -580,6 +580,29 @@ export class RemoteSqlite {
   }
 }
 
+/** Guest-side sender for one stream resource, such as a pattern's verb. */
+export class RemoteStream<T = FabricValue> {
+  readonly #client: FabricClient;
+  readonly #name: string;
+
+  constructor(client: FabricClient, name: string) {
+    this.#client = client;
+    this.#name = name;
+  }
+
+  /**
+   * Sends `event` to the stream's handler, after every cell operation this
+   * guest made before the call has settled, so the handler reads what those
+   * operations wrote. What the promise waits for then is the host's to say;
+   * the `cf-iframe` host resolves it once the handler's run has committed, and
+   * rejects it with the reason when the runtime refuses the event or that run.
+   */
+  async send(event: T): Promise<void> {
+    const snapshot = cloneIfNecessary(event as FabricValue, { frozen: false });
+    await this.#client.callAfterCellOperations(this.#name, "send", snapshot);
+  }
+}
+
 /** One other member of a presence room, at its latest record. */
 export type PresenceParticipant = BridgePresenceParticipant;
 
@@ -952,6 +975,11 @@ export class FabricClient {
     return new RemoteSqlite(this, name);
   }
 
+  /** Returns a sender for the stream resource `name`. */
+  stream<T = FabricValue>(name: string): RemoteStream<T> {
+    return new RemoteStream<T>(this, name);
+  }
+
   /** Returns the one shared guest handle for the presence resource `name`. */
   presence(name: string): RemotePresence {
     let presence = this.#presences.get(name);
@@ -968,6 +996,24 @@ export class FabricClient {
     value?: FabricValue,
   ): Promise<FabricValue | undefined> {
     return this.request("call", { resource, method, value });
+  }
+
+  /**
+   * As {@link call}, once every cell operation queued before this call has
+   * settled. Each cell holds its operations back until the one before has
+   * settled, so without this wait a call can reach the host ahead of a cell
+   * write the guest made first.
+   */
+  async callAfterCellOperations(
+    resource: string,
+    method: string,
+    value?: FabricValue,
+  ): Promise<FabricValue | undefined> {
+    const tails = [...this.#cellOperationQueues.values()].flatMap((queue) =>
+      queue.tail === undefined ? [] : [queue.tail]
+    );
+    await Promise.all(tails);
+    return await this.call(resource, method, value);
   }
 
   request(

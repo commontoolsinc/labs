@@ -2,19 +2,28 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import {
+  collectExternalSchemaRefHashes,
+  parseExternalSchemaRef,
+} from "@commonfabric/data-model-schema/schema-refs";
+import { taggedHashStringOf } from "@commonfabric/data-model";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import type { Cell } from "../src/cell.ts";
 import type {
   IExtendedStorageTransaction,
   SealedCommitVerdict,
+  URI,
 } from "../src/storage/interface.ts";
 import { readConfirmed, readDurable } from "../src/confirmed-read.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import { writeResultSchemaMeta } from "../src/result-schema-meta.ts";
 import { Runtime } from "../src/runtime.ts";
+import { lookupSchemaDocument } from "../src/schema-registry.ts";
 import type { SessionSync } from "@commonfabric/memory/v2";
 import type { SpaceReplica } from "../src/storage/v2.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { newSharedServer, TestStorageManager } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("confirmed read");
 const space = signer.did();
@@ -130,6 +139,330 @@ describe("confirmed-read", () => {
     expect(read.value).toEqual({ n: 1, child: 2 });
     expect(read.confirmed).toBe(true);
     expect(read.seq).toBeGreaterThanOrEqual(seq);
+  });
+
+  it("returns a newly written cell as confirmed after settlement", async () => {
+    const tx = reader.edit();
+    const note = reader.getCell<Note>(space, "new-own", noteSchema, tx);
+    note.set({ n: 1 });
+    expect((await tx.commit().settled).error).toBeUndefined();
+    expect(
+      readConfirmed(reader, space, (readTx) => note.withTx(readTx).get()?.n)
+        .confirmed,
+    ).toBe(true);
+  });
+
+  it("returns a blind whole-document write as confirmed after settlement", async () => {
+    const address = {
+      space,
+      id: "of:blind-own" as URI,
+      type: "application/json" as const,
+      path: [],
+    };
+    const tx = reader.edit();
+    expect(tx.write(address, { value: { n: 1 } }).error).toBeUndefined();
+    expect((await tx.commit().settled).error).toBeUndefined();
+    const read = readConfirmed(
+      reader,
+      space,
+      (readTx) => readTx.read(address).ok?.value,
+    );
+    expect(read.value).toEqual({ value: { n: 1 } });
+    expect(read.confirmed).toBe(true);
+  });
+
+  describe("of an accepted document without delivery", () => {
+    const address = {
+      space,
+      id: "of:blind-confirmation" as URI,
+      type: "application/json" as const,
+      path: [],
+    };
+
+    /** Writes a complete document through `runtime` without starting a watch. */
+    async function replace(runtime: Runtime, n: number): Promise<void> {
+      const tx = runtime.edit();
+      expect(tx.write(address, { value: { n } }).error).toBeUndefined();
+      expect((await tx.commit().settled).error).toBeUndefined();
+    }
+
+    /** Reads the complete document without starting a watch. */
+    function readDocument() {
+      return readConfirmed(reader, space, (tx) => tx.read(address).ok?.value);
+    }
+
+    it("returns an elided whole-document set as confirmed", async () => {
+      await replace(writer, 7);
+      await replace(reader, 7);
+      expect(readDocument()).toEqual({
+        value: { value: { n: 7 } },
+        confirmed: true,
+      });
+    });
+
+    describe("elided against the commit's read of it", () => {
+      // The reader's commit reads a version another session has since
+      // replaced, and writes what that session stored. The server refuses
+      // the read as stale and elides the write as an identity, so the commit
+      // is accepted only by elision.
+
+      /** Commits `write` over the reader's read of `{ n: 1 }` after the
+       * writer has stored `{ n: 3 }`. */
+      async function commitOverStaleRead(
+        write: (tx: IExtendedStorageTransaction) => void,
+      ): Promise<void> {
+        await replace(reader, 1);
+        const tx = reader.edit();
+        expect(tx.read(address).ok?.value).toEqual({ value: { n: 1 } });
+        await replace(writer, 3);
+        write(tx);
+        expect((await tx.commit().settled).error).toBeUndefined();
+      }
+
+      it("returns a set as confirmed", async () => {
+        await commitOverStaleRead((tx) => {
+          expect(tx.write(address, { value: { n: 3 } }).error)
+            .toBeUndefined();
+        });
+        expect(readDocument()).toEqual({
+          value: { value: { n: 3 } },
+          confirmed: true,
+        });
+      });
+
+      it("returns a patch as confirmed", async () => {
+        await commitOverStaleRead((tx) => {
+          expect(tx.write({ ...address, path: ["value", "n"] }, 3).error)
+            .toBeUndefined();
+        });
+        expect(readDocument()).toEqual({
+          value: { value: { n: 3 } },
+          confirmed: true,
+        });
+      });
+    });
+
+    it("returns an accepted deletion as confirmed", async () => {
+      await replace(writer, 7);
+      const replica = readerManager.open(space).replica;
+      expect(
+        (await replica.commitNative!({
+          operations: [{
+            op: "delete",
+            id: address.id,
+            type: address.type,
+          }],
+        })).error,
+      ).toBeUndefined();
+      expect(readDocument()).toEqual({ value: undefined, confirmed: true });
+    });
+
+    it("returns an elided deletion of an absent document as confirmed", async () => {
+      const replica = readerManager.open(space).replica;
+      expect(
+        (await replica.commitNative!({
+          operations: [{
+            op: "delete",
+            id: address.id,
+            type: address.type,
+          }],
+        })).error,
+      ).toBeUndefined();
+      expect(readDocument()).toEqual({ value: undefined, confirmed: true });
+    });
+
+    it("returns no sequence for an unobserved version even after unrelated pushes advance", async () => {
+      await replace(reader, 1);
+      await replace(writer, 2);
+      await write("observed", 1);
+      const observed = await loaded("observed");
+      const delivered = arrival(observed, 2);
+      const seq = await write("observed", 2);
+      await delivered;
+      expect(
+        readConfirmed(reader, space, (tx) => observed.withTx(tx).get()).seq,
+      )
+        .toBeGreaterThanOrEqual(seq);
+      expect(readDocument()).toEqual({
+        value: { value: { n: 1 } },
+        confirmed: true,
+      });
+
+      expect((await readerManager.open(space).sync(address.id)).error)
+        .toBeUndefined();
+      const read = readDocument();
+      expect(read.value).toEqual({ value: { n: 2 } });
+      expect(read.confirmed).toBe(true);
+      expect(read.seq).toBeGreaterThanOrEqual(seq);
+    });
+
+    it("returns an unconfirmed read while a whole-document write is pending", async () => {
+      const tx = reader.edit();
+      tx.write(address, { value: { n: 1 } });
+      const receipt = tx.commit();
+      const read = readDocument();
+      expect((await receipt.settled).error).toBeUndefined();
+      expect(read).toEqual({ value: { value: { n: 1 } }, confirmed: false });
+    });
+
+    it("returns an unconfirmed read after a blind patch over an accepted version", async () => {
+      await replace(reader, 1);
+      const foreign = writer.edit();
+      foreign.write(address, { value: { n: 1, hidden: 9 } });
+      expect((await foreign.commit().settled).error).toBeUndefined();
+      const replica = readerManager.open(space).replica;
+      expect(
+        (await replica.commitNative!({
+          operations: [{
+            op: "patch",
+            id: address.id,
+            type: address.type,
+            patches: [{ op: "replace", path: "/value/n", value: 2 }],
+            value: { value: { n: 2 } },
+          }],
+        })).error,
+      ).toBeUndefined();
+      expect(readDocument().confirmed).toBe(false);
+    });
+  });
+
+  describe("of a content-addressed schema document", () => {
+    // A document's schema is stored as `cid:` documents in the transaction
+    // that writes it. The server ships them with a document that refers to
+    // them, and does not send a replica its own change to a document it holds,
+    // so a replica that changed a loaded document's schema is never sent them.
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        title: { $ref: "#/$defs/Title" },
+        detail: { $ref: "#/$defs/Detail" },
+      },
+      $defs: {
+        Title: { type: "string", description: "A confirmed read's title" },
+        Detail: { type: "object", properties: { count: { type: "number" } } },
+      },
+    } as const satisfies JSONSchema;
+
+    /** The documents `cell`'s stored `schema` metadata names: its root and
+     * every document the root refers to. */
+    function schemaDocumentsOf(cell: Cell<unknown>): URI[] {
+      const stored = cell.getMetaRaw("schema");
+      const ref = isObjectNotArray(stored) ? stored.$ref : undefined;
+      const root = typeof ref === "string"
+        ? parseExternalSchemaRef(ref)?.taggedHash
+        : undefined;
+      expect(root).toBeDefined();
+      const closure = new Set<string>([root!]);
+      for (const hash of closure) {
+        for (
+          const dependency of collectExternalSchemaRefHashes(
+            lookupSchemaDocument(hash),
+          )
+        ) {
+          closure.add(dependency);
+        }
+      }
+      return [...closure].map((hash): URI => `cid:${hash}`);
+    }
+
+    /** `readConfirmed` of the reader's read of the documents `ids`, returning
+     * whether it found each one. */
+    function confirmedReadOf(ids: URI[]) {
+      return readConfirmed(
+        reader,
+        space,
+        (tx) =>
+          ids.every((id) =>
+            tx.read({ space, id, type: "application/json", path: [] }).ok
+              ?.value !== undefined
+          ),
+      );
+    }
+
+    it("returns a read of the ones the reader's own commit stored as confirmed once a push covers its commit", async () => {
+      await write("described", 1);
+      const described = await loaded("described");
+      const tx = reader.edit();
+      expect(writeResultSchemaMeta(described.withTx(tx), resultSchema)).toBe(
+        true,
+      );
+      expect((await tx.commit().settled).error).toBeUndefined();
+      const seq = tx.committedSeq!(space)!;
+      const ids = schemaDocumentsOf(described);
+      expect(ids.length).toBeGreaterThan(1);
+
+      const read = confirmedReadOf(ids);
+      expect(read.value).toBe(true);
+      expect(read.confirmed).toBe(true);
+      expect(read.seq).toBeGreaterThanOrEqual(seq);
+    });
+
+    it("returns an unconfirmed read of ones the reader's own commit has not had accepted", async () => {
+      await write("described", 1);
+      const described = await loaded("described");
+      const tx = reader.edit();
+      writeResultSchemaMeta(described.withTx(tx), resultSchema);
+      const committed = tx.commit();
+      const read = confirmedReadOf(schemaDocumentsOf(described));
+      expect((await committed.settled).error).toBeUndefined();
+
+      expect(read).toEqual({ value: true, confirmed: false });
+    });
+
+    it("returns an unconfirmed read of one written in session scope, which no server stores", async () => {
+      const storage = TestStorageManager.create({
+        as: signer,
+        memoryHost: new URL("http://localhost:65535"),
+      }, {
+        create() {
+          throw new Error("Session state stays local");
+        },
+      });
+      const local = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: storage,
+        experimental: { localSessionDocuments: true, serverExecution: false },
+      });
+      try {
+        const schema = { type: "string" } as const satisfies JSONSchema;
+        const id: URI = `cid:${taggedHashStringOf(schema)}`;
+        const tx = local.edit();
+        tx.writeValueOrThrow({ space, id, path: [], scope: "session" }, schema);
+        expect((await tx.commit().settled).error).toBeUndefined();
+
+        const read = readConfirmed(local, space, (readTx) =>
+          readTx.read({
+            space,
+            id,
+            type: "application/json",
+            path: [],
+            scope: "session",
+          }).ok?.value !== undefined);
+        expect(read).toEqual({ value: true, confirmed: false });
+      } finally {
+        await local.dispose();
+        await storage.close();
+      }
+    });
+
+    it("returns an unconfirmed read of ones the reader does not hold", async () => {
+      const tx = writer.edit();
+      const described = writer.getCell<Note>(
+        space,
+        "described",
+        noteSchema,
+        tx,
+      );
+      described.set({ n: 1 });
+      writeResultSchemaMeta(described, resultSchema);
+      expect((await tx.commit().settled).error).toBeUndefined();
+
+      const read = confirmedReadOf(
+        schemaDocumentsOf(writer.getCell<Note>(space, "described", noteSchema)),
+      );
+      expect(read).toEqual({ value: false, confirmed: false });
+    });
   });
 
   it("returns no sequence once a frame failed to apply", async () => {

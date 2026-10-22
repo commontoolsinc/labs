@@ -93,7 +93,12 @@ explicitly declares it through `chatRoom`. A declared container room includes
 that root as `container`; a standalone room needs no container, including when
 another space declares it. The manager's separate event checks private Home
 membership and lists or restores the conversation. Joining an already listed
-room without a `requestId` changes nothing. Room write handlers send their
+room without a `requestId` changes no membership and records nothing. A join
+from a message or a reaction, marked `messageAct`, leaves the title the
+manager's catalog lists the room under as it is, and any other join brings that
+title up to the room's (see
+[`joinRoom`](ChatManagerOutput.md#joinroomrequestid-string-room-cellchatroomoutput)).
+Room write handlers send their
 local `joined` stream after recording the write. Its `tellManagerJoined`
 handler reads the manager binding and sends `joinRoom` in a separate event,
 so the transaction that stores shared messages and reactions reads neither
@@ -109,9 +114,11 @@ delivery" and §4). So two sends of the same text are two messages.
 An act on a message, and a reply, takes the message by its cell and reads it
 alone. A handler checks what the element's write policy does not — whose
 message or reaction it is, the obliteration rights, and that a message acted
-on or replied to lives in the room's space — and drops anything else without
-a word: the room's rendering offers only acts the viewer can take, so no
-event outside the rules comes from it. The acts on a message are bound to a
+on or replied to lives in the room's space — and refuses anything else: the
+run fails with a reason a person can read, and writes nothing. The room's
+rendering offers only acts the viewer can take, so a refusal reaches a client
+whose own event broke the rules. An act that would change nothing, such as a
+reaction added twice, succeeds and writes nothing. The acts on a message are bound to a
 handle on one of the room's records, and the sends to the room's messages,
 either of which names the room's space and is read for nothing else for
 this. A message's write policy names its handlers, not a room, so the space
@@ -168,7 +175,7 @@ that creates the room, so it is labeled with its creator, and `about` links it.
 own, so it is labeled with that member, and the creator's record keeps its
 label. It records each retitle's outcome in the sender's own `titleRequests`,
 kept `PerUser`, under the event's `requestId`, and a request already there
-changes nothing; a refusal writes nothing else. A request already there changes nothing.
+changes nothing; a refusal writes nothing else.
 `canSend` is computed for each viewer from their access and whether their
 profile resolves.
 

@@ -103,8 +103,11 @@ createRef({}, { parent, type: "internal", cause: descriptor.partialCause })
 (`packages/runner/src/derived-internal-cell-ids.ts`,
 `DerivedInternalCellIds.idFor()`, which `getDerivedInternalCellLink` in
 `packages/runner/src/link-utils.ts` calls; a runtime keeps the ids it has
-hashed, by result cell and partial cause). The result is a `FabricHash`: hash
-bytes plus an algorithm tag, stringified as `<tag>:<base64urlHash>`, e.g.
+hashed, by result cell and partial cause). A partial cause that is an object is
+kept by its identity and must be deep-frozen, as the builder leaves every cause
+it assigns; `idFor()` throws for one that is not. The result is a
+`FabricHash`: hash bytes plus an algorithm tag, stringified as
+`<tag>:<base64urlHash>`, e.g.
 `fid1:abc…`
 (`packages/data-model/src/fabric-primitives/FabricHash.ts`). The hash is
 opaque: nothing about the preimage — including `type: "internal"` or the
@@ -128,9 +131,10 @@ identity.
 An instance given a name by `nameInstance(Child(...), "child")`
 (`packages/runner/src/builder/instance-name.ts`) is a **named instance**. The
 builder takes that name as the instance's partial cause,
-`{ $generated: "instance", name: "child" }`, wherever no result key, node
-input or authored `.for()` names it already. The name sits under the
-reserved `$generated` key, so no authored cause can equal it. An instance
+`{ $instance: "child" }`, wherever no result key, node input or authored
+`.for()` names it already. The name sits under the reserved `$instance` key,
+so no authored cause can equal it, and the cause carries no `$generated`, the
+key of the causes the builder mints for anonymous roots. An instance
 name given to more than one root in a pattern names none of them, and each
 keeps a positional cause. A stream root never takes an instance name, and a
 name given to one does not count toward another root's. A named instance's
