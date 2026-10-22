@@ -6,7 +6,8 @@ description: Guide for managing tasks within a session using bd (beads) for subt
 # Task Management
 
 At the user level, we use Linear to manage tasks. When the Linear MCP is
-available, you can consult this directly.
+available, you can consult this directly. Issues belong to the CommonTools team,
+whose key is `CT`, so code comments and documents cite an issue as `CT-1234`.
 
 Our workflow is to run many worktrees and checkouts of the repo and work on
 multiple research tasks and tasks in parallel. For managing todos and progress
