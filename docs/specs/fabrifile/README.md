@@ -173,11 +173,6 @@ that a blob reference grants nothing on its own. See
 
 The design depends on runtime capabilities that don't exist yet:
 
-- **Renaming a blob, from a pattern.** `rename`, and an `add` that chooses a
-  free name, store an existing blob's bytes and media type again under another
-  name. That needs a way for a handler to do it without the bytes passing
-  through the pattern, such as a builtin that takes a blob reference and a
-  name, and returns the new blob's reference.
 - **Authorized blob reads.** A blob read is admitted only for a principal the
   blob's space admits, as a read of any other document of the space is, and a
   blob write likewise. Until then, everything under [Privacy](#privacy)
