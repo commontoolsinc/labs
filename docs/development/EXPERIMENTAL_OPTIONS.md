@@ -595,10 +595,11 @@ flags it adopts from the deployment it runs against.
   [the implementation plan](../plans/view-scoped-client-replication.md) for
   follow-up work.
 - **Status (2026-10-22):** off by default. Under the served vote burst, with
-  the flush deadline capped at 1000 ms, the benchmark's worker arm with the
-  flag on reads level with the serving loop off, 3.7 to 4.4 s against 3.8 to
-  4.3 s across three series, and the main-thread arm with it on reads 5.6 to
-  6.0 s. The planner plans a wave the deadline cut over its last UI walk; a
+  the flush deadline capped at 1000 ms, the benchmark with the flag on reads
+  faster than with the serving loop off, 3.4 s on the main thread and 3.8 to
+  3.9 s in the worker against 4.3 s. Under the FabriChat send burst the
+  worker arm with it on reads 3.6 s against 3.1 s with the loop off. The
+  planner plans a wave the deadline cut over its last UI walk; a
   plan whose delivery is unchanged reaches the session without a watch-set
   evaluation, and one whose delivery only grew without a full re-evaluation
   of the session, its added roots evaluated and its support graph extended
@@ -606,8 +607,11 @@ flags it adopts from the deployment it runs against.
   walks; and a walk after a change reads again only the cells whose recorded
   reads it touched, for a plan of 220 to 266 ms where it was 442 ms. What
   remains is a plan per session carrying about 320,000 characters of roots
-  and producer bases, and the planning tail on the main thread
-  ([record](../history/development/performance/2026-10-22-served-vote-batching-and-planner-reads.md),
+  and producer bases, and a window in which a client that runs nothing of a
+  piece itself has received an event's consequence and not yet the
+  derivations that read it, which the server can commit a wave later
+  ([chat record](../history/development/performance/2026-10-22-served-chat-burst-and-the-deferred-settle.md),
+  [vote record](../history/development/performance/2026-10-22-served-vote-batching-and-planner-reads.md),
   [the earlier record](../history/development/performance/2026-10-22-view-scoped-replication-vote-burst.md)).
 
 

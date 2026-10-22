@@ -15,12 +15,16 @@ then counted what one burst causes and named seven removals, and stage 3
 below tracks them: the growing flush deadline and the serving pass that runs
 every ready event before one derivation pass have taken out most of the
 per-wave and per-event machinery, and view-scoped replication now plans less
-and walks less. What is left is the memory server's root evaluations, once
+and walks less: with it on, the vote burst reads faster than with the loop
+off on the main thread and in the worker, and the FabriChat send burst half a
+second slower. What is left is the memory server's root evaluations, once
 per session per flush pass with a tuple evaluated under every schema a
 reader declared; each client re-running what the server ran; and, with
-view-scoped replication on, the plan's size and its planning tail on the main
-thread. This plan is for whoever picks that up on the branch, with everything
-they need that the records do not carry.
+view-scoped replication on, the plan's size, a room's creating space running
+the room's graph only to have its writes refused, and the window in which a
+client has an event's consequence before the derivations that read it. This
+plan is for whoever picks that up on the branch, with everything they need
+that the records do not carry.
 
 ## Where things stand
 
@@ -326,10 +330,18 @@ Before a push: repo-wide `deno fmt --check`, `deno lint`, `deno task check`,
          against 4.8 s and 4.7 s with the flag off on this workload, where
          every viewer sees everything.
    - [x] The serving pass running every ready event before one derivation
-         pass, a head the preflight parked on its own loads retried within
-         the pass: 51 scheduler passes to 4 and a 6.2 s probe burst to 3.3 s
-         with the flag off
+         pass, a head the preflight parks on its loads behind events the
+         pass ran ending the pass without its settle, which the pass the
+         park's release starts runs: 51 scheduler passes to 4 and a 6.2 s
+         probe burst to 3.3 s with the flag off
          ([record](../history/development/performance/2026-10-22-served-vote-batching-and-planner-reads.md)).
+         The send burst found that a drop of the parked head left that
+         settle waiting for new input, and a drop now queues the pass; a
+         fire inside a transaction appends when the transaction commits;
+         and with the deferral the vote burst with the flag on reads 3.4 s
+         on the main thread and 3.8 to 3.9 s in the worker against 4.3 s
+         with the loop off, 6.3 to 8.2 s without it
+         ([chat record](../history/development/performance/2026-10-22-served-chat-burst-and-the-deferred-settle.md)).
    - [x] Of what the view-scoped record left: a grown delivery extends the
          session's support graph in place, the committed documents reach the
          sessions before the planner walks, three costs a cell read repeated
@@ -338,10 +350,14 @@ Before a push: repo-wide `deno fmt --check`, `deno lint`, `deno task check`,
          walk keeps what it found at each cell between walks, for a plan of
          220 to 266 ms where it was 442 ms; the benchmark's worker arm with
          the flag on reads level with the loop off (same record).
-   - [ ] What that record leaves: the plan's size (548 roots, the same 548 as
-         inputs, 1,058 producer bases, to each session at each quiescent
-         settlement), a plan per session, and the planning tail on the main
-         thread.
+   - [ ] What those records leave: the plan's size (548 roots, the same 548
+         as inputs, 1,058 producer bases, to each session at each quiescent
+         settlement) and a plan per session; a room's creating space running
+         the room's graph, whose writes into the room's space are all
+         refused (784 refusals in one send-burst run); and the window in
+         which a client that runs nothing of a piece has an event's
+         consequence and not yet the derivations the server committed a
+         wave later.
    - [ ] One root evaluation per (document, path) per walk with its schemas
          validated against it, and a memo for a selector that failed against
          a document version (the memory server, every arm).
