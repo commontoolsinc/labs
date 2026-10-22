@@ -770,11 +770,11 @@ Both modes use ordinary worker clients with no browser, each holding the
 worker reconciler's demand over the piece's view for the run, as a mounted tab
 does (`renderView` on the session, with the fixture showing the poll's own
 view under its `renderPoll` input), so a client derives the tallies and cards
-it would show and the measured end is the moment that view is current. The
-reconciler alone registers no view with the session, so the view-scoped
-web-client flag does not activate selective replication in this benchmark. Use
-the browser Topics benchmarks to measure that mode, and hold server execution
-constant when comparing replication flags.
+it would show and the measured end is the moment that view is current. Each
+client is a web client (`clientClass: "web"` on the session), so under
+`EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION` its view registers as a view
+interest and the server selects what it receives, as it does for a browser
+tab; hold that flag and server execution constant when comparing arms.
 
 A burst's measured interval ends when every client's own vote list, read at
 that runtime's quiescence and woken by the list's own changes, holds exactly

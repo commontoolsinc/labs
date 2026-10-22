@@ -46,17 +46,18 @@ probe's second round, on the same four-core container as the census.
 | Host traversals, time in them | 10,321, 0.4 s | 34,068, 10.4 s |
 | Frames encoded | 202 | 253 |
 | Serving scheduler runs | 888 | 789 |
-| Client scheduler runs, each of three clients | 315 | 552–564 |
+| Client scheduler runs, each of five clients | 315 | 552–564 |
 
 The selection does what it is for: the memory server's incremental walks
 evaluate 45 roots instead of 10,206, since the sessions' graphs are now the
 rendered roots and the documents the planner selected rather than everything
 the clients had subscribed to. What replaces them is the planner.
 
-**A plan per view per wave, each walking the UI again.** The publisher plans
-every attached view after every wave, 14 waves by 5 views here, and 50 of the
-65 plans walked the rendered tree through the renderer schema to collect its
-reads, at about 200 ms a walk. The walk is cached and invalidated by the
+**A plan per view per wave, each walking the UI again.** The publisher
+considers every attached view after every cycle: 16 publishes by 5 views here,
+80 snapshot comparisons, of which 15 found the view's caches and execution
+snapshot unchanged and 65 planned. 50 of the 65 plans walked the rendered tree
+through the renderer schema to collect its reads, at about 200 ms a walk. The walk is cached and invalidated by the
 scheduler's read matching, and every vote changes values the UI reads, so the
 cache held for almost nothing in a burst even though the set of documents the
 UI reads changed in none of these waves. The walk itself is a schema traversal
@@ -83,8 +84,10 @@ over the walk it has, with the current execution snapshot and producer bases;
 the walk is redone at the next settlement that reaches quiescence. A burst
 walks the UI once per view, as it ends. What this trades: a UI subtree that
 appears during a burst and reads documents no selected computation reads is
-not delivered until the burst ends, which with the deadline cap is bounded by
-the cap. Documents a computation reads are selected from the fresh snapshot
+not delivered until the next settlement that reaches quiescence. The cap
+bounds each cut settle, not the deferral: a space under continuous input
+defers the walk for as long as the input lasts, and a bound on that wait is
+open. Documents a computation reads are selected from the fresh snapshot
 either way, and the rendered outputs flow through the support graph as before.
 
 **A plan that changes only what a view may run or adopt rides the next frame.**
@@ -147,8 +150,10 @@ left to take out, with the share of the 9.1 s burst each stands for:
    selection changed or a resync owes them, and otherwise the documents
    alone. About 1 s of encoding, and whatever the clients spend re-applying
    unchanged plans.
-3. Plans deferred to quiescence, as the UI walk now is. About 3 s, against the
-   bound the deadline cap puts on how long a newly visible document waits.
+3. Plans deferred to quiescence, as the UI walk now is. About 3 s, against a
+   newly visible document waiting for the next quiescent settlement, which
+   the cap bounds per settle and not as a whole; the same bound the walk's
+   deferral wants.
 4. The renderer-schema walk itself, in the planner and in the memory server's
    demand graph: a leaf, 250 ms a walk here, for the round that returns to
    leaves.

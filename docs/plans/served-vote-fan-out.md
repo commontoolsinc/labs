@@ -313,9 +313,9 @@ Before a push: repo-wide `deno fmt --check`, `deno lint`, `deno task check`,
          25.9 s against 4.8 s, from a plan per view per wave re-walking the
          UI and a full re-evaluation per changed plan; the planner plans a
          cut wave over its last walk and an unchanged delivery rides the
-         next frame, for 9.1 s on the main thread and 5.4 s in the worker.
-         Still 2× the flag off on this workload, where every viewer sees
-         everything.
+         next frame, for 9.1 s on the main thread and 5.4 s in the worker,
+         against 4.8 s and 4.7 s with the flag off on this workload, where
+         every viewer sees everything.
    - [ ] What the view-scoped record leaves: one plan per snapshot rather than
          per session, manifests only when they change, and whether plans
          defer to quiescence as the UI walk does.

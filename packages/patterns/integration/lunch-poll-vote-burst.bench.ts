@@ -61,9 +61,10 @@
  * The harness hosts its own storage server, with a serving loop attached when
  * server execution is enabled. Both modes use ordinary worker clients with no
  * browser, each holding the worker reconciler's demand over the view as a
- * mounted tab does, so the clients derive what they would show; the
- * reconciler registers no view with the session, so the view-scoped
- * web-client flag does not activate selective replication here.
+ * mounted tab does, so the clients derive what they would show. Each is a
+ * web client, so under `EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION` its view
+ * registers as a view interest and the server selects what it receives, as
+ * it does for a browser; the flag is held constant across a comparison.
  * The poll uses the `lunch-poll-keyed-votes` fixture's identity seam because
  * these clients do not render the `#profile` create surface.
  */

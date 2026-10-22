@@ -139,7 +139,7 @@ benchmark, which carries none.
 | Root evaluations | 18,124 | 10,206 | — | — |
 | Frames encoded | 660 | 202 | 439 | 186 |
 | Serving scheduler runs | 858 | 888 | — | — |
-| Client scheduler runs, each of three clients | 643 | 315 | 581 | 357 |
+| Client scheduler runs, each of five clients | 643 | 315 | 581 | 357 |
 | Client traversals, each client | 405 | 216 | 373 | 238 |
 
 The worker arm's scheduler runs in the worker, outside the probe's

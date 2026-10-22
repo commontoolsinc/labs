@@ -6595,8 +6595,10 @@ export class Server {
     });
   }
 
-  /** Publishes eligibility only with the document frame that supplies its inputs. */
+  /** Publishes eligibility only with the document frame that supplies its
+   * inputs; the frame carries the plans a changed selection owed. */
   #attachViewPlans(session: SessionState, sync: SessionSync): void {
+    session.viewPlansPending = false;
     sync.viewPlans = session.views.map((view) => {
       const selection = session.viewSelections.get(view.id);
       return {
@@ -8167,10 +8169,7 @@ export class Server {
               sync.caughtUpLocalSeq = session.caughtUpLocalSeq;
             }
             await this.#attachOperationFields(space, sessionId, sync);
-            if (session.views.length > 0) {
-              this.#attachViewPlans(session, sync);
-              session.viewPlansPending = false;
-            }
+            if (session.views.length > 0) this.#attachViewPlans(session, sync);
             return {
               type: "session/effect",
               space,

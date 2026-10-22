@@ -57,10 +57,12 @@ After a successful serving settlement, including a quiet settlement or a partial
 wave that reaches its flush deadline, the planner checks whether the view
 selection needs updating. Unsettled producers carry no currency basis. It
 traverses a new or changed visible view using renderer semantics and shared
-component schemas. After a wave the flush deadline cut, a view whose walk a
-change invalidated is planned over its last walk, with the current execution
-snapshot and producer bases; the walk is redone at the next settlement that
-reaches quiescence, so a burst of cut waves walks the UI once, as it ends. Ordinary rendered attributes and object props contribute
+component schemas. After a wave the flush deadline cut, a view whose UI walk
+a change has invalidated is planned over its last walk, with the current
+execution snapshot and producer bases; the walk is redone at the next
+settlement that reaches quiescence, so a burst of cut waves walks the UI once
+per view, as it ends. The cap bounds each cut settle and not the deferral: a
+space under continuous input defers the walk for as long as the input lasts. Ordinary rendered attributes and object props contribute
 their reads. Declared bindings contribute their effective component projection;
 stream targets identify visible handlers, and writable bindings identify direct
 edits.
