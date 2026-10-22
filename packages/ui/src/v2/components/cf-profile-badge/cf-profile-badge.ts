@@ -745,8 +745,8 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
         this._applyValue(val);
         this._deriveVerification(
           cfcLabel,
-          isWrittenProfileName(isObjectNotArray(val) ? val.name : undefined),
           generation,
+          isWrittenProfileName(isObjectNotArray(val) ? val.name : undefined),
         );
       }, {
         includeCfcLabel: true,
@@ -849,8 +849,8 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
    */
   private _deriveVerification(
     cfcLabel: CfcLabelView | undefined,
-    nameWritten: boolean,
     generation: number,
+    nameWritten: boolean,
   ): void {
     if (generation !== this._resolveGeneration || !this.isConnected) return;
     // The label is the runtime-attested, display-redacted view delivered over
