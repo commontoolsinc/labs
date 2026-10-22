@@ -389,6 +389,33 @@ describe("Blob Routes", () => {
       expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
     });
 
+    it("serves a blob of a type it serves as itself as an attachment when asked to download it", async () => {
+      const identity = await Identity.fromPassphrase(
+        "toolshed-blob-named-download",
+      );
+      await bootstrapHomeSpace(identity);
+      const contents = {
+        type: "image/gif",
+        body: new FabricBytes(bytes),
+        name: "photo.gif",
+      };
+      const hash = hashOf(contents).toString().slice("fid1:".length);
+
+      const post = await uploadTo(
+        `/${identity.did()}/blobs/image.gif`,
+        contents,
+      );
+      expect(post.status).toBe(201);
+
+      const get = await app.request(
+        `/${identity.did()}/blobs/${hash}.gif?download`,
+      );
+      expect(get.headers.get("Content-Type")).toBe("image/gif");
+      expect(get.headers.get("Content-Disposition")).toBe(
+        `attachment; filename="photo.gif"; filename*=UTF-8''photo.gif`,
+      );
+    });
+
     it("serves a blob of a type it serves as octet-stream as an attachment, under its name", async () => {
       const identity = await Identity.fromPassphrase(
         "toolshed-blob-named-attachment",

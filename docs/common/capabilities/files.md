@@ -51,7 +51,16 @@ with a `Content-Disposition` header naming the file, so the saved file has that
 name whichever host serves the space. A blob stored with no name is served with
 one naming no file. There the `download` attribute is what names the saved file,
 and browsers honor it only when the link is same-origin with the page, so a
-space served from another host saves the file under its hash instead.
+space served from another host saves the file under its hash instead. A URL
+with `?download` is served as an attachment whatever the blob's type, which a
+browser saves from any origin, under the blob's name.
+
+A pattern that holds a blob's reference, its space's DID and its id there, rather
+than its URL, offers it with `cf-blob-link`, as
+`<cf-blob-link blob={file.blob} name={file.name}>`, which links to its
+`?download` URL, and shows an image with `<cf-image blob={file.blob}>`. Each
+asks the runtime for the URL the blob's space's host serves it at, which a
+pattern has no way to form itself.
 
 `cf-file-download` is not for stored files. It takes the content as a string
 and builds the download in the browser, so using it means holding the bytes in
@@ -86,7 +95,8 @@ can still be too large to rename.
 - A name is any non-empty string of well-formed Unicode of at most 1024 bytes
   as UTF-8. Every download's
   `Content-Disposition` is `inline` for a type served as itself, and
-  `attachment` for every other, naming the file when the blob has a name.
+  `attachment` for every other, or for any type under `?download`, naming the
+  file when the blob has a name.
 - The bytes stay in the space's own store beside its cells. There is no
   offload to an object store, and no signed or expiring URL.
 - GIF, JPEG, PNG, and WebP are served as their own media type, so an `<img>`

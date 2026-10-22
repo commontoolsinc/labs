@@ -1288,6 +1288,40 @@ describe("RuntimeClient", () => {
       expect(request.body.slice()).toEqual(new Uint8Array([1, 2, 3]));
     });
 
+    it("returns the URL a blob URL request returns", async () => {
+      const requests: unknown[] = [];
+      const conn = {
+        on: () => {},
+        request: (message: unknown) => {
+          requests.push(message);
+          return Promise.resolve({ url: "http://host/space/blobs/abc" });
+        },
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      const url = await client.blobUrl({
+        space: "did:key:z6Mk-runtime-client-blob" as never,
+        id: "fid1:abc",
+      });
+
+      expect(url).toBe("http://host/space/blobs/abc");
+      expect(requests).toEqual([{
+        type: RequestType.BlobUrl,
+        space: "did:key:z6Mk-runtime-client-blob",
+        id: "fid1:abc",
+      }]);
+
+      await client.blobUrl({
+        space: "did:key:z6Mk-runtime-client-blob" as never,
+        id: "fid1:abc",
+        download: true,
+      });
+
+      expect((requests[1] as { download?: boolean }).download).toBe(true);
+    });
+
     it("sends the name of the file the bytes came from", async () => {
       const requests: unknown[] = [];
       const conn = {
