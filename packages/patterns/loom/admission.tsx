@@ -145,11 +145,12 @@ function adderFields(
 }
 
 /**
- * Throws unless `event` names no profile in `as`, or names one whose own label
- * attests, with `represents-principal`, the principal the event acts for and
- * no other, as `principalOf()` reads it. A profile that attests nobody, or
- * more than one principal, or that attests one in a form no runtime mints, is
- * no one's, and a run that acts for no one has no profile of its own.
+ * Throws unless `event` names no profile in `as`, or names one that represents
+ * the principal the event acts for, as
+ * `principalOf(as, "represents-principal")` returns it. A profile it returns
+ * no principal for, because its label names nobody, names more than one
+ * principal, or holds only claims the reader does not accept, represents no
+ * one, and a run that acts for no one has no profile of its own.
  */
 function assertOwnProfile(event: PanelAdmission): void {
   if (event.as === undefined) return;
@@ -181,7 +182,8 @@ function attestedAdders(panel: Writable<Panel>): DID[] | undefined {
  * Throws unless the principal the running event acts for may remove `panel`
  * for everyone: an occurrence its label attests to that principal alone, one
  * that records no adder at all, or, for an OWNER of the Loom's space, one it
- * attests to a principal the Loom's access list no longer admits. `panels` is
+ * attests to a principal the Loom's access list no longer admits, or one whose
+ * label does not settle on an adder. `panels` is
  * the Loom's list, which anchors both access reads in the Loom's space: an
  * occurrence `addPanel` linked may live in another space, whose list says
  * nothing about who belongs to the Loom. The adder is read from the runtime's
@@ -192,10 +194,11 @@ function attestedAdders(panel: Writable<Panel>): DID[] | undefined {
  * An occurrence records no adder when it holds no profile and no stamp names
  * anyone at `addedBy`, whose value is then its writer's claim and protects
  * nothing. Every other occurrence whose stamps do not settle on one adder is
- * refused to everyone: one whose stamps name two principals, one holding a
- * claim in a form no runtime mints, which a runtime did not write, and one
- * that holds a profile no stamp says anyone acted under, since `admitPanel`
- * stamps every profile it records.
+ * an OWNER's alone to remove: one whose stamps name two principals, one
+ * holding a claim in a form no runtime mints, which a runtime did not write,
+ * and one that holds a profile no stamp says anyone acted under, since
+ * `admitPanel` stamps every profile it records. No participant's claim to it
+ * can be read, so none is protected, and the OWNER is who clears it up.
  */
 export function assertRemovable(
   panel: Writable<Panel>,
@@ -214,8 +217,9 @@ export function assertRemovable(
     return;
   }
   if (adders?.length !== 1) {
+    if (spaceAccess(panels) === "OWNER") return;
     throw new Error(
-      "A panel whose label does not settle on one adder cannot be removed",
+      "A panel whose label does not settle on one adder can be removed only by an OWNER of the Loom",
     );
   }
   const [adder] = adders;

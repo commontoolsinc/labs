@@ -17,9 +17,25 @@
     ],
     "type": "object"
   },
-  "pattern": "loom-overlay-fixture/main.tsx",
+  "pattern": "loom-chat-room-fixture/main.tsx",
   "resultSchema": {
     "$defs": {
+      "ChatRoomChoice": {
+        "properties": {
+          "room": {
+            "$ref": "#/$defs/LinkedChatRoom"
+          }
+        },
+        "type": "object"
+      },
+      "LinkedChatRoom": {
+        "properties": {
+          "$NAME": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "MemberEvent": {
         "properties": {
           "principal": {
@@ -129,7 +145,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/loom/admission.tsx",
-              "moduleIdentity": "tNKemumyaddVg5xcvZyfLqTKhWPHIfN2XpYBWRRDy88",
+              "moduleIdentity": "w5rok2VDax9C_w7UV4Gn7BK8cYlMX-il085yXXP9fpg",
               "path": [
                 "admitPanel"
               ]
@@ -154,7 +170,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/loom/admission.tsx",
-              "moduleIdentity": "tNKemumyaddVg5xcvZyfLqTKhWPHIfN2XpYBWRRDy88",
+              "moduleIdentity": "w5rok2VDax9C_w7UV4Gn7BK8cYlMX-il085yXXP9fpg",
               "path": [
                 "admitPanel"
               ]
@@ -167,31 +183,6 @@
           },
           "name": {
             "type": "string"
-          }
-        },
-        "type": "object"
-      },
-      "PanelAdmission": {
-        "properties": {
-          "as": {
-            "properties": {
-              "avatar": {
-                "type": "string"
-              },
-              "name": {
-                "type": "string"
-              }
-            },
-            "type": "object"
-          },
-          "before": {
-            "$ref": "#/$defs/Panel"
-          },
-          "panel": {
-            "$ref": "#/$defs/Panel"
-          },
-          "piece": {
-            "type": "unknown"
           }
         },
         "type": "object"
@@ -292,32 +283,21 @@
       "$UI": {
         "$ref": "https://commonfabric.org/schemas/vnode.json"
       },
-      "addPanel": {
-        "$ref": "#/$defs/PanelAdmission",
+      "chatRoom": {
+        "$ref": "#/$defs/LinkedChatRoom"
+      },
+      "ensureChatRoom": {
         "asCell": [
-          "stream"
+          "stream",
+          "opaque"
         ]
       },
-      "grant": {
+      "lowerToRead": {
         "$ref": "#/$defs/MemberEvent",
         "asCell": [
           "stream"
         ],
-        "description": "Grants `principal` WRITE in the Loom's space, as a trusted gesture."
-      },
-      "hidePanel": {
-        "asCell": [
-          "stream"
-        ],
-        "properties": {
-          "panel": {
-            "$ref": "#/$defs/Panel"
-          }
-        },
-        "required": [
-          "panel"
-        ],
-        "type": "object"
+        "description": "Lowers `principal` to READ in the Loom's space, as a trusted gesture."
       },
       "panels": {
         "items": {
@@ -325,27 +305,25 @@
         },
         "type": "array"
       },
-      "revoke": {
-        "$ref": "#/$defs/MemberEvent",
-        "asCell": [
-          "stream"
-        ],
-        "description": "Revokes `principal`'s access to the Loom's space, as a trusted gesture."
-      },
-      "viewerPanels": {
+      "pieceRegistry": {
         "items": {
-          "$ref": "#/$defs/Panel"
+          "type": "unknown"
         },
         "type": "array"
+      },
+      "setChatRoom": {
+        "$ref": "#/$defs/ChatRoomChoice",
+        "asCell": [
+          "stream"
+        ]
       }
     },
     "required": [
       "panels",
-      "viewerPanels",
-      "addPanel",
-      "hidePanel",
-      "grant",
-      "revoke",
+      "pieceRegistry",
+      "setChatRoom",
+      "ensureChatRoom",
+      "lowerToRead",
       "$NAME",
       "$UI"
     ],

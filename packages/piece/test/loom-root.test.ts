@@ -311,9 +311,12 @@ const receiptExists = {
 const notTheirs =
   "A panel can be added under a profile only by the principal that profile represents";
 
-/** What the root says when a panel's label does not settle on one adder. */
+/**
+ * What the root says to a non-owner removing a panel whose label does not
+ * settle on one adder.
+ */
 const unsettled =
-  "A panel whose label does not settle on one adder cannot be removed";
+  "A panel whose label does not settle on one adder can be removed only by an OWNER of the Loom";
 
 describe("loom-root", () => {
   let manager: ReturnType<typeof StorageManager.emulate>;
@@ -767,7 +770,7 @@ describe("loom-root", () => {
     ]);
   });
 
-  it("removes an occurrence for the principal its label attests as its adder, for anyone when it records no adder, for nobody when its label does not settle on one, and for an OWNER when the adder has left", async () => {
+  it("removes an occurrence for the principal its label attests as its adder, for anyone when it records no adder, and for an OWNER when the adder has left or its label does not settle on one", async () => {
     const space = pieces.getSpace();
     const output = root.asSchema(rootSchema);
     const addPanel = await output.key("addPanel").pull();
@@ -890,16 +893,6 @@ describe("loom-root", () => {
       ["stamped-other", url("stamped-other"), [
         at(["addedBy"], by(foreignSigner.did())),
       ], [others]],
-      // The stamp names another principal. Whether the copy of the profile's
-      // label a link carried counts beside it depends on how a principal is
-      // read through a link, and either way the occurrence is refused.
-      ["under-own-profile", {
-        ...url("under-own-profile"),
-        addedByProfile: ownProfile.getAsLink(),
-      }, [
-        at(["addedByProfile"], represents(foreignSigner.did())),
-        { ...at(["addedByProfile"], represents(signer.did())), origin: "link" },
-      ], [others, unsettled]],
       [
         "linked-addedby-other",
         {
@@ -908,36 +901,6 @@ describe("loom-root", () => {
         },
         [at(["addedBy"], by(foreignSigner.did()))],
         [others],
-      ],
-      // A label that does not settle on one adder protects its occurrence
-      // from everyone, the caller and the OWNER included: two principals
-      // named, a claim in a form no runtime mints even beside a well-formed
-      // stamp, and a profile that no stamp says anyone acted under.
-      ["two-adders", url("two-adders"), [
-        at(["addedBy"], by(signer.did()), by(foreignSigner.did())),
-      ], [unsettled]],
-      ["both-fields", url("both-fields"), [
-        at(["addedBy"], by(signer.did())),
-        at(["addedByProfile"], represents(foreignSigner.did())),
-      ], [unsettled]],
-      ["misspelled", url("misspelled"), [
-        at(["addedBy"], `authored-by:${signer.did()}`),
-      ], [unsettled]],
-      ["malformed-beside-stamp", {
-        ...url("malformed-beside-stamp"),
-        addedByProfile: ownProfile.getAsLink(),
-      }, [
-        at(["addedBy"], `authored-by:${signer.did()}`),
-        at(["addedByProfile"], represents(signer.did())),
-      ], [unsettled]],
-      [
-        "unstamped-profile",
-        {
-          ...url("unstamped-profile"),
-          addedByProfile: ownProfile.getAsLink(),
-        },
-        [],
-        [unsettled],
       ],
     ];
     for (const [cause, value, entries, messages] of refusals) {
@@ -973,6 +936,82 @@ describe("loom-root", () => {
     for (const [cause, value, entries] of removals) {
       const cell = await linked(cause, value, entries);
       await sendAndSettle(removePanel, { panel: cell }, `rm-${cause}`);
+      expect([cause, await holds(cell)]).toEqual([cause, false]);
+    }
+
+    // A label that does not settle on one adder protects its occurrence from
+    // every participant, a would-be adder included, and leaves it an OWNER's
+    // to clear up: two principals named, a claim in a form no runtime mints
+    // even beside a well-formed stamp, and a profile that no stamp says
+    // anyone acted under.
+    const unsettledCases: [string, unknown, unknown[]][] = [
+      ["two-adders", url("two-adders"), [
+        at(["addedBy"], by(signer.did()), by(foreignSigner.did())),
+      ]],
+      ["both-fields", url("both-fields"), [
+        at(["addedBy"], by(signer.did())),
+        at(["addedByProfile"], represents(foreignSigner.did())),
+      ]],
+      ["misspelled", url("misspelled"), [
+        at(["addedBy"], `authored-by:${signer.did()}`),
+      ]],
+      ["malformed-beside-stamp", {
+        ...url("malformed-beside-stamp"),
+        addedByProfile: ownProfile.getAsLink(),
+      }, [
+        at(["addedBy"], `authored-by:${signer.did()}`),
+        at(["addedByProfile"], represents(signer.did())),
+      ]],
+      ["unstamped-profile", {
+        ...url("unstamped-profile"),
+        addedByProfile: ownProfile.getAsLink(),
+      }, []],
+    ];
+    const unsettledCells: [string, Cell<unknown>][] = [];
+    for (const [cause, value, entries] of unsettledCases) {
+      unsettledCells.push([cause, await linked(cause, value, entries)]);
+    }
+    // Here the stamp names another principal. Whether the copy of the
+    // profile's label a link carried counts beside it depends on how a
+    // principal is read through a link, so it is either another's or
+    // unsettled, and either way a non-owner is refused.
+    const underOwnProfile = await linked("under-own-profile", {
+      ...url("under-own-profile"),
+      addedByProfile: ownProfile.getAsLink(),
+    }, [
+      at(["addedByProfile"], represents(foreignSigner.did())),
+      { ...at(["addedByProfile"], represents(signer.did())), origin: "link" },
+    ]);
+    await setAcl({
+      [thirdOwner.did()]: "OWNER",
+      [signer.did()]: "WRITE",
+      [foreignSigner.did()]: "WRITE",
+    });
+    for (const [cause, cell] of unsettledCells) {
+      expect([
+        cause,
+        await refusedWith(
+          removePanel,
+          { panel: cell },
+          `rm-writer-${cause}`,
+          unsettled,
+        ),
+      ]).toEqual([cause, true]);
+      expect([cause, await holds(cell)]).toEqual([cause, true]);
+    }
+    expect(
+      await refusedWith(
+        removePanel,
+        { panel: underOwnProfile },
+        "rm-writer-under-own-profile",
+        others,
+        unsettled,
+      ),
+    ).toBe(true);
+    expect(await holds(underOwnProfile)).toBe(true);
+    await setAcl({ [signer.did()]: "OWNER", [foreignSigner.did()]: "WRITE" });
+    for (const [cause, cell] of unsettledCells) {
+      await sendAndSettle(removePanel, { panel: cell }, `rm-owner-${cause}`);
       expect([cause, await holds(cell)]).toEqual([cause, false]);
     }
 
