@@ -104,8 +104,9 @@ unusable for all of them. Names that need different rules belong to a different
 collection, which the same item can hold beside it — a board that numbers its
 members and also lets people give a few of them words holds two namespaces, each
 with a policy of its own. Several names for one member, and names that address
-something computed, fit within one policy, because the list above offers each as
-an answer for the whole collection.
+something computed, fit within one policy only when they take the same answers
+as the collection's other names: an alias that may be retired, beside numbers
+that are permanent, is a second policy and so a second collection.
 
 Two of them touch the contract above and are worth stating explicitly. A
 collection that permits several names for one member still returns exactly one
