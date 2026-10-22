@@ -51,13 +51,16 @@ with a `Content-Disposition` header naming the file, so the saved file has that
 name whichever host serves the space. A blob stored with no name is served with
 one naming no file. There the `download` attribute is what names the saved file,
 and browsers honor it only when the link is same-origin with the page, so a
-space served from another host saves the file under its hash instead.
+space served from another host saves the file under its hash instead. A URL
+with `?download` is served as an attachment whatever the blob's type, which a
+browser saves from any origin, under the blob's name.
 
 A pattern that holds a blob's reference, its space's DID and its id there, rather
 than its URL, offers it with `cf-blob-link`, as
-`<cf-blob-link blob={file.blob} name={file.name}>`, and shows an image with
-`<cf-image blob={file.blob}>`. Each asks the runtime for the URL the blob's
-space's host serves it at, which a pattern has no way to form itself.
+`<cf-blob-link blob={file.blob} name={file.name}>`, which links to its
+`?download` URL, and shows an image with `<cf-image blob={file.blob}>`. Each
+asks the runtime for the URL the blob's space's host serves it at, which a
+pattern has no way to form itself.
 
 `cf-file-download` is not for stored files. It takes the content as a string
 and builds the download in the browser, so using it means holding the bytes in

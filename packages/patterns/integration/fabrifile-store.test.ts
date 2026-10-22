@@ -361,16 +361,26 @@ describe("FabriFile store", () => {
       });
     });
 
-    it("refuses a request missing its media type, size or blob", async () => {
+    it("refuses a request missing its name, media type, size or blob", async () => {
       const blobId = await storeBlob(photo);
       const { send, facts } = await startStore(await writeProfile("Ada"));
 
       await send("add", { requestId: "a1", name: "photo.png", blobId });
-
-      expect((await facts()).requests.a1).toMatchObject({
-        status: "refused",
-        code: "invalid-request",
+      const { name: _, ...unnamed } = addEvent("a2", "photo.png", blobId);
+      await send("add", unnamed);
+      await send("add", {
+        ...addEvent("a3", "photo.png", blobId),
+        blob: { space: home, id: "" },
       });
+
+      const { requests } = await facts();
+      for (const id of ["a1", "a2", "a3"]) {
+        expect({ id, ...requests[id] }).toMatchObject({
+          id,
+          status: "refused",
+          code: "invalid-request",
+        });
+      }
     });
 
     it("refuses a blob in another space", async () => {
@@ -481,6 +491,17 @@ describe("FabriFile store", () => {
       expect((await facts()).byName).toEqual({});
       expect((await read(entry)).removedAt).toBeDefined();
       expect(await blobRecord(blobId)).toEqual(photo);
+    });
+
+    it("refuses a request naming no entry", async () => {
+      const { send, facts } = await startStore(await writeProfile("Ada"));
+
+      await send("remove", { requestId: "x1" });
+      await send("rename", { requestId: "r1", name: "holiday.png" });
+
+      const { requests } = await facts();
+      expect(requests.x1).toMatchObject({ code: "invalid-request" });
+      expect(requests.r1).toMatchObject({ code: "invalid-request" });
     });
 
     it("frees the removed entry's name", async () => {
