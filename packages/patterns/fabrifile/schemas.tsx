@@ -159,7 +159,7 @@ export interface RenameFileEvent {
  * and the streams that change them. A client that draws natively reads this,
  * as the store's `files` view group.
  */
-export interface FileStoreView {
+export interface FileStoreFiles {
   /** Every file in the store, in the order they were added. */
   entries: Cell<FileEntry>[];
 
@@ -180,6 +180,6 @@ export interface FileStoreView {
 }
 
 /** What a space's file store offers: its data face, and that as a view group. */
-export interface FileStoreOutput extends FileStoreView {
-  [VIEWS]: { files: FileStoreView };
+export interface FileStoreOutput extends FileStoreFiles {
+  [VIEWS]: { files: FileStoreFiles };
 }

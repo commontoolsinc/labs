@@ -14,8 +14,12 @@ import { dirname, fromFileUrl, join, relative } from "@std/path";
 
 const HERE = dirname(fromFileUrl(import.meta.url));
 
-/** Matches the specifier of every `import` or `export … from` statement. */
-const SPECIFIER = /(?:^|\n)\s*(?:import|export)\b[^;]*?\bfrom\s+"([^"]+)"/g;
+/**
+ * Matches the specifier of every `import` or `export … from` statement, and of
+ * every bare `import "…";`, which loads its module as surely as any other.
+ */
+const SPECIFIER =
+  /(?:^|\n)\s*(?:(?:import|export)\b[^;]*?\bfrom\s+|import\s+)"([^"]+)"/g;
 
 /**
  * Matches what a module that renders holds: an element, written as a
@@ -73,7 +77,7 @@ describe("store-imports", () => {
 
     const modules = await reachable("view.tsx");
 
-    expect(modules.has("store.tsx")).toBe(true);
+    expect(modules.has("schemas.tsx")).toBe(true);
     expect(RENDERING.test(modules.get("view.tsx") ?? "")).toBe(true);
   });
 });

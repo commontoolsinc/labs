@@ -45,8 +45,8 @@ import {
   type FileProfileCell,
   type FileRefusalCode,
   type FileRequestOutcome,
+  type FileStoreFiles,
   type FileStoreOutput,
-  type FileStoreView,
   type RemoveFileEvent,
   type RenameFileEvent,
 } from "./schemas.tsx";
@@ -406,7 +406,7 @@ export const FileStoreCore = pattern<FileStoreCoreInput, FileStoreOutput>(
         entries.get().map((entry, i) => [entry.name, entryAt(entries, i)]),
       )
     );
-    const view: FileStoreView = {
+    const view: FileStoreFiles = {
       entries: entryCells,
       byName,
       requests: computed(() => requests.get()),
