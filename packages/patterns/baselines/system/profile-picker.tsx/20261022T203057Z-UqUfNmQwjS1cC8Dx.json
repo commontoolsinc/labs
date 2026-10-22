@@ -43,7 +43,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "ceDZXwvtQOE84iqBQPWAH6NNKdzSl8Txv4KZ8YL7ySw",
+                  "moduleIdentity": "O5ZHsaAwljXZ1VCzGa9yUEaPs0kKRp8JNKXKjZy4lYA",
                   "path": [
                     "setAvatar"
                   ]
@@ -69,7 +69,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "ceDZXwvtQOE84iqBQPWAH6NNKdzSl8Txv4KZ8YL7ySw",
+                  "moduleIdentity": "O5ZHsaAwljXZ1VCzGa9yUEaPs0kKRp8JNKXKjZy4lYA",
                   "path": [
                     "setBio"
                   ]
@@ -94,7 +94,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "ceDZXwvtQOE84iqBQPWAH6NNKdzSl8Txv4KZ8YL7ySw",
+                  "moduleIdentity": "O5ZHsaAwljXZ1VCzGa9yUEaPs0kKRp8JNKXKjZy4lYA",
                   "path": [
                     "mutateElements"
                   ]
@@ -123,7 +123,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "ceDZXwvtQOE84iqBQPWAH6NNKdzSl8Txv4KZ8YL7ySw",
+                  "moduleIdentity": "O5ZHsaAwljXZ1VCzGa9yUEaPs0kKRp8JNKXKjZy4lYA",
                   "path": [
                     "mutateExternalProfileLinks"
                   ]
@@ -152,7 +152,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "ceDZXwvtQOE84iqBQPWAH6NNKdzSl8Txv4KZ8YL7ySw",
+                  "moduleIdentity": "O5ZHsaAwljXZ1VCzGa9yUEaPs0kKRp8JNKXKjZy4lYA",
                   "path": [
                     "setInbox"
                   ]
@@ -183,7 +183,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "ceDZXwvtQOE84iqBQPWAH6NNKdzSl8Txv4KZ8YL7ySw",
+                  "moduleIdentity": "O5ZHsaAwljXZ1VCzGa9yUEaPs0kKRp8JNKXKjZy4lYA",
                   "path": [
                     "setName"
                   ]
@@ -208,7 +208,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "ceDZXwvtQOE84iqBQPWAH6NNKdzSl8Txv4KZ8YL7ySw",
+                  "moduleIdentity": "O5ZHsaAwljXZ1VCzGa9yUEaPs0kKRp8JNKXKjZy4lYA",
                   "path": [
                     "setPicture"
                   ]
@@ -294,7 +294,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "ceDZXwvtQOE84iqBQPWAH6NNKdzSl8Txv4KZ8YL7ySw",
+                  "moduleIdentity": "O5ZHsaAwljXZ1VCzGa9yUEaPs0kKRp8JNKXKjZy4lYA",
                   "path": [
                     "publishVerifiedIdentities"
                   ]
@@ -326,6 +326,14 @@
           "$NAME",
           "$UI"
         ],
+        "type": "object"
+      },
+      "DefaultProfileSlot": {
+        "properties": {
+          "profile": {
+            "$ref": "#/$defs/BackwardsCompatibleProfile"
+          }
+        },
         "type": "object"
       },
       "ExternalIdentityAssertion": {
@@ -525,6 +533,20 @@
               "cell"
             ],
             "description": "The inbox piece to point at; absent clears the pointer."
+          },
+          "replacing": {
+            "anyOf": [
+              {
+                "type": "undefined"
+              },
+              {
+                "$ref": "#/$defs/ShareInboxPiece",
+                "asCell": [
+                  "cell"
+                ]
+              }
+            ],
+            "description": "What the profile is to point at for the write to happen. Left out, the\npointer is set whatever it holds. Present and `undefined`, it is set only\nwhile the profile points at no inbox. A link, it is set only while the\nprofile points at that inbox, by a comparison of links that reads only\nlink shape: a link to an inbox holding nothing is a link, and names it.\nAn event spelled `{ inbox, replacing: undefined }` is a conditional one."
           }
         },
         "type": "object"
@@ -594,15 +616,40 @@
       }
     },
     "properties": {
-      "defaultName": {
-        "type": "string"
+      "defaultProfile": {
+        "$ref": "#/$defs/DefaultProfileSlot",
+        "asCell": [
+          "cell"
+        ]
       },
-      "inputId": {
-        "type": "string"
+      "legacyDefaultProfile": {
+        "anyOf": [
+          {
+            "type": "undefined"
+          },
+          {
+            "$ref": "#/$defs/BackwardsCompatibleProfile"
+          }
+        ],
+        "asCell": [
+          "cell"
+        ]
+      },
+      "mru": {
+        "asCell": [
+          "cell"
+        ],
+        "items": {
+          "$ref": "#/$defs/BackwardsCompatibleProfile"
+        },
+        "type": "array"
+      },
+      "offersSetDefault": {
+        "default": true,
+        "type": "boolean"
       },
       "privateInbox": {
-        "$ref": "#/$defs/ProfileInbox",
-        "description": "Home's private inbox, if the embedder has it, held as a profile holds its\npointer. Each profile this creates is pointed at it, unless the profile\npoints at an inbox already."
+        "$ref": "#/$defs/ProfileInbox"
       },
       "profiles": {
         "asCell": [
@@ -612,61 +659,33 @@
           "$ref": "#/$defs/BackwardsCompatibleProfile"
         },
         "type": "array"
+      },
+      "retiredProfiles": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/BackwardsCompatibleProfile"
+        },
+        "type": "array"
       }
     },
     "required": [
-      "profiles"
+      "profiles",
+      "offersSetDefault",
+      "mru"
     ],
     "type": "object"
   },
-  "pattern": "system/profile-create.tsx",
+  "pattern": "system/profile-picker.tsx",
   "resultSchema": {
-    "$defs": {
-      "CreateProfileEvent": {
-        "properties": {
-          "detail": {
-            "properties": {
-              "message": {
-                "type": "string"
-              }
-            },
-            "type": "object"
-          },
-          "key": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "target": {
-            "properties": {
-              "value": {
-                "type": "string"
-              }
-            },
-            "type": "object"
-          }
-        },
-        "type": "object"
-      }
-    },
     "properties": {
-      "$NAME": {
-        "type": "string"
-      },
       "$UI": {
         "$ref": "https://commonfabric.org/schemas/vnode.json"
-      },
-      "createProfile": {
-        "$ref": "#/$defs/CreateProfileEvent",
-        "asCell": [
-          "stream"
-        ]
       }
     },
     "required": [
-      "createProfile",
-      "$NAME",
       "$UI"
     ],
     "type": "object"
