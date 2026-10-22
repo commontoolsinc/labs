@@ -830,7 +830,7 @@ describe("view interests", () => {
       .toHaveLength(0);
   });
 
-  it("re-evaluates the watch set for a plan that changes what a view is delivered", async () => {
+  it("extends a view's support graph for a delivery that only grew, without re-evaluating its demand", async () => {
     await set([], [view()]);
     const [{ handle }] = server.viewInterestsForSpace(space);
     await server.setViewSelection(space, handle, {
@@ -845,17 +845,66 @@ describe("view interests", () => {
         generation: 2,
         delivery: [query("of:support"), query("of:ordinary")],
       });
+      // The one evaluation resolves the new delivery's closure before it is
+      // accepted; the pass that delivers it extends the support graph and
+      // evaluates nothing again.
+      expect(evaluations.calls).toHaveLength(1);
       await server.flushSessions();
-      expect(evaluations.calls.length).toBeGreaterThan(0);
+      expect(evaluations.calls).toHaveLength(1);
     } finally {
       evaluations.restore();
     }
+    const effects = messages.filter((message) =>
+      message.type === "session/effect"
+    );
+    expect(effects).toHaveLength(1);
+    const effect = effects[0];
+    if (effect.type !== "session/effect") {
+      throw new Error("Expected session effect");
+    }
+    expect(effect.effect.upserts.map((entry) => entry.id)).toEqual([
+      "of:ordinary",
+    ]);
+    expect(effect.effect.viewPlans?.[0].generation).toBe(2);
+    // The grown graph tracks the added document from here on.
+    messages.length = 0;
+    await server.writeDocument(space, "of:ordinary", { label: "updated" });
+    await server.flushSessions();
     const ids = messages.flatMap((message) =>
       message.type === "session/effect"
         ? message.effect.upserts.map((entry) => entry.id)
         : []
     );
     expect(ids).toEqual(["of:ordinary"]);
+  });
+
+  it("re-evaluates the watch set for a plan that drops a delivered root", async () => {
+    await set([], [view()]);
+    const [{ handle }] = server.viewInterestsForSpace(space);
+    await server.setViewSelection(space, handle, {
+      generation: 1,
+      delivery: [query("of:support"), query("of:ordinary")],
+    });
+    await server.flushSessions();
+    messages.length = 0;
+    const evaluations = spy(server, "evaluateWatchSet");
+    try {
+      await server.setViewSelection(space, handle, {
+        generation: 2,
+        delivery: [query("of:support")],
+      });
+      await server.flushSessions();
+      // The validation of the new delivery and the pass's full evaluation.
+      expect(evaluations.calls.length).toBeGreaterThan(1);
+    } finally {
+      evaluations.restore();
+    }
+    const removed = messages.flatMap((message) =>
+      message.type === "session/effect"
+        ? message.effect.removes.map((entry) => entry.id)
+        : []
+    );
+    expect(removed).toEqual(["of:ordinary"]);
   });
 
   it("isolates a stored selection from its caller's later mutations", async () => {

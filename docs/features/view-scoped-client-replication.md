@@ -134,12 +134,14 @@ the current execution snapshot.
 Memory retains demand and supporting delivery as separate tracked graphs. Dirty
 documents refresh those graphs incrementally; support updates do not become
 execution demand. Ordinary watch additions extend the demand graph and deliver
-differences against the session's current delivery state. A full view
-replacement or recovery rebuilds the graphs, as does a selection that changes
-what a view is delivered, which then diffs against the session's delivery
-state. A selection that changes only what the view may run or adopt leaves the
-graphs standing: its plans ride the session's next frame, a frame of plans
-alone when nothing dirtied it. A frame carries the plans when they are owed, by
+differences against the session's current delivery state. A selection that
+adds delivery roots to a view and takes none away extends the view's support
+graph by the added roots within the next incremental refresh, over the demand
+graph that refresh keeps current. A full view replacement or recovery rebuilds
+the graphs, as does a selection that drops a delivered root, since only a full
+evaluation diffs the departed document out. A selection that changes only what
+the view may run or adopt leaves the graphs standing: its plans ride the
+session's next frame, a frame of plans alone when nothing dirtied it. A frame carries the plans when they are owed, by
 such a selection or by a rebuilt graph; an incremental frame that owes none
 carries documents alone, and the client keeps the plans it holds. Unrelated commits without catch-up
 markers or operation changes produce no view frame. View replacements declare

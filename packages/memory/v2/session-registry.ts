@@ -101,6 +101,14 @@ export type SessionState = {
    * built. A changed delivery takes `forceFullResync` instead. */
   viewPlansPending: boolean;
 
+  /** Set when a planner selection added delivery roots to a view and took
+   * none away: the next pass extends the view's support graph by the added
+   * roots, inside the incremental refresh, instead of re-evaluating the
+   * whole watch set. Cleared as that pass commits. A selection that removes
+   * a root takes `forceFullResync`, since only a full evaluation diffs a
+   * departed document out. */
+  viewSupportGrown: boolean;
+
   /** Set once this session was admitted an explicit `entity_scope_key`
    * read (protocol.md §2's read row — lease holders only), and STICKY
    * for the session's life: it selects the session's WIRE VOCABULARY
@@ -364,6 +372,7 @@ export class SessionRegistry {
       pendingCaughtUpLocalSeq: existing?.pendingCaughtUpLocalSeq ?? 0,
       forceFullResync: existing?.forceFullResync ?? false,
       viewPlansPending: existing?.viewPlansPending ?? false,
+      viewSupportGrown: existing?.viewSupportGrown ?? false,
       ...(existing?.leaseHolderReads === true
         ? { leaseHolderReads: true }
         : {}),
@@ -502,6 +511,7 @@ export class SessionRegistry {
     session.viewDemandEntities = new Map();
     session.forceFullResync = true;
     session.viewPlansPending = false;
+    session.viewSupportGrown = false;
   }
 
   detach(space: string, sessionId: string, ownerConnectionId: string): void {

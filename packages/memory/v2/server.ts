@@ -2433,6 +2433,23 @@ export type EngineOpener = (
  * the default. It also reads and writes documents directly, outside any
  * session, for in-process callers such as blob uploads.
  */
+/** Whether every member of `subset` is in `superset`. */
+function isSubset(subset: Set<string>, superset: Set<string>): boolean {
+  for (const key of subset) if (!superset.has(key)) return false;
+  return true;
+}
+
+/** The roots a planner delivery names, as `scope\0id` keys. */
+function deliveryRootKeys(delivery: readonly ViewQuery[]): Set<string> {
+  const keys = new Set<string>();
+  for (const query of delivery) {
+    for (const root of query.roots) {
+      keys.add(`${root.scope ?? "space"}\0${root.id}`);
+    }
+  }
+  return keys;
+}
+
 export class Server {
   #sessions: SessionRegistry;
   #connections = new Map<string, Connection>();
@@ -6588,8 +6605,23 @@ export class Server {
         ...selection,
         revision: handle.revision,
       });
-      if (sameDelivery(previous)) session!.viewPlansPending = true;
-      else session!.forceFullResync = true;
+      // A delivery that only grew extends the view's support graph on the
+      // next pass; one that dropped a root rebuilds the graphs, since only a
+      // full evaluation diffs the departed document out.
+      if (sameDelivery(previous)) {
+        session!.viewPlansPending = true;
+      } else if (
+        previous !== undefined && previous.revision === handle.revision &&
+        isSubset(
+          deliveryRootKeys(previous.delivery),
+          deliveryRootKeys(selection.delivery),
+        )
+      ) {
+        session!.viewSupportGrown = true;
+        session!.viewPlansPending = true;
+      } else {
+        session!.forceFullResync = true;
+      }
       this.markSpaceDirty(space, []);
       return true;
     });
@@ -6637,18 +6669,7 @@ export class Server {
       engine,
       identity,
     );
-    const selected: WatchSpec[] = [];
-    for (const view of views) {
-      const selection = session.viewSelections.get(view.id);
-      if (selection?.revision !== view.revision) continue;
-      for (const [index, query] of selection.delivery.entries()) {
-        selected.push({
-          id: `view-support:${view.id}:${index}`,
-          kind: "graph",
-          query,
-        });
-      }
-    }
+    const selected = this.#viewSupportWatches(session, views);
     const delivery = selected.length === 0
       ? demand
       : await this.evaluateWatchSet(
@@ -6673,6 +6694,26 @@ export class Server {
       demandGraphs: demand.graphs,
       demandEntities: demand.entities,
     };
+  }
+
+  /** The delivery-only watches the planner's current selections give the views. */
+  #viewSupportWatches(
+    session: SessionState,
+    views: readonly ViewInterest[],
+  ): WatchSpec[] {
+    const selected: WatchSpec[] = [];
+    for (const view of views) {
+      const selection = session.viewSelections.get(view.id);
+      if (selection?.revision !== view.revision) continue;
+      for (const [index, query] of selection.delivery.entries()) {
+        selected.push({
+          id: `view-support:${view.id}:${index}`,
+          kind: "graph",
+          query,
+        });
+      }
+    }
+    return selected;
   }
 
   /** Extends ordinary demand while retaining the view's rendered and support graphs. */
@@ -7103,6 +7144,7 @@ export class Server {
     engine: Engine.Engine,
     watches: readonly WatchSpec[],
     previous: SessionState["graphs"],
+    keyOf: (branch: string) => string = (branch) => branch,
   ) {
     const graphs = new Map(previous);
     const identity = this.#sessionScopeIdentity(session);
@@ -7118,7 +7160,8 @@ export class Server {
     };
     const attribution = createRootAttribution();
     for (const [branch, query] of groupedQueries(watches)) {
-      const existing = graphs.get(branch);
+      const key = keyOf(branch);
+      const existing = graphs.get(key);
       if (existing === undefined) {
         const tracked = trackGraph(
           session.space,
@@ -7136,7 +7179,7 @@ export class Server {
         // failure (or a failing operation-field attachment) must not
         // leave an already-inserted entry over budget.
         this.#enforceEvaluationCacheBudget();
-        graphs.set(branch, tracked.state);
+        graphs.set(key, tracked.state);
         for (const [docKey, entity] of tracked.state.entities) {
           recordUpdate(docKey, entity);
         }
@@ -7148,7 +7191,7 @@ export class Server {
       }
 
       const staged = cloneTrackedGraphState(engine, existing);
-      graphs.set(branch, staged);
+      graphs.set(key, staged);
       const extended = extendTrackedGraph(
         session.space,
         engine,
@@ -8301,8 +8344,9 @@ export class Server {
             // expensive failure is the one most worth attributing.
             let sessionKind: "untouched" | "touched" = "untouched";
             try {
-              let touched = false;
+              let touched = session.viewSupportGrown;
               for (const dirtyId of batchDirtyIds) {
+                if (touched) break;
                 if (session.trackedIds.has(dirtyId)) {
                   touched = true;
                   break;
@@ -8377,6 +8421,25 @@ export class Server {
                   "phase",
                   "walk",
                 );
+              }
+              // A planner selection that grew a view's delivery extends its
+              // support graph here, by the added roots, over the demand graph
+              // the refresh above kept current; the grown graphs take effect
+              // as this frame commits.
+              let grownGraphs: SessionState["graphs"] | undefined;
+              if (session.viewSupportGrown) {
+                const grown = this.#extendWatchGraphs(
+                  session,
+                  engine,
+                  this.#viewSupportWatches(session, session.views),
+                  session.graphs,
+                  (branch) => `view-support:${branch}`,
+                );
+                grownGraphs = grown.graphs;
+                for (const [key, entry] of grown.updates) {
+                  changedInterests.add(toDirtyKey(entry.id, entry.scopeKey));
+                  updates.set(key, entry);
+                }
               }
               if (
                 updates.size === 0 && changedInterests.size === 0 &&
@@ -8456,6 +8519,14 @@ export class Server {
               const commitEntities = () => {
                 const trackedStartedAt = performance.now();
                 try {
+                  if (grownGraphs !== undefined) {
+                    session.graphs = grownGraphs;
+                    this.#addMissedToTrackedIds(
+                      session.trackedIds,
+                      grownGraphs.values(),
+                    );
+                    session.viewSupportGrown = false;
+                  }
                   // A new delivered entity adds a key to the session's
                   // demand; a changed snapshot of a held one does not.
                   let enteredEntity = false;
