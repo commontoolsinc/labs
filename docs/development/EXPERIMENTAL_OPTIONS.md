@@ -1943,18 +1943,21 @@ the per-epic implementation notes).
   long, up to the cap, and a settle that reaches quiescence, or a loop that
   finds no work, hands it the base again. The first consequence of a burst
   stays visible within the base; the cascade behind it is cut less often as
-  it goes; and an event that arrives while a longer settle runs is drained
-  into the same wave by the settle's own re-drain, so the shared derivations
-  downstream run once for several events rather than once per event.
+  it goes; and the events that arrive while a longer settle runs are drained
+  together by the next cycle, so one wave carries several events and the
+  commit, flush pass, frames and client integrations behind a wave are paid
+  once for all of them. The scheduler still derives from each event as it is
+  drained.
 - **Current default and planned end state.** Off by default: every settle
   takes the base deadline. The end state is a default cap, chosen from the
   vote burst's and the seed's counts of waves, flush passes, frames and
   client integrations with the cap on, and then the knob goes.
 - **Status on 2026-10-22.** Implemented, off by default. With a 1000 ms cap
   over the 100 ms base, one burst of 25 votes takes 8 waves on the main
-  thread rather than 68 and 7 in the worker rather than 31; flush passes,
-  session walks, frames and client runs fall by the same factor, the serving
-  scheduler's own runs do not, and the browser benchmark's `vote burst 5x5`
+  thread rather than 68 and 7 in the worker rather than 31; on the main
+  thread flush passes fall from 76 to 17, session walks from 330 to 75,
+  frames from 660 to 202 and each client's runs from 643 to 315, the serving
+  scheduler's own runs do not move, and the browser benchmark's `vote burst 5x5`
   goes from 5.8 s to 4.7 s on the main thread and 4.6 s to 4.1 s in the
   worker
   ([record](../history/development/performance/2026-10-22-served-vote-wave-costs.md)).

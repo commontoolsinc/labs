@@ -293,11 +293,13 @@ Before a push: repo-wide `deno fmt --check`, `deno lint`, `deno task check`,
        five frames), and, under serving, every client re-running every
        served action (about half of a client's runs). It ends with seven
        removals and the invariant each keeps.
-3. [ ] Build the removals the census selects, each measured against the
-       census's counts before its headline: a removal that does not move its
-       count did not remove the work. Each lands behind nothing where it is
-       a pure cost reduction and behind a registry entry where it changes
-       what a session receives.
+3. [ ] Build the seven removals the census selects, each measured against
+       the census's counts before its headline: a removal that does not move
+       its count did not remove the work. Each lands behind nothing where it
+       is a pure cost reduction and behind a registry entry where it changes
+       what a session receives. View-scoped replication is not one of the
+       seven; it is measured here because it stands to retire the
+       subscriptions the first three removals cheapen.
    - [x] The serving loop's wave coalescing: a flush deadline that grows
          after a cut settle, capped by `SERVER_EXECUTION_FLUSH_DEADLINE_MAX_MS`.
          The [wave-costs record](../history/development/performance/2026-10-22-served-vote-wave-costs.md)
@@ -320,9 +322,13 @@ Before a push: repo-wide `deno fmt --check`, `deno lint`, `deno task check`,
    - [ ] One root evaluation per (document, path) per walk with its schemas
          validated against it, and a memo for a selector that failed against
          a document version (the memory server, every arm).
+   - [ ] The space-pure part of a root evaluation shared across the
+         sessions of one batch (the memory server, every arm).
    - [ ] The client integrating a served value as a result rather than a
          trigger (the client, under serving).
    - [ ] The bookkeeping-only commits that skip the walk.
+   - [ ] On the OFF arm, a watch add answered without waiting for a flush
+         pass to end.
 4. [ ] Measure the burst on both arms and the seed, twice each, and record
        them beside the serving-side rows.
 5. [ ] Revisit the overlap's default under the worker once the floor has

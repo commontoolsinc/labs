@@ -112,10 +112,13 @@ relaxes it for the cascade behind it: a settle the deadline cut hands the
 next cycle a deadline twice as long, up to a cap
 (`SpaceServerPolicy.flushDeadlineMaxMs`,
 `SERVER_EXECUTION_FLUSH_DEADLINE_MAX_MS`), and a settle that reaches
-quiescence, or a loop that finds no work, hands it the base again. An event
-arriving while a longer settle runs is drained into the same wave by the
-settle's existing re-drain, so pending events fold in. With no cap set
-nothing changes. `executor-sustained-input.test.ts` pins the shape: twice
+quiescence, or a loop that finds no work, hands it the base again. A settle
+drains events once, as its wave opens (the re-drain inside a settle runs only
+after an in-flight predecessor commit finishes, which only the overlap arm
+has), so an event arriving while a longer settle runs waits for the next
+cycle; what a longer wave buys is that the next drain then finds several
+events waiting and one wave carries them all. With no cap set nothing
+changes. `executor-sustained-input.test.ts` pins the shape: twice
 the one before, never past the cap, the base again after quiescence.
 
 ## The measurement: one burst with a 1000 ms cap
@@ -143,16 +146,16 @@ The worker arm's scheduler runs in the worker, outside the probe's
 main-thread trace, which is why its two rows are blank.
 
 The counts move the way the reading predicted. Twenty-five votes become eight
-waves on the main thread rather than 68, about three votes to a wave, which
-is the folding of pending events: a vote that arrives while a longer settle
-runs is drained into the settle under way. Everything priced per wave falls
+waves on the main thread rather than 68, about three votes to a wave: the
+votes that arrive while a longer settle runs are drained together when the
+next wave opens. Everything priced per wave falls
 with the wave count — flush passes 76 to 17, walks 330 to 75, frames 660 to
 202 — and each client runs half as many actions and traverses half as often,
 because it integrates eight commits rather than 68. The one count that does
-not move is the serving scheduler's own runs, 858 to 888: the wave folds the
-events it drains, but the scheduler still derives from each one as it
-arrives, so a handler-adjacent lift that three votes reach runs three times
-within the same wave. Longer waves collapse the fan-out machinery around a
+not move is the serving scheduler's own runs, 858 to 888: a wave carries the
+several events its drain found, but the scheduler still derives from each
+one as it is dispatched, so a handler-adjacent lift that three votes reach
+runs three times within the same wave. Longer waves collapse the fan-out machinery around a
 run and leave the runs themselves to the next removal.
 
 The browser benchmark's headline follows the counts:

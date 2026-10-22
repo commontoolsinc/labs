@@ -653,10 +653,10 @@ the next cycle a deadline twice as long, up to the policy's
 `flushDeadlineMaxMs` (`SERVER_EXECUTION_FLUSH_DEADLINE_MAX_MS`); a settle that
 reaches quiescence, or a loop that finds no work, hands it the base again. So
 a burst's first consequence is visible within the base, the cascade behind it
-is cut less often as it goes, and an event arriving while a longer settle
-runs is drained into the same wave, which is what spares the sessions a
-flush pass, a walk and a frame per partial wave. With no cap set, every
-settle takes the base. `wavesBudgetExhausted` counts
+is cut less often as it goes, and the events arriving while a longer settle
+runs wait for the next cycle's drain and share the wave it opens, which is
+what spares the sessions a flush pass, a walk and a frame per event. With no
+cap set, every settle takes the base. `wavesBudgetExhausted` counts
 exhausted cycles, including those with no wave closure or durable commit;
 `waves` counts closures, including vacuous or aborted outcomes. Their ratio
 is not a committed-wave exhaustion fraction. The amplification budget's
