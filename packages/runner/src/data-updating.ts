@@ -54,7 +54,7 @@ import {
 } from "./cfc/types.ts";
 import { createRef } from "./create-ref.ts";
 import { findAndInlineDataUriLinks } from "./data-uri.ts";
-import { resolveLink } from "./link-resolution.ts";
+import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import {
   areNormalizedLinksSame,
   areNormalizedLinksSameIgnoringScope,
@@ -1289,12 +1289,15 @@ function isNarrowerInstanceOf(
  * Written at `link`, a link to a slot realized there would point the instance
  * back at the slot that points at it: a link cycle every later read meets.
  * Written there, the link refers to the instance itself.
+ *
+ * The slots read are the broader-scope ones, not the region the write lands
+ * in, so they are not write-destination reads. What is read at each is which
+ * reference sits there, and `readMaybeLink` journals exactly that.
  */
 function realizesAt(
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   target: NormalizedFullLink,
-  options: DiffAndUpdateOptions | undefined,
 ): boolean {
   if (
     !areNormalizedLinksSameIgnoringScope(target, link) ||
@@ -1302,35 +1305,28 @@ function realizesAt(
   ) {
     return false;
   }
-  const readOptions = {
-    ...options,
-    meta: { ...options?.meta, ...writeDestinationRead },
-  };
   let scope: CellScope | undefined = target.scope;
   while (scope !== undefined && scopeRank(scope) < scopeRank(link.scope)) {
-    scope = realizationScope(tx, { ...target, scope }, readOptions);
+    scope = realizationScope(tx, { ...target, scope });
   }
   return scope === link.scope;
 }
 
 /**
  * The narrower scope `slot` hands its content to, decided as link resolution
- * decides it: by the stored value at `slot`'s path or, where that path is
- * absent, at the nearest ancestor present. `undefined` when that value is
- * content, or a link anywhere but the same position of the same document at a
- * narrower scope.
+ * decides it: by the nearest link stored at `slot`'s path or above it. A
+ * position holding content has no link above it, since a link stores no
+ * children. `undefined` when there is no such link, or when it names anything
+ * but the same position of the same document at a narrower scope.
  */
 function realizationScope(
   tx: IExtendedStorageTransaction,
   slot: NormalizedFullLink,
-  readOptions: DiffAndUpdateOptions,
 ): CellScope | undefined {
   for (let depth = slot.path.length; depth >= 0; depth--) {
     const position = { ...slot, path: slot.path.slice(0, depth) };
-    const stored = tx.readValueOrThrow(position, readOptions);
-    if (stored === undefined) continue;
-    if (!isPrimitiveCellLink(stored)) return undefined;
-    const hop = parseLink(stored, position);
+    const hop = readMaybeLink(tx, position);
+    if (hop === undefined) continue;
     return areNormalizedLinksSameIgnoringScope(hop, position) &&
         scopeRank(hop.scope) > scopeRank(position.scope)
       ? hop.scope
@@ -1846,7 +1842,7 @@ export function normalizeAndDiff(
   if (
     newValueLink !== undefined &&
     (areNormalizedLinksSame(link, newValueLink) ||
-      realizesAt(tx, link, newValueLink, options))
+      realizesAt(tx, link, newValueLink))
   ) {
     diffLogger.debug(
       "diff",
