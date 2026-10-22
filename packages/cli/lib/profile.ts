@@ -539,9 +539,11 @@ function isRetired(root: Cell<unknown>, config: ProfileTargetConfig): boolean {
  * the profile of `config.identity` whose space is `config.profileSpace`,
  * which is retired before the send exactly when `retired` is true and is not
  * after it. The home root is started, since its handler runs in this
- * process. `doing` names the act in a failure's message.
+ * process, and only once it is found to exist, so that a refused act creates
+ * no home. `doing` names the act in a failure's message.
  *
- * @throws Error when the commit fails, or when it leaves the profile's
+ * @throws Error when the identity has no home, when the commit fails, or
+ * when it leaves the profile's
  * retirement as it was: a refused write does not reach the commit's own
  * status, since the runtime records the refusal on the transaction it
  * rejected.
@@ -555,6 +557,9 @@ async function sendToHome(
 ): Promise<void> {
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
   try {
+    if (await pieces.getDefaultPattern(false) === undefined) {
+      throw new Error(`${config.space} has no home, so it has no profiles.`);
+    }
     const home = await pieces.ensureDefaultPattern();
     const root = home.getCell().withTx().asSchema(undefined);
     const profile = await listedProfile(root, config, retired);

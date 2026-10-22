@@ -178,6 +178,28 @@ describe("profile management", () => {
   });
 
   describe("retireProfile()", () => {
+    it("throws, creating no home, for a person who has none", async () => {
+      let created = false;
+      const homeless = () =>
+        Promise.resolve({
+          runtime,
+          synced: () => Promise.resolve(),
+          dispose: () => Promise.resolve(),
+          getDefaultPattern: () => Promise.resolve(undefined),
+          ensureDefaultPattern: () => {
+            created = true;
+            return Promise.resolve({ getCell: () => host });
+          },
+        } as unknown as PiecesController);
+
+      await expect(
+        retireProfile({ ...CONFIG, profileSpace: space }, {
+          loadPieces: homeless,
+        }),
+      ).rejects.toThrow(/has no home/);
+      expect(created).toBe(false);
+    });
+
     it("leaves the retired profile out of the list, and the rest in it", async () => {
       const ada = await createProfile({ ...CONFIG, name: "Ada" }, {
         loadPieces,

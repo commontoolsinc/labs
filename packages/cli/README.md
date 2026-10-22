@@ -12,7 +12,7 @@ each row as an object that carries no bytes:
 - `name`: the profile's display name, or `""`;
 - `picture`: `{ "size": <bytes>, "byOwner": <boolean> }`, or `null` when it has
   none;
-- `avatar`: the legacy avatar, shown only where there is no picture, as
+- `avatar`: the legacy avatar, which a profile shows where it has no picture, as
   `{ "text": <text>, "byOwner": <boolean> }`, or, for a `data:` URL,
   `{ "size": <bytes it holds>, "byOwner": <boolean> }`, or `null` when it has
   none;

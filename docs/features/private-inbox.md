@@ -632,10 +632,10 @@ more, `receivedAt`:
 - `sharedAt`: when the sender shared the offer, in milliseconds since the
   epoch, by the sender's clock.
 - `toProfile`: `{space}`, the recipient's profile the offer is for, by its
-  space DID, when the sender named one. Every profile of one identity points
-  at this one inbox, so this is what tells the recipient which of their
-  profiles was offered the thing. Like `from`, it is the sender's claim; a
-  reader acts on it only for a profile that is its own.
+  space DID, when the sender named one. Several profiles of one identity can
+  point at one inbox, so this is what tells the recipient which of them was
+  offered the thing. Like `from`, it is the sender's claim; a reader acts on
+  it only for a profile that is its own and that points at this inbox.
 - `receivedAt`: when the inbox received the offer, by its own clock. A
   handler's clock reads to the second, so two offers can share it.
 

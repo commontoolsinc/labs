@@ -174,7 +174,8 @@ wish({ query: "#profileSpace" }) // default profile's space cell
 
 Once profile data is loaded and at least one profile exists,
 `wish({ query: "#profile" }).result` is **the single current profile** —
-the best of the ordered candidates (default → MRU → first) — in **every** mode
+the best of the ordered candidates (default → MRU → first, or the preferred
+profile first, as the next paragraph says) — in **every** mode
 (interactive, headless, and the blessed read). It does not depend on the picker
 sidecar pattern running, so
 consumers can gate on `.result` without stranding in the multi-profile case
@@ -182,11 +183,12 @@ consumers can gate on `.result` without stranding in the multi-profile case
 
 A profile the home lists in `retiredProfiles` is not a candidate. A runtime
 constructed with `preferredProfileSpace`, which a host gives a runtime that acts
-as one of the user's profiles (the Weaver runs one per facet), answers with the
-profile in that space ahead of the rest. When the home does not list that
-profile, or has retired it, `#profile` fails with an error naming the space
-rather than answer as another profile. The home's own default and MRU are
-unchanged, and nothing else reads the option.
+as one of the user's profiles (the Weaver runs one per facet), orders the
+profile in that space ahead of the rest, so `#profile` and the profile-data
+wishes above (`#profileName` and the rest) answer from it. When the home does
+not list that profile, or has retired it, these wishes fail with an error
+naming the space rather than answer as another profile, even when other
+profiles are live. The home's own default and MRU are unchanged.
 
 Profile resolution waits for the Home root, default pattern, roster, and
 referenced profile documents to load before publishing a new result or opening

@@ -1149,8 +1149,10 @@ const profileWish = wish({ query: "#profile" }); // resolves the viewer's profil
   other participants, bind the profile cell they contributed to the shared roster
   on join.
 - `size`: `xs | sm | md | lg | xl`.
-- The verified seal only appears for a live, runtime-attested profile cell (it
-  will not show in stories or `--no-run` checks — that is expected, not a failure).
+- The verified seal only appears for a live, runtime-attested cell: a profile,
+  or another record of the person whose label attests them, which wears the
+  owner's seal alone (it will not show in stories or `--no-run` checks — that
+  is expected, not a failure).
 - **Every participant** with a stored profile cell can be badged — not just the
   viewer. Cross-space profile reads resolve for any authorized viewer (CT-1667/1687),
   so store each person's `#profile` cell in the shared `PerSpace` roster on join and
