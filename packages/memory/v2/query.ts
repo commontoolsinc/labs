@@ -114,8 +114,10 @@ export type TrackedGraphState = {
   /**
    * The tracker's records by the referrers whose walks needed them, keyed
    * by `trackedEntryKey`: a document reached through a link attributes to
-   * the document holding the link, a schema document to the document whose
-   * schema or envelope names it, and a watch root to its root key
+   * the document holding the link, a schema document a walk needed to the
+   * document whose selector or envelope names it, a schema document a
+   * delivered document's content refers to that document's closure key
+   * (`closureReferrerKey`), and a watch root to its root key
    * (`rootReferrerKey`). A record whose last walked referrer lets go
    * retires; a document with no record left is retired with it and leaves
    * `entities`, so what nothing reaches any more stops being delivered.
@@ -1728,6 +1730,23 @@ const entryDocKey = (entry: string): QueryDocKey =>
 
 const ROOT_REFERRER_PREFIX = "root\0";
 
+const CLOSURE_REFERRER_PREFIX = "closure\0";
+
+/**
+ * The referrer key under which a delivered document keeps the schema
+ * documents its content refers to. It is distinct from the document's own
+ * key, under which its walk keeps what its selector needs, so that a ref
+ * dropped from the content releases nothing the walk still attributes.
+ */
+const closureReferrerKey = (docKey: QueryDocKey): string =>
+  `${CLOSURE_REFERRER_PREFIX}${docKey}`;
+
+/** The document a referrer key that is not a root's names. */
+const referrerDocKey = (referrer: string): QueryDocKey =>
+  (referrer.startsWith(CLOSURE_REFERRER_PREFIX)
+    ? referrer.slice(CLOSURE_REFERRER_PREFIX.length)
+    : referrer) as QueryDocKey;
+
 /** The referrer key of a watch root: its document key and its selector. */
 export const rootReferrerKey = (
   docKey: string,
@@ -1746,11 +1765,6 @@ export const rootReferrersOf = (
       toDocumentSelector(root.selector),
     )
   );
-
-/** Whether a schema document's record, which the closure assembly
- * attributes outside any walk, is what `entry` names. */
-const isSchemaDocEntry = (entry: string): boolean =>
-  fromDocKey(entryDocKey(entry)).id.startsWith("cid:");
 
 /** The tracker attribution of a graph state. */
 type TrackedAttribution = Pick<
@@ -1939,7 +1953,7 @@ const retireOrphans = (
       if (referrer.startsWith(ROOT_REFERRER_PREFIX)) {
         retirement.rewalkRoots.add(referrer);
       } else {
-        retirement.rewalkDocs.add(referrer as QueryDocKey);
+        retirement.rewalkDocs.add(referrerDocKey(referrer));
       }
     }
     if (!state.tracker.has(docKey)) {
@@ -1981,14 +1995,28 @@ const retireEmptied = (
     state.schemaRefs.delete(docKey);
     retirement.retired.add(docKey);
     retirement.rewalkDocs.delete(docKey);
-    // What the manager holds for a retired document stands for a walk
-    // whose records are gone: a root added again would be served the
-    // document as it was when that walk read it.
-    const { id, scopeKey } = fromDocKey(docKey);
-    state.manager.forgetInstance(scopeKey, id);
     releaseReferrer(missesView(state), docKey, changedMisses);
     releaseReferrer(crossingsView(state), docKey);
     releaseTrackedReferrer(state, docKey, retirement);
+    releaseTrackedReferrer(state, closureReferrerKey(docKey), retirement);
+  }
+};
+
+/**
+ * Drops what `manager` holds for the documents `retirement` retired. A
+ * cached document stands for a walk whose records are gone: a root added
+ * again would be served the document as it was when that walk read it.
+ * A refresh calls this again once it has merged its own walk's manager
+ * into the graph's, since that walk may have read a document the pass
+ * went on to retire.
+ */
+const forgetRetiredFromManager = (
+  manager: EngineObjectManager,
+  retirement: Retirement,
+): void => {
+  for (const docKey of retirement.retired) {
+    const { id, scopeKey } = fromDocKey(docKey);
+    manager.forgetInstance(scopeKey, id);
   }
 };
 
@@ -2011,6 +2039,15 @@ const forgetRetiredFromMemo = (
     forgotten.add(schemaMemoDocumentPrefix({ space, scope, id }));
   }
   forgetSchemaMemoDocuments(state.memo, forgotten);
+};
+
+/** What a retired document left cached in `state`, forgotten. */
+const forgetRetired = (
+  state: TrackedGraphState,
+  retirement: Retirement,
+): void => {
+  forgetRetiredFromManager(state.manager, retirement);
+  forgetRetiredFromMemo(state, retirement);
 };
 
 /**
@@ -2059,7 +2096,7 @@ const rewalkDocument = (
   }
   const restored = recorders.fresh.get(docKey);
   for (const entry of previous) {
-    if (restored?.has(entry) || isSchemaDocEntry(entry)) continue;
+    if (restored?.has(entry)) continue;
     state.tracksOf.get(docKey)?.delete(entry);
     dropAttribution(state, entry, docKey, retirement);
   }
@@ -2128,7 +2165,7 @@ const sweepSuspects = (
               rooted = docKey;
               break search;
             }
-            const referrerDoc = referrer as QueryDocKey;
+            const referrerDoc = referrerDocKey(referrer);
             if (reachable.has(referrerDoc)) {
               rooted = docKey;
               break search;
@@ -2264,7 +2301,7 @@ const settleRetirement = (
       retirement.reconcile.add(root.docKey);
     }
   }
-  forgetRetiredFromMemo(state, retirement);
+  forgetRetired(state, retirement);
   return touched;
 };
 
@@ -2319,21 +2356,23 @@ const deliverTouched = (
     state.tracker.add(key, REJECTING_SELECTOR);
   }
   for (const [referrer, keys] of staged.closureOf) {
+    const closureReferrer = closureReferrerKey(referrer);
     for (const key of keys) {
-      recorders.tracked(key, REJECTING_SELECTOR, referrer, "walked");
+      recorders.tracked(key, REJECTING_SELECTOR, closureReferrer, "walked");
     }
   }
   const retirement = createRetirement();
   for (const { referrer, key } of staged.closureDrops) {
     const entry = trackedEntryKey(key, REJECTING_SELECTOR);
-    state.tracksOf.get(referrer)?.delete(entry);
-    dropAttribution(state, entry, referrer, retirement);
+    const closureReferrer = closureReferrerKey(referrer);
+    state.tracksOf.get(closureReferrer)?.delete(entry);
+    dropAttribution(state, entry, closureReferrer, retirement);
   }
   // A schema document attributes nothing of its own, so retiring one
   // uncovers nothing and the cascade ends here.
   retireOrphans(state, retirement);
   retireEmptied(state, retirement, changedMisses);
-  forgetRetiredFromMemo(state, retirement);
+  forgetRetired(state, retirement);
   for (const [key, snapshot] of staged.additions) {
     updates.set(key, snapshot);
   }
@@ -2636,8 +2675,9 @@ export const trackGraph = (
     schemaTracker.add(key, REJECTING_SELECTOR);
   }
   for (const [referrer, keys] of staged.closureOf) {
+    const closureReferrer = closureReferrerKey(referrer);
     for (const key of keys) {
-      tracked(key, REJECTING_SELECTOR, referrer, "walked");
+      tracked(key, REJECTING_SELECTOR, closureReferrer, "walked");
     }
   }
   for (const [key, snapshot] of staged.additions) {
@@ -3046,6 +3086,7 @@ export const refreshTrackedGraph = (
     phases.enter("merge");
     for (const key of delivered.retired) retirement.retired.add(key);
     state.manager.mergeFrom(manager);
+    forgetRetiredFromManager(state.manager, retirement);
 
     stats.managerReads = manager.readCount - readCountBefore;
 

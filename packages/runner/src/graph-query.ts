@@ -353,8 +353,13 @@ export class GraphQueryWalk {
       this.#identity,
     );
     docKey ??= derivedKey;
+    // The override stands for the instance being visited, and the
+    // session's own instance has none to set, so a visit to it takes down
+    // the one an explicit instance visited before it left.
     if (docKey !== derivedKey) {
       this.#keyOverrides.set(derivedKey, docKey);
+    } else {
+      this.#keyOverrides.delete(derivedKey);
     }
     const internedSelector = internPathSelector(effectiveSelector);
     const covering = coveringSelector(

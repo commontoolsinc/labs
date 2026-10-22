@@ -1270,6 +1270,126 @@ describe("Server", () => {
         }
       });
 
+      it("walks, for a root added later, a document a refresh retired, at the version that refresh read", async () => {
+        // One write unlinks `of:x` from `of:a` and relinks `of:x` to a new
+        // `of:y`. The refresh reads the new `of:x` and then retires it,
+        // and the graph's cache lets go of it when the refresh's reads are
+        // merged in, so a watch on `of:x` added afterwards walks it and
+        // reaches `of:y`.
+        const fixture = await openFixture(0);
+        try {
+          await fixture.writer.transact({
+            localSeq: 2,
+            reads: { confirmed: [], pending: [] },
+            operations: [
+              {
+                op: "set",
+                id: "of:a",
+                value: { value: { child: link(fixture.space, "of:x") } },
+              },
+              { op: "set", id: "of:x", value: { value: { name: "x" } } },
+              { op: "set", id: "of:b", value: { value: { name: "b" } } },
+            ],
+          });
+          await fixture.server.flushSessions();
+          const { view } = await fixture.reader.watchAddSync([
+            permissive("of:a"),
+            watch("of:b"),
+          ]);
+          const frames = view.subscribeSync();
+          const pushed = frames.next();
+          await fixture.writer.transact({
+            localSeq: 3,
+            reads: { confirmed: [], pending: [] },
+            operations: [
+              { op: "set", id: "of:a", value: { value: {} } },
+              {
+                op: "set",
+                id: "of:x",
+                value: { value: { child: link(fixture.space, "of:y") } },
+              },
+              { op: "set", id: "of:y", value: { value: { name: "y" } } },
+            ],
+          });
+          await fixture.server.flushSessions();
+          const { value: frame } = await pushed;
+          expect(ids(frame!.removes)).toEqual(["of:x"]);
+          const added = await fixture.reader.watchAddSync([permissive("of:x")]);
+          expect(ids(added.sync.upserts)).toEqual(["of:x", "of:y"]);
+          expect(ids([...fixture.state.entities.values()])).toEqual([
+            "of:a",
+            "of:b",
+            "of:x",
+            "of:y",
+          ]);
+        } finally {
+          await fixture.close();
+        }
+      });
+
+      it("keeps, at the refresh, a schema document the selector needs when the content stops referring to it", async () => {
+        // The watch's selector is `outer`, which refers to `leaf`, and the
+        // document's link carries the same ref. Replacing the document
+        // with a value carrying no ref releases what the content kept and
+        // nothing the selector's walk keeps, so both stay delivered.
+        const leaf = { type: "string", title: "selector-leaf" } as const;
+        const leafHash = internSchemaAsTaggedHashString(leaf);
+        const outer = {
+          type: "object",
+          properties: { x: { $ref: `cid:${leafHash}` } },
+        } as const;
+        const outerHash = internSchemaAsTaggedHashString(outer);
+        const selectorWatch: GraphWatchSpec = {
+          id: "of:a",
+          kind: "graph",
+          query: {
+            roots: [{
+              id: "of:a",
+              selector: { path: [], schema: { $ref: `cid:${outerHash}` } },
+            }],
+          },
+        };
+        const fixture = await openFixture(0);
+        try {
+          await fixture.writer.transact({
+            localSeq: 2,
+            reads: { confirmed: [], pending: [] },
+            operations: [
+              { op: "set", id: `cid:${leafHash}`, value: { value: leaf } },
+              { op: "set", id: `cid:${outerHash}`, value: { value: outer } },
+              { op: "set", id: "of:t", value: { value: { n: 1 } } },
+              {
+                op: "set",
+                id: "of:a",
+                value: { value: { x: linkWithSchemaRef("of:t", outerHash) } },
+              },
+            ],
+          });
+          await fixture.server.flushSessions();
+          const { view } = await fixture.reader.watchAddSync([selectorWatch]);
+          const delivered = () => ids([...fixture.state.entities.values()]);
+          expect(delivered()).toEqual(
+            [`cid:${leafHash}`, `cid:${outerHash}`, "of:a", "of:t"].toSorted(),
+          );
+          const frames = view.subscribeSync();
+          const pushed = frames.next();
+          await fixture.writer.transact({
+            localSeq: 3,
+            reads: { confirmed: [], pending: [] },
+            operations: [{ op: "set", id: "of:a", value: { value: {} } }],
+          });
+          await fixture.server.flushSessions();
+          const { value: frame } = await pushed;
+          expect(ids(frame!.removes)).toEqual(["of:t"]);
+          expect(ids(frame!.upserts)).toEqual(["of:a"]);
+          expect(delivered()).toEqual(
+            [`cid:${leafHash}`, `cid:${outerHash}`, "of:a"].toSorted(),
+          );
+        } finally {
+          await fixture.close();
+        }
+      });
+
       it("retracts, at the refresh, the whole closure of a schema ref a document no longer carries", async () => {
         // `of:a` links under `outer`, which refers to `leaf`. Replacing
         // `of:a` with a value carrying no ref releases the closure the old
