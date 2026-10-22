@@ -1643,3 +1643,92 @@ Deno.test("walks a CFC envelope's schema-document closure transitively", async (
     });
   });
 });
+
+Deno.test("refuses a document whose CFC label map holds a numeric whole-field label or path", async () => {
+  await withEngine((engine) => {
+    const id = "of:numeric-label-carrier";
+    const carrier = (entry: Record<string, unknown>) =>
+      ({
+        op: "set",
+        id,
+        value: {
+          value: { n: 3 },
+          cfc: { version: 1, labelMap: { version: 1, entries: [entry] } },
+        },
+      }) as never;
+    const inline = { confidentiality: ["secret"], integrity: [] };
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, {
+        operations: [carrier({ path: ["n"], label: inline })],
+      }),
+    });
+    let localSeq = 2;
+    const patch = (patches: unknown[]) =>
+      applyCommit(engine, {
+        sessionId: "s:a",
+        commit: commit(localSeq++, {
+          operations: [{ op: "patch", id, patches }],
+        }),
+      });
+
+    // Request parsing cannot see the number a `move` or an `increment`
+    // produces at a label position: only the post-patch document shows it.
+    for (
+      const [field, patches] of [
+        ["label", [{
+          op: "move",
+          from: "/value/n",
+          path: "/cfc/labelMap/entries/0/label",
+        }]],
+        ["label", [
+          { op: "remove", path: "/cfc/labelMap/entries/0/label" },
+          { op: "increment", path: "/cfc/labelMap/entries/0/label", by: 2 },
+        ]],
+        ["path", [{
+          op: "move",
+          from: "/value/n",
+          path: "/cfc/labelMap/entries/0/path",
+        }]],
+        ["path", [
+          { op: "remove", path: "/cfc/labelMap/entries/0/path" },
+          { op: "increment", path: "/cfc/labelMap/entries/0/path", by: 1 },
+        ]],
+      ] as const
+    ) {
+      assertThrows(
+        () => patch([...patches]),
+        ProtocolError,
+        `numeric CFC label-map ${field}`,
+      );
+    }
+    // A set carrying the number is refused at the same point, whatever the
+    // request parser made of it.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(localSeq++, {
+            operations: [carrier({ path: ["n"], label: 0 })],
+          }),
+        }),
+      ProtocolError,
+      "numeric CFC label-map label",
+    );
+    // Nothing a refused commit staged reached the store.
+    assertEquals(
+      (read(engine, { id } as never) as { cfc: unknown }).cfc,
+      {
+        version: 1,
+        labelMap: { version: 1, entries: [{ path: ["n"], label: inline }] },
+      },
+    );
+    // Rewriting the label with an object stays admitted, so a stored number
+    // can be repaired by the same patch path that is refused above.
+    patch([{
+      op: "replace",
+      path: "/cfc/labelMap/entries/0/label",
+      value: { confidentiality: ["repaired"], integrity: [] },
+    }]);
+  });
+});

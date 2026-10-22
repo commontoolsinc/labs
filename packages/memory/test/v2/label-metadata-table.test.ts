@@ -169,7 +169,7 @@ describe("label-metadata-table", () => {
     }
   });
 
-  it("detects and validates numeric fields despite missing siblings and unsupported versions", () => {
+  it("keeps table-free numeric fields inline and resolves tabled ones despite missing siblings and unsupported versions", () => {
     for (const endpoint of endpoints) {
       for (const field of ["label", "path"]) {
         for (const recordEntries of [false, true]) {
@@ -184,11 +184,13 @@ describe("label-metadata-table", () => {
                 },
               },
             };
+            // Without a dictionary the number is stored data: it needs no
+            // negotiation, compresses to nothing, and expands to itself.
             const source = endpoint.wrap([doc]);
             const before = canonical(source);
-            expect(endpoint.has(source)).toBe(true);
-            expect(() => endpoint.compress(source)).toThrow("reference");
-            expect(() => endpoint.expand(source)).toThrow("reference");
+            expect(endpoint.has(source)).toBe(false);
+            expect(endpoint.compress(source)).toBe(source);
+            expect(endpoint.expand(source)).toBe(source);
             expect(canonical(source)).toBe(before);
             const value = field === "label" ? {} : ["secret"];
             const tables = field === "label"
@@ -237,7 +239,32 @@ describe("label-metadata-table", () => {
     }
   });
 
-  it("preserves malformed inline patch payloads while validating whole-field numeric refs", () => {
+  it("keeps a stored numeric field inline and emits no dictionary beside it", () => {
+    for (const endpoint of endpoints) {
+      for (const field of ["label", "path"]) {
+        const stored = {
+          cfc: {
+            version: 1,
+            labelMap: {
+              version: 1,
+              entries: [{ path: ["secret"], label: {}, [field]: 7 }],
+            },
+          },
+        };
+        // The repeated document alone earns a dictionary; the stored number
+        // beside it would then read as a reference, so the envelope stays
+        // inline and is delivered to a negotiated receiver unchanged.
+        const source = endpoint.wrap([compressibleDocument(), stored]);
+        const before = canonical(source);
+        expect(endpoint.compress(source)).toBe(source);
+        expect(endpoint.has(source)).toBe(false);
+        expect(endpoint.expand(source)).toBe(source);
+        expect(canonical(source)).toBe(before);
+      }
+    }
+  });
+
+  it("preserves malformed inline patch payloads and keeps table-free whole-field numbers inline", () => {
     const root = "/cfc/labelMap/entries";
     const patches = [
       { op: "replace", path: "/cfc", value: null },
@@ -276,9 +303,9 @@ describe("label-metadata-table", () => {
           }],
         },
       };
-      expect(hasClientMessageLabelMetadata(indexed)).toBe(true);
-      expect(() => compressClientMessageLabels(indexed)).toThrow("reference");
-      expect(() => expandClientMessageLabels(indexed)).toThrow("reference");
+      expect(hasClientMessageLabelMetadata(indexed)).toBe(false);
+      expect(compressClientMessageLabels(indexed)).toBe(indexed);
+      expect(expandClientMessageLabels(indexed)).toBe(indexed);
     }
   });
 });

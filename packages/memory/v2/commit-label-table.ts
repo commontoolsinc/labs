@@ -67,9 +67,9 @@ export function expandClientMessageLabels(message: unknown): unknown {
 }
 
 /**
- * Detects tables or numeric refs requiring commit-label negotiation. Uses the
- * same metadata positions as expansion and throws on malformed operation shapes.
- * Numeric application values and numeric components inside labels are ordinary data.
+ * Detects tables requiring commit-label negotiation. A number at a whole-field
+ * position without its table is stored data, which commit admission refuses;
+ * numeric application values and numeric components inside labels are ordinary data.
  */
 export function hasClientMessageLabelMetadata(message: unknown): boolean {
   if (
@@ -119,7 +119,7 @@ export function expandServerMessageCommitLabels(message: unknown): unknown {
   return ok === result ? message : deepFreeze({ ...message, ok });
 }
 
-/** Detects result-local tables and numeric refs requiring commit-label negotiation. */
+/** Detects result-local tables requiring commit-label negotiation. */
 export function hasServerMessageCommitLabelMetadata(message: unknown): boolean {
   if (!isPlainObject(message)) return false;
   const result = commitResultOf(message);
@@ -162,11 +162,14 @@ function mapCommitResultMetadata(
   if (!validParent && hasTables) {
     throw new Error("Invalid commit result");
   }
-  // Inline-only malformed results belong to the semantic parser. A numeric
-  // metadata field still requires a valid transport envelope before expansion.
-  const mapValue: MapMetadataValue = validParent ? map : (value) => {
-    if (typeof value === "number") throw new Error("Invalid commit result");
-    return value;
+  // Inline-only malformed results belong to the semantic parser: nothing under
+  // an invalid parent is compressed, and since no table is present there (see
+  // above) a number there is inline data. A reference (a number whose
+  // dictionary is present) still requires a valid revision before expansion.
+  const mapValue: MapMetadataValue = validParent ? map : (value) => value;
+  const tablePresent = {
+    label: Object.hasOwn(result, "labelTable"),
+    path: Object.hasOwn(result, "labelPathTable"),
   };
   const revisions = mapArray(result.revisions, (revision) => {
     if (!isPlainObject(revision)) {
@@ -179,8 +182,8 @@ function mapCommitResultMetadata(
       isSequence(revision.opIndex);
     const mapRevisionValue: MapMetadataValue = validRevision
       ? mapValue
-      : (value) => {
-        if (typeof value === "number") {
+      : (value, field) => {
+        if (typeof value === "number" && tablePresent[field]) {
           throw new Error("Invalid commit revision");
         }
         return value;

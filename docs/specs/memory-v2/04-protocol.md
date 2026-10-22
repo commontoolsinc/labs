@@ -247,8 +247,8 @@ shape.
 of schema tables and message compression. It is a build capability, always
 advertised by this build, and defaults to `false` when absent. The server
 compacts labels and paths only
-when both peers advertise it. A client refuses a sync carrying either table or
-indexed metadata unless the connection negotiated the capability.
+when both peers advertise it. A client refuses a sync carrying either table
+unless the connection negotiated the capability.
 
 `commitLabelTableV1` independently advertises label and label-path tables for
 client `transact` requests and server transaction acknowledgments. This build
@@ -971,11 +971,15 @@ internally; the wire carries only indices and one copy of each selected value.
 Inline, nonindexed CFC metadata is preserved unchanged for semantic readers,
 including malformed metadata and `cfc: null` (no stored policy). The codec
 validates dictionary contents and indexed references, not inline CFC semantics.
-A number in a whole entry's `label` or `path` field is reserved as a dictionary
-reference, even when the sibling field is missing or an envelope version is
-unsupported. This also applies to numeric entry keys in a malformed `entries`
-record. Missing tables and invalid indices are rejected; numeric values inside
-labels, path components, or application data are not whole-field references.
+A number in a whole entry's `label` or `path` field is a dictionary reference
+exactly when the sync carries that field's table, even when the sibling field is
+missing, an envelope version is unsupported, or the entry sits at a numeric key
+in a malformed `entries` record. Invalid indices are rejected. Without the table
+the number is stored data and passes through inline on negotiated and
+unnegotiated connections alike; the server emits no table beside such a number,
+and commit admission refuses to store one (see the commit section below).
+Numeric values inside labels, path components, or application data are not
+whole-field references.
 
 For example, these two entries refer to the same label and path:
 
@@ -1106,10 +1110,16 @@ As with sync tables, nonindexed inline metadata, including malformed CFC
 subtrees and `cfc: null`, reaches semantic CFC readers unchanged. Such a subtree
 does not prevent compression of eligible metadata elsewhere in the commit.
 Dictionary contents, including unused slots, and indexed references remain
-codec-validated. A numeric whole entry `label` or `path` is a reserved reference
-even under an unsupported version, with a missing sibling field, or at a numeric
-key in a malformed `entries` record; it must resolve through the corresponding
-commit dictionary. This rule also applies at document-rooted patch positions.
+codec-validated. A numeric whole entry `label` or `path` is a reference exactly
+when the commit carries the corresponding dictionary, even under an unsupported
+version, with a missing sibling field, or at a numeric key in a malformed
+`entries` record; it must then resolve through that dictionary. This rule also
+applies at document-rooted patch positions. Without the dictionary the number is
+not transport metadata: the request parses, and commit admission refuses every
+resulting document whose whole entry `label` or `path` is a number, including
+one a `move` or `increment` patch produces from application data, because no
+dictionary is stored with a document and a stored number could never be
+resolved.
 
 The client compacts a temporary outgoing message before Fabric encoding and
 transport byte/node validation. It retains the original inline commit for
@@ -1119,9 +1129,9 @@ capability receives the inline representation even for a retained commit.
 
 The server performs bounded wire decoding, then expands negotiated metadata
 before validating the request's commit shape or running CFC and storage checks.
-Unnegotiated tables or indexed metadata, malformed table contents, missing or
-out-of-range references, and expansion beyond the codec's shared 16 MiB
-referenced-label/path byte budget reject the request before commit application.
+Unnegotiated tables, malformed table contents, out-of-range references, and
+expansion beyond the codec's shared 16 MiB referenced-label/path byte budget
+reject the request before commit application.
 That budget counts cumulative canonical encoded label and path bytes at every
 reference, including the codec tag. Expansion removes the tables and restores
 exact metadata; internal and stored commits use the inline representation.

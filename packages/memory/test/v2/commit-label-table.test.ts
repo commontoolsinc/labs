@@ -219,23 +219,39 @@ describe("commit-label-table", () => {
       .toBe(
         canonical(applyPatchToDocument({}, patches)),
       );
-    const indexedPatch = ack([{
+    // A number at a label position without a table is inline data, not a
+    // reference, in a patch payload as in a document.
+    const storedPatch = ack([{
       ...identity,
       op: "patch",
       patches: [
         { op: "replace", path: "/cfc/labelMap/entries/0/label", value: 0 },
       ],
     }]);
-    expect(hasServerMessageCommitLabelMetadata(indexedPatch)).toBe(true);
-    expect(() => expandServerMessageCommitLabels(indexedPatch)).toThrow(
-      "reference",
-    );
-    expect(() => compressServerMessageCommitLabels(indexedPatch)).toThrow(
-      "reference",
-    );
+    expect(hasServerMessageCommitLabelMetadata(storedPatch)).toBe(false);
+    expect(expandServerMessageCommitLabels(storedPatch)).toBe(storedPatch);
+    expect(compressServerMessageCommitLabels(storedPatch)).toBe(storedPatch);
+    const tabledPatch = {
+      ...storedPatch,
+      ok: { ...storedPatch.ok, labelTable: [label()] },
+    };
+    expect(hasServerMessageCommitLabelMetadata(tabledPatch)).toBe(true);
+    const resolved: unknown = expandServerMessageCommitLabels(tabledPatch);
+    assert(isPlainObject(resolved) && isPlainObject(resolved.ok));
+    expect(canonical(resolved.ok.revisions)).toBe(canonical([{
+      ...identity,
+      op: "patch",
+      patches: [
+        {
+          op: "replace",
+          path: "/cfc/labelMap/entries/0/label",
+          value: label(),
+        },
+      ],
+    }]));
   });
 
-  it("preserves identity-only patch ACKs while checking subsequent indexed patch payloads", () => {
+  it("preserves identity-only patch ACKs while resolving subsequent tabled patch payloads", () => {
     const identity = {
       id: "of:fixture",
       branch: "",
@@ -309,12 +325,36 @@ describe("commit-label-table", () => {
             ],
           },
         };
-        expect(hasServerMessageCommitLabelMetadata(indexed)).toBe(true);
-        expect(() => expandServerMessageCommitLabels(indexed)).toThrow(
-          "reference",
-        );
-        expect(() => compressServerMessageCommitLabels(indexed)).toThrow(
-          "reference",
+        expect(hasServerMessageCommitLabelMetadata(indexed)).toBe(false);
+        expect(expandServerMessageCommitLabels(indexed)).toBe(indexed);
+        expect(compressServerMessageCommitLabels(indexed)).toBe(indexed);
+        const tabled = {
+          ...indexed,
+          ok: {
+            ...indexed.ok,
+            ...(field === "label"
+              ? { labelTable: [label()] }
+              : { labelPathTable: [["value"]] }),
+          },
+        };
+        expect(hasServerMessageCommitLabelMetadata(tabled)).toBe(true);
+        expect(canonical(expandServerMessageCommitLabels(tabled))).toBe(
+          canonical({
+            ...indexed,
+            ok: {
+              ...indexed.ok,
+              revisions: [revision, {
+                ...identity,
+                scopeKey: "space",
+                opIndex: 1,
+                patches: [{
+                  op: "replace",
+                  path: `/cfc/labelMap/entries/0/${field}`,
+                  value: field === "label" ? label() : ["value"],
+                }],
+              }],
+            },
+          }),
         );
       }
     }
@@ -366,12 +406,12 @@ describe("commit-label-table", () => {
         sync: { type: "sync", upserts: [], labelTable: [{}] },
       },
     };
-    expect(() => expandServerMessageCommitLabels(siblingTable)).toThrow(
-      "reference",
-    );
+    // A sync's table beside the ACK does not make the ACK's number a
+    // reference: it stays inline, exactly as sent.
+    expect(expandServerMessageCommitLabels(siblingTable)).toBe(siblingTable);
   });
 
-  it("rejects table-free ACK references under invalid result parents while preserving inline metadata", () => {
+  it("keeps table-free numbers inline under invalid result parents and rejects tables there", () => {
     for (const parent of [{ seq: 19 }, { branch: "", seq: "19" }]) {
       for (const field of ["label", "path"]) {
         const source = {
@@ -384,15 +424,6 @@ describe("commit-label-table", () => {
             ],
           },
         };
-        expect(() => hasServerMessageCommitLabelMetadata(source)).toThrow(
-          "Invalid commit result",
-        );
-        expect(() => expandServerMessageCommitLabels(source)).toThrow(
-          "Invalid commit result",
-        );
-        expect(() => compressServerMessageCommitLabels(source)).toThrow(
-          "Invalid commit result",
-        );
         const patch = {
           ...revision({}),
           op: "patch",
@@ -406,12 +437,26 @@ describe("commit-label-table", () => {
           ...source,
           ok: { ...parent, revisions: [patch] },
         };
-        expect(() => hasServerMessageCommitLabelMetadata(patchSource)).toThrow(
-          "Invalid commit result",
-        );
-        expect(() => expandServerMessageCommitLabels(patchSource)).toThrow(
-          "Invalid commit result",
-        );
+        // Without a dictionary the number is inline data for the semantic
+        // parser, whatever it makes of the parent.
+        for (const inline of [source, patchSource]) {
+          const before = canonical(inline);
+          expect(hasServerMessageCommitLabelMetadata(inline)).toBe(false);
+          expect(compressServerMessageCommitLabels(inline)).toBe(inline);
+          expect(expandServerMessageCommitLabels(inline)).toBe(inline);
+          expect(canonical(inline)).toBe(before);
+        }
+        // A dictionary under an invalid parent is still refused.
+        const tables = field === "label"
+          ? { labelTable: [label()] }
+          : { labelPathTable: [["value"]] };
+        for (const inline of [source, patchSource]) {
+          const tabled = { ...inline, ok: { ...inline.ok, ...tables } };
+          expect(hasServerMessageCommitLabelMetadata(tabled)).toBe(true);
+          expect(() => expandServerMessageCommitLabels(tabled)).toThrow(
+            "Invalid commit result",
+          );
+        }
       }
       const inline = {
         type: "response",
@@ -441,7 +486,7 @@ describe("commit-label-table", () => {
     }
   });
 
-  it("preserves inline ACK revisions without scope keys and rejects their indexed metadata", () => {
+  it("preserves inline ACK revisions without scope keys and rejects their tabled references", () => {
     const { scopeKey: _scopeKey, ...inlineRevision } = revision(document());
     const source = {
       ...ack([]),
@@ -465,7 +510,7 @@ describe("commit-label-table", () => {
       canonical(mixed),
     );
     for (const field of ["label", "path"]) {
-      const indexed = {
+      const stored = {
         ...source,
         ok: {
           ...source.ok,
@@ -475,12 +520,22 @@ describe("commit-label-table", () => {
           }],
         },
       };
-      expect(() => hasServerMessageCommitLabelMetadata(indexed)).toThrow(
-        "Invalid commit revision",
-      );
-      expect(() => compressServerMessageCommitLabels(indexed)).toThrow(
-        "Invalid commit revision",
-      );
+      // A table-free number is inline data even in a malformed revision.
+      expect(hasServerMessageCommitLabelMetadata(stored)).toBe(false);
+      expect(compressServerMessageCommitLabels(stored)).toBe(stored);
+      expect(expandServerMessageCommitLabels(stored)).toBe(stored);
+      // Beside its dictionary it is a reference, which a malformed revision
+      // may not carry.
+      const indexed = {
+        ...stored,
+        ok: {
+          ...stored.ok,
+          ...(field === "label"
+            ? { labelTable: [label()] }
+            : { labelPathTable: [["value"]] }),
+        },
+      };
+      expect(hasServerMessageCommitLabelMetadata(indexed)).toBe(true);
       expect(() => expandServerMessageCommitLabels(indexed)).toThrow(
         "Invalid commit revision",
       );
@@ -735,32 +790,90 @@ describe("commit-label-table", () => {
     );
   });
 
-  it("detects unnegotiated numeric refs at direct patch and collection entry positions", () => {
+  it("resolves tabled refs at direct patch and collection entry positions and keeps table-free numbers inline", () => {
     const root = "/cfc/labelMap/entries";
-    const patches: PatchOp[] = [
-      { op: "replace", path: `${root}/0/label`, value: 0 },
-      { op: "add", path: `${root}/0/path`, value: 0 },
-      { op: "add", path: `${root}/-`, value: { label: 0, path: [] } },
-      {
-        op: "splice",
-        path: root,
-        index: 0,
-        remove: 0,
-        add: [{ label: {}, path: 0 }],
-      },
-      { op: "append", path: root, values: [{ label: 0, path: [] }] },
-      { op: "add-unique", path: root, values: [{ label: 0, path: [] }] },
-      { op: "remove-by-value", path: root, value: { label: 0, path: [] } },
+    const resolvedLabel = label(5);
+    const resolvedPath = ["value", "resolved"];
+    const tables = {
+      labelTable: [resolvedLabel],
+      labelPathTable: [resolvedPath],
+    };
+    const patches: [PatchOp, PatchOp][] = [
+      [
+        { op: "replace", path: `${root}/0/label`, value: 0 },
+        { op: "replace", path: `${root}/0/label`, value: resolvedLabel },
+      ],
+      [
+        { op: "add", path: `${root}/0/path`, value: 0 },
+        { op: "add", path: `${root}/0/path`, value: resolvedPath },
+      ],
+      [
+        { op: "add", path: `${root}/-`, value: { label: 0, path: [] } },
+        {
+          op: "add",
+          path: `${root}/-`,
+          value: { label: resolvedLabel, path: [] },
+        },
+      ],
+      [
+        {
+          op: "splice",
+          path: root,
+          index: 0,
+          remove: 0,
+          add: [{ label: {}, path: 0 }],
+        },
+        {
+          op: "splice",
+          path: root,
+          index: 0,
+          remove: 0,
+          add: [{ label: {}, path: resolvedPath }],
+        },
+      ],
+      [
+        { op: "append", path: root, values: [{ label: 0, path: [] }] },
+        {
+          op: "append",
+          path: root,
+          values: [{ label: resolvedLabel, path: [] }],
+        },
+      ],
+      [
+        { op: "add-unique", path: root, values: [{ label: 0, path: [] }] },
+        {
+          op: "add-unique",
+          path: root,
+          values: [{ label: resolvedLabel, path: [] }],
+        },
+      ],
+      [
+        { op: "remove-by-value", path: root, value: { label: 0, path: [] } },
+        {
+          op: "remove-by-value",
+          path: root,
+          value: { label: resolvedLabel, path: [] },
+        },
+      ],
     ];
-    for (const patch of patches) {
-      const source = request([{
+    for (const [indexed, resolved] of patches) {
+      const operation = (patch: PatchOp): Operation => ({
         op: "patch",
         id: "of:wire",
         patches: [patch],
-      }]);
-      expect(hasClientMessageLabelMetadata(source)).toBe(true);
-      expect(() => expandClientMessageLabels(source)).toThrow("reference");
-      expect(() => compressClientMessageLabels(source)).toThrow();
+      });
+      // Without a dictionary the number is stored data; the server's commit
+      // admission, not the transport, refuses to write it.
+      const source = request([operation(indexed)]);
+      expect(hasClientMessageLabelMetadata(source)).toBe(false);
+      expect(expandClientMessageLabels(source)).toBe(source);
+      expect(compressClientMessageLabels(source)).toBe(source);
+      // Beside its dictionary the same number is a reference at that position.
+      const tabled = { ...source, commit: { ...source.commit, ...tables } };
+      expect(hasClientMessageLabelMetadata(tabled)).toBe(true);
+      expect(canonical(expandClientMessageLabels(tabled))).toBe(
+        canonical(request([operation(resolved)])),
+      );
     }
   });
 

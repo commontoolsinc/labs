@@ -16,6 +16,7 @@ import {
   schemaMetaRefHashes,
 } from "@commonfabric/data-model-schema/schema-refs";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+import { findNumericLabelField } from "./label-metadata-table.ts";
 import { mapLinkSchemas } from "./schema-table-links.ts";
 import {
   applySqliteCommitWrite,
@@ -5820,6 +5821,22 @@ const applyCommitTransaction = (
       requiredLabelDocs.add(ref.slice("cid:".length));
     }
   };
+  // A number at a whole-field label or path of the CFC label map is a
+  // transport dictionary reference in a negotiated envelope and nothing
+  // anywhere else: no dictionary is stored with a document, so a stored
+  // number can never be resolved, and the sync sender cannot compress an
+  // envelope carrying one without changing its meaning. Request parsing
+  // sees the number a set or a value-bearing patch carries, but a `move`
+  // or an `increment` can produce one from application data, so the
+  // post-patch document is checked here for every form alike.
+  const requireInlineLabelMetadata = (id: string, document: unknown): void => {
+    const field = findNumericLabelField(document);
+    if (field !== undefined) {
+      throw new ProtocolError(
+        `memory v2 commit writes document ${id} with a numeric CFC label-map ${field}, which only a transport dictionary could resolve`,
+      );
+    }
+  };
   // A document's reserved `schema` metadata member is a schema position
   // in the link spelling — a self-contained inline schema, or a single
   // `{ "$ref": "cid:…" }` root — and its refs are collected exactly as a
@@ -5922,6 +5939,7 @@ const applyCommitTransaction = (
             );
             stagedMetadataDocs.set(docKey, patched);
             if (patchTouchesMetadata(operation.patches)) {
+              requireInlineLabelMetadata(operation.id, patched);
               collectCfcEnvelopeRef((patched as { cfc?: unknown }).cfc);
               collectSchemaMetaRefs(operation.id, patched);
             }
@@ -5933,6 +5951,7 @@ const applyCommitTransaction = (
     }
     if (!operation.id.startsWith("cid:")) {
       if (operation.op === "set") {
+        requireInlineLabelMetadata(operation.id, operation.value);
         collectLinkSchemaRefs(operation.value);
         collectCfcEnvelopeRef(
           (operation.value as { cfc?: unknown } | null)?.cfc,
@@ -6005,6 +6024,7 @@ const applyCommitTransaction = (
     // `cid:` document alike (see collectSchemaMetaRefs): the identity
     // check above covers `.value` and nothing beside it.
     if (installsVerifiedContent) {
+      requireInlineLabelMetadata(operation.id, operation.value);
       collectSchemaMetaRefs(operation.id, operation.value);
     }
     const earlierSet = cidSetsInCommit?.get(operation.id);

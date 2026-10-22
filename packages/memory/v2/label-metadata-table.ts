@@ -108,9 +108,12 @@ interface CompressionTable {
 /**
  * Compresses repeated labels and paths when reference and table costs save bytes.
  * Inputs are neither mutated nor frozen. Call only for a negotiated endpoint.
- * Preserves uninterpreted inline metadata. Throws on numeric input refs, an
- * already-compressed envelope, or a selected label
- * containing a reserved schema reference. Compress labels before schemas when
+ * Preserves uninterpreted inline metadata. Returns the envelope unchanged, which
+ * is always a valid encoding, when a whole-field label or path already holds a
+ * number (a dictionary would make that stored number read as a reference).
+ * Throws on an already-compressed envelope, a selected label containing a
+ * reserved schema reference, or dictionaries past
+ * `MAX_LABEL_METADATA_EXPANSION_BYTES`. Compress labels before schemas when
  * labels contain schema-bearing links.
  */
 export function compressLabelMetadata(
@@ -129,11 +132,18 @@ export function compressLabelMetadata(
       values: [],
     };
   });
+  let storedNumber = false;
   mapEnvelope(envelope, (value, field) => {
-    const state = states[field === "label" ? 0 : 1];
-    collectCandidate(state, value);
+    if (typeof value === "number") {
+      storedNumber = true;
+    } else {
+      collectCandidate(states[field === "label" ? 0 : 1], value);
+    }
     return value;
   });
+  // A stored number is data the receiver keeps inline only while no
+  // dictionary for its field is present, so this envelope stays inline.
+  if (storedNumber) return envelope;
   let expandedBytes = 0;
   const dictionaries: Record<string, TableValue[]> = {};
   for (const state of states) {
@@ -155,6 +165,9 @@ export function compressLabelMetadata(
 
 /**
  * Expands and removes metadata tables, validating all entries and refs.
+ * A number at a whole-field position is a reference only when the envelope
+ * carries that field's dictionary; without one it is stored data and stays
+ * inline, as the compressor never emits a dictionary beside such a number.
  * Returns a deeply frozen expanded envelope, with one frozen copy per table value.
  * Unchanged subtrees shared with the input may be frozen in place.
  * Table contents must be self-contained: reserved schema refs are rejected even
@@ -169,8 +182,8 @@ export function expandLabelMetadata(
   const states = tables.map((spec) => readTable(envelope, spec));
   let expandedBytes = 0;
   const expanded = mapEnvelope(envelope, (value, field) => {
-    const { spec, values, costs } = states[field === "label" ? 0 : 1];
-    if (typeof value === "number") {
+    const { spec, present, values, costs } = states[field === "label" ? 0 : 1];
+    if (typeof value === "number" && present) {
       if (
         !Number.isSafeInteger(value) || Object.is(value, -0) || value < 0 ||
         value >= values.length
@@ -193,17 +206,30 @@ export function expandLabelMetadata(
 }
 
 /**
- * Detects dictionaries or numeric refs without validating inline CFC semantics.
- * Uses the same position traversal as compression and expansion.
+ * Detects dictionaries without validating inline CFC semantics. A number at a
+ * whole-field position needs no negotiation on its own: without a dictionary it
+ * is stored data, which commit admission refuses to write and delivery passes
+ * through inline.
  */
 export function hasLabelMetadata(
   envelope: Record<string, unknown>,
-  mapEnvelope: MapMetadataEnvelope,
+  _mapEnvelope: MapMetadataEnvelope,
 ): boolean {
-  if (tables.some((spec) => Object.hasOwn(envelope, spec.name))) return true;
-  let found = false;
-  mapEnvelope(envelope, (value) => {
-    found ||= typeof value === "number";
+  return tables.some((spec) => Object.hasOwn(envelope, spec.name));
+}
+
+/**
+ * Reports the first whole-field label or path holding a number in a document,
+ * visiting exactly the positions compression and expansion visit. Commit
+ * admission refuses such a document: no dictionary is stored beside it, so the
+ * number could never be resolved, and a sync carrying it cannot be compressed.
+ */
+export function findNumericLabelField(
+  document: unknown,
+): MetadataField | undefined {
+  let found: MetadataField | undefined;
+  mapLabelMetadataAtPath(document, [], (value, field) => {
+    if (typeof value === "number") found ??= field;
     return value;
   });
   return found;
@@ -221,11 +247,6 @@ function isLabelPath(value: unknown): value is readonly string[] {
 
 /** Helper for compression, which hashes each object once within its envelope. */
 function collectCandidate(state: CompressionTable, value: unknown): void {
-  if (typeof value === "number") {
-    throw new Error(
-      `Cannot compress metadata \`${state.spec.field}\` reference`,
-    );
-  }
   if (!isPlainObject(value) && !Array.isArray(value)) {
     return;
   }

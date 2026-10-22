@@ -537,7 +537,7 @@ describe("sync-label-table", () => {
     }
   });
 
-  it("throws for malformed label tables and numeric references while preserving inline labels", () => {
+  it("throws for malformed label tables and dictionary references while preserving inline labels and table-free numbers", () => {
     for (
       const table of [null, {}, 0, "table", [0], [null], ["ref"], [false], [[]]]
     ) {
@@ -554,13 +554,12 @@ describe("sync-label-table", () => {
       expect(() => expandSessionSyncLabels(wireSync([ref], [labelFor(0)])))
         .toThrow("reference");
     }
+    // A number is a reference only beside its dictionary; a stored one
+    // travels inline in both directions.
     for (const ref of [0, 99]) {
-      expect(() => expandSessionSyncLabels(wireSync([ref]))).toThrow(
-        "reference",
-      );
-      expect(() => compressSessionSyncLabels(wireSync([ref]))).toThrow(
-        "reference",
-      );
+      const stored = wireSync([ref]);
+      expect(expandSessionSyncLabels(stored)).toBe(stored);
+      expect(compressSessionSyncLabels(stored)).toBe(stored);
     }
     for (
       const label of [
@@ -607,7 +606,7 @@ describe("sync-label-table", () => {
       .toThrow();
   });
 
-  it("throws for malformed path tables and numeric references while preserving inline paths", () => {
+  it("throws for malformed path tables and dictionary references while preserving inline paths and table-free numbers", () => {
     for (const table of [null, {}, 0, "table", [0], [null], [{}], [[1]]]) {
       expect(() => expandSessionSyncLabels(wireSync([], undefined, [], table)))
         .toThrow();
@@ -623,8 +622,9 @@ describe("sync-label-table", () => {
         expandSessionSyncLabels(wireSync([{}], undefined, [ref], [["value"]]))
       ).toThrow("reference");
     }
-    expect(() => expandSessionSyncLabels(wireSync([{}], undefined, [0])))
-      .toThrow("reference");
+    const storedPath = wireSync([{}], undefined, [0]);
+    expect(expandSessionSyncLabels(storedPath)).toBe(storedPath);
+    expect(compressSessionSyncLabels(storedPath)).toBe(storedPath);
     const sparsePath = new Array(2);
     sparsePath[1] = "value";
     for (

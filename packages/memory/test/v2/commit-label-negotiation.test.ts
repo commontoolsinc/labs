@@ -279,9 +279,11 @@ describe("commit-label-negotiation", () => {
     });
   }
 
+  // A table-free number in an acknowledgment is inline data, so only an
+  // unsolicited table is refused.
   for (const advertised of [undefined, false]) {
-    for (const indexedOnly of [false, true]) {
-      it(`refuses unsolicited acknowledgment ${indexedOnly ? "references" : "tables"} with capability=${advertised}`, async () => {
+    {
+      it(`refuses unsolicited acknowledgment tables with capability=${advertised}`, async () => {
         const server = new CapabilityServer({
           ...testSessionOpenServerOptions,
           store: new URL("memory://commit-ack-unsolicited"),
@@ -303,10 +305,7 @@ describe("commit-label-negotiation", () => {
               throw new Error("Expected an acknowledgment");
             }
             expect(Object.hasOwn(compact.ok, "labelTable")).toBe(true);
-            if (!indexedOnly) return compact;
-            const { labelTable: _labels, labelPathTable: _paths, ...ok } =
-              compact.ok;
-            return { ...compact, ok };
+            return compact;
           });
           await expect(session.transact({
             localSeq: 1,
@@ -800,7 +799,7 @@ describe("commit-label-negotiation", () => {
     }
   }
 
-  it("rejects malformed and unsolicited commit tables and indexed metadata during parsing", () => {
+  it("rejects malformed and unsolicited commit tables during parsing and leaves table-free numbers to admission", () => {
     const base = {
       type: "transact",
       requestId: "invalid",
@@ -824,6 +823,9 @@ describe("commit-label-negotiation", () => {
       expect(parseClientMessage(payload, { commitLabelTableV1: true }))
         .toBeNull();
     }
+    // A number without its table is not transport metadata: the request
+    // parses on either arm, and commit admission refuses to store it (see
+    // the engine validation tests).
     for (const entry of [{ path: [], label: 0 }, { path: 0, label: {} }]) {
       const payload = encodeMemoryBoundary({
         ...base,
@@ -836,9 +838,12 @@ describe("commit-label-negotiation", () => {
           }],
         },
       });
-      expect(parseClientMessage(payload)).toBeNull();
-      expect(parseClientMessage(payload, { commitLabelTableV1: true }))
-        .toBeNull();
+      for (const options of [{}, { commitLabelTableV1: true }]) {
+        expect(parseClientMessage(payload, options)).toMatchObject({
+          type: "transact",
+          requestId: "invalid",
+        });
+      }
     }
   });
 

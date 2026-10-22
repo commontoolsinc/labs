@@ -13,6 +13,7 @@ import {
   type SessionSync,
 } from "../../v2.ts";
 import { connect, loopback, type Transport } from "../../v2/client.ts";
+import { evictDocumentCacheEntries } from "../../v2/engine.ts";
 import { Server } from "../../v2/server.ts";
 import {
   testSessionOpenAuthFactory,
@@ -200,7 +201,8 @@ describe("sync-label-negotiation", () => {
         { name: "label table", fields: { labelTable: [null] } },
         { name: "path table", fields: { labelPathTable: [null] } },
         {
-          name: "indexed path without a table",
+          name: "a stored numeric path without a table",
+          accepted: true,
           fields: {
             upserts: [{
               branch: "",
@@ -211,7 +213,8 @@ describe("sync-label-negotiation", () => {
           },
         },
         {
-          name: "indexed label without a table",
+          name: "a stored numeric label without a table",
+          accepted: true,
           fields: {
             upserts: [{
               branch: "",
@@ -223,9 +226,11 @@ describe("sync-label-negotiation", () => {
         },
         ...["label", "path"].flatMap((field) =>
           [false, true].map((objectEntries) => ({
-            name: `indexed ${field} with missing sibling and version in ${
-              objectEntries ? "object" : "array"
-            } entries`,
+            name:
+              `a stored numeric ${field} with missing sibling and version in ${
+                objectEntries ? "object" : "array"
+              } entries`,
+            accepted: true,
             fields: {
               upserts: [{
                 branch: "",
@@ -341,5 +346,128 @@ describe("sync-label-negotiation", () => {
         }
       });
     }
+  }
+
+  for (const clientEnabled of [false, true]) {
+    it(`delivers a stored numeric label inline to a client with syncLabelTableV1=${clientEnabled} and keeps delivering`, async () => {
+      const server = new Server({
+        ...testSessionOpenServerOptions,
+        store: new URL("memory://sync-label-stored-number"),
+      });
+      const frames: Record<string, unknown>[] = [];
+      const transport = loopback(server);
+      const observerTransport: Transport = {
+        ...transport,
+        send(payload) {
+          const message = decodeMemoryBoundary(payload);
+          if (isPlainObject(message) && message.type === "hello") {
+            return transport.send(encodeMemoryBoundary({
+              ...message,
+              flags: {
+                ...getMemoryProtocolFlags(),
+                syncLabelTableV1: clientEnabled,
+              },
+            }));
+          }
+          return transport.send(payload);
+        },
+        setReceiver(receiver) {
+          transport.setReceiver((payload) => {
+            const sync = syncOf(decodeMemoryBoundary(payload));
+            if (sync !== undefined) frames.push(sync);
+            receiver(payload);
+          });
+        },
+      };
+      const writerClient = await connect({ transport: loopback(server) });
+      const observerClient = await connect({ transport: observerTransport });
+      try {
+        const space = "did:key:sync-label-stored-number";
+        const writer = await writerClient.mount(
+          space,
+          {},
+          testSessionOpenAuthFactory,
+        );
+        const write = (version: number) =>
+          writer.transact({
+            localSeq: version,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "set",
+              id: "of:donuts",
+              value: document(version),
+            }, {
+              op: "set",
+              id: `cid:${taggedHashStringOf(true)}`,
+              value: { value: true },
+            }],
+          });
+        await write(1);
+        // Commit admission now refuses a numeric whole-field label, so the
+        // row is rewritten in place to stand for one stored before that
+        // check existed (a `move` of application data into the label map).
+        const stored = {
+          ...document(1),
+          cfc: {
+            ...document(1).cfc,
+            labelMap: {
+              version: 1,
+              entries: [
+                { path: ["flavor"], label: 3 },
+                { path: 4, label: { confidentiality: [], integrity: [] } },
+              ],
+            },
+          },
+        };
+        const engine = await server.engineForSpace(space);
+        engine.database.prepare(
+          `UPDATE revision SET data = :data WHERE id = 'of:donuts'`,
+        ).run({ data: encodeMemoryBoundary(stored) });
+        evictDocumentCacheEntries(engine, Number.MAX_SAFE_INTEGER);
+
+        const observer = await observerClient.mount(
+          space,
+          {},
+          testSessionOpenAuthFactory,
+        );
+        const { view, sync } = await observer.watchAddSync([{
+          id: "donuts",
+          kind: "graph",
+          query: {
+            roots: [{
+              id: "of:donuts",
+              selector: { path: [], schema: true },
+            }],
+          },
+        }]);
+        expect(encodeMemoryBoundary(
+          sync.upserts.find((entry) => entry.id === "of:donuts")?.doc,
+        )).toBe(encodeMemoryBoundary(stored));
+        // The stored number travelled inline on the wire, beside no table.
+        const contentFrames = frames.filter((frame) =>
+          Array.isArray(frame.upserts) && frame.upserts.length > 0
+        );
+        expect(contentFrames).toHaveLength(1);
+        expect(Object.hasOwn(contentFrames[0], "labelTable")).toBe(false);
+        expect(Object.hasOwn(contentFrames[0], "labelPathTable")).toBe(false);
+        expect(observerClient.isConnected()).toBe(true);
+
+        // Delivery continues: a later write is pushed, compressed when the
+        // connection negotiated tables.
+        const updates = view.subscribeSync();
+        await write(2);
+        const pushed = await updates.next();
+        expect(pushed.done).toBe(false);
+        if (pushed.done) throw new Error("Expected a pushed sync");
+        expect(encodeMemoryBoundary(
+          pushed.value.upserts.find((entry) => entry.id === "of:donuts")?.doc,
+        )).toBe(encodeMemoryBoundary(document(2)));
+        expect(Array.isArray(frames.at(-1)?.labelTable)).toBe(clientEnabled);
+      } finally {
+        await writerClient.close();
+        await observerClient.close();
+        await server.close();
+      }
+    });
   }
 });
