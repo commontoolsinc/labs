@@ -24,7 +24,7 @@ have landed.
 | 6a — the old spellings warn, each naming its end date | on main |
 | 6b — the old spellings are removed | on main |
 | 7 — each command sits under the noun it acts on | on main |
-| 7b — the superseded spellings are removed | not started; they are guaranteed only through 2026-09-11 |
+| 7b — the superseded spellings are removed | on main |
 
 **Arc two — how a caller writes what a command acts on.**
 
@@ -649,11 +649,7 @@ than taking anything away.
    `recreate-root`. Each moved command stays answerable at the spelling it
    had, hidden and dated, so a script keeps working while it is migrated. The
    date bounds a guarantee rather than schedules an execution: removing those
-   mounts is 7b, a separate change, the way 6b was separate from 6a. 7b takes
-   the notice and its dated constant with the mounts, and
-   `packages/cli/test/integration-command-spellings.test.ts` too — the check
-   holding the integration drills to the blessed spellings has nothing left to
-   find once no superseded spelling answers.
+   mounts is 7b, a separate change, the way 6b was separate from 6a.
 
    The duplicated nouns this step was named for resolve rather than merge.
    `piece inspect` reports on a live piece and `cf inspect` reads a stored
@@ -661,6 +657,10 @@ than taking anything away.
    `cf view` pages a source file and `piece view` renders a running piece.
    Different objects, so the fix was naming. `piece apply` and `cf cell set`
    stay separate for the reason recorded above.
+7b. **Remove the superseded spellings** once their date has passed. Done: the
+   hidden mounts, the step-7 notice and its dated constant, and the check
+   that held the integration drills to the blessed spellings, are gone. Each
+   command answers only under the noun it acts on.
 
 Steps 1–5 are mechanical. Step 7 needs real decisions and belongs last, because
 each pair is two working commands whose merge changes behavior rather than
@@ -771,6 +771,7 @@ intermediate state wrong. What each step owes:
 | 6a | The old spellings marked deprecated wherever they are taught, each carrying the removal date |
 | 6b | Removal of the old spellings, and of the deprecation notes 6a added |
 | 7 | The rule and the mapping here, `packages/cli/README.md`'s superseded-spellings table, and every example moved to the new spelling |
+| 7b | Removal of the superseded-spellings table, and of every mention of the old spellings |
 
 **Old spellings stay as redirects, not errors, until the date 6a names.** A
 deprecated spelling that still works costs a line of aliasing; one that fails

@@ -1784,18 +1784,6 @@ describe("cli piece parsing", () => {
     expect(setsrcFlags).toContain("--dangerously-allow-incompatible-schema");
   });
 
-  it("declares the same options on both mounts of a moved command", () => {
-    // One builder, two mount points: a caller who has not migrated yet meets
-    // the surface the new spelling has, not a copy that can drift from it.
-    // Compared on each command's own declarations, because the two nouns
-    // contribute different globals -- see the `--json` case below.
-    const own = (command: { getBaseOptions(): { flags: string[] }[] }) =>
-      command.getBaseOptions().flatMap((o) => o.flags).sort();
-    expect(own(piece.getCommand("recreate-root", true)!)).toEqual(
-      own(space.getCommand("recreate-root")!),
-    );
-  });
-
   it("refuses `--json` on a moved command rather than ignoring it", async () => {
     const { code, stdout, stderr } = await cf(
       argv`space recreate-root --json -i ./k.key -s s -a http://localhost:8000`,
@@ -1815,26 +1803,6 @@ describe("cli piece parsing", () => {
     const all = (command: { getOptions(): { flags: string[] }[] }) =>
       command.getOptions().flatMap((o) => o.flags);
     expect(all(space.getCommand("recreate-root")!)).toContain("--json");
-    expect(all(piece.getCommand("recreate-root", true)!)).not.toContain(
-      "--json",
-    );
-  });
-
-  it("hides the superseded `cf piece` mounts from help", () => {
-    // Hidden is what keeps the old spelling working without teaching it: it
-    // stays reachable for a caller who already wrote it, and is offered to
-    // nobody new.
-    const names = (
-      // deno-lint-ignore no-explicit-any
-      command: any,
-      includeHidden: boolean,
-    ): string[] =>
-      command.getCommands(includeHidden).map((c: { getName(): string }) =>
-        c.getName()
-      );
-    expect(names(piece, true)).toContain("recreate-root");
-    expect(names(piece, false)).not.toContain("recreate-root");
-    expect(names(space, false)).toContain("recreate-root");
   });
 
   it("reports `set-home` on both nouns as an unknown command", async () => {
@@ -1922,7 +1890,7 @@ describe("cli piece parsing", () => {
 
   it("refuses a piece get command that names both projection flags", async () => {
     const { code, stderr } = await cf(
-      argv`get
+      argv`cell get
         --identity ./definitely-missing-piece-get-review.key
         --api-url https://cf.dev --space common-knowledge
         --piece ${PIECE} --select id --schema id`,
@@ -1935,7 +1903,7 @@ describe("cli piece parsing", () => {
 
   it("passes a --select projection through the piece get command action", async () => {
     const { code, stderr } = await cf(
-      argv`get
+      argv`cell get
         --identity ./definitely-missing-piece-get-review.key
         --api-url https://cf.dev --space common-knowledge
         --piece ${PIECE} --select id,title`,
@@ -1948,7 +1916,7 @@ describe("cli piece parsing", () => {
 
   it("passes a parsed selection through the piece get command action", async () => {
     const { code, stderr } = await cf(
-      argv`get
+      argv`cell get
         --identity ./definitely-missing-piece-get-review.key
         --api-url https://cf.dev --space common-knowledge
         --piece ${PIECE} --filter .active --schema id`,
