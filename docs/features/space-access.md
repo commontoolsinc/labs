@@ -95,8 +95,8 @@ the pattern's to do, over the participants the space's root lists.
 
 The list's `"*"` entry is not a member. It admits whoever the list does not
 name, and names no one, so it is reported apart, as `anyone`, and is absent
-when the list has no such entry. A reader can then tell a space only its
-members can open from one anyone with its address can. A configured service
+when the list has no such entry. A reader can then tell whether the space is
+open only to its members or to anyone with its address. A configured service
 DID holds `OWNER` without an entry and is not listed, and the space's own DID
 is listed only where the list names it.
 

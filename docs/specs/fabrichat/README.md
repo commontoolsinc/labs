@@ -200,9 +200,9 @@ for a container, which decides who could see a room placed there. A space
 offers two halves of that:
 
 - **Its access list** says who can read and write. A pattern reads its own
-  principal's level (`spaceAccess()`), and a member's pattern lists the
-  principals it names, with the `*` entry apart (`spaceMembers()`). The
-  space's own tools change it.
+  principal's level (`spaceAccess()`), and, for a principal the list
+  admits, the principals it names, with the `*` entry apart
+  (`spaceMembers()`). The space's own tools change it.
 - **Its participants**, the profiles its root lists (`participants`, which a
   pattern in the space reads through `wish({ query: "#default" })`), name
   people, but each entry is a claim: any participant can add any profile, by

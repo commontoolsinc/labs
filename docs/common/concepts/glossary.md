@@ -73,8 +73,8 @@ A [space] with more than one member or participant. A space says who those are
 in two ways:
 
 - **Its access list** admits principals to read or write. A pattern asks for
-  its own principal's level there with `spaceAccess()`, and, for a member,
-  lists the principals it names with `spaceMembers()`.
+  its own principal's level there with `spaceAccess()`, and, for a principal
+  the list admits, lists the principals it names with `spaceMembers()`.
 - **Its participants** are the profiles its root lists, as the system default
   app does in `participants`, each added by someone joining the space. Any
   participant can add any profile, so an entry is a claim, not a grant of
