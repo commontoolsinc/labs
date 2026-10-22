@@ -547,6 +547,8 @@ export class Scheduler {
     eventId: string;
     keys: readonly string[];
     generations: ReadonlyMap<string, number>;
+    /** Resolves once the loads settled and the park was released or failed. */
+    settled: Promise<void>;
   } | null = null;
 
   /**
@@ -2788,15 +2790,30 @@ export class Scheduler {
   async #processExecuteEventPhases(): Promise<Set<Action>> {
     const eventBlockingDeps = new Set<Action>();
     let remaining = this.#eventQueue.length;
+    // A head the preflight parked on loads its own cold reads started is
+    // waited for and tried again, in place of the pass the park's release
+    // would otherwise wake: the loads are the preflight's own, and settle
+    // soon. Bounded, since a retry may park on keys the first did not.
+    let parkRetries = 0;
     while (true) {
       const head = this.#eventQueue[0];
       const deps = await this.#processExecuteEventPhase();
       for (const dep of deps) eventBlockingDeps.add(dep);
       if (
-        !this.runtime.servingPosture || deps.size > 0 || head === undefined ||
-        this.#eventQueue[0] === head || --remaining <= 0 ||
-        this.#eventQueue.length === 0
+        !this.runtime.servingPosture || deps.size > 0 || head === undefined
       ) break;
+      if (this.#eventQueue[0] === head) {
+        const park = this.#headEventLoadPark;
+        if (
+          park?.eventId !== head.id || parkRetries >= 4 || this.#disposed
+        ) break;
+        parkRetries++;
+        await park.settled;
+        if (this.#disposed || this.#eventQueue[0] !== head) break;
+        continue;
+      }
+      parkRetries = 0;
+      if (--remaining <= 0 || this.#eventQueue.length === 0) break;
       // The handler's run has to have landed before the next preflight
       // reads what it wrote.
       if (this.runningPromise) await this.runningPromise;
@@ -3865,7 +3882,6 @@ export class Scheduler {
         this.runtime.storageManager.pendingLoadGeneration?.(key) ?? 0,
       ]),
     );
-    this.#headEventLoadPark = { eventId: event.id, keys, generations };
     logger.debug("event-load-park", () => [
       `event ${event.id} parks on ${keys.length} loading document(s)`,
       keys,
@@ -3882,10 +3898,17 @@ export class Scheduler {
           failures.push(error);
         })
       ));
-    settled.then(() => {
-      if (failures.length === 0) this.#releaseHeadEventLoadPark(event.id);
-      else this.#failHeadEventLoadPark(event, failures);
-    });
+    this.#headEventLoadPark = {
+      eventId: event.id,
+      keys,
+      generations,
+      // Registered ahead of the release below, so that a waiter on it finds
+      // the park released or failed when it resumes.
+      settled: settled.then(() => {
+        if (failures.length === 0) this.#releaseHeadEventLoadPark(event.id);
+        else this.#failHeadEventLoadPark(event, failures);
+      }),
+    };
   }
 
   #releaseHeadEventLoadPark(eventId: string): void {

@@ -53,9 +53,10 @@ describe("scheduler serving event batch", () => {
     await runtime.idle();
 
     let derivationRuns = 0;
+    let derived = -1;
     const derivation: Action = (readTx) => {
       derivationRuns++;
-      counter.withTx(readTx).get();
+      derived = counter.withTx(readTx).get();
     };
     runtime.scheduler.subscribe(derivation, {
       reads: [toMemorySpaceAddress(counter.getAsNormalizedFullLink())],
@@ -82,22 +83,29 @@ describe("scheduler serving event batch", () => {
       });
     }
     await runtime.idle();
-    return { seen, derivationRuns: () => derivationRuns, counter };
+    // Read through the derivation's own transaction: a read outside one
+    // under the serving posture reaches for the store, and a pull left
+    // behind would outlive the test.
+    return {
+      seen,
+      derivationRuns: () => derivationRuns,
+      derived: () => derived,
+    };
   }
 
   it("runs every ready event's handler before one derivation pass under the serving posture", async () => {
-    const { seen, derivationRuns, counter } = await queueThreeEvents(true);
+    const { seen, derivationRuns, derived } = await queueThreeEvents(true);
     // Each handler read what the one before it wrote, and the derivation
     // ran once over all three rather than once per event.
     expect(seen).toEqual([0, 1, 3]);
-    expect(counter.get()).toBe(6);
+    expect(derived()).toBe(6);
     expect(derivationRuns()).toBe(2);
   });
 
   it("settles the derivations after each event outside the serving posture", async () => {
-    const { seen, derivationRuns, counter } = await queueThreeEvents(false);
+    const { seen, derivationRuns, derived } = await queueThreeEvents(false);
     expect(seen).toEqual([0, 1, 3]);
-    expect(counter.get()).toBe(6);
+    expect(derived()).toBe(6);
     expect(derivationRuns()).toBe(4);
   });
 });

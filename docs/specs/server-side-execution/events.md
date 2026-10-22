@@ -221,9 +221,11 @@ handler fires
   its own preflight, and settles the derivations once behind all of
   them (`facade.ts`, `#processExecuteEventPhases`): the demanded
   derivations several events invalidate run once per pass rather than
-  once per event, and an event whose preflight finds an invalid input
-  ends the run, so the settle recomputes that input before the event
-  dispatches. Undemanded intermediates are skipped by pull-based
+  once per event; a head the preflight parks on the cold reads its own
+  populate started is waited for and tried again within the pass, and an
+  event whose preflight finds an invalid input ends the run, so the
+  settle recomputes that input before the event dispatches. Undemanded
+  intermediates are skipped by pull-based
   laziness as before; the wave's single derived commit carries every
   event the pass took.
 - Server enqueue goes through the scheduler facade (`facade.queueEvent`
