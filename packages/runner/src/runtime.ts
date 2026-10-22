@@ -909,8 +909,14 @@ export interface RuntimeOptions {
    * profile per identity it presents, as the Weaver does with its facets).
    * When the home does not list that profile, or retired it, `#profile`
    * fails rather than answer as another profile. The home's own default and
-   * most-recently-used profiles are unchanged, and nothing but `#profile`'s
-   * answer reads this.
+   * most-recently-used profiles are unchanged. Nothing in the runtime reads
+   * this but `#profile`'s answer, and through `#profile` it reaches every
+   * pattern that reads `#profile`. FabriChat's chat manager is one of them:
+   * there is one per Home, and it keys direct rooms by the counterpart's
+   * principal alone, so two profiles of one person would share a direct room
+   * with the same counterpart, which shows the counterpart that the two are
+   * one person. A host therefore runs the chat manager as one profile, the
+   * default, until the manager keeps its state per profile.
    */
   preferredProfileSpace?: MemorySpace;
 
