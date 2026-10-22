@@ -53,6 +53,7 @@ import type {
   SchedulerGraphSnapshot,
 } from "../telemetry.ts";
 import type { ViewExecutionNode } from "../view-replication.ts";
+import type { ViewProofPass } from "../view-replication-client.ts";
 import {
   CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES,
   INITIAL_RUN_SYNC_HOLD_TIMEOUT_MS,
@@ -149,6 +150,7 @@ import {
   subscribePullSchedulerAction,
   unsubscribeSchedulerAction,
 } from "./registration.ts";
+import { sameReactivityLog } from "./reactivity.ts";
 import { runSchedulerAction, type SchedulerActionRunState } from "./run.ts";
 import {
   captureEchoRun,
@@ -2179,6 +2181,7 @@ export class Scheduler {
   #initialViewDependencies(
     action: Action,
     identity: string,
+    pass?: ViewProofPass,
   ): ReactivityLog | undefined {
     const { viewPiece, viewNodeId, viewLocalOnly } = action as Partial<
       TelemetryAnnotations
@@ -2191,6 +2194,7 @@ export class Scheduler {
       viewPiece,
       viewNodeId,
       identity,
+      pass,
     );
   }
 
@@ -2199,6 +2203,9 @@ export class Scheduler {
     space: MemorySpace,
     { parked = true }: { parked?: boolean } = {},
   ): void {
+    // Nothing the loop does changes the replica or the plans, so every
+    // adopted node's proof shares what an earlier node's proved.
+    const pass = this.runtime.viewReplication.createProofPass();
     for (const node of this.#nodes.nodes()) {
       const metadata = node.action as Partial<TelemetryAnnotations>;
       if (metadata.viewPiece?.space !== space) continue;
@@ -2206,7 +2213,14 @@ export class Scheduler {
         const log = this.#initialViewDependencies(
           node.action,
           node.adoptedViewIdentity,
+          pass,
         );
+        // A proof that observed what the node's last one did leaves the
+        // dependencies and write surface that proof installed as they stand.
+        if (
+          log !== undefined && node.adoptedViewDependencies !== undefined &&
+          sameReactivityLog(node.adoptedViewDependencies, log)
+        ) continue;
         if (log !== undefined) {
           const writes = sortAndCompactPaths([
             ...resolveRegistrationSurface(node.action, log),
@@ -2229,6 +2243,9 @@ export class Scheduler {
             writes,
           );
           this.resubscribe(node.action, log);
+          if (node.adoptedViewIdentity !== undefined) {
+            node.adoptedViewDependencies = log;
+          }
           continue;
         }
       } else if (!parked || node.status !== "unavailable") continue;
@@ -2257,7 +2274,10 @@ export class Scheduler {
   /** Revokes authority evidence while the next invocation is unresolved. */
   beginViewAction(action: Action): void {
     const node = this.#nodes.get(action);
-    if (node !== undefined) node.adoptedViewIdentity = undefined;
+    if (node !== undefined) {
+      node.adoptedViewIdentity = undefined;
+      node.adoptedViewDependencies = undefined;
+    }
     const metadata = action as Partial<TelemetryAnnotations>;
     if (
       metadata.viewNodeId !== undefined &&

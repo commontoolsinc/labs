@@ -56,3 +56,59 @@ for (const size of [100, 300, 1000]) {
     },
   });
 }
+
+for (const size of [100, 300, 1000]) {
+  // A list view of `size` rows. Each row's handler edits its row's vote, a
+  // tally reads the vote, and a label reads the names of nine rows, which no
+  // handler edits: the labels are the ancestors whose reads match no edit.
+  const nodes: ViewExecutionNode[] = [];
+  const handlers = new Set<string>();
+  const renderReads: (NormalizedFullLink & IMemorySpaceAddress)[] = [];
+  for (let index = 0; index < size; index++) {
+    const piece = address(`row-piece-${index}`);
+    const edits = [{ ...address(`row-${index}`), path: ["value", "vote"] }];
+    nodes.push({
+      id: `handler-${index}`,
+      piece,
+      kind: "handler",
+      log: {
+        reads: [address(`row-${index}`)],
+        shallowReads: [],
+        writes: edits,
+      },
+      writes: edits,
+    });
+    handlers.add(`handler-${index}`);
+    for (const role of ["tally", "label"]) {
+      const writes = [address(`${role}-${index}`)];
+      nodes.push({
+        id: `${role}-${index}`,
+        piece,
+        kind: "computation",
+        log: {
+          reads: role === "tally" ? edits : Array.from(
+            { length: 9 },
+            (_, offset) => ({
+              ...address(`row-${(index + offset) % size}`),
+              path: ["value", "name"],
+            }),
+          ),
+          shallowReads: [],
+          writes,
+        },
+        writes,
+      });
+      renderReads.push(address(`${role}-${index}`));
+    }
+  }
+  Deno.bench({
+    name: `${size} visible handlers, their tallies and labels`,
+    group: "view selection with visible handlers",
+    fn(b) {
+      b.start();
+      const selection = selectViewData(nodes, renderReads, [], handlers);
+      b.end();
+      expect(selection.actions.length).toBe(2 * size);
+    },
+  });
+}
