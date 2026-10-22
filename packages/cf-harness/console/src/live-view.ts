@@ -116,9 +116,6 @@ export type ConsoleLiveEntry =
      */
     revealed?: Readonly<Record<string, string>>;
     pieces: readonly ConsoleTurnResultPiece[];
-
-    /** The space the pieces are in, which composing an address needs. */
-    spaceName?: string;
   };
 
 /**
@@ -629,20 +626,19 @@ const piecesBaseFrom = (raw: string | null): string | undefined => {
 };
 
 /**
- * Where one piece is opened. The host that renders pieces somewhere other than
- * the Fabric API says so with `piecesBase`, and the pane composes the address
- * from the space and the slug the run recorded; with no base named, the URL
- * the run recorded is used as it stands rather than rebuilt.
+ * Where one piece is opened. The path of the URL the run recorded ends in the
+ * space and the slug. The host that renders pieces somewhere other than the Fabric API
+ * says so with `piecesBase`, and the pane puts those two segments after it;
+ * with no base named, the recorded URL is used as it stands.
  */
 export const consoleLivePieceHref = (
   piece: ConsoleTurnResultPiece,
-  spaceName: string | undefined,
   piecesBase: string | undefined,
 ): string =>
-  piecesBase === undefined || spaceName === undefined
+  piecesBase === undefined
     ? piece.url
-    : `${piecesBase}/${encodeURIComponent(spaceName)}/${
-      encodeURIComponent(piece.slug)
+    : `${piecesBase}/${
+      new URL(piece.url).pathname.split("/").slice(-2).join("/")
     }`;
 
 /**
@@ -927,7 +923,6 @@ export const consoleLiveEntries = (
             ? {}
             : { revealed: event.result.revealed }),
           pieces: event.result.pieces,
-          spaceName: event.result.spaceName,
         });
         break;
       }
@@ -1798,11 +1793,7 @@ export class ConsoleLive extends LitElement {
               html`
                 <a
                   class="piece-link"
-                  href="${consoleLivePieceHref(
-                    piece,
-                    entry.spaceName,
-                    this.piecesBase,
-                  )}"
+                  href="${consoleLivePieceHref(piece, this.piecesBase)}"
                   rel="noopener"
                 >
                   Open ${piece.slug}

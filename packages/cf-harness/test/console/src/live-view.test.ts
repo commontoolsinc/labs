@@ -70,9 +70,10 @@ describe("console/src/live-view", () => {
       looms: [],
       pieces: [{
         slug: "reading-list",
-        url: "http://localhost:8000/my-space/reading-list",
+        url:
+          "http://localhost:8000/did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK/reading-list",
       }],
-      spaceName: "my-space",
+      spaceName: "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
       finalText: "built it",
     },
   };
@@ -364,7 +365,6 @@ describe("console/src/live-view", () => {
         answer: "Bought **cfh:v:22222**.",
         revealed: { "cfh:v:22222": "https://shop.example/item/7" },
         pieces: [],
-        spaceName: "s",
       }]);
     });
 
@@ -447,7 +447,6 @@ describe("console/src/live-view", () => {
         outcome: "completed",
         answer: "built it",
         pieces: [{ slug: "reading-list", url: "http://localhost:8000/s/r" }],
-        spaceName: "s",
       });
     });
 
@@ -628,28 +627,38 @@ describe("console/src/live-view", () => {
   });
 
   describe("consoleLivePieceHref()", () => {
-    const piece = { slug: "reading list", url: "http://localhost:8000/s/r" };
+    const space = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+    const piece = {
+      slug: "reading-list",
+      url: `http://localhost:8000/${space}/reading-list`,
+    };
 
     it("returns the address the run recorded when no base is named", () => {
-      expect(consoleLivePieceHref(piece, "my space", undefined)).toBe(
-        "http://localhost:8000/s/r",
-      );
+      expect(consoleLivePieceHref(piece, undefined)).toBe(piece.url);
     });
 
-    it("returns an address under the base a host renders pieces at", () => {
-      expect(consoleLivePieceHref(
-        piece,
-        "my space",
-        "http://localhost:9901/pattern-pane",
-      )).toBe("http://localhost:9901/pattern-pane/my%20space/reading%20list");
+    it("returns the space and slug under the base a host renders pieces at", () => {
+      expect(consoleLivePieceHref(piece, "http://localhost:9901/pattern-pane"))
+        .toBe(`http://localhost:9901/pattern-pane/${space}/reading-list`);
     });
 
-    it("returns the recorded address for a result naming no space", () => {
-      // Without the space there is nothing to compose against, and inventing
-      // one would send the reader to a piece that is not theirs.
-      expect(consoleLivePieceHref(piece, undefined, "http://host.test/p")).toBe(
-        "http://localhost:8000/s/r",
-      );
+    it("carries no query or fragment of the recorded address to the base", () => {
+      const queried = {
+        ...piece,
+        url: `http://localhost:8000/${space}/reading-list?t=1#top`,
+      };
+      expect(consoleLivePieceHref(queried, "http://host.test/p"))
+        .toBe(`http://host.test/p/${space}/reading-list`);
+    });
+
+    it("replaces the whole of the recorded address before the space", () => {
+      const prefixed = {
+        ...piece,
+        url: `http://localhost:8000/api/v1/${space}/reading-list`,
+      };
+      const href = consoleLivePieceHref(prefixed, "http://host.test/p");
+      expect(href).toBe(`http://host.test/p/${space}/reading-list`);
+      expect(href).not.toContain("/api/v1/");
     });
   });
 
@@ -2274,7 +2283,7 @@ describe("console/src/live-view", () => {
       view.entries = consoleLiveEntries(log(COMPLETED_WITH_PIECE));
 
       expect(templateText(view.view())).toContain(
-        "http://localhost:8000/my-space/reading-list",
+        "http://localhost:8000/did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK/reading-list",
       );
     });
 
@@ -2288,9 +2297,11 @@ describe("console/src/live-view", () => {
 
       const text = templateText(view.view());
       expect(text).toContain(
-        "http://localhost:9901/pattern-pane/my-space/reading-list",
+        "http://localhost:9901/pattern-pane/did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK/reading-list",
       );
-      expect(text).not.toContain("http://localhost:8000/my-space/reading-list");
+      expect(text).not.toContain(
+        "http://localhost:8000/did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK/reading-list",
+      );
     });
 
     it("renders why a refused piece base is not being used", () => {

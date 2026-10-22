@@ -47,11 +47,10 @@ export interface AssignSlugToolSuccessOutput {
   pieceId: string;
 
   /**
-   * Absolute URL for the named piece, composed from the session's API URL
-   * and the space's configured name. Absent when the session was configured
-   * by `did:key` rather than by name: the only URL available then would
-   * carry the space DID, a bare fabric identifier that does not cross the
-   * model boundary, so no URL is offered rather than a fabricated one.
+   * Absolute URL for the named piece, composed from the session's API URL,
+   * the space's DID, and the slug. Absent only when the API URL cannot be
+   * read as a URL. Artifact-only: the prompt loop strips the space's DID from
+   * model context with it, and the console reads it from the artifact.
    */
   url?: string;
 }
@@ -224,25 +223,18 @@ const slugAvailability = async (
 };
 
 /**
- * The URL a person opens for a named piece, or `undefined` when none can be
- * composed without inventing one. The address is the session's API URL, then
- * the space, then the slug — the same shape `cf piece new` prints. Only a
- * space configured by NAME yields one: a space configured by `did:key` would
- * put a bare fabric identifier in the URL, and that does not cross the model
- * boundary.
+ * The URL a person opens for a named piece, or `undefined` when the session's
+ * API URL is not a URL. The address is the session's API URL, then the
+ * space's DID, then the slug — the shape the shell reads a space DID out of.
  */
 export const namedPieceUrl = (
   pieces: PiecesController,
   slug: string,
 ): string | undefined => {
-  const spaceName = pieces.getSpaceName();
-  if (spaceName === undefined) {
-    return undefined;
-  }
   try {
     const url = new URL(pieces.runtime.apiUrl);
     const base = url.pathname.endsWith("/") ? url.pathname : `${url.pathname}/`;
-    url.pathname = `${base}${encodeURIComponent(spaceName)}/${slug}`;
+    url.pathname = `${base}${pieces.getSpace()}/${slug}`;
     return url.toString();
   } catch {
     return undefined;

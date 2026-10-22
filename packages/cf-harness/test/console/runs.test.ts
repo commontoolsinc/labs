@@ -24,7 +24,6 @@ import {
   mintReferentHandle,
 } from "../../src/handle-table.ts";
 import type { HarnessTranscriptMessage } from "../../src/contracts/transcript.ts";
-import { createToolOutputId } from "../../src/contracts/tool-result.ts";
 import {
   HARNESS_CELL_LABELS_TYPE,
   type HarnessCellLabels,
@@ -33,6 +32,10 @@ import {
   HARNESS_HANDLE_TABLE_TYPE,
   type HarnessHandleTable,
 } from "../../src/contracts/handle-table.ts";
+import {
+  createToolOutputId,
+  createToolResultRef,
+} from "../../src/contracts/tool-result.ts";
 
 const runState = (runId: string, updatedAt: string) => ({
   ...createHarnessRunState({
@@ -129,6 +132,16 @@ const unreadSnapshot = (): HarnessCellLabels => ({
   cells: [],
 });
 
+/** The output the run's `assign_slug` call persisted, URL included. */
+const ASSIGN_SLUG_OUTPUT = {
+  artifactPath: "/runs/r1/tool-outputs/r1_assign_slug_4-assign_slug.json",
+  value: {
+    status: "ok",
+    slug: "books",
+    url: "http://localhost:8000/did:key:z6MkBooks/books",
+  },
+};
+
 /** A run that searched, failed to compile, fixed, and named the piece. */
 const buildTranscript = (): HarnessTranscriptMessage[] => [
   { role: "user", content: "track the books I am reading" },
@@ -157,10 +170,18 @@ const buildTranscript = (): HarnessTranscriptMessage[] => [
   }),
   result("c3", "run_pattern", { status: "ok", pieceId: "piece-9" }),
   call("c4", "assign_slug", { slug: "books" }),
-  result("c4", "assign_slug", {
-    slug: "books",
-    url: "http://localhost:8000/my-space/books",
-  }),
+  {
+    role: "tool",
+    toolCallId: "c4",
+    toolName: "assign_slug",
+    content: JSON.stringify({ status: "ok", slug: "books" }),
+    resultRef: createToolResultRef(
+      createToolOutputId("r1", "assign_slug", 4),
+      "assign_slug",
+      "r1",
+      ASSIGN_SLUG_OUTPUT.artifactPath,
+    ),
+  },
   call("c5", "record_feedback", { patternId: "p-books", verdict: "up" }),
   result("c5", "record_feedback", { status: "ok" }),
 ];
@@ -182,7 +203,7 @@ describe("console/runs", () => {
     });
 
     it("reads the index calls and the address a person can open", () => {
-      const lens = consoleRunLens(buildTranscript());
+      const lens = consoleRunLens(buildTranscript(), [ASSIGN_SLUG_OUTPUT]);
       expect(lens.searches[0].query).toBe("reading list #books");
       expect(lens.searches[0].hits[0]).toEqual({
         patternId: "p-books",
@@ -190,7 +211,15 @@ describe("console/runs", () => {
         score: 0.82,
       });
       expect(lens.feedback[0].verdict).toBe("up");
-      expect(lens.pieces[0].url).toBe("http://localhost:8000/my-space/books");
+      expect(lens.pieces[0].url).toBe(
+        "http://localhost:8000/did:key:z6MkBooks/books",
+      );
+    });
+
+    it("returns no address for a piece whose persisted output it was not given", () => {
+      const lens = consoleRunLens(buildTranscript());
+      expect(lens.pieces[0].slug).toBe("books");
+      expect(lens.pieces[0].url).toBeUndefined();
     });
 
     it("names a search made on tags alone by its tags", () => {
@@ -243,9 +272,7 @@ describe("console/runs", () => {
         runState("r1", "2026-01-01T00:00:01.000Z"),
         buildTranscript(),
       );
-      expect(summary.pieceUrls).toEqual([
-        "http://localhost:8000/my-space/books",
-      ]);
+      expect(summary.pieceSlugs).toEqual(["books"]);
     });
   });
 

@@ -14,6 +14,7 @@ import {
   mintReferentHandle,
 } from "../../src/handle-table.ts";
 import type { HarnessTranscriptMessage } from "../../src/contracts/transcript.ts";
+import { persistAssignSlugOutputs } from "../support/assign-slug-outputs.ts";
 
 const writeTranscript = async (
   artifactRoot: string,
@@ -25,7 +26,9 @@ const writeTranscript = async (
   await Deno.mkdir(runRoot, { recursive: true });
   await Deno.writeTextFile(
     join(runRoot, "transcript.json"),
-    JSON.stringify(transcript),
+    JSON.stringify(
+      await persistAssignSlugOutputs(runRoot, turnId, transcript),
+    ),
   );
   await Deno.writeTextFile(
     join(runRoot, "run-report.json"),
@@ -454,7 +457,7 @@ describe("console/turn-result", () => {
     }
   });
 
-  it("returns successful `assign_slug` values exactly as the model received them", async () => {
+  it("returns the slug and URL a successful `assign_slug` call persisted", async () => {
     const artifactRoot = await Deno.makeTempDir({
       prefix: "cf-harness-console-result-",
     });
@@ -493,6 +496,12 @@ describe("console/turn-result", () => {
         spaceName: "console-test",
         finalText: "Your reading list is ready.",
       });
+      // The transcript the model read holds no URL.
+      expect(
+        await Deno.readTextFile(
+          join(artifactRoot, "turn-with-piece", "transcript.json"),
+        ),
+      ).not.toContain("http://localhost:8000");
     } finally {
       await Deno.remove(artifactRoot, { recursive: true });
     }
@@ -843,6 +852,55 @@ describe("console/turn-result", () => {
         turnId,
         spaceName: "console-test",
       })).resolves.toBeUndefined();
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  });
+
+  it("returns the other pieces and the answer when one persisted output does not read back", async () => {
+    const artifactRoot = await Deno.makeTempDir({
+      prefix: "cf-harness-console-result-",
+    });
+    try {
+      const turnId = "turn-with-a-lost-output";
+      const named = (toolCallId: string, slug: string) => ({
+        role: "tool" as const,
+        toolCallId,
+        toolName: "assign_slug",
+        content: JSON.stringify({
+          status: "ok",
+          slug,
+          url: `http://localhost:8000/console-test/${slug}`,
+        }),
+      });
+      await writeTranscript(artifactRoot, turnId, [
+        { role: "user", content: "build two lists" },
+        named("call-1", "reading-list"),
+        named("call-2", "watch-list"),
+        { role: "assistant", content: "Both lists are ready." },
+      ]);
+      await Deno.remove(
+        join(artifactRoot, turnId, "tool-outputs", "1-assign_slug.json"),
+      );
+
+      await expect(readConsoleTurnResult({
+        sessionId: "session",
+        continuable: true,
+        artifactRoot,
+        turnId,
+        spaceName: "console-test",
+      })).resolves.toEqual({
+        outcome: "completed",
+        sessionId: "session",
+        continuable: true,
+        looms: [],
+        pieces: [{
+          slug: "watch-list",
+          url: "http://localhost:8000/console-test/watch-list",
+        }],
+        spaceName: "console-test",
+        finalText: "Both lists are ready.",
+      });
     } finally {
       await Deno.remove(artifactRoot, { recursive: true });
     }

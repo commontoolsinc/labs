@@ -77,6 +77,7 @@ import {
   harnessClientProtocolEcho,
 } from "../../src/contracts/client-command.ts";
 import { INERT_RUNSC } from "../support/inert-runsc.ts";
+import { persistAssignSlugOutputs } from "../support/assign-slug-outputs.ts";
 
 /**
  * A loop that answers the task it was given and nothing else. The console
@@ -242,7 +243,9 @@ const writeTurnTranscript = async (
   await Deno.mkdir(runRoot, { recursive: true });
   await Deno.writeTextFile(
     join(runRoot, "transcript.json"),
-    JSON.stringify(transcript),
+    JSON.stringify(
+      await persistAssignSlugOutputs(runRoot, turnId, transcript),
+    ),
   );
   await Deno.writeTextFile(
     join(runRoot, "run-report.json"),
@@ -2696,6 +2699,23 @@ describe("console/server", () => {
       expect((await listSessions()).sessions).toHaveLength(0);
     });
 
+    it("starts a turn for a piece address naming a space by DID, which only the session can check", async () => {
+      // This console is configured by name, and a name and a DID can spell
+      // one space; the session knows both, so the turn decides.
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "make the headings readable",
+        inputCells: [{
+          name: "pattern_1",
+          ref: "pattern:did:key:z6MkAnySpace/bill-inbox",
+        }],
+      }));
+
+      expect(response.status).toBe(200);
+      const started = await response.json();
+      await server.service.waitForTurn(started.sessionId, started.turnId);
+      expect((await listSessions()).sessions).toHaveLength(1);
+    });
+
     it("answers 400 for a piece address whose slug is malformed", async () => {
       const response = await server.handle(jsonRequest("/api/task", {
         text: "make the headings readable",
@@ -3144,6 +3164,22 @@ describe("console/server", () => {
       await expect(resolveConsoleConfig([], {}, "/console")).rejects.toThrow(
         "a fabric session is required",
       );
+    });
+
+    it("returns the space DID a caller names, as the session's space", async () => {
+      const space = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+      expect(
+        (await resolveConsoleConfig(
+          ["--fabric-identity", "k", "--fabric-space", space],
+          {},
+          "/console",
+        )).fabricSession.space,
+      ).toBe(space);
+      expect(
+        (await resolveConsoleConfig(["--fabric-identity", "k"], {
+          CF_HARNESS_FABRIC_SPACE: space,
+        }, "/console")).fabricSession.space,
+      ).toBe(space);
     });
 
     it("throws naming the flag for a port that is not a positive integer", async () => {

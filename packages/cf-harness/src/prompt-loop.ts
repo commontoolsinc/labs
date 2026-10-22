@@ -5657,10 +5657,10 @@ export class CfHarnessPromptLoop {
       };
     }
     if (toolId === "assign_slug" && isObjectNotArray(output)) {
-      // The slug is the model's own word and the URL is composed from the
-      // session's API URL and space name, so neither is a fabric identifier;
-      // the piece id stays in the artifact, and the error text is scrubbed.
-      const { pieceId: _pieceId, ...publicOutput } = output;
+      // The slug is the model's own word. The piece id and the URL, which
+      // carries the space's DID, stay in the artifact, where the console reads
+      // the URL a person opens; the error text is scrubbed.
+      const { pieceId: _pieceId, url: _url, ...publicOutput } = output;
       const scrubbed: Record<string, unknown> = { ...publicOutput };
       if (typeof scrubbed.message === "string") {
         scrubbed.message = scrubBareFabricIdentifiers(scrubbed.message);
@@ -5671,7 +5671,7 @@ export class CfHarnessPromptLoop {
           createHarnessTranscriptOmissionRuleRecord(
             "artifact-only",
             resultRef,
-            presentFieldPointers(output, ["pieceId"]),
+            presentFieldPointers(output, ["pieceId", "url"]),
           ),
           createHarnessTranscriptOmissionRuleRecord(
             "bare-fabric-identifier-scrub",

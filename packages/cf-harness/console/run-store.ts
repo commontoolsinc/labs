@@ -613,7 +613,7 @@ export const readConsoleRun = async (
     summary: summarizeConsoleRun(runState, transcript),
     runState: withoutReferents(runState),
     transcript,
-    lens: consoleRunLens(transcript),
+    lens: consoleRunLens(transcript, toolOutputs),
     steps,
     handles: consoleRunHandles(steps, table, labels),
     ...referentDisplay(runState.handleTable?.referents ?? [], display),

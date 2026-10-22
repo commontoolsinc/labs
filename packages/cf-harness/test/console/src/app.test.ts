@@ -19,7 +19,7 @@ const row = (
   createdAt: "2026-01-01",
   updatedAt: "2026-01-01",
   toolCallCount: 0,
-  pieceUrls: [],
+  pieceSlugs: [],
 });
 
 describe("console/src/app", () => {

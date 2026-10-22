@@ -88,9 +88,6 @@ export interface ConsoleHandle {
   /** The name `assign_slug` gave it, once it has one. */
   slug?: string;
 
-  /** The address a person can open, once the handle has been named. */
-  url?: string;
-
   /**
    * The shape of the value behind it, as the pattern that made it declared.
    * Absent means no mint knew the shape, not that the referent has none.
@@ -569,6 +566,22 @@ const childRunIdOf = (output: unknown): string | undefined => {
 const artifactName = (path: string): string =>
   path.split(/[\\/]/).at(-1) ?? path;
 
+/**
+ * The full tool output persisted at `artifactPath`, or `undefined` when none
+ * was read. A transcript holds what the model was shown; this is what the tool
+ * returned. Paths compare by file name, since the run and the reader may name
+ * one directory differently.
+ */
+export const persistedToolOutput = (
+  artifactPath: string | undefined,
+  toolOutputs: readonly ConsoleToolOutputArtifact[],
+): ConsoleToolOutputArtifact | undefined =>
+  artifactPath === undefined
+    ? undefined
+    : toolOutputs.find((candidate) =>
+      artifactName(candidate.artifactPath) === artifactName(artifactPath)
+    );
+
 const valueAtJsonPointer = (
   value: unknown,
   pointer: string,
@@ -645,12 +658,7 @@ const withheldFor = (
   }
   const locations = result.rules.flatMap((rule) =>
     rule.locations.map((location): ConsoleWithheldLocation => {
-      const artifact = toolOutputs.find((candidate) =>
-        candidate.artifactPath === location.artifactPath ||
-        artifactName(candidate.artifactPath) === artifactName(
-            location.artifactPath,
-          )
-      );
+      const artifact = persistedToolOutput(location.artifactPath, toolOutputs);
       const held = artifact === undefined
         ? { available: false as const }
         : valueAtJsonPointer(artifact.value, location.jsonPointer);
@@ -915,7 +923,6 @@ export const consoleRunHandles = (
           ? { producedByStep: known.producedByStep }
           : {}),
         ...(known?.slug !== undefined ? { slug: known.slug } : {}),
-        ...(known?.url !== undefined ? { url: known.url } : {}),
         ...(entry?.schema !== undefined ? { schema: entry.schema } : {}),
         uses: known?.uses ?? [],
         confidentiality: known?.confidentiality ?? [],
@@ -930,7 +937,6 @@ export const consoleRunHandles = (
 interface HandleProvenance {
   producedByStep?: number;
   slug?: string;
-  url?: string;
   uses: ConsoleHandleUse[];
   confidentiality: string[];
 }
@@ -1006,14 +1012,9 @@ const handleProvenance = (
     }
     if (step.toolName === "assign_slug" && step.status !== "error") {
       const slug = asString(output.slug) ?? asString(args.slug);
-      const url = asString(output.url);
       for (const token of handleTokensIn(args.token)) {
-        const record = at(token);
         if (slug !== undefined) {
-          record.slug = slug;
-        }
-        if (url !== undefined) {
-          record.url = url;
+          at(token).slug = slug;
         }
       }
     }
