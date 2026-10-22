@@ -2,6 +2,11 @@ import { hashOf } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { isDID } from "@commonfabric/identity/did";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
+import {
+  blobDocumentId,
+  type BlobRecord,
+  isBlobFileName,
+} from "@commonfabric/runner/blob-record";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { Context } from "@hono/hono";
 
@@ -13,18 +18,6 @@ import { createRouter } from "@/lib/create-app.ts";
 import { memoryServer } from "@/routes/storage/memory.ts";
 
 const router = createRouter();
-
-/**
- * A blob as the store keeps it: its media type, its bytes, and, when it was
- * stored with one, the name of the file they came from. A blob's id is the hash
- * of the whole record, so the same bytes stored under two names, or under a
- * name and under none, are two blobs.
- */
-type BlobContents = {
-  type: string;
-  body: FabricBytes;
-  name?: string;
-};
 
 const DEFAULT_SUFFIX_BY_TYPE: Record<string, string> = {
   "image/gif": "gif",
@@ -93,22 +86,11 @@ const toByteArray = (value: unknown): Uint8Array | undefined => {
 };
 
 /**
- * Indicates whether `name` may name the file a blob holds, which is so of any
- * non-empty string of well-formed Unicode, one with no unpaired surrogate. A
- * download only ever offers the name as one to save under, encoded so that no
- * character of it can reach the header as itself (see
- * {@link contentDispositionFor}), so the store holds a name to no rule of a
- * file system's. The encoding is what needs it well-formed.
- */
-const isFileName = (name: unknown): name is string =>
-  typeof name === "string" && name.length > 0 && name.isWellFormed();
-
-/**
  * Returns `value` as blob contents if its body is a `FabricBytes`, the one form
  * an upload may take, and its `name`, if it has one, is a file name (see
- * {@link isFileName}), or `undefined` otherwise.
+ * `isBlobFileName()`), or `undefined` otherwise.
  */
-const asBlobContents = (value: unknown): BlobContents | undefined => {
+const asBlobRecord = (value: unknown): BlobRecord | undefined => {
   if (
     !isObjectNotArray(value) || typeof value.type !== "string" ||
     !(value.body instanceof FabricBytes)
@@ -118,22 +100,22 @@ const asBlobContents = (value: unknown): BlobContents | undefined => {
   if (value.name === undefined) {
     return { type: value.type, body: value.body };
   }
-  return isFileName(value.name)
+  return isBlobFileName(value.name)
     ? { type: value.type, body: value.body, name: value.name }
     : undefined;
 };
 
 /**
- * Like {@link asBlobContents}, except that the body may also be one of the
+ * Like {@link asBlobRecord}, except that the body may also be one of the
  * byte-shaped forms {@link toByteArray} reads, which a stored blob may hold,
  * and that a `name` which is not a file name is dropped rather than refused, so
  * that the blob is still served, under no name.
  */
-const asStoredBlobContents = (value: unknown): BlobContents | undefined => {
+const asStoredBlobRecord = (value: unknown): BlobRecord | undefined => {
   if (!isObjectNotArray(value) || typeof value.type !== "string") {
     return undefined;
   }
-  const name = isFileName(value.name) ? { name: value.name } : {};
+  const name = isBlobFileName(value.name) ? { name: value.name } : {};
   if (value.body instanceof FabricBytes) {
     return { type: value.type, body: value.body, ...name };
   }
@@ -236,18 +218,18 @@ const readRequestContents = async (request: Request) => {
   if (!source) {
     return undefined;
   }
-  return asBlobContents(decodeMemoryBoundary(source));
+  return asBlobRecord(decodeMemoryBoundary(source));
 };
 
-const loadBlobContents = async (
+const loadBlobRecord = async (
   spaceDid: string,
   id: string,
-): Promise<BlobContents | undefined> => {
+): Promise<BlobRecord | undefined> => {
   const document = await memoryServer.readDocument(
     spaceDid,
-    `cid:${id}`,
+    blobDocumentId(id),
   );
-  return asStoredBlobContents(document?.value);
+  return asStoredBlobRecord(document?.value);
 };
 
 const upload = async (c: Context) => {
@@ -256,7 +238,7 @@ const upload = async (c: Context) => {
     return c.text("Invalid space DID", 400);
   }
 
-  let contents: BlobContents | undefined;
+  let contents: BlobRecord | undefined;
   try {
     contents = await readRequestContents(c.req.raw);
   } catch (error) {
@@ -273,7 +255,7 @@ const upload = async (c: Context) => {
   const blobName = c.req.param("blobName") as string | undefined;
   const suffix = suffixFor(blobName ?? contents.name, contents.type);
   const hash = id.slice("fid1:".length);
-  await memoryServer.writeDocument(spaceDid, `cid:${id}`, contents);
+  await memoryServer.writeDocument(spaceDid, blobDocumentId(id), contents);
 
   return c.json({ id, url: `blobs/${hash}.${suffix}` }, 201);
 };
@@ -292,7 +274,7 @@ router.get("/:spaceDid/blobs/:blobName", async (c) => {
     return c.text("Invalid blob name", 400);
   }
   const { id } = parsed;
-  const contents = await loadBlobContents(spaceDid, id);
+  const contents = await loadBlobRecord(spaceDid, id);
   if (!contents) {
     return c.text("Blob not found", 404);
   }

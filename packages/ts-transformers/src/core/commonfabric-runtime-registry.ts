@@ -343,6 +343,14 @@ export const COMMONFABRIC_RUNTIME_EXPORT_REGISTRY = [
     category: "ignored",
     reactiveOrigin: false,
   },
+  // nameBlob(target, blobId, name) stages a blob's record in the running
+  // handler and returns its id. It builds no graph node, so it is a plain call
+  // inside the handler that makes it.
+  {
+    exportName: "nameBlob",
+    category: "ignored",
+    reactiveOrigin: false,
+  },
 ] as const satisfies readonly CommonFabricRuntimeExportSpec[];
 
 export const COMMONFABRIC_RUNTIME_EXPORTS_BY_NAME: ReadonlyMap<

@@ -48,6 +48,7 @@
     "./experimental-posture": "./src/experimental-posture.ts",
     "./deployment-meta": "./src/deployment-meta.ts",
     "./space-host": "./src/space-host.ts",
+    "./blob-record": "./src/blob-record.ts",
     "./pattern-release-time": "./src/pattern-release-time.ts",
     "./fabric-url": "./src/fabric-url.ts",
     "./meta-seam": "./src/meta-seam.ts",
