@@ -1727,8 +1727,8 @@ export interface IStorageTransaction {
 
   /**
    * Optional: record `changes` to the string at `address`, so that the commit
-   * carries them as an `apply-op` at the field's head (memory-v2 §7.7.1),
-   * guarded by the hash of the value this transaction read there. Returns the
+   * carries them as an `apply-op` without a base (memory-v2 §7.7.1), which
+   * the commit's read of the field stands in for. Returns the
    * changed string, which the caller writes to `address` through the ordinary
    * write path: the transaction's later reads, its CFC checks, and the local
    * view all see that write, and the commit sends the field's change as the

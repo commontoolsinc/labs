@@ -5928,9 +5928,9 @@ export class Server {
                 duplicate: resolution.duplicate,
               };
               operationApplyCount.add(1, attributes);
-              // A `head` base lands at the field's current version, so it is
-              // rebased over nothing.
-              const baseVersion = operation.base === "head"
+              // An `apply-op` without a base lands at the field's current
+              // version, so it is rebased over nothing.
+              const baseVersion = operation.base === undefined
                 ? resolution.from.version
                 : operation.base?.version ?? 0;
               operationTransformSuffix.record(

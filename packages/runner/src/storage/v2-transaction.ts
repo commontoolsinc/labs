@@ -18,7 +18,6 @@ import {
   codeMirrorTextChangesPayload,
   type CommitPrecondition,
   getCommitPreconditionsConfig,
-  operationBaselineHash,
   type PatchOp,
   resolveScopeKey,
   type ScopeKey,
@@ -226,7 +225,7 @@ type DocumentEntry = ReadDocumentEntry | WritableDocumentEntry;
 
 /**
  * The text changes a transaction recorded at one string field, which its
- * commit carries as one `apply-op` at the field's head.
+ * commit carries as one `apply-op` against the transaction's read of it.
  */
 type TextChangeIntent = {
   /** The field's document path, `value` first. */
@@ -1857,9 +1856,10 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   /**
    * Helper for `getNativeCommit()`, which builds one `apply-op` per field the
-   * transaction changed the text of in `space`. Each lands at the field's head
-   * only while the field holds the value the transaction read, which its
-   * `baselineHash` names, so the server has nothing to merge it over.
+   * transaction changed the text of in `space`. None names a base: the commit
+   * carries the transaction's read of the field, which refuses the commit once
+   * the field moves, so the server applies each at the version the field
+   * holds, with nothing to merge it over.
    */
   #textChangeOperations(space: MemorySpace): ApplyOpOperation[] {
     const operations: ApplyOpOperation[] = [];
@@ -1873,8 +1873,6 @@ export class V2StorageTransaction implements IStorageTransaction {
           path: toValuePath(intent.path.slice(1)),
           codec: CODEMIRROR_CHANGESET_CODEC,
           submissionId: intent.submissionId,
-          base: "head",
-          baselineHash: operationBaselineHash(intent.baseline),
           payload: codeMirrorTextChangesPayload(
             intent.baseline,
             intent.batches,

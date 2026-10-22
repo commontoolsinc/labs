@@ -164,7 +164,7 @@ describe("collaborative-text-changes", () => {
     });
   });
 
-  it("sends the edit as an `apply-op` at the field's head, after a patch that leaves the field alone", async () => {
+  it("sends the edit as an `apply-op` without a base, after a patch that leaves the field alone", async () => {
     const note = await seed();
     await openAsEditor(note);
 
@@ -176,14 +176,14 @@ describe("collaborative-text-changes", () => {
     ]);
     const native = getDirectTransactionNativeCommit(tx, space);
 
-    expect(native?.applyOps).toEqual([
-      expect.objectContaining({
-        op: "apply-op",
-        path: ["body"],
-        base: "head",
-        baselineHash: operationBaselineHash("abc"),
-      }),
-    ]);
+    expect(native?.applyOps).toHaveLength(1);
+    const edit = native?.applyOps?.[0];
+    expect(edit).toMatchObject({ op: "apply-op", path: ["body"] });
+    // The commit's read of the field is the base.
+    expect(edit !== undefined && Object.hasOwn(edit, "base")).toBe(false);
+    expect(edit !== undefined && Object.hasOwn(edit, "baselineHash")).toBe(
+      false,
+    );
     const patch = native?.operations.find((operation) =>
       operation.op === "patch"
     );

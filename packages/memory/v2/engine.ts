@@ -4748,18 +4748,20 @@ const validateApplyOperation = (operation: ApplyOpOperation): void => {
   ) {
     throw new ProtocolError("apply-op identity fields are malformed");
   }
-  const hashedBase = operation.base === null || operation.base === "head";
-  if (!hashedBase && !validateCursor(operation.base)) {
+  if (
+    operation.base !== undefined && operation.base !== null &&
+    !validateCursor(operation.base)
+  ) {
     throw new OpCursorMismatchError("apply-op cursor is malformed");
   }
   if (
-    hashedBase
+    operation.base === null
       ? typeof operation.baselineHash !== "string" ||
         operation.baselineHash.length === 0
       : operation.baselineHash !== undefined
   ) {
     throw new OpFieldBaselineMismatchError(
-      "baselineHash is required exactly when apply-op base is `null` or `head`",
+      "baselineHash is required exactly when apply-op base is null",
     );
   }
   if (
@@ -4773,6 +4775,50 @@ const validateApplyOperation = (operation: ApplyOpOperation): void => {
   if (Array.isArray(updates) && updates.length > MAX_OPERATION_BATCH_UPDATES) {
     throw new OpCodecError("operation payload exceeds the update-count limit");
   }
+};
+
+/**
+ * Whether `commit` stands as the base of its `apply-op` at `opIndex`, which
+ * names none: it carries a recursive read, confirmed or pending, of the field
+ * or of a path above it, and no operation ahead of this one writes the field.
+ * Reads are validated before any operation applies, so the field then holds
+ * exactly what that read saw.
+ */
+const commitReadIsFieldBase = (
+  commit: ClientCommit,
+  opIndex: number,
+  operation: ApplyOpOperation,
+): boolean => {
+  const fieldPath = ["value", ...operation.path];
+  const scope = normalizeScope(operation.scope);
+  const covers = (
+    read: { id: string; scope?: CellScope; path: readonly string[] },
+  ) =>
+    read.id === operation.id && normalizeScope(read.scope) === scope &&
+    isPrefixPath(read.path, fieldPath);
+  const read =
+    commit.reads.confirmed.some((read) =>
+      read.nonRecursive !== true && covers(read)
+    ) || commit.reads.pending.some(covers);
+  if (!read) return false;
+  return commit.operations.slice(0, opIndex).every((earlier) => {
+    if (earlier.op === "sqlite" || earlier.id !== operation.id) return true;
+    if (normalizeScope(earlier.scope) !== scope) return true;
+    switch (earlier.op) {
+      case "patch":
+        return earlier.patches.every((patch) =>
+          touchedPointerPaths(patch).every((path) =>
+            !pathsOverlap(path, fieldPath)
+          )
+        );
+      case "apply-op":
+      case "release-op-field":
+        return !pathsOverlap(["value", ...earlier.path], fieldPath);
+      default:
+        // A `set` or `delete` replaces the whole document.
+        return false;
+    }
+  });
 };
 
 const storedOperationResolution = (
@@ -4815,11 +4861,23 @@ const applyOperation = (
     principal?: string;
     sessionId: SessionId;
     scopeKeyOverride?: string;
+
+    /**
+     * Whether the commit stands as the base of an `apply-op` that names none
+     * (see `commitReadIsFieldBase()`).
+     */
+    readIsBase: boolean;
   },
 ): { resolution: ApplyOpResolution; revision?: AppliedRevision } => {
   const { branch, seq, opIndex, operation, principal, sessionId } = options;
   assertDefaultOperationBranch(branch);
   validateApplyOperation(operation);
+  if (operation.base === undefined && !options.readIsBase) {
+    throw new OpCursorMismatchError(
+      "an apply-op without a base needs the commit's recursive read of the " +
+        "field, and no earlier operation in the commit writing it",
+    );
+  }
   if (isStreamEntriesDocId(operation.id)) {
     throw new ProtocolError(
       "apply-op cannot mutate a stream sidecar document",
@@ -4861,14 +4919,15 @@ const applyOperation = (
     | OperationSubmissionRow
     | undefined;
   if (duplicate) {
-    // A `head` submission resolved its base to whatever version the field
-    // held when it landed, so the stored base version says nothing a replay
-    // could disagree with.
+    // A submission without a base took the version the field held when it
+    // landed, so the stored base version says nothing a replay could
+    // disagree with.
     const base = operation.base;
     if (
       duplicate.codec !== operation.codec ||
-      (base !== null && base !== "head" && base.epoch !== duplicate.epoch) ||
-      (base !== "head" && duplicate.base_version !== (base?.version ?? 0)) ||
+      (base != null && base.epoch !== duplicate.epoch) ||
+      (base !== undefined &&
+        duplicate.base_version !== (base?.version ?? 0)) ||
       (base === null &&
         operation.baselineHash !== priorField?.baseline_hash) ||
       duplicate.submitted_payload !== encodeMemoryBoundary(operation.payload)
@@ -4900,13 +4959,15 @@ const applyOperation = (
   let baselineHash: string;
   let intervening: FabricValue[];
   if (!activeField) {
-    if (operation.base !== null && operation.base !== "head") {
+    if (operation.base != null) {
       throw new OpCursorMismatchError(
-        "inactive operation fields require a `null` or `head` base",
+        "inactive operation fields require a null or absent base",
       );
     }
+    // Without a base, the commit's read of the field is what the payload was
+    // computed from, and the field still holds it.
     const currentHash = operationBaselineHash(currentMaterialized);
-    if (operation.baselineHash !== currentHash) {
+    if (operation.base === null && operation.baselineHash !== currentHash) {
       throw new OpFieldBaselineMismatchError(
         "operation field baseline hash mismatch",
       );
@@ -4941,16 +5002,9 @@ const applyOperation = (
         );
       }
       baseVersion = 0;
-    } else if (operation.base === "head") {
-      // The hash stands in for a cursor: a payload computed from the value
-      // the field holds now has nothing to be rebased over.
-      if (
-        operation.baselineHash !== operationBaselineHash(currentMaterialized)
-      ) {
-        throw new OpFieldBaselineMismatchError(
-          "operation field value no longer matches the `head` baseline hash",
-        );
-      }
+    } else if (operation.base === undefined) {
+      // The commit's read of the field stands in for a cursor: it saw the
+      // version the field holds now, so there is nothing to rebase over.
       baseVersion = activeField.version;
     } else {
       if (operation.base.epoch !== activeField.epoch) {
@@ -6528,6 +6582,8 @@ const applyCommitTransaction = (
         principal: scanPrincipal,
         sessionId: scanSession,
         scopeKeyOverride: scopeKeyByOpIndex.get(opIndex),
+        readIsBase: operation.base === undefined &&
+          commitReadIsFieldBase(commit, opIndex, operation),
       });
       operationResolutions.push(applied.resolution);
       if (applied.revision) revisions.push(applied.revision);

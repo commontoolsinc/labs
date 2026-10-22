@@ -3300,11 +3300,10 @@ export class CellImpl<T extends FabricValue>
 
   /**
    * Applies `changes` to this string cell, each position referring to the
-   * value this transaction read. The commit carries them as an edit at the
-   * field's head, which a collaborative editor merges with its own typing and
-   * which lands only while the field holds the value read here; the read
-   * itself goes with the commit, so a field that moved on refuses it and the
-   * transaction runs again against the new value.
+   * value this transaction read. The commit carries them as an edit, which a
+   * collaborative editor merges with its own typing, together with the read
+   * itself, which is what the edit is against: a field that moved on refuses
+   * the commit, and the transaction runs again against the new value.
    *
    * @throws when called outside a transaction, when the cell holds no string,
    *   when a change does not fit the string, or when the transaction already

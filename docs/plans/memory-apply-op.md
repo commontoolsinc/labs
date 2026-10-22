@@ -379,9 +379,9 @@ editor semantics.
       and pending-commit durability barrier as ordinary writes.
 - [x] Do not place `apply-op` in `PendingVersion`: the editor owns its immediate
       local view, while Memory owns canonical materialization. Ordinary Cell
-      state advances from authoritative verdict/sync results. WP11's `head`
-      edit is the one case the replica shows ahead of the verdict, because its
-      result is fixed by the value it was computed from.
+      state advances from authoritative verdict/sync results. WP11's edit
+      against a read is the one case the replica shows ahead of the verdict,
+      because its result is fixed by the value it was computed from.
 - [x] Ensure a collaboration commit participates in `synced()`, shutdown, route
       replacement, authorization errors, and telemetry.
 - [x] Keep emulated storage behavior on the real loopback Memory server rather
@@ -559,10 +559,11 @@ Purpose: let a handler edit an active collaborative string, which an ordinary
 write may not change (§7.6), with an edit the open editors merge like any
 other.
 
-- [x] Add a `head` base to `apply-op`: the payload applies at the field's
-      current version, with nothing to rebase over, while the field's value
-      hashes to the operation's `baselineHash`, and activates an inactive field
-      from that value (§7.6, §7.7.1).
+- [x] Let `apply-op` name no base: the commit's recursive read of the field is
+      what it was written against, so it applies at the field's current
+      version with nothing to rebase over, and activates an inactive field from
+      that value. Without such a read, or after an earlier operation in the
+      commit wrote the field, it is rejected (§7.6, §7.7.1).
 - [x] Add `Writable<string>.applyChanges()`, taking changes in the shape of a
       CodeMirror change spec against the value the handler read. The handler's
       transaction records them and writes the changed text, so CFC, its later
@@ -582,8 +583,10 @@ other.
 
 Required tests:
 
-- [x] A `head` operation applies at the current version, refuses a stale
-      baseline hash, activates an inactive field, and replays as a duplicate.
+- [x] An `apply-op` without a base applies at the current version beside a
+      read of the field or of the document, activates an inactive field,
+      replays as a duplicate, and is rejected without a recursive read or after
+      an earlier write to the field in the commit.
 - [x] A stale confirmed read of the field refuses the commit as a
       `ConflictError` before the operation applies.
 - [x] A handler's edit commits beside an ordinary write to another field of the
