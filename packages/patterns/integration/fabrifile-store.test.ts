@@ -361,6 +361,18 @@ describe("FabriFile store", () => {
       });
     });
 
+    it("refuses a request missing its media type, size or blob", async () => {
+      const blobId = await storeBlob(photo);
+      const { send, facts } = await startStore(await writeProfile("Ada"));
+
+      await send("add", { requestId: "a1", name: "photo.png", blobId });
+
+      expect((await facts()).requests.a1).toMatchObject({
+        status: "refused",
+        code: "invalid-request",
+      });
+    });
+
     it("refuses a blob in another space", async () => {
       const blobId = await storeBlob(photo);
       const { send, facts } = await startStore(await writeProfile("Ada"));

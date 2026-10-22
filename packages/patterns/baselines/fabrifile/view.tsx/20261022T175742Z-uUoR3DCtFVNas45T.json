@@ -28,12 +28,6 @@
             "type": "number"
           }
         },
-        "required": [
-          "name",
-          "mediaType",
-          "blob",
-          "size"
-        ],
         "type": "object"
       },
       "BlobRef": {
@@ -112,6 +106,7 @@
       },
       "FileRefusalCode": {
         "enum": [
+          "invalid-request",
           "invalid-name",
           "name-taken",
           "other-space",
@@ -258,9 +253,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "entry"
-        ],
         "type": "object"
       },
       "RenameFileEvent": {
@@ -285,10 +277,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "entry",
-          "name"
-        ],
         "type": "object"
       }
     },

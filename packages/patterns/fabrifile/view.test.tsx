@@ -35,14 +35,14 @@ const SPACE = "did:key:z6Mk-fabrifile-view";
 /** Records the name of each entry a `remove` names. */
 const recordRemove = handler<RemoveFileEvent, { log: Writable<string[]> }>(
   (event, { log }) => {
-    log.push(`remove ${event.entry.get().name}`);
+    log.push(`remove ${event.entry?.get().name}`);
   },
 );
 
 /** Records each name a `rename` asks for. */
 const recordRename = handler<RenameFileEvent, { log: Writable<string[]> }>(
   (event, { log }) => {
-    log.push(`rename ${event.entry.get().name} to ${event.name}`);
+    log.push(`rename ${event.entry?.get().name} to ${event.name}`);
   },
 );
 

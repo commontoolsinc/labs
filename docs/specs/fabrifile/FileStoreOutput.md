@@ -24,6 +24,7 @@ interface FileStoreOutput {
       status: "refused";
       reason: string;
       code?:
+        | "invalid-request"
         | "invalid-name"
         | "name-taken"
         | "other-space"
@@ -110,7 +111,8 @@ These rules hold for every stream:
 - A request from a principal the store's space doesn't admit with WRITE or
   OWNER is not admitted, and records no outcome.
 - An admitted request missing a key its stream needs, or naming a key of the
-  wrong type, is refused, with a reason that says which, rather than ignored.
+  wrong type, is refused, with `code: "invalid-request"` and a reason that says
+  which, rather than ignored.
 - A request sent again with the same `requestId` changes nothing, and its
   outcome stays the one first recorded.
 - Every stream changes only this store.

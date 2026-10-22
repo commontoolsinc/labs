@@ -92,7 +92,7 @@ const addUploads = handler<
 >((event, { add, anchor, sent }) => {
   const space = spaceOf(anchor);
   if (space === undefined) return;
-  for (const file of event?.detail?.files ?? []) {
+  (event?.detail?.files ?? []).forEach((file) => {
     const requestId = newRequestId();
     sent.push({ requestId, name: file.name });
     add.send({
@@ -103,7 +103,7 @@ const addUploads = handler<
       size: file.size,
       onConflict: "rename",
     });
-  }
+  });
 });
 
 /** Removes the entry it is bound to. */

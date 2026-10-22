@@ -74,6 +74,7 @@ export const epochNsecFromMsec = (msec: number): FabricEpochNsec =>
 
 /** Why a store refused a request, which stays the same whatever its reason. */
 export type FileRefusalCode =
+  | "invalid-request"
   | "invalid-name"
   | "name-taken"
   | "other-space"
@@ -105,22 +106,27 @@ export type FileRequestOutcome =
 /** What a store does when a request names a name another entry has. */
 export type NameConflict = "refuse" | "rename";
 
+//
+// Each event's keys are optional to its stream, so that a request missing one
+// reaches the handler, which refuses it saying which, rather than being dropped.
+//
+
 /** An event on a store's `add`. */
 export interface AddFileEvent {
   /** Chosen by the sender; the event's own key when there is none. */
   requestId?: string;
 
   /** The new entry's name, the name its blob was stored under. */
-  name: string;
+  name?: string;
 
   /** The media type the blob was stored with. */
-  mediaType: string;
+  mediaType?: string;
 
   /** The blob holding the bytes. */
-  blob: BlobRef;
+  blob?: BlobRef;
 
   /** The size of the file, in bytes. */
-  size: number;
+  size?: number;
 
   /** What to do when `name` is taken; `refuse` when absent. */
   onConflict?: NameConflict;
@@ -132,7 +138,7 @@ export interface RemoveFileEvent {
   requestId?: string;
 
   /** The entry to remove. */
-  entry: Cell<FileEntry>;
+  entry?: Cell<FileEntry>;
 }
 
 /** An event on a store's `rename`. */
@@ -141,10 +147,10 @@ export interface RenameFileEvent {
   requestId?: string;
 
   /** The entry to rename. */
-  entry: Cell<FileEntry>;
+  entry?: Cell<FileEntry>;
 
   /** The entry's new name. */
-  name: string;
+  name?: string;
 
   /** What to do when `name` is taken; `refuse` when absent. */
   onConflict?: NameConflict;

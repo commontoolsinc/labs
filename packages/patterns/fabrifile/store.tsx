@@ -231,7 +231,7 @@ export const commitAdd = handler<AddFileEvent, AddState>(
       refuse(
         requests,
         requestId,
-        "invalid-name",
+        "invalid-request",
         "An add needs a `mediaType`, a `size` and a `blob`.",
       );
       return;
