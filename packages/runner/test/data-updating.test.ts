@@ -36,6 +36,10 @@ import { decomposeSchema } from "../src/schema-decompose.ts";
 import { registerSchemaDocument } from "../src/schema-registry.ts";
 import type { URI } from "../src/sigil-types.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import {
+  isLinkResolutionProbe,
+  isWriteDestinationRead,
+} from "../src/storage/reactivity-log.ts";
 import { getTransactionWriteDetails } from "../src/storage/transaction-inspection.ts";
 import { toURI } from "../src/uri-utils.ts";
 
@@ -1432,6 +1436,32 @@ describe("data-updating", () => {
 
       expect(slot(id, "user").getRaw()).toEqual({ a: "hello" });
       expect(slot(id, "space").get()).toEqual({ a: "hello" });
+    });
+
+    it("journals its reads of the realizing slots as link probes, not as write-destination reads", async () => {
+      // Those slots are not the region the write lands in, so what the guard
+      // reads there is which reference sits at each one.
+      const id = target("realization reads chained to session", "chain");
+      await tx.commit().settled;
+      tx = runtime.edit();
+
+      const changes = normalizeAndDiff(
+        runtime,
+        tx,
+        slot(id, "session", ["a"]).getAsNormalizedFullLink(),
+        redirectTo(id, "space", ["a"]),
+      );
+
+      expect(changes).toEqual([]);
+      const reads = [...tx.getReadActivities!()].filter((read) =>
+        read.id === id && read.scope !== "session"
+      );
+      expect(reads.length).toBeGreaterThan(0);
+      expect(
+        reads.filter((read) =>
+          !isLinkResolutionProbe(read.meta) || isWriteDestinationRead(read.meta)
+        ),
+      ).toEqual([]);
     });
 
     it("writes a link to the space slot of a document whose content is at that slot", () => {
