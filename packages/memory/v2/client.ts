@@ -2123,6 +2123,13 @@ export class Client {
     if ([...this.#spaces].some((session) => session.held)) {
       this.#restartDelayMs = reconnectDelayMs(this.#restarts++);
     }
+    // A frame the transport could not decode (see `receiveFailedError()`) may
+    // already count as delivered on the server, exactly like a frame this
+    // client could not parse in `#onMessage()`: each session restores from
+    // its own baseline rather than the server's delivery cache.
+    if (error !== undefined && isOwnReceiveFailure(error)) {
+      for (const session of this.#spaces) session.invalidateDelivery(error);
+    }
     for (const session of this.#spaces) {
       session.handleDisconnect();
     }
@@ -4723,6 +4730,20 @@ export const connectionError = (message: string, cause?: unknown): Error => {
  */
 export const writeFailedError = (message: string, cause?: unknown): Error =>
   Object.assign(connectionError(message, cause), { ownWriteFailed: true });
+
+/**
+ * Like `connectionError()`, except that it marks a frame the transport
+ * received and could not decode: a frame past the negotiated size or slot cap,
+ * a compressed frame that does not inflate, or an invalid router credit. A
+ * transport reports such a failure to its close receiver with this error, and
+ * the client then treats every session's delivery as invalid, since the server
+ * may have recorded the undecodable frame as delivered.
+ */
+export const receiveFailedError = (message: string, cause?: unknown): Error =>
+  Object.assign(connectionError(message, cause), { ownReceiveFailed: true });
+
+const isOwnReceiveFailure = (error: unknown): boolean =>
+  (error as { ownReceiveFailed?: unknown } | null)?.ownReceiveFailed === true;
 
 /**
  * How many attempts may fail because one commit's or watch request's own write

@@ -698,9 +698,12 @@ export class WebSocketTransport implements MemoryClient.Transport {
             } catch {
               // Diagnostics cannot prevent detaching and closing this socket.
             }
-            const error = new Error(
+            // Tagged so the client invalidates every session's delivery: the
+            // server may count the frame this transport could not decode as
+            // delivered.
+            const error = MemoryClient.receiveFailedError(
               "Unable to decode compressed memory websocket message",
-              { cause },
+              cause,
             );
             this.#detachSocket(error);
             this.#closeReceiver(error);
