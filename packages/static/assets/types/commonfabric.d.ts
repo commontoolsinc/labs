@@ -1333,7 +1333,8 @@ export interface IStreamable<T> {
   ): void;
 }
 
-// Lightweight HKT, so we can pass cell types to IKeyable<>.
+// Lightweight higher-kinded type (HKT), so we can pass cell types to
+// IKeyable<>.
 export interface HKT {
   _A: unknown;
   type: unknown;
@@ -1777,8 +1778,9 @@ export interface ICreatable<C extends AnyBrandedCell<any>> {
    * Set a cause for this cell. Used to create a link when the cell doesn't have
    * one yet.
    *
-   * Record causes may not use the top-level key `$generated` — it is
-   * reserved for system-generated causes and setting one throws.
+   * Record causes may not use the top-level key `$generated` or `$instance` —
+   * they are reserved for the causes the pattern builder mints, and setting
+   * one throws.
    * @param cause - The cause to associate with this cell
    * @returns This cell for method chaining
    */
@@ -5039,6 +5041,37 @@ export declare function revokeSpaceAccess(
   target: AnyCell<unknown>,
   principal: DID,
 ): void;
+
+/**
+ * Returns the id of a blob holding the bytes and media type of the blob
+ * `blobId` under the file name `name`, in the space `target`'s value lives in.
+ * A blob's id is the hash of its name, media type and bytes, and a blob never
+ * changes, so this is how a file is renamed: the space then holds the same
+ * bytes under both names, and whatever names the file names the new blob. A
+ * blob already named `name` is its own answer.
+ *
+ * The new blob's record is staged in the handler's transaction, and is stored
+ * when the transaction commits. Its bytes travel with the commit, so a handler
+ * renaming a large file loads its bytes and then sends them back.
+ *
+ * Returns `undefined` when the space holds no blob `blobId`. A blob still
+ * loading is not one of those: the handler is withdrawn, and runs again once
+ * the blob arrives.
+ *
+ * The record carries no label, as no blob does: `name` is readable by anyone
+ * who can fetch the blob, as its bytes are. The blob's id hashes the name in
+ * with the media type and bytes, so fetching it takes knowing all three
+ * already, and a correct guess at all three is confirmed by fetching.
+ *
+ * Available only in a handler, and throws anywhere else. Throws too when
+ * `blobId` is not a non-empty string, or `name` is not a non-empty string of
+ * well-formed Unicode of at most 1024 bytes as UTF-8.
+ */
+export declare function nameBlob(
+  target: AnyCell<unknown>,
+  blobId: string,
+  name: string,
+): string | undefined;
 
 /**
  * Convert an entity-id reference — as produced by {@link getEntityId} or a

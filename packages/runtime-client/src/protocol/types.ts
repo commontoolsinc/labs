@@ -458,6 +458,11 @@ export enum RequestType {
    * otherwise failing as a confusing server 404.
    */
   UploadBlob = "runtime:uploadBlob",
+  /**
+   * Returns the URL the named space's host serves a blob at, so a host can
+   * show or offer a blob it holds a reference to.
+   */
+  BlobUrl = "runtime:blobUrl",
 
   // Piece operations (main -> worker)
 
@@ -2377,10 +2382,44 @@ export type UploadBlobRequest = BaseRequest & {
   body: FabricBytes;
 
   /**
-   * The extension the stored blob is served under, defaulting to `bin`.
-   * A leading dot is stripped.
+   * The name of the file the bytes came from, if they have one. The stored blob
+   * keeps it, hashed into the blob's id with the media type and the bytes, and
+   * a download of the blob is offered under it.
+   */
+  name?: string;
+
+  /**
+   * The extension the stored blob is served under. A leading dot is stripped.
+   * With none, the store chooses one: the extension of `name`, or else one for
+   * the media type, or else `bin`.
    */
   suffix?: string;
+};
+
+/**
+ * The {@link RequestType.BlobUrl} request: a blob, named by its space and its
+ * id there.
+ */
+export type BlobUrlRequest = BaseRequest & {
+  type: RequestType.BlobUrl;
+
+  /** The space whose blob store holds the blob. */
+  space: DID;
+
+  /** The blob's id, `fid1:` and the hash of its record. */
+  id: string;
+
+  /**
+   * Whether the URL is one to save the blob from: its host then serves it as
+   * an attachment, which a browser saves from any origin, rather than shows.
+   */
+  download?: boolean;
+};
+
+/** Where a blob is served from. */
+export type BlobUrlResponse = {
+  /** The absolute URL the blob's space's host serves it at. */
+  url: string;
 };
 
 /** The stored blob's id, and the URL it is served from. */
@@ -3469,7 +3508,8 @@ export type IPCClientRequest =
   | DetectNonIdempotentRequest
   | GetPatternSourcesRequest
   | SetBreakpointsRequest
-  | UploadBlobRequest;
+  | UploadBlobRequest
+  | BlobUrlRequest;
 
 /**
  * The requests naming a piece by id, read off {@link IPCClientRequest} rather
@@ -4328,6 +4368,7 @@ export type RemoteResponse =
   | DetectNonIdempotentResponse
   | PatternSourcesResponse
   | UploadBlobResponse
+  | BlobUrlResponse
   | OperationCapabilitiesResponse
   | OperationFieldResponse
   | OperationApplyResponse
@@ -4723,6 +4764,10 @@ export type Commands = {
   [RequestType.UploadBlob]: {
     request: UploadBlobRequest;
     response: UploadBlobResponse;
+  };
+  [RequestType.BlobUrl]: {
+    request: BlobUrlRequest;
+    response: BlobUrlResponse;
   };
   // VDOM requests
   [RequestType.VDomMount]: {

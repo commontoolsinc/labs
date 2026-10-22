@@ -11,6 +11,7 @@
  */
 
 import { CSI, term } from "./ansi.ts";
+import { type BlameRunner, blameRunner } from "./blame.ts";
 import type { Document } from "./model.ts";
 import { decodeKeys } from "./keys.ts";
 import { cursorScreenPos, renderFrame, type ViewState } from "./render.ts";
@@ -83,6 +84,10 @@ export interface PagerDeps {
    * is running in, showing git's output with `write` and stopping git when
    * `signal` aborts. */
   pushIo(write: (text: string) => void, signal: AbortSignal): PushIo;
+
+  /** Attribute each line of a file with `git blame`, rejecting with git's
+   * message when it cannot, and stopping git when `signal` aborts. */
+  blame: BlameRunner;
 }
 
 /** The real terminal and process operations. */
@@ -104,6 +109,7 @@ export function realPagerDeps(): PagerDeps {
     delay: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     onGrammarLoad,
     pushIo: (write, signal) => realPushIo({ write, signal }),
+    blame: blameRunner(),
   };
 }
 
@@ -161,7 +167,27 @@ export async function runPager(
     deps.write(out);
   };
 
-  const draw = () => paint(session.displayDoc(), session.view());
+  // Drawing the blame column can ask for files' blame. Each load runs while
+  // keys keep arriving, and draws again when it lands, unless a reveal or a
+  // button press is playing its frames, which end with a draw of their own.
+  // Closing the viewer stops the loads still running.
+  const blameController = new AbortController();
+  const draw = () => {
+    if (cleanedUp) return;
+    paint(session.displayDoc(), session.view());
+    for (const load of session.takeBlameLoads()) {
+      deps.blame(load.request, blameController.signal).then(
+        (lines) => session.finishBlameLoad(load, lines),
+        (error) =>
+          session.failBlameLoad(
+            load,
+            error instanceof Error ? error.message : String(error),
+          ),
+      ).then(() => {
+        if (!cancelReveal && !cancelPush) draw();
+      });
+    }
+  };
 
   // Ctrl-L leaves the session at the finished state; these frames walk the lines
   // it revealed in one at a time so where they land is visible. Any key, or a
@@ -264,6 +290,7 @@ export async function runPager(
     if (cleanedUp) return;
     cleanedUp = true;
     branchPushController?.abort();
+    blameController.abort();
     try {
       tty.setRaw(false);
     } catch { /* ignore */ }

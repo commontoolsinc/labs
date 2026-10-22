@@ -19,6 +19,14 @@ A security model combining information flow control with contextual integrity;
 enforces policies on how data is used, attached to schemas and validated both
 statically and dynamically.
 
+## CFS (Common Fabric Service)
+
+The headless backend that the Weaver app talks to, kept in the
+`commonfabric/loom` repository. It runs against a pinned tag of this
+repository, and some features here, such as the
+[shared-space catalog](../../features/shared-space-catalog.md), have CFS as a
+caller.
+
 ## Piece
 
 Piece is a [pattern] invocation binding set of [cell]s as inputs and set of
@@ -109,6 +117,13 @@ about the space, not a list of what the space holds: a social space that hosts
 a chat among other things declares its own kind
 ([`space-kinds.md`](../../features/space-kinds.md)).
 
+## DID (Decentralized Identifier)
+
+An identifier of the form `did:<method>:<id>`, from the W3C DID Core
+specification. Spaces and users are named by [did:key] DIDs, derived from a
+keypair, so whoever holds the private key controls the identity. Some services
+and CFC principals are named by `did:web` DIDs instead.
+
 ## [did:key]
 
 A decentralized identifier derived from a keypair. Used to uniquely identify and
@@ -188,6 +203,16 @@ The minimal set of components that must be trusted to enforce security. This
 includes rendering infrastructure (e.g. web components), and excludes
 user-authored patterns, which are sandboxed.
 
+## SES (Secure ECMAScript)
+
+A hardened JavaScript environment from the Endo project. Pattern code runs in
+SES compartments, which limit the ambient authority it can reach, and the
+runtime verifies and hardens each pattern's module-scope definitions when it
+loads them. The [SES sandboxing specification](../../specs/sandboxing/SES_SANDBOXING_SPEC.md)
+describes the design, and the
+[SES authoring limits](../ai/pattern-development-guide.md#ses-authoring-limits-and-escape-hatches)
+describe what it means for a pattern author.
+
 ## UCAN (User Controlled Authorization Network)
 
 A capability-based auth system that allows delegating access rights using signed
@@ -209,9 +234,11 @@ and pending tiers) are documented in the
 [piece]: #piece
 [acl]: #acl-access-control-list
 [cfc]: #cfc-contextual-flow-control
+[cfs]: #cfs-common-fabric-service
 [cts]: #cts-common-fabric-typescript
 [crdt]: #crdt-conflict-free-replicated-data-type
 [deno]: #deno
+[did]: #did-decentralized-identifier
 [did:key]: #didkey
 [event-handler]: #event-handler
 [llm]: #llm-large-language-model
@@ -219,6 +246,7 @@ and pending tiers) are documented in the
 [reactive-framework]: #reactive-framework
 [pattern]: #pattern
 [safe-rendering]: #safe-rendering
+[ses]: #ses-secure-ecmascript
 [space]: #space
 [tcb]: #tcb-trusted-computing-base
 [ucan]: #ucan-user-controlled-authorization-network

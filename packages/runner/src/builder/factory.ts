@@ -44,6 +44,7 @@ import {
   registerUnsafeHostTrustedValue,
   type UnsafeHostTrust,
 } from "../unsafe-host-trust.ts";
+import { nameBlob } from "./blob-name.ts";
 import {
   agent,
   cellFromUrl,
@@ -319,6 +320,9 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     spaceOf,
     grantSpaceAccess,
     revokeSpaceAccess,
+
+    // Blobs
+    nameBlob,
 
     // Entity utilities
     getEntityId,

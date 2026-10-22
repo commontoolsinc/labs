@@ -42,10 +42,11 @@ dashboard/
   status-dot.ts THE ONE PLACE the status dot's shapes are chosen
   green-star.ts THE ONE PLACE the green branch's star is drawn
   green-branch.ts the commits each repository's green branch is at and was at
+  github-webhooks.ts the GitHub webhook relay's deliveries, and whether what was read from GitHub is still current
   detail-list.ts  the row list a tile's body is built from
   theme.ts      light/dark surface colors, theme switch markup and browser behavior
   lib.ts        shared helpers (github, memo, escapeHtml, sparkline, strip, …)
-  ctx.ts        shared, memoized data sources handed to every tile (ctx.runs)
+  ctx.ts        shared data sources handed to every tile (ctx.runs)
   favicon.ts    runtime status priority and access to generated PNG favicon copies
   favicon-png.generated.ts  generated runtime PNG favicon copies
   favicon-artwork.ts  build/test-only SVG source for those favicon copies
@@ -312,7 +313,10 @@ run held without reaching any, every held run in its way was deleted, and the
 head starts again from what it read. A read of the top that leaves out the
 newest run held is rejected as behind, unless reading that run by its id shows
 it deleted. Readings made within twenty seconds of
-each other share one read of the top. A reading that needs runs below the head
+each other share one read of the top, and while the GitHub webhook relay vouches
+for the runs held, a reading reads the top only when a delivered run has landed
+on it (see [Following the GitHub webhook relay](#following-the-github-webhook-relay)).
+A reading that needs runs below the head
 reads on down the list. The head is kept as deep as the deepest of its readers
 last read, and a reader that has not read for a day stops holding it. Each part
 of the dashboard that reads runs keeps its own `RunLists`, and so do CI
@@ -398,6 +402,96 @@ A reader whose answer rests on one run, as the ci tile's verdict rests on the
 run that decides a job, can ask for the run it stops at to be read again by its
 id when the reading did not read it from the list. The reading then goes on past
 that run when, read again, it no longer settles the question.
+
+### Following the GitHub webhook relay
+
+The organization's GitHub webhook sends every event to a relay, described in
+`github-webhook-relay/README.md` in the infra repository. The relay writes each
+delivery, the moment it arrives, to every TCP connection open to it, and keeps
+nothing for a subscriber that is not connected. A subscriber that falls behind
+is disconnected rather than skipped, so a connection that is still open has
+carried every delivery made since the relay started writing to it.
+`github-webhooks.ts` holds the dashboard's connection. The server opens it when
+it starts, at the `host:port` that `GITHUB_WEBHOOK_RELAY` names, by default the
+stage relay's subscriber address, and turns TCP keepalive on for it. An empty
+`GITHUB_WEBHOOK_RELAY` turns the relay off.
+
+A connection vouches for what was read under it: data read from GitHub while
+the connection was open is still current for as long as that connection is
+open and no delivery that could change the data has arrived since, up to
+fifteen minutes after the read. GitHub does not promise to make every
+delivery, and a repository outside the organization sends none, so that limit
+bounds how long a delivery that never arrives can leave anything out of date.
+A connection starts vouching with the first delivery it carries, which shows
+that the relay has started writing to it. A connection that has carried
+nothing for two minutes stops vouching, and the next serving tick ends it and
+opens another, because a connection whose far end has gone carries nothing and
+does not end; the organization's webhook delivers many times a minute whenever
+anyone is working. A delivery that cannot be read, a `workflow_run` or `push`
+delivery that lacks what the dashboard reads of one, and a delivery that a
+reader below fails to take in, each end the connection as well, since what was
+read under it may then be out of date. A connection that ended after carrying a delivery is replaced
+at once. One that cannot be opened, or that ended before carrying anything, is
+tried again on the next serving tick, and the first of a series of failures to
+connect is logged. Whenever the relay cannot vouch, every reader below reads
+GitHub on its own interval as it would with no relay at all.
+
+The relay is used in these places:
+
+- **Run lists.** Each `RunLists` takes in the runs delivered in `workflow_run`
+  deliveries for the workflows it holds. A delivered run it holds replaces the
+  copy held, unless the copy is newer, and counts as read. A delivered run it
+  does not hold, newer than the oldest run it holds, is one the head lacks.
+  The next reading reads the top, however recently it was last read, and reads
+  each such run the top leaves out by its id: one that is gone is dropped, one
+  older than the newest run listed is placed among the runs held, and one
+  newer is a run the list is served behind, so readings go on reading the top
+  until the list shows it. GitHub's list can be read a moment before it shows a
+  run that a delivery has announced. A read of the top keeps the head's copy of
+  a run, read or delivered, when the list's copy is older, and a delivered copy
+  unless the list's copy is newer. While the relay
+  vouches for the read of the top, a reading reads the top only for such a run,
+  and while it vouches for the read of a filtered list, a reading does not read
+  that list. So while deliveries keep the relay vouching, a workflow with no
+  activity costs a read of the top, and of each filtered list, every fifteen
+  minutes, and one with activity costs about a read of the top for each new
+  run; once the relay goes quiet, readers read on their own intervals. A run deleted from the list sends no delivery;
+  it stays held until the top is next read, or, further down, until the head is
+  cut back past it.
+- **The scheduler.** A delivery that changes a run source, which is a run of
+  its workflow in its scope or, for a source of runs on main, a push to the
+  repository's green branch, makes the source due at once. The scheduler
+  fetches it and collects the tiles reading it without waiting for their
+  interval, so a main build that fails turns its tiles red as soon as GitHub
+  says so. A delivery for a source being fetched already has the source fetched
+  again once that fetch is published. The tiles are still collected on their
+  intervals, from data that costs nothing to read while the relay vouches for
+  it, so whatever a tile shows that depends on the time stays current.
+- **The ci tile's sweep.** A delivered run of a job the sweep judges, which is
+  a run on its repository's default branch not started for a pull request,
+  starts a sweep at once when it finishes, or as soon as the sweep under way
+  ends. Whether a failing job's workflow has changed since the failure is kept
+  from one sweep to the next until a push to that repository's default branch
+  is delivered, or the relay stops vouching for it.
+- **The green branch.** The repository's activity record is read only when a
+  push to the branch has been delivered since the last read, or the relay does
+  not vouch for that read. A read that does not yet show the branch at the
+  commit the latest delivered push moved it to is read again on the next
+  refresh.
+- **The recent commits tile.** The organization's repositories are listed
+  again only after a `repository` delivery, or when the relay does not vouch
+  for the last listing. A delivered push to a repository's default branch has
+  that repository's commits read at once, and read again on each refresh until
+  they start at the commit pushed; the read lists the repositories first only
+  when the relay does not vouch for the last listing, or when that listing
+  leaves out the repository pushed to. A push to a repository that a listing
+  read after it still leaves out is dropped. While the relay vouches and
+  nothing has been delivered, the tile reads nothing.
+
+The ci tile's inventory of repositories and workflows is read once an hour
+whatever the relay delivers, because enabling or disabling a workflow sends no
+delivery. The github spend tile reads GitHub's billing data, which no delivery
+describes.
 
 ## Add a tile
 
@@ -638,7 +732,7 @@ installation with the same permissions; see [Credentials](#credentials).
 | labs ci trust, labs ci duration | GitHub Actions (`deno.yml` in `commonfabric/labs`), via the REST API. Trust reads the runs on main; duration reads the pull request runs. Each trust tile opens its repository's page, and each cell of its strip opens its run | `GH_TOKEN` (or `GITHUB_TOKEN`) |
 | loom ci trust, loom ci duration | the same two tiles for `commonfabric/loom` (`test-fast.yml`) | `GH_TOKEN` (read access to loom); optional `DASHBOARD_LOOM_REPO` |
 | weaver ci trust, weaver ci duration | the same two tiles for `commonfabric/commonfabric-weaver` (`ci.yml`). The duration tile is not a link, because the history views cover only labs and loom | `GH_TOKEN` (read access to weaver); optional `DASHBOARD_WEAVER_REPO` |
-| recent commits | the newest commits on the default branch of every repository the token can see that is not archived, interleaved newest first and each tagged with its repository: each commit that landed a pull request opened by an account GitHub does not mark as a bot, and each commit that the labs, loom, or weaver main CI workflow ran on after a push. The commit a pull request landed is the one GitHub merged it with: the squashed commit, the merge commit, or the last commit rebased onto the branch, so a pull request is one row. The rest are left out: a commit pushed without a pull request, and a bot's pull request, such as an automated deployment's, unless one of those workflows ran on it. So a repository used as a notebook adds no rows. A pull request counts only when it was merged into the repository's default branch. The tile lists the organization's repositories at most every thirty seconds. When a repository's last push has changed since its commits were read, one GraphQL query reads its newest hundred commits again, each with the pull request that landed it. A repository GitHub refuses to read, for want of permission for example, keeps the commits already read until its next push, and the tile's sub line counts such repositories. A repository whose read GitHub rate-limited, or that failed for any other reason, keeps them too, and is read again on the next refresh without being counted. That read runs in the background, and the tile is collected again when it finds new commits. A commit one of those workflows ran on carries the newest such run's result and duration, from the same main-run snapshots the ci trust tiles read, and its text links to that run; the text of any other commit links to the commit. A pull request number in a title, such as "(#1234)", links to that pull request, and the row's arrow links to the pull request that landed the commit, or to the commit when its title names none. A row whose commit the repository's green branch is or was at opens with a star, read from GitHub's activity record for the repository. The tile is red when the newest finished run of those workflows failed, and orange when one of the nine before it did | `GH_TOKEN` (Actions read on labs, loom, and weaver; Contents and Pull requests read across the organization) |
+| recent commits | the newest commits on the default branch of every repository the token can see that is not archived, interleaved newest first and each tagged with its repository: each commit that landed a pull request opened by an account GitHub does not mark as a bot, and each commit that the labs, loom, or weaver main CI workflow ran on after a push. The commit a pull request landed is the one GitHub merged it with: the squashed commit, the merge commit, or the last commit rebased onto the branch, so a pull request is one row. The rest are left out: a commit pushed without a pull request, and a bot's pull request, such as an automated deployment's, unless one of those workflows ran on it. So a repository used as a notebook adds no rows. A pull request counts only when it was merged into the repository's default branch. The tile lists the organization's repositories at most every thirty seconds, and while the GitHub webhook relay vouches for the last listing, not at all. When a repository's last push has changed since its commits were read, or a push to its default branch has been delivered, one GraphQL query reads its newest hundred commits again, each with the pull request that landed it; a delivered push has them read at once (see [Following the GitHub webhook relay](#following-the-github-webhook-relay)). A repository GitHub refuses to read, for want of permission for example, keeps the commits already read until its next push, and the tile's sub line counts such repositories. A repository whose read GitHub rate-limited, or that failed for any other reason, keeps them too, and is read again on the next refresh without being counted. That read runs in the background, and the tile is collected again when it finds new commits. A commit one of those workflows ran on carries the newest such run's result and duration, from the same main-run snapshots the ci trust tiles read, and its text links to that run; the text of any other commit links to the commit. A pull request number in a title, such as "(#1234)", links to that pull request, and the row's arrow links to the pull request that landed the commit, or to the commit when its title names none. A row whose commit the repository's green branch is or was at opens with a star, read from GitHub's activity record for the repository. The tile is red when the newest finished run of those workflows failed, and orange when one of the nine before it did | `GH_TOKEN` (Actions read on labs, loom, and weaver; Contents and Pull requests read across the organization) |
 | commit CI Gantt → `/ci-gantt` | job and step timing for every successful main workflow run attached to one commit, linked from run durations in recent commits; the commit wears the green branch's star when the branch is or was at it | `GH_TOKEN` |
 | CI duration history → `/bench?view=ci` | labs and loom job, shard-group, and end-to-end workflow duration trends. The labs and loom duration tiles open their repository's view, which charts runs on main rather than the pull request runs the tiles measure | `GH_TOKEN` |
 | CI run Gantt → `/bench?view=gantt` | detailed labs or loom job phases from `scripts/ci-gantt.ts`, backed by the CI history cache | `GH_TOKEN` |
@@ -727,7 +821,10 @@ runs by their event as well.
 
 The set of repositories and the workflows in them is read once an hour and the
 results behind it every five minutes, because the inventory changes far more
-slowly than a job's result does. Reading it costs one request for the
+slowly than a job's result does. A delivered run of one of the jobs starts a
+sweep sooner, and while the relay vouches for the runs held a sweep reads only
+the workflows that have new runs (see
+[Following the GitHub webhook relay](#following-the-github-webhook-relay)). Reading it costs one request for the
 organization's repository listing, one per repository for its workflows, and
 usually one per active workflow for that workflow's newest runs. A sweep that
 fails is tried again when the next one is due, five minutes later, and the
@@ -741,7 +838,9 @@ snapshots the ci trust tiles read, so the tile judges them again each time one
 of those snapshots arrives, which is every thirty seconds, and publishes the
 result with the trust tiles. The request that asks whether a failing job's
 workflow file has changed is made at most once per failing run in each sweep,
-however often the main builds are judged.
+however often the main builds are judged, and while the relay vouches that no
+default branch has been pushed to, at most once per failing run in fifteen
+minutes.
 
 The tile keeps its last collection, and the **CI jobs** page renders it rather
 than collecting again, so the page costs no requests however often it is opened
@@ -1315,6 +1414,7 @@ it.
 | `PROD_PROXY` | production | optional proxy for reaching tailnet hosts. Use `socks5h://127.0.0.1:1055` with the Tailscale userspace proxy. Also accepts `socks5://`, `http://`, and `https://`; invalid values and URLs containing credentials fail closed instead of fetching directly. Setting it also moves the tailnet name checks onto the proxy, since a dashboard that needs a proxy cannot resolve MagicDNS names itself. The bastion check needs a SOCKS5 proxy to do that, and stays gray over an `http://` or `https://` one. |
 | `COMMON_FABRIC_URL` | production | override the public-site URL (e.g. the `www` host if the apex redirects). |
 | `DASHBOARD_REPO` | CI tiles, github users | which repo the CI tiles read. Its owner is the organization the **github users** tile reads (default `commonfabric/labs`). |
+| `GITHUB_WEBHOOK_RELAY` | GitHub tiles | the `host:port` of the GitHub webhook relay's subscriber listener (default `github-webhooks.stage.commonfabric.dev:8081`). An empty value turns the relay off, and the dashboard then reads GitHub on its intervals alone. See [Following the GitHub webhook relay](#following-the-github-webhook-relay). |
 | `DASHBOARD_CACHE_DIR` | server caches | directory for all persistent dashboard cache files (default: the platform temp directory), including the `fabric-wall-run-lists-*.json` files that keep the run-list reader's runs across restarts. |
 | `SIGNOZ_UI_URL` | prod errors, dau | browser-facing SigNoz URL for the explorer pop-outs: **prod errors** links to `/logs/logs-explorer` and **dau** to `/traces-explorer` under it. Defaults to `SIGNOZ_URL` when that is a public `https://` URL. An in-cluster `http://` URL, which a browser cannot reach, leaves both tiles with no pop-out at all, so set this whenever the server reaches SigNoz over one. |
 | `PROD_SERVICE` | prod errors, dau | the `service.name` production reports under in SigNoz, which both trace-reading tiles scope to. Defaults to `toolshed-production`. A name outside `[A-Za-z0-9._-]` is ignored, since it lands inside a query expression. |
@@ -1785,6 +1885,13 @@ its embedded tsnet).
    history file and Tailscale node state. The dashboard remains a one-replica
    `Recreate` Deployment; pod replacement reuses the same non-ephemeral
    Tailscale node ID and `dashboard.<tailnet>.ts.net` name.
+4. To follow the GitHub webhook relay, the pod has to be able to open a TCP
+   connection to the relay's subscriber listener, and `GITHUB_WEBHOOK_RELAY`
+   has to name the address it reaches the listener at. The Tailscale sidecar
+   runs in userspace, so the pod's own connections do not cross the tailnet,
+   and both the dashboard's egress policy and the relay's ingress policy have
+   to admit the connection. A pod that cannot connect logs the first failure,
+   tries again on each serving tick, and reads GitHub on its intervals.
 
 **Build, push, deploy**
 

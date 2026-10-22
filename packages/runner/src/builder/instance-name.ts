@@ -58,12 +58,13 @@ export function instanceNameOf(root: OpaqueCell<unknown>): string | undefined {
 }
 
 /**
- * The partial cause of the instance named `name`. It sits under the reserved
- * `$generated` key, so no cause a pattern gives with `.for()` can equal it,
- * and its string value keeps it apart from the builder's numbered causes.
+ * The partial cause of the instance named `name`, `{ $instance: name }`.
+ * `$instance` is a reserved key, so no cause a pattern gives with `.for()` can
+ * equal it, and it stands apart from `$generated`, the key of the causes the
+ * builder mints for anonymous roots.
  */
 export function instancePartialCause(name: string): JSONObject {
-  return { $generated: "instance", name };
+  return { $instance: name };
 }
 
 /**
@@ -75,11 +76,10 @@ export function instanceNameOfPartialCause(
 ): string | undefined {
   if (
     isObjectNotArray(partialCause) &&
-    partialCause.$generated === "instance" &&
-    typeof partialCause.name === "string" &&
-    Object.keys(partialCause).length === 2
+    typeof partialCause.$instance === "string" &&
+    Object.keys(partialCause).length === 1
   ) {
-    return partialCause.name;
+    return partialCause.$instance;
   }
   return undefined;
 }
