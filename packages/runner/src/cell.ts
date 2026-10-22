@@ -2415,22 +2415,34 @@ export class CellImpl<T extends FabricValue>
             );
             return appended;
           };
-          // A fire made inside a transaction is work that transaction
-          // launched (scheduler-v2 I10), and it happens when the
-          // transaction commits: the intent is tracked and the event
-          // appended then. A transaction that fails or is aborted, as
-          // `editWithRetry` aborts an attempt it runs again, fired nothing:
-          // no intent is outstanding for it, no outcome is signaled, and
-          // what its local run left in the overlay is retired. So an
-          // attempt run again fires its event once, and one run again under
-          // the caller's own event id, as `PieceController.edit()` runs it,
-          // is not reported refused before it fires. The local echo below
-          // follows the same transaction through its speculation lineage,
-          // which reads the transaction's state the same way: a fire
-          // through one that already committed happens at once, and one
-          // through one that already failed does not happen. A read-only
-          // transaction commits nothing and so launches nothing: a fire
-          // through one happens at once, as one with none does.
+          // A fire made inside a writable transaction is work that
+          // transaction launched, and it happens only if the transaction
+          // commits (events.md §2): the intent is tracked and the event
+          // appended at the commit's verdict. The append is an external
+          // effect, so it runs from the transaction's post-commit outbox,
+          // which flushes at the verdict and only on success. A transaction
+          // that fails or is aborted, as `editWithRetry` aborts an attempt
+          // it runs again, flushes nothing, so no intent is outstanding for
+          // it and no outcome is signaled; its commit callback retires what
+          // the fire's local run left in the overlay, the in-memory
+          // compensation that hook is for. So an attempt run again fires its
+          // event once, and one run again under the caller's own event id,
+          // as `PieceController.edit()` runs it, is not reported refused
+          // before it fires.
+          //
+          // The scheduler's lineage gate (`queueEvent(…, { originTx })`)
+          // decides the same commit-or-drop question for the events this
+          // runtime queues, and the local echo below goes through it. The
+          // append cannot: it is not an event this runtime runs, and a
+          // client that runs nothing of the piece drops its echo at dispatch
+          // for want of a handler, while the append has to happen all the
+          // same.
+          //
+          // A fire through a transaction that already committed happens at
+          // once, and one through a transaction that already failed does
+          // not happen. A read-only transaction commits nothing and so
+          // launches nothing: a fire through one happens at once, as one
+          // with none does.
           const unfired = (
             error: { message: string },
           ): EventAppendDeliveryOutcome => {
@@ -2458,10 +2470,19 @@ export class CellImpl<T extends FabricValue>
             outcome = Promise.resolve(unfired(origin.error));
           } else {
             outcome = new Promise((resolve) => {
+              originTx.enqueuePostCommitEffect({
+                // Unique per fire, so that the outbox's deduplication by
+                // id never drops a second fire of one event id.
+                id: `event-append:${eventId}:${crypto.randomUUID()}`,
+                kind: "event-append",
+                flush: () => {
+                  resolve(fire());
+                },
+              });
               originTx.addCommitCallback((_tx, result) => {
-                resolve(
-                  result.error === undefined ? fire() : unfired(result.error),
-                );
+                if (result.error !== undefined) {
+                  resolve(unfired(result.error));
+                }
               });
             });
           }

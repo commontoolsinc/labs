@@ -116,12 +116,15 @@ handler fires
 ```
 
 - A client fire made inside a writable transaction (an imperative
-  `send` within `editWithRetry`, say) is work that transaction launched
-  (scheduler-v2 I10), and it happens when the transaction commits: the
-  intent is tracked and the event appended then. A transaction that
-  fails or is aborted fired nothing: no intent is outstanding for it, no
-  outcome is signaled, and the echo its local run left on the overlay is
-  retired. So an attempt run again fires its event once, under the id
+  `send` within `editWithRetry`, say) is work that transaction launched,
+  and it happens only if the transaction commits. Scheduler-v2's I10
+  states that for the work a handler attempt launches; this rule extends
+  it to every writable transaction a client fire goes through. The
+  intent is tracked and the event appended from the transaction's
+  post-commit outbox, at the commit's verdict and only on success. A
+  transaction that fails or is aborted fired nothing: no intent is
+  outstanding for it, no outcome is signaled, and the echo its local run
+  left on the overlay is retired. So an attempt run again fires its event once, under the id
   that attempt minted, or under the caller's own id, which every attempt
   shares. A fire through a transaction that has already committed
   happens at once, and one through a transaction that has already failed
@@ -240,14 +243,25 @@ handler fires
   them (`facade.ts`, `#processExecuteEventPhases`): the demanded
   derivations several events invalidate run once per pass rather than
   once per event. A head the preflight parks on its loads, behind events
-  the pass already ran, ends the pass without its settle: the pass the
-  park's release starts dispatches it and settles behind it, and the
-  continuation queues no pass for the work that waits, so the serving loop
-  keeps cycling while the loads are in flight. A drop that takes the
-  parked head off the queue before its loads settle, as the flush
-  deadline's purge of an in-process leftover does, queues that pass in the
-  release's place. A head that parks before the pass ran any handler
-  leaves the settle to run as before. An
+  the pass already ran, ends the pass without its settle: the pass that
+  the park's end queues dispatches it and settles behind it, and the
+  continuation queues no pass for the work that waits. The park ends when
+  its loads settle, when one fails, or when a drop takes the parked head
+  off the queue first, as the flush deadline's purge of an in-process
+  leftover does, and each of the three queues that pass. A head that parks
+  before the pass ran any handler leaves the settle to run as before.
+  The scheduler is not idle while a head is parked, so a serving cycle
+  whose flush deadline comes before the park ends commits the handlers'
+  writes, consequence marks included, a wave ahead of the derivations over
+  them. That is the deadline's trade (serving-loop.md §3: a consequence is
+  visible while the wave behind it keeps deriving), taken whenever a
+  park outlasts the deadline; W does not cover those inputs until the
+  derivations land. A client that runs the piece derives over the
+  consequence itself; a web client under view-scoped replication, which
+  runs none of it, shows the consequence a wave before the derived view.
+  That window is accepted for the batching it buys: settling at every
+  park instead would run the derivations once per parked event rather
+  than once over the events of a pass. An
   event whose preflight finds an invalid input ends the run, so the
   settle recomputes that input before the event dispatches. Undemanded
   intermediates are skipped by pull-based

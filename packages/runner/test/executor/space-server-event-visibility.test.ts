@@ -307,6 +307,45 @@ describe("SpaceServer", () => {
     expect(stats.events.visibilityDeferrals).toBe(0);
   });
 
+  it("defers an entry whose read from the store fails under the store read-through", async () => {
+    // A read of the entries document that throws leaves the view where a
+    // failed ordered response leaves it: the entry defers, and a later drain
+    // reads it again once the store answers.
+    const fixture = await openFixture({ storeReadThrough: true });
+    const { notices, serving, called, stats } = fixture;
+    await fixture.admitOne(1, "read-through-held");
+    await fixture.drain();
+    expect(called).toEqual(["B"]);
+    const deferrals = stats.events.visibilityDeferrals;
+    notices.length = 0;
+
+    const manager = fixture.runtime.storageManager;
+    const integrate = manager.integrateStoreWrites!.bind(manager);
+    let failures = 0;
+    using _integrate = stub(
+      manager,
+      "integrateStoreWrites",
+      (...args: unknown[]) => {
+        const [target, writes] = args as Parameters<typeof integrate>;
+        if (
+          failures === 0 && writes.some((write) => write.id === sidecars[1])
+        ) {
+          failures++;
+          throw new Error("injected store read failure");
+        }
+        return integrate(target, writes);
+      },
+    );
+    await fixture.admitOne(1, "read-through-failing");
+    serving.enqueueCommit({ ...notices[0], writes: [] });
+    await clock.settle();
+    expect(failures).toBe(1);
+    expect(stats.events.visibilityDeferrals).toBe(deferrals + 1);
+
+    await clock.tick(250);
+    expect(called).toEqual(["B", "B"]);
+  });
+
   for (const failure of ["publication", "response"] as const) {
     it(`keeps the watermark below unavailable events after a ${failure} failure`, async () => {
       const fixture = await openFixture();

@@ -123,6 +123,17 @@ follow outside the measured interval. The burst's numbers below are on that
 end. What a member with the flag on shows in the window between its event's
 consequence and the derivations was not looked at.
 
+The window is not only a benchmark's: a member with the flag on shows the
+consequence a wave before the derived view, so a chat member's message count
+reads one short until that wave arrives. It is the flush deadline's trade, by
+which a consequence is visible while the wave behind it keeps deriving
+(`serving-loop.md` §3), and the deferral takes it whenever a park outlasts the
+deadline, where settling at every park would derive once per parked event.
+It is accepted for that batching, and stated beside the deferral in
+`events.md` §2. W does not cover those inputs until the derivations land, so
+whatever waits on it, `cf get` among them, stays exact; and nothing a member
+shows is withdrawn, only late by a wave.
+
 ## The deferral, measured
 
 | One burst | Loop off | Flag on, deferral | Flag on, no deferral |
@@ -172,11 +183,16 @@ notifies have run. Dropped.
 
 The send burst is half a second behind the loop off with the flag on. In
 order of what the measurements point at: the creator's space running every
-room's graph only to have its writes refused; the window in which a flag-on
-member's event is consequenced and its derived view is not; and the parks
-themselves, about 2.4 per chat event and one per vote, each costing a pass.
+room's graph only to have its writes refused; and the parks themselves,
+about 2.4 per chat event and one per vote, each costing a pass. The window in
+which a flag-on member's event is consequenced and its derived view is not is
+the accepted trade the section above describes, not an item here.
 In one of the six probe rounds run with the flag, the deferral and these
 fixes, the server's message list itself lacked the room creator's first
 message, and the serving loop logged no drop and no spent deferral budget for
-it; it was not seen in the 39 rounds run since, with the deferral off or the
-flag off, and is not explained.
+it. That symptom, one message short in the server's own list, was not seen in
+the 39 rounds run since, with the deferral off or the flag off, and is not
+explained. It is a different observation from a burst whose eight
+consequences are marked with no derived write yet: the probe read the list
+once after the consequences and a settle, so it cannot say whether that
+message was lost or late.

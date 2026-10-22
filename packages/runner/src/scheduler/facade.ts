@@ -577,8 +577,8 @@ export class Scheduler {
 
   /**
    * Whether the latest pass ended on a head parked on its loads, deferring its
-   * settle to the pass the park's release starts. While it holds, the
-   * continuation queues no pass for the deferred derivations.
+   * settle to the pass the park's end queues (`#endHeadEventLoadPark`). While
+   * it holds, the continuation queues no pass for the deferred derivations.
    */
   #settleDeferredForLoadPark = false;
 
@@ -2769,13 +2769,15 @@ export class Scheduler {
       .#processExecuteEventPhases();
     // Under the serving posture a head the preflight parked on its loads,
     // behind events this pass dispatched, ends the pass without its settle:
-    // the pass the park's release starts dispatches it and settles behind
-    // it, so the derivations the events before it invalidated run once
-    // behind all of them rather than once per parked event. The pass ends
-    // rather than waiting on the loads, so the serving loop keeps cycling
-    // while they are in flight. A head that parks again before this pass
-    // dispatched anything keeps a settle the previous pass deferred waiting
-    // with it; one that parks with no batch ahead of it lets the settle run.
+    // the pass the park's end queues dispatches it and settles behind it,
+    // so the derivations the events before it invalidated run once behind
+    // all of them rather than once per parked event. That is the trade: the
+    // scheduler is not idle while the head is parked, and a serving cycle
+    // whose flush deadline comes first commits the handlers' writes a wave
+    // ahead of the derivations over them (events.md §2). A head that parks
+    // again before this pass dispatched anything keeps a settle the previous
+    // pass deferred waiting with it; one that parks with no batch ahead of it
+    // lets the settle run.
     this.#settleDeferredForLoadPark = this.runtime.servingPosture === true &&
       (dispatched > 0 || deferredBefore) && eventBlockingDeps.size === 0 &&
       this.#hasLoadParkedHeadEvent();
@@ -3940,6 +3942,17 @@ export class Scheduler {
     for (const [key, generation] of this.#headEventLoadPark.generations) {
       this.#headEventLoadParkHistory.generations.set(key, generation);
     }
+    this.#endHeadEventLoadPark();
+  }
+
+  /**
+   * Ends the head event's load park, however it ends, and queues the pass
+   * that runs what waited on it: the events behind the head, and a settle a
+   * pass deferred to the park (`#settleDeferredForLoadPark`), for which no
+   * other pass is queued. A release, a failed load and a drop each end the
+   * park through here, so none of them can leave that settle unrun.
+   */
+  #endHeadEventLoadPark(): void {
     this.#headEventLoadPark = null;
     this.queueExecution();
   }
@@ -4010,7 +4023,7 @@ export class Scheduler {
       ? errors[errors.findIndex((each) => !isAuthorizationLoadFailure(each))]
       : errors[0];
     const keys = this.#headEventLoadPark.keys.join(", ");
-    this.#headEventLoadPark = null;
+    this.#endHeadEventLoadPark();
     this.#headEventLoadParkHistory = null;
     const detail = error instanceof Error ? error.message : String(error);
     if (event.served === undefined) {
@@ -4019,7 +4032,6 @@ export class Scheduler {
         `Event dropped: required replica load failed before dispatch ` +
           `(${keys}: ${detail})`,
       );
-      this.queueExecution();
       return;
     }
     const failure = error instanceof ReplicaLoadFailureError ? error.failure : {
@@ -4065,7 +4077,6 @@ export class Scheduler {
         },
       );
     }
-    this.queueExecution();
   }
 
   #dropEvent(
@@ -4083,12 +4094,8 @@ export class Scheduler {
     } = {},
   ): void {
     if (this.#headEventLoadPark?.eventId === event.id) {
-      // The park's release finds no park once the drop has cleared it, so
-      // the drop queues the pass the release would have: the events behind
-      // the head wait for it, and so does a settle a pass deferred to the
-      // release (`#settleDeferredForLoadPark`).
-      this.#headEventLoadPark = null;
-      this.queueExecution();
+      // The park's release finds no park once the drop has ended it.
+      this.#endHeadEventLoadPark();
     }
     if (this.#headEventLoadParkHistory?.eventId === event.id) {
       this.#headEventLoadParkHistory = null;

@@ -202,6 +202,7 @@ describe("scheduler serving event batch", () => {
       writing: writing.getAsNormalizedFullLink(),
       parking: parking.getAsNormalizedFullLink(),
       pass: () => access.execute(),
+      failLoad: (error: Error) => load.reject(error),
     };
   }
 
@@ -223,6 +224,22 @@ describe("scheduler serving event batch", () => {
       "the test drops the parked event",
     );
     expect(purged).toBe(1);
+    await settled;
+    expect(env.derived).toEqual([0, 1]);
+  });
+
+  it("settles the events a pass ran once its parked head's load fails", async () => {
+    // A failed load ends the park as its release would, dropping the
+    // client event that parked, and the settle the pass left to the park's
+    // end runs all the same.
+    const env = await parkingRuntime();
+    env.runtime.scheduler.queueEvent(env.writing, { value: 1 });
+    env.runtime.scheduler.queueEvent(env.parking, {});
+    await env.pass();
+    expect(env.derived).toEqual([0]);
+
+    const settled = env.runtime.idle();
+    env.failLoad(new Error("the test's load fails"));
     await settled;
     expect(env.derived).toEqual([0, 1]);
   });

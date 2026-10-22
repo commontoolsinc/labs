@@ -4316,20 +4316,21 @@ export class SpaceServer implements TransactionSealDestination {
           ) {
             visibilityFlushed = true;
             this.#options.stats.events.visibilityBarriers += 1;
-            if (readThrough) {
-              // Under the store read-through the replica learns of a commit
-              // when the feed's refresh re-reads what it wrote
-              // (`#refreshHeldDocuments`), and the serving connection carries
-              // no frames for this space, so an ordered response would bring
-              // nothing. The store already holds the entry: read the entries
-              // document from it. A view still hidden by a pending local
-              // write defers below, as it does after a response.
-              runtime.storageManager.integrateStoreWrites?.(space, [{
-                id: doc.id,
-                scopeKey: "space",
-              }]);
-            } else {
-              try {
+            try {
+              if (readThrough) {
+                // Under the store read-through the replica learns of a
+                // commit when the feed's refresh re-reads what it wrote
+                // (`#refreshHeldDocuments`), and the serving connection
+                // carries no frames for this space, so an ordered response
+                // would bring nothing. The store already holds the entry:
+                // read the entries document from it. A view still hidden by
+                // a pending local write defers below, as it does after a
+                // response.
+                runtime.storageManager.integrateStoreWrites?.(space, [{
+                  id: doc.id,
+                  scopeKey: "space",
+                }]);
+              } else {
                 // Admission precedes loopback delivery. Publish this space's
                 // queued frames, then use their ordered response boundary to
                 // await application. Pending wave writes need not promote
@@ -4339,17 +4340,19 @@ export class SpaceServer implements TransactionSealDestination {
                   return undefined;
                 }
                 await provider.pullToServerHead!();
-              } catch (error) {
-                if (!this.#active || this.#runtime !== runtime) {
-                  return undefined;
-                }
-                logger.warn("event-visibility-sync-failed", () => [
-                  `Could not synchronize event ${entry.eventId}'s replica view`,
-                  error,
-                ]);
               }
-              if (!this.#active || this.#runtime !== runtime) return undefined;
+            } catch (error) {
+              // A failed read or response leaves the view as it was, and
+              // the entry defers below to the rescan that tries again.
+              if (!this.#active || this.#runtime !== runtime) {
+                return undefined;
+              }
+              logger.warn("event-visibility-sync-failed", () => [
+                `Could not synchronize event ${entry.eventId}'s replica view`,
+                error,
+              ]);
             }
+            if (!this.#active || this.#runtime !== runtime) return undefined;
             // Compaction or another consequence can change the stored index
             // during the response. Re-find the same immutable entry identity.
             stored = ((Engine.read(engine, { id: doc.id })?.value ??
