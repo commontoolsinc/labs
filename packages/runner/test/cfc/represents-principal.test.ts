@@ -298,6 +298,15 @@ describe("represents-principal", () => {
         .toEqual([DID, OTHER_DID]);
     });
 
+    it("lists the DIDs in the order the view holds them, deeper entries among the top-level ones", () => {
+      const label = view([
+        representsAt(["elements", "0"], OTHER_DID),
+        representsAt(["bio"], DID),
+      ]);
+      expect(exactPrincipalAttestations(label, "represents-principal", false))
+        .toEqual([OTHER_DID, DID]);
+    });
+
     it("refuses a claim in a form the runtime does not mint on a deeper entry it counts", () => {
       const label = view([
         representsAt(["name"], DID),

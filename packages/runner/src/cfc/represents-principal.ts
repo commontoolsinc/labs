@@ -232,7 +232,10 @@ export const exactPrincipalAttestations = (
       : principalClaimEntries(view),
   );
   const checked = new Set([...principalClaimEntries(view), ...counted]);
-  for (const entry of checked) {
+  // In the view's own order, so the principals are listed as they first
+  // appear there.
+  for (const entry of view?.entries ?? []) {
+    if (!checked.has(entry)) continue;
     for (const atom of entry.label.integrity ?? []) {
       const spelling = principalClaimSpelling(atom);
       if (spelling === undefined) continue;
