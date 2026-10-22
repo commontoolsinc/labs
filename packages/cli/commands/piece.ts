@@ -2117,59 +2117,6 @@ export function buildRecreateRootCommand(
 }
 
 /**
- * The last day `cf space set-home` and its superseded `cf piece set-home`
- * mount answer at all.
- *
- * A literal, fixed when the retirement reaches main, for the reason
- * `COMMAND_SPELLING_END_DATE` gives: a caller who reads the refusal today and
- * acts on it next week has to be told the same day both times. Nothing
- * consults it at run time; what removes the mounts is a later change that
- * deletes them with this constant.
- */
-export const SET_HOME_RETIRED_END_DATE = "2026-10-21";
-
-/**
- * What a run of the retired command is told, on its help page and in the
- * refusal: what creates a Home, and what changes one.
- */
-const SET_HOME_RETIREMENT = "A Home is created on its user's first open, " +
-  "and its source is changed in place: " +
-  "cf piece setsrc --cell <home-root> ./my-home.tsx, where the root is the " +
-  "link cf wish '#default' --select @ answers with in the Home space. " +
-  "This spelling stops answering after " + SET_HOME_RETIRED_END_DATE + ".";
-
-/**
- * `set-home`, retired.
- *
- * A Home is created on its user's first open and changed only by an in-place
- * source update, which retains the account data its root owns, so there is
- * nothing for a command that installs a Home root to do. Both mounts stay,
- * hidden, through {@link SET_HOME_RETIRED_END_DATE}, so a script that still
- * writes the command meets the replacement instead of an unknown command.
- * Options are not parsed: every line written for the command is answered the
- * same way.
- */
-// deno-lint-ignore no-explicit-any
-export function buildRetiredSetHomeCommand(spelling: string): Command<any> {
-  return new Command()
-    .description(`Retired. ${SET_HOME_RETIREMENT}`)
-    .useRawArgs()
-    // Raw arguments reach the action unparsed, `--help` among them, so the
-    // page a caller asks for is rendered here rather than by the parser.
-    // deno-lint-ignore no-explicit-any
-    .action(function (this: Command<any>, _options, ...args: string[]) {
-      if (args.some((word) => word === "--help" || word === "-h")) {
-        this.showHelp();
-        return;
-      }
-      throw new ValidationError(
-        `'cf ${spelling}' is retired. ${SET_HOME_RETIREMENT}`,
-        { exitCode: 1 },
-      );
-    });
-}
-
-/**
  * `space create`, which creates a space owned by the identity and records it
  * in the identity's Home space list.
  */
@@ -3257,9 +3204,7 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
     "recreate-root",
     buildRecreateRootCommand("piece recreate-root", "space recreate-root")
       .hidden(),
-  )
-  /* piece set-home — retired, with `cf space set-home` */
-  .command("set-home", buildRetiredSetHomeCommand("piece set-home").hidden());
+  );
 
 /** Shared flags accepted by piece commands that resolve a target or source. */
 export interface PieceCLIOptions {

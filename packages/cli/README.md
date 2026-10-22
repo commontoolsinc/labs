@@ -1316,6 +1316,13 @@ to the DID it has always reached. A name or DID that reaches no space opens
 nothing: `cf piece new` there reports that no space answers to it, and names
 `cf space create` as the way to make one.
 
+A Home's source is changed in place, with
+`cf piece setsrc --cell <home-root> ./my-home.tsx`, where the root is the link
+`cf wish '#default' --select @` answers with in the Home space; no command
+installs or replaces a Home root.
+[Custom Home pattern](../../docs/common/conventions/HOME_SPACE.md#custom-home-pattern)
+walks through it.
+
 ## Where a piece is created
 
 `cf piece new <main> --input-file <path>` reads a JSON object and uses it as the
@@ -2695,18 +2702,6 @@ removes them, and nothing holds them open past that date.
 This is a migration aid rather than a second surface: nothing here teaches the
 right column as an alternative spelling to keep using. `--piece` is a different
 case — a deprecated name for `--cell` that carries no end date and no notice.
-
-### Retired: `cf space set-home`
-
-A Home is created on its user's first open and changed only in place, so a
-command that installs a Home root has no job. `cf space set-home` and its
-`cf piece set-home` mount are retired: both are hidden, and a run of either
-refuses and says what does each half of the work — first open for creation,
-`cf piece setsrc --cell <home-root> ./my-home.tsx` for the source, where the
-root is the link `cf wish '#default' --select @` answers with in the Home space.
-**The spelling stops answering after 2026-10-21**, when a later change removes
-the mounts. See
-[Custom Home pattern](../../docs/common/conventions/HOME_SPACE.md#custom-home-pattern).
 
 ## Evaluating patterns from another tool
 
