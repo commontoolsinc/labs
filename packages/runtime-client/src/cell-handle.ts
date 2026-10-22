@@ -1627,11 +1627,10 @@ export class CellHandle<T = unknown> {
     // value-only notification never spuriously churns the label.
     const labelChanged = labelUpdate !== undefined && this.#wantsCfcLabel &&
       !cfcLabelViewsEqual(labelUpdate.cfcLabel, this.#cfcLabel);
-    if (!valueChanged && !labelChanged && !isNews) {
-      return;
-    }
-
-    if (valueChanged) this.#value = applied;
+    // The label the handle holds follows every update that carries one,
+    // whether or not a subscriber hears of it: a handle whose subscribers
+    // never asked for labels still seeds a later handle on the cell with the
+    // label it holds, and says how current it is.
     if (labelUpdate !== undefined) {
       this.#cfcLabel = labelUpdate.cfcLabel;
       this.#cfcLabelCurrent = labelUpdate.current;
@@ -1640,6 +1639,11 @@ export class CellHandle<T = unknown> {
       // earlier one.
       this.#cfcLabelCurrent = false;
     }
+    if (!valueChanged && !labelChanged && !isNews) {
+      return;
+    }
+
+    if (valueChanged) this.#value = applied;
     for (const { onValue } of this.#callbacks.values()) {
       onValue(this.#value as Readonly<T>, this.#cfcLabel, {
         cfcLabelCurrent: this.#cfcLabelCurrent,

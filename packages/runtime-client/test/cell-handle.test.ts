@@ -3923,6 +3923,30 @@ describe("cell-handle", () => {
       second.cancel();
     });
 
+    it("takes the label a label-only update carries for a subscriber that never asked for labels, without telling it", () => {
+      // The subscriber hears no label-only change, as before, but the handle
+      // holds the new label as current, for the handle it may seed later.
+      const cell = new CellHandle<string>(runtime(), ref);
+      const heard: unknown[] = [];
+      const cancel = cell.subscribe((value) => {
+        heard.push(value);
+      }, { onRefused: () => {} });
+      cell[$onCellUpdate]("by alice", {
+        cfcLabel: label("alice"),
+        current: true,
+      });
+
+      cell[$onCellUpdate]("by alice", {
+        cfcLabel: label("bob"),
+        current: true,
+      });
+
+      expect(heard).toEqual([undefined, "by alice"]);
+      expect(cell.cfcLabel).toEqual(label("bob"));
+      expect(cell.cfcLabelCurrent).toBe(true);
+      cancel();
+    });
+
     it("hands a subscriber that joins while another stays the label as current", () => {
       const cell = new CellHandle<string>(runtime(), ref);
       const first = listen(cell);
