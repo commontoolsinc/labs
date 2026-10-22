@@ -790,7 +790,8 @@ evaluation through response assembly. `memory/response/prepareSchemas` against
 `memory/response/sendRaw` splits each outbound message, response or effect, into
 schema-table compression and the hand-off to the transport;
 `memory.compression/send/encode` is the websocket compression that follows, on
-whichever side is sending.
+whichever side is sending; its detail carries the payload's length in characters
+and the frame's size in bytes, so a capture can say what a costly encode carried.
 
 ### Find sessions watching or caching a particular schema
 
