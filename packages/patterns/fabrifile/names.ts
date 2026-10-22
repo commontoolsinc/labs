@@ -9,7 +9,11 @@
 /** The most bytes a name may take as UTF-8. */
 export const MAX_NAME_BYTES = 255;
 
-/** The characters no name may hold: `/`, `\`, and every control character. */
+/**
+ * The characters no name may hold: `/`, `\`, and every control character,
+ * which are what the pattern exists to match.
+ */
+// deno-lint-ignore no-control-regex
 const FORBIDDEN = /[/\\\u0000-\u001f\u007f]/;
 
 /** An unpaired surrogate, which no well-formed string holds. */
