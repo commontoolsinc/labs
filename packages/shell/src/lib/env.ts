@@ -25,6 +25,7 @@ declare global {
   var $EXPERIMENTAL_LOCAL_SESSION_DOCUMENTS: string | undefined;
   var $EXPERIMENTAL_SHARED_MEMORY_CONNECTION: string | undefined;
   var $EXPERIMENTAL_LOCAL_FOLD: string | undefined;
+  var $EXPERIMENTAL_INSTANCE_NAMES: string | undefined;
 }
 
 const ENVIRONMENT_DEFINE = typeof $ENVIRONMENT === "string"
@@ -166,6 +167,14 @@ export const EXPERIMENTAL = {
   // `EXPERIMENTAL_LOCAL_FOLD=true` bakes a shell whose worker keeps such a
   // write as a fold instead of reverting it.
   localFold: flagValue(EXPERIMENTAL_LOCAL_FOLD_DEFINE),
+  // Instance naming. Decided by the deployment (SHELL_FLAG_SOURCES), like
+  // `localSessionDocuments`: the define pins it, and is unset in a release
+  // build.
+  instanceNames: flagValue(
+    typeof $EXPERIMENTAL_INSTANCE_NAMES === "string"
+      ? $EXPERIMENTAL_INSTANCE_NAMES
+      : undefined,
+  ),
 };
 
 /**

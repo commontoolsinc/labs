@@ -12,15 +12,6 @@ import { freezePartialCauses } from "./builder/pattern.ts";
 import type { JSONObject, Pattern } from "./builder/types.ts";
 
 /**
- * `stopNamingInstancesForTestingOnly()` from `builder/instance-name.ts`, for a
- * test in another package that sets a pattern up as a runtime without
- * instance names does, and then updates it. `nameInstance()` names instances
- * unless a test turns it off through here, and no public export reaches the
- * switch.
- */
-export { stopNamingInstancesForTestingOnly } from "./builder/instance-name.ts";
-
-/**
  * Returns `pattern`, a pattern a test writes out as an object literal rather
  * than building with the builder, with its partial causes deep-frozen in place
  * the way the builder freezes those of every pattern it builds. The runtime

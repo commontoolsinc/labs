@@ -11,10 +11,7 @@ import {
 } from "@commonfabric/runner/storage/cache.deno";
 import type { Cell } from "../src/cell.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import {
-  instancePartialCause,
-  stopNamingInstancesForTestingOnly,
-} from "../src/builder/instance-name.ts";
+import { instancePartialCause } from "../src/builder/instance-name.ts";
 import { getDerivedInternalCellLink } from "../src/link-utils.ts";
 import { type MetaField, rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -238,14 +235,24 @@ const NAMED_NEWER_COUNTER_AFTER_POSITIONAL_SIBLING = parentProgram(
 );
 
 describe("instance-carry-over", () => {
+  // Every runtime here names instances, through the experimental flag that
+  // turns naming on, unless a case says otherwise.
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let rt: Runtime;
   // Runtimes `freshRuntime()` has replaced, kept running until the case ends.
   let replaced: Runtime[];
 
+  // The options of a runtime that names instances when `instanceNames` is
+  // true, and compiles every instance positionally when it is false.
+  const naming = (instanceNames = true) => ({
+    apiUrl: new URL(import.meta.url),
+    experimental: { instanceNames },
+  });
+
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
-    rt = new Runtime({ apiUrl: new URL(import.meta.url), storageManager });
+    rt = new Runtime({ ...naming(), storageManager });
     replaced = [];
   });
   afterEach(async () => {
@@ -354,7 +361,7 @@ describe("instance-carry-over", () => {
     await rt.patternManager.flushCompileCacheWrites();
     await rt.storageManager.synced();
     replaced.push(rt);
-    rt = new Runtime({ apiUrl: new URL(import.meta.url), storageManager });
+    rt = new Runtime({ ...naming(), storageManager });
     const cell = rt.getCell<Record<string, unknown>>(space, name);
     await cell.sync();
     return cell;
@@ -609,8 +616,9 @@ describe("instance-carry-over", () => {
     });
 
     it("keeps each `.map()` element's child state through a start in a runtime that names instances", async () => {
-      // The elements were set up by a runtime that named no instance, which
-      // the switch reproduces with the very source that names `row`.
+      // The elements were set up by a runtime that named no instance, which a
+      // runtime with naming off reproduces with the very source that names
+      // `row`.
 
       const program: RuntimeProgram = {
         main: "/main.tsx",
@@ -633,8 +641,9 @@ describe("instance-carry-over", () => {
           },
         ],
       };
-      const restoreNaming = stopNamingInstancesForTestingOnly();
-      try {
+      replaced.push(rt);
+      rt = new Runtime({ ...naming(false), storageManager });
+      {
         const deployed = await compile(program);
         const tx = rt.edit();
         const cell = rt.getCell<Record<string, unknown>>(
@@ -653,8 +662,6 @@ describe("instance-carry-over", () => {
         expect((await write.commit().settled).error).toBeUndefined();
         await rt.idle();
         rt.runner.stop(cell);
-      } finally {
-        restoreNaming();
       }
       const cell = await freshRuntime("map-elements");
 
@@ -823,7 +830,10 @@ describe("instance-carry-over", () => {
       it("carries the one positional child of its pattern over, though the deployed source's instance was deleted", async () => {
         // The judgment this makes: `p` is deleted, and `q`, a new instance of
         // the same pattern elsewhere, takes `p`'s state, since `p`'s child was
-        // the only unclaimed positional child of that identity.
+        // the only unclaimed positional child of that identity. That is
+        // best-effort continuity, not a guarantee against misattribution:
+        // nothing here tells `q` apart from `p` under a new name, so a new
+        // instance can take a deleted one's state.
 
         const cell = await deployedParent("deleted-then-added", {
           deployed: parentProgram([
@@ -1058,10 +1068,7 @@ describe("instance-carry-over", () => {
     const runtimeOnServer = (): Runtime => {
       const manager = EmulatedStorageManager.connectTo(server, { as: signer });
       managers.push(manager);
-      const runtime = new Runtime({
-        apiUrl: new URL(import.meta.url),
-        storageManager: manager,
-      });
+      const runtime = new Runtime({ ...naming(), storageManager: manager });
       made.push(runtime);
       return runtime;
     };

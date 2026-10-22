@@ -34,10 +34,7 @@ import {
   markRendererTrustedEvent,
   reviewedActionProvenance,
 } from "@commonfabric/runner/cfc";
-import {
-  instancePartialCauseForTestingOnly,
-  stopNamingInstancesForTestingOnly,
-} from "@commonfabric/runner/for-testing-only";
+import { instancePartialCauseForTestingOnly } from "@commonfabric/runner/for-testing-only";
 import { PatternsRoute } from "@commonfabric/runner/patterns-route.deno";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
@@ -118,16 +115,22 @@ describe("Home interface upgrade", () => {
             new Response("Not found", { status: 404 }),
       );
       const apiUrl = new URL(`http://127.0.0.1:${http.addr.port}`);
+      // A cold case's deployed Home is set up as a runtime with instance
+      // naming off sets it up, so its `const`-bound children sit at positional
+      // spots until the runtime that opens it, with naming on, carries them
+      // over to their names. The other cases update Home in the runtime that
+      // set it up, which never mixes the two.
+      const positional = mode === "automatic-cold";
       let storage = EmulatedStorageManager.connectTo(server, { as: owner });
       let runtime = new Runtime({
         apiUrl,
         storageManager: storage,
+        experimental: { instanceNames: !positional },
       });
       let controller = new PiecesController(
         createSession({ identity: owner, spaceDid: owner.did() }),
         runtime,
       );
-      let restoreNaming = () => {};
       try {
         const candidate = await resolveLocalProgram(
           (resolver) => runtime.harness.resolve(resolver),
@@ -145,13 +148,6 @@ describe("Home interface upgrade", () => {
         // interface change. Retaining the entry path keeps each production
         // dependency's identity intact.
         entry!.contents = oldHome;
-        // A cold case's deployed Home is set up as a runtime without instance
-        // names set it up, so its `const`-bound children sit at positional
-        // spots until the runtime that opens it carries them over to their
-        // names. The other cases update Home in the runtime that set it up,
-        // which never mixes the two.
-        const positional = mode === "automatic-cold";
-        if (positional) restoreNaming = stopNamingInstancesForTestingOnly();
         let home: Cell<unknown>;
         if (mode === "explicit") {
           const compiled = await runtime.patternManager.compilePattern(
@@ -512,7 +508,6 @@ describe("Home interface upgrade", () => {
         // schema refuses. The field comparisons below cover the manager and
         // Home's own state, not each child's, so the update must drop none.
         const droppedBefore = droppedSlots();
-        restoreNaming();
         const identity = getPatternIdentityRef(home)?.identity;
         const rootLink = home.getAsNormalizedFullLink();
         if (mode === "explicit") {
@@ -529,7 +524,11 @@ describe("Home interface upgrade", () => {
             await runtime.dispose();
             await storage.close();
             storage = EmulatedStorageManager.connectTo(server, { as: owner });
-            runtime = new Runtime({ apiUrl, storageManager: storage });
+            runtime = new Runtime({
+              apiUrl,
+              storageManager: storage,
+              experimental: { instanceNames: true },
+            });
             controller = new PiecesController(
               createSession({ identity: owner, spaceDid: owner.did() }),
               runtime,
@@ -590,6 +589,7 @@ describe("Home interface upgrade", () => {
         const peer = new Runtime({
           apiUrl,
           storageManager: peerStorage,
+          experimental: { instanceNames: true },
         });
         const peerController = new PiecesController(
           createSession({ identity: owner, spaceDid: owner.did() }),
@@ -629,7 +629,6 @@ describe("Home interface upgrade", () => {
           await peerStorage.close();
         }
       } finally {
-        restoreNaming();
         await controller.dispose();
         await runtime.dispose();
         await storage.close();
