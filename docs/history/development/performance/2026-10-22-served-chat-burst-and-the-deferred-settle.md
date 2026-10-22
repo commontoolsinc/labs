@@ -131,8 +131,8 @@ which a consequence is visible while the wave behind it keeps deriving
 deadline, where settling at every park would derive once per parked event.
 It is accepted for that batching, and stated beside the deferral in
 `events.md` §2. W does not cover those inputs until the derivations land, so
-whatever waits on it, `cf get` among them, stays exact; and nothing a member
-shows is withdrawn, only late by a wave.
+a wait on it, as `cf get` makes, does not end on the handlers' commit alone;
+and nothing a member shows is withdrawn, only late by a wave.
 
 ## The deferral, measured
 

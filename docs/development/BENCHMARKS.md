@@ -324,14 +324,14 @@ measurement.
 
 Under server execution the serving runtime computes those derivations, and with
 web view-scoped replication on the page shows what it delivers without running
-any of them, so the browser completes no run during either operation. Both
-segments' timed samples declare `mayRunNothing` when the deployment serves with
-server execution on, which permits that zero rather than asserting it; with
-server execution off the browser computes the derivations, and the guard stays.
-Neither segment takes its read-accounted sample under server execution, and
-each writes a line saying so instead: the sample attributes the browser's reads
-to the derivations, and what the browser runs there is its echo of them, or
-nothing.
+any of them, so the browser's worker may complete no run at all during either
+operation. Both segments' timed samples declare `mayRunNothing` when the
+deployment serves with server execution on, which permits that zero rather than
+asserting it; with server execution off the browser computes the derivations,
+and the guard stays. Neither segment takes its read-accounted sample under
+server execution, and each writes a line saying so instead: the sample
+attributes the browser's reads to the derivations, and what the browser runs
+there is its echo of them, or nothing.
 
 The comment segment needs the viewer to have a Profile, since the composer's
 send button is disabled until `#profile` resolves to a named one. The field
