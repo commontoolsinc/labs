@@ -1,6 +1,7 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
+import { ROUTED_RAW_LIMIT } from "../v2/routed-parser.ts";
 import {
   decodeRouterAdmission,
   decodeRouterHeader,
@@ -439,6 +440,30 @@ describe("router-protocol", () => {
     ]);
     expect(sender.bufferedBytes).toBe(0);
     expect(errors).toHaveLength(0);
+  });
+
+  it("admits a lone body up to the raw limit under any queue bound and never one past it", () => {
+    for (const limit of [5, null]) {
+      const errors: Error[] = [];
+      const sender = new RouterSender(
+        () => {},
+        (error) => errors.push(error),
+        limit,
+      );
+      // Alone, a body is bounded only by what the router and SDK accept.
+      sender.send(route, new Uint8Array(ROUTED_RAW_LIMIT));
+      expect(sender.bufferedBytes).toBe(ROUTED_RAW_LIMIT);
+      // Behind it, the queue bound applies when enabled.
+      if (limit === null) sender.send(route, "x");
+      else expect(() => sender.send(route, "x")).toThrow();
+      const fresh = new RouterSender(
+        () => {},
+        (error) => errors.push(error),
+        limit,
+      );
+      expect(() => fresh.send(route, new Uint8Array(ROUTED_RAW_LIMIT + 1)))
+        .toThrow();
+    }
   });
 
   it("terminates output when a queued body exceeds the byte budget", () => {

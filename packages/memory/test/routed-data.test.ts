@@ -38,6 +38,8 @@ import { listenRoutedMemory } from "../v2/routed-listener.ts";
 import {
   decodeRoutedFrame,
   encodeRoutedFrame,
+  ROUTED_QUEUE_LIMIT,
+  ROUTED_RAW_LIMIT,
   routedFlags,
   routedObject,
 } from "../v2/routed-parser.ts";
@@ -1205,6 +1207,18 @@ Deno.test("routed host limits are config over defaults, and must nest", () => {
     routedHostLimits({ watchesPerSession: 40960 }).watchesPerSession,
     40960,
   );
+  // The per-socket output bound is configuration too, capped at the 8 MiB
+  // one message may occupy alone, which `null` leaves in force.
+  assertEquals(routedHostLimits().outputBytesPerSocket, 4 * 1024 * 1024);
+  assertEquals(
+    routedHostLimits({ outputBytesPerSocket: ROUTED_RAW_LIMIT })
+      .outputBytesPerSocket,
+    ROUTED_RAW_LIMIT,
+  );
+  assertEquals(
+    routedHostLimits({ outputBytesPerSocket: null }).outputBytesPerSocket,
+    null,
+  );
   // No code ceiling: far above the old 256 contexts and 64 sessions.
   assertEquals(
     routedHostLimitsFor({
@@ -1230,6 +1244,8 @@ Deno.test("routed host limits are config over defaults, and must nest", () => {
       { proofsPerContext: 143 },
       // A context with no ticket to open its first space with.
       { tickets: 511 },
+      // A queue bound above what one message may occupy alone.
+      { outputBytesPerSocket: ROUTED_RAW_LIMIT + 1 },
     ]
   ) {
     let refused = false;
@@ -1248,6 +1264,7 @@ Deno.test("routed host limits are config over defaults, and must nest", () => {
       [{ sessionsPerRouter: 20000 }, "sessionsPerRouter"],
       [{ watchesPerSession: 40961 }, "watchesPerSession"],
       [{ watchesPerContext: 2047 }, "watchesPerSession"],
+      [{ outputBytesPerSocket: ROUTED_RAW_LIMIT + 1 }, "outputBytesPerSocket"],
       [{ unknownLimit: 1 }, "unknownLimit"],
     ] as [Partial<RoutedHostLimits>, string][]
   ) {
@@ -4262,17 +4279,24 @@ describe("routed close diagnostics", () => {
         const socket = await f.dataSocket(await f.issueTicket());
         await socket.take();
         assert(send);
-        const limitBytes = 4 * 1024 * 1024;
+        // A message is refused alone only past the 8 MiB ceiling; behind
+        // retained output the 4 MiB queue bound applies.
+        const limitBytes = classification === "single-message"
+          ? ROUTED_RAW_LIMIT
+          : ROUTED_QUEUE_LIMIT;
         const secret = "private-output-payload";
         const message: ServerMessage = {
           type: "response",
           requestId: "diagnostic-request",
           ok: secret + "é".repeat(
-            classification === "single-message" ? limitBytes : 8,
+            classification === "single-message" ? ROUTED_RAW_LIMIT / 2 : 8,
           ),
         };
         const encoded = encodeMemoryBoundary(message);
         const frameBytes = new TextEncoder().encode(encoded).length;
+        expect(frameBytes > ROUTED_RAW_LIMIT).toBe(
+          classification === "single-message",
+        );
         const bufferedBytes = classification === "single-message"
           ? 0
           : limitBytes - frameBytes + 1;
@@ -4334,6 +4358,129 @@ describe("routed close diagnostics", () => {
       }
     });
   }
+
+  /** Captures the data-socket sender and opens a data socket for output tests. */
+  async function outputFixture(
+    name: string,
+    limits?: Partial<RoutedHostLimits>,
+  ) {
+    const f = await fixture(name, { limits });
+    const lines: string[] = [];
+    const info = stub(console, "info", (line: unknown) => {
+      lines.push(String(line));
+    });
+    const connect = f.server.connectRouted.bind(f.server);
+    let send: ((message: ServerMessage) => void) | undefined;
+    const connected = stub(f.server, "connectRouted", (sender, ...args) => {
+      send = sender;
+      return connect(sender, ...args);
+    });
+    const socket = await f.dataSocket(await f.issueTicket());
+    await socket.take();
+    assert(send);
+    const response = (bytes: number): ServerMessage => ({
+      type: "response",
+      requestId: "large-sync",
+      ok: "x".repeat(bytes),
+    });
+    const closedVerdicts = () =>
+      lines.map((line) => JSON.parse(line)).filter((entry) =>
+        entry.verdict === "context-closed"
+      );
+    return {
+      f,
+      socket,
+      send,
+      response,
+      closedVerdicts,
+      close: async () => {
+        info.restore();
+        connected.restore();
+        await f.close();
+      },
+    };
+  }
+
+  it("delivers a lone 5 MiB response as records and refuses one over 8 MiB as a single message", async () => {
+    const o = await outputFixture("output-lone-large");
+    try {
+      // Nothing is queued on the socket, so the response is admitted past
+      // the 4 MiB queue bound, written as 32 KiB records, and reassembled
+      // by the SDK's assembler and frame decoder.
+      const message = o.response(5 * 1024 * 1024);
+      const encoded = encodeMemoryBoundary(message);
+      o.send(message);
+      const delivered = await o.socket.take();
+      expect(delivered).toBe(encoded);
+      expect(decodeRoutedFrame(delivered, true, FRAME_SLOTS).body).toEqual(
+        message,
+      );
+      expect(o.socket.readyState).toBe(WebSocket.OPEN);
+      // The 8 MiB ceiling is the router's and the SDK's frame limit: no
+      // message past it is sent, queued or alone.
+      const oversized = o.response(ROUTED_RAW_LIMIT);
+      expect(() => o.send(oversized)).toThrow("Routed memory output limit");
+      await o.socket.closed.promise;
+      o.f.host.close();
+      const closed = o.closedVerdicts();
+      expect(closed).toHaveLength(1);
+      expect(closed[0].outputLimit).toMatchObject({
+        frameBytes: new TextEncoder().encode(encodeMemoryBoundary(oversized))
+          .length,
+        bufferedBytes: 0,
+        limitBytes: ROUTED_RAW_LIMIT,
+        classification: "single-message",
+      });
+    } finally {
+      await o.close();
+    }
+  });
+
+  it("refuses a 5 MiB response queued behind retained output over the bound as queued output", async () => {
+    const o = await outputFixture("output-queued-large");
+    try {
+      o.socket.bufferedAmount = 1;
+      const message = o.response(5 * 1024 * 1024);
+      expect(() => o.send(message)).toThrow("Routed memory output limit");
+      await o.socket.closed.promise;
+      o.f.host.close();
+      const closed = o.closedVerdicts();
+      expect(closed).toHaveLength(1);
+      expect(closed[0].outputLimit).toMatchObject({
+        frameBytes: new TextEncoder().encode(encodeMemoryBoundary(message))
+          .length,
+        bufferedBytes: 1,
+        limitBytes: ROUTED_QUEUE_LIMIT,
+        classification: "queued-output",
+      });
+    } finally {
+      await o.close();
+    }
+  });
+
+  it("admits queued output of any size under a null bound and still refuses one message over 8 MiB", async () => {
+    const o = await outputFixture("output-null-bound", {
+      outputBytesPerSocket: null,
+    });
+    try {
+      o.socket.bufferedAmount = ROUTED_QUEUE_LIMIT;
+      const message = o.response(5 * 1024 * 1024);
+      o.send(message);
+      expect(await o.socket.take()).toBe(encodeMemoryBoundary(message));
+      expect(o.socket.readyState).toBe(WebSocket.OPEN);
+      expect(() => o.send(o.response(ROUTED_RAW_LIMIT))).toThrow(
+        "Routed memory output limit",
+      );
+      await o.socket.closed.promise;
+      o.f.host.close();
+      expect(o.closedVerdicts()[0].outputLimit).toMatchObject({
+        limitBytes: ROUTED_RAW_LIMIT,
+        classification: "single-message",
+      });
+    } finally {
+      await o.close();
+    }
+  });
 
   for (const opportunity of ["pending", "executed", "recovered"] as const) {
     it(`records bounded logical queue history with event-loop marker \`${opportunity}\``, async () => {

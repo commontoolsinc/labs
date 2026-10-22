@@ -436,7 +436,15 @@ a closed or replacement socket.
 
 Private sockets enforce the 32 KiB plus five-byte record limit at WebSocket
 assembly, not just after decoding. Endpoints retain complete logical bodies under
-the existing message and queue bounds. Toolshed output waits for each record's
+the existing message and queue bounds. Toolshed output to one private socket is
+admitted by `limits.outputBytesPerSocket` (default 4 MiB; `null` disables it):
+a message is refused when the socket already holds output (retained logical
+bodies or unflushed socket bytes) and that plus the message would exceed the
+bound. A message sent to a socket holding nothing is admitted up to 8 MiB, the
+router's response-header limit and the SDK's frame limit, and written as the
+usual 32 KiB records; no message over 8 MiB is sent on any socket. A refusal
+closes the socket with an `output-limit` verdict classified `single-message`
+(over 8 MiB) or `queued-output`. Toolshed output waits for each record's
 socket write callback. Negotiated public uploads wait for the peer's byte credit
 before each record. Browser output also checks the native `bufferedAmount`
 against a 4 MiB cap when streaming without credit; exhaustion terminates the
@@ -574,8 +582,9 @@ matches the router's default `max_frame_slots`; `null` disables value counting.
 The router enforces the enabled cap on complete public envelopes; opaque
 streamed bodies are checked at the toolshed and SDK. The SDK refuses to send a
 frame exceeding the advertised cap and closes on receiving one. Endpoint
-exposure is also bounded by the byte caps (8 MiB raw, 16 MiB expanded, 4 MiB
-queued per data socket), including when value counting is disabled. A
+exposure is also bounded by the byte caps (8 MiB raw, 16 MiB expanded, 8 MiB
+for one message sent alone and 4 MiB of output queued behind other output per
+data socket), including when value counting is disabled. A
 whole-space sync can exceed these byte bounds and needs chunking (infra#244).
 Context, principal, router and toolshed quotas cover sessions, watches and
 holdings; resource bounds and exact values are in the infra router README.
@@ -667,8 +676,9 @@ a session. The server removes only documents a session declares, so a document
 left out that is no longer in the session's watch set gets no remove, and the
 client keeps the value it last had for it until the document is watched again.
 And the documents left out all come back in one response frame, which must fit
-the 4 MiB the toolshed queues to a data socket; a response past that closes the
-socket.
+the 8 MiB the toolshed may send to a data socket as one message
+(`limits.outputBytesPerSocket`, default 4 MiB, bounds only output queued behind
+other output); a response past 8 MiB closes the socket.
 
 Each context closes with one `routed-memory-verdict` event whose verdict is
 `context-closed` and whose `reason` retains the first socket failure through
@@ -680,11 +690,14 @@ failed send, before socket accounting can change during close:
 - `bufferedBytes`: the larger of retained logical output bytes and npm `ws`'s
   `bufferedAmount`. Control sockets use `bufferedAmount` alone. Socket writable
   bytes can include framing.
-- `limitBytes`: the 4 MiB bound on their sum; equality is admitted.
+- `limitBytes`: the bound that refused the send: 8 MiB for a message too large
+  to send alone, else `limits.outputBytesPerSocket` (default 4 MiB) on their
+  sum; equality is admitted.
 - `endpoint`: `data` or `control`. A control-link failure carries its snapshot
   into each context it closes, unless that context already has a socket failure.
-- `classification`: `single-message` when `frameBytes > limitBytes`, otherwise
-  `queued-output`.
+- `classification`: `single-message` when `frameBytes` exceeds 8 MiB, otherwise
+  `queued-output` (the message would fit alone but not behind the output the
+  socket holds).
 - `messageType`: the structured Memory message kind when available at the
   sender; omitted for binary control records and data greetings.
 - `diagnostics`: for structured data output, separate socket and retained-body

@@ -411,7 +411,7 @@ export type RouterSenderEvent =
 export class RouterSender {
   #send: (record: Uint8Array, done: (error?: Error | null) => void) => void;
   #fail: (error: Error) => void;
-  #limit: number;
+  #limit: number | null;
   #bytes = 0;
   #queue: {
     records: Generator<Uint8Array>;
@@ -444,11 +444,16 @@ export class RouterSender {
     written: () => void;
   } | undefined;
 
-  /** Constructs an instance with a socket-completion callback and byte budget. */
+  /**
+   * Constructs an instance with a socket-completion callback and the bound on
+   * bytes queued behind other output; `null` disables that bound. A body sent
+   * while nothing is retained is admitted up to `ROUTED_RAW_LIMIT` either way,
+   * and no body larger than that is admitted.
+   */
   constructor(
     send: (record: Uint8Array, done: (error?: Error | null) => void) => void,
     fail: (error: Error) => void,
-    limit: number,
+    limit: number | null,
     diagnostics: {
       /** Monotonic clock, injectable for deterministic diagnostic tests. */
       now?: () => number;
@@ -532,7 +537,11 @@ export class RouterSender {
       ? encoder.encode(payload)
       : payload;
     try {
-      requireRouted(this.#bytes + body.length <= this.#limit);
+      requireRouted(
+        body.length <= ROUTED_RAW_LIMIT &&
+          (this.#bytes === 0 || this.#limit === null ||
+            this.#bytes + body.length <= this.#limit),
+      );
       encodeRouterHeader({
         route,
         bytes: body.length,

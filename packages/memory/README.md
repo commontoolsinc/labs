@@ -188,10 +188,13 @@ The host's `context-closed` audit retains the first socket failure. An
 `output-limit` close includes `outputLimit` with `frameBytes`, `bufferedBytes`,
 `limitBytes`, `endpoint` (`data` or `control`), and `classification`
 (`single-message` or `queued-output`), sampled before close. `messageType` is
-included when the sender has a structured Memory message. The 4 MiB output bound
-applies to the larger of retained logical output and outstanding socket bytes,
-plus the attempted payload, including when admission quotas are disabled. The
-audit carries no payload or error text.
+included when the sender has a structured Memory message. The output bound
+(`limits.outputBytesPerSocket`, default 4 MiB, `null` disables it) applies to
+the larger of retained logical output and outstanding socket bytes, plus the
+attempted payload, when the socket already holds output; a message sent to a
+socket holding nothing is admitted up to 8 MiB, and no message over 8 MiB is
+sent, whatever the quotas. `single-message` means over 8 MiB. The audit carries
+no payload or error text.
 
 Structured data refusals also carry `outputLimit.diagnostics`: separate
 `socketBytes` and `sender.retainedBytes`, queued-body counts, lifetime logical

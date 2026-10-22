@@ -342,13 +342,21 @@ type OutputLimit = {
   /** Larger of socket-buffered and retained logical bytes at admission. */
   readonly bufferedBytes: number;
 
-  /** Bound on the larger queue measurement plus the attempted payload bytes. */
+  /**
+   * The bound that refused the send: `ROUTED_RAW_LIMIT` for a message too
+   * large to send alone, else `limits.outputBytesPerSocket`, the bound on the
+   * larger queue measurement plus the attempted payload bytes.
+   */
   readonly limitBytes: number;
 
   /** Private socket whose output exceeded the bound. */
   readonly endpoint: "data" | "control";
 
-  /** Whether the attempted message exceeds the bound on an empty socket. */
+  /**
+   * `single-message` when the message exceeds `ROUTED_RAW_LIMIT`, which no
+   * socket may send; `queued-output` when it would fit alone but not behind
+   * the output the socket already retains.
+   */
   readonly classification: "single-message" | "queued-output";
 
   /** Structured message kind, when the sender has a Memory message. */
@@ -804,6 +812,16 @@ export interface RoutedHostLimits {
    * byte, nesting and unambiguous-JSON checks remain active.
    */
   frameSlots: number | null;
+  /**
+   * Bytes of output one private socket may hold queued: the larger of its
+   * retained logical bodies and its unflushed socket bytes, plus the message
+   * being sent. A message sent while nothing is queued is admitted up to
+   * `ROUTED_RAW_LIMIT` (8 MiB) regardless, since the router forwards a
+   * response of that size and the SDK accepts it; this bound decides what
+   * may queue behind other output. `null` disables the queued-output bound;
+   * the 8 MiB ceiling on one message always holds. At most `ROUTED_RAW_LIMIT`.
+   */
+  outputBytesPerSocket: number | null;
 }
 
 /** Numeric defaults for every quota and structural frame bound. */
@@ -843,6 +861,7 @@ export const DEFAULT_ROUTED_HOST_LIMITS: RoutedHostDefaults = {
   holdingsPerToolshed: 4194304,
   holdingsPerPrincipal: 655360,
   frameSlots: ROUTED_DEFAULT_SLOT_LIMIT,
+  outputBytesPerSocket: ROUTED_QUEUE_LIMIT,
 };
 
 /**
@@ -899,6 +918,10 @@ export function routedHostLimits(
     "proofsPerContext",
   );
   requireLimit(nestedLimit(limits.contextsPerLink, limits.tickets), "tickets");
+  requireLimit(
+    nestedLimit(limits.outputBytesPerSocket, ROUTED_RAW_LIMIT),
+    "outputBytesPerSocket",
+  );
   return limits;
 }
 
@@ -1364,7 +1387,13 @@ export class RoutedMemoryHost {
           }, false),
         )
         .sign(this.#options.identity).then((bytes) =>
-          sendBounded(socket, bytes, rememberClose, "control")
+          sendBounded(
+            socket,
+            bytes,
+            this.#limits.outputBytesPerSocket,
+            rememberClose,
+            "control",
+          )
         ).catch(() => safeClose(socket));
     });
     socket.addEventListener("close", () => {
@@ -1467,6 +1496,7 @@ export class RoutedMemoryHost {
           sendBounded(
             socket,
             new TextEncoder().encode("rpo1"),
+            this.#limits.outputBytesPerSocket,
             rememberClose,
             "control",
           );
@@ -1494,6 +1524,7 @@ export class RoutedMemoryHost {
             new RoutedWriter("mls1").time(sequence).fixed(
               new Uint8Array([status]),
             ).blob(result).bytes,
+            this.#limits.outputBytesPerSocket,
             rememberClose,
             "control",
             undefined,
@@ -1955,7 +1986,13 @@ export class RoutedMemoryHost {
         nonce,
       ).time(issued)
         .sign(this.#options.identity).then((bytes) =>
-          sendBounded(socket, bytes, rememberClose, "data")
+          sendBounded(
+            socket,
+            bytes,
+            this.#limits.outputBytesPerSocket,
+            rememberClose,
+            "data",
+          )
         ).catch(() => safeClose(socket));
     });
     const deadline = setTimeout(() => safeClose(socket), 5000);
@@ -2005,7 +2042,7 @@ export class RoutedMemoryHost {
     const outgoing = new RouterSender(
       (record, done) => socket.send(record, done),
       () => fail("socket-send-failure"),
-      ROUTED_QUEUE_LIMIT,
+      this.#limits.outputBytesPerSocket,
       {
         observe: (event) => {
           diagnostics.observe(
@@ -2111,6 +2148,7 @@ export class RoutedMemoryHost {
             routerRequestAdmission: true,
             negotiatedMemoryFlags,
           }),
+          this.#limits.outputBytesPerSocket,
           rememberClose,
           "data",
         );
@@ -2210,6 +2248,7 @@ export class RoutedMemoryHost {
         socket,
         size,
         Math.max(socket.bufferedAmount, outgoing.bufferedBytes),
+        this.#limits.outputBytesPerSocket,
         rememberClose,
         "data",
         message.type,
@@ -2831,6 +2870,7 @@ function safeClose(socket: WebSocket): void {
 function sendBounded(
   socket: WebSocket,
   bytes: string | Uint8Array,
+  queueLimit: number | null,
   rememberClose: (reason: CloseReason, output?: OutputLimit) => void,
   endpoint: OutputLimit["endpoint"],
   messageType?: OutputLimit["messageType"],
@@ -2844,6 +2884,7 @@ function sendBounded(
     socket,
     size,
     socket.bufferedAmount,
+    queueLimit,
     rememberClose,
     endpoint,
     messageType,
@@ -2856,28 +2897,40 @@ function sendBounded(
   }
 }
 
-/** Checks logical output and records operands before terminating a full socket. */
+/**
+ * Checks output and records operands before terminating a full socket. A
+ * message larger than `ROUTED_RAW_LIMIT` is refused on any socket: the router
+ * accepts no larger response header and the SDK no larger frame. A smaller
+ * message is admitted when the socket holds nothing (`bufferedBytes` is zero),
+ * however large; otherwise `queueLimit`, when enabled, bounds the queued bytes
+ * plus the message, so one socket's queue stays bounded while a response that
+ * only fits alone (a whole-space sync) still goes out.
+ */
 function checkOutput(
   socket: WebSocket,
   size: number,
   bufferedBytes: number,
+  queueLimit: number | null,
   rememberClose: (reason: CloseReason, output?: OutputLimit) => void,
   endpoint: OutputLimit["endpoint"],
   messageType?: OutputLimit["messageType"],
   diagnostics?: () => RoutedOutputSnapshot,
 ): void {
-  if (bufferedBytes + size > ROUTED_QUEUE_LIMIT) {
+  const tooLarge = size > ROUTED_RAW_LIMIT;
+  if (
+    tooLarge ||
+    (bufferedBytes > 0 && queueLimit !== null &&
+      bufferedBytes + size > queueLimit)
+  ) {
     // Socket accounting can change during close; keep this check's operands.
     rememberClose(
       "output-limit",
       Object.freeze({
         frameBytes: size,
         bufferedBytes,
-        limitBytes: ROUTED_QUEUE_LIMIT,
+        limitBytes: tooLarge ? ROUTED_RAW_LIMIT : queueLimit as number,
         endpoint,
-        classification: size > ROUTED_QUEUE_LIMIT
-          ? "single-message"
-          : "queued-output",
+        classification: tooLarge ? "single-message" : "queued-output",
         ...(messageType === undefined ? {} : { messageType }),
         ...(diagnostics === undefined ? {} : { diagnostics: diagnostics() }),
       }),
