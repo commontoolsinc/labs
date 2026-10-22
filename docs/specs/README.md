@@ -57,6 +57,7 @@ decision is reversed or superseded).
 - [Naming in collections](collection-naming.md)
 - [The cell reference grammar](cell-reference-grammar.md)
 - [Memory v2](memory-v2/README.md)
+- [Editing live collaborative text from pattern code](pattern-text-edit.md) (proposed)
 - [FUSE filesystem](fuse-filesystem/README.md)
 - [SQLite builtins](sqlite-builtin/README.md)
 - [Runner child-run ownership](runner-child-run-ownership.md)
