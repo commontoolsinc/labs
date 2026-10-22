@@ -1537,6 +1537,9 @@ const assembleSchemaDocClosures = (
     for (const hash of refs) {
       for (const key of closureOfHash(hash)) closure.add(key);
     }
+    // A schema document's scan names its own hash, and a document cannot
+    // keep itself.
+    closure.delete(referrer);
     if (closure.size > 0) closureOf.set(referrer, closure);
     const dropped = new Set<QueryDocKey>();
     for (const hash of previousRefs ?? []) {
@@ -2003,19 +2006,28 @@ const retireEmptied = (
 };
 
 /**
- * Drops what `manager` holds for the documents `retirement` retired. A
- * cached document stands for a walk whose records are gone: a root added
- * again would be served the document as it was when that walk read it.
- * A refresh calls this again once it has merged its own walk's manager
- * into the graph's, since that walk may have read a document the pass
- * went on to retire.
+ * Drops what `manager` holds for the documents `retirement` retired, and
+ * for the misses that retired with nothing tracking the document in their
+ * place. A cached document stands for a walk whose records are gone: a
+ * root added again would be served the document as it was when that walk
+ * read it, or told it is absent as it was then, which no later arrival
+ * corrects once the miss's interest is gone. A refresh calls this again
+ * once it has merged its own walk's manager into the graph's, since that
+ * walk may have read a document the pass went on to retire.
  */
 const forgetRetiredFromManager = (
   manager: EngineObjectManager,
+  state: TrackedGraphState,
   retirement: Retirement,
+  changedMisses: ReadonlySet<string>,
 ): void => {
   for (const docKey of retirement.retired) {
     const { id, scopeKey } = fromDocKey(docKey);
+    manager.forgetInstance(scopeKey, id);
+  }
+  for (const key of changedMisses) {
+    if (state.missed.has(key) || state.tracker.has(key)) continue;
+    const { id, scopeKey } = fromDocKey(key as QueryDocKey);
     manager.forgetInstance(scopeKey, id);
   }
 };
@@ -2041,12 +2053,13 @@ const forgetRetiredFromMemo = (
   forgetSchemaMemoDocuments(state.memo, forgotten);
 };
 
-/** What a retired document left cached in `state`, forgotten. */
+/** What a retired document or miss left cached in `state`, forgotten. */
 const forgetRetired = (
   state: TrackedGraphState,
   retirement: Retirement,
+  changedMisses: ReadonlySet<string>,
 ): void => {
-  forgetRetiredFromManager(state.manager, retirement);
+  forgetRetiredFromManager(state.manager, state, retirement, changedMisses);
   forgetRetiredFromMemo(state, retirement);
 };
 
@@ -2301,7 +2314,7 @@ const settleRetirement = (
       retirement.reconcile.add(root.docKey);
     }
   }
-  forgetRetired(state, retirement);
+  forgetRetired(state, retirement, changedMisses);
   return touched;
 };
 
@@ -2309,11 +2322,12 @@ const settleRetirement = (
  * Helper for the incremental evaluations, which snapshots the tracked
  * documents among `touched`, assembles the schema closures the snapshots
  * need, attributes and releases the closure's records as the assembly
- * reports, and merges the snapshots into `state.entities`. A document in
- * `dirty` is delivered whatever its version, as the caller was told it
- * changed; any other document touched at the version already delivered,
- * as one walked again for its attribution alone is, is not an update.
- * Returns the snapshots, and the schema documents a dropped ref retired.
+ * reports, settles what the releases retire, and merges the snapshots
+ * into `state.entities`. A document in `dirty` is delivered whatever its
+ * version, as the caller was told it changed; any other document touched
+ * at the version already delivered, as one walked again for its
+ * attribution alone is, is not an update. Returns the snapshots, and the
+ * documents a dropped ref retired.
  */
 const deliverTouched = (
   space: string,
@@ -2323,24 +2337,26 @@ const deliverTouched = (
   touched: Iterable<QueryDocKey>,
   dirty: ReadonlySet<QueryDocKey>,
   recorders: GraphRecorders,
+  sharedMemo: SchemaMemo,
   stats: QueryTraversalStats,
   changedMisses: Set<string>,
 ): { updates: Map<QueryDocKey, EntitySnapshot>; retired: Set<QueryDocKey> } => {
   const updates = new Map<QueryDocKey, EntitySnapshot>();
-  for (const key of touched) {
-    if (!state.tracker.has(key)) continue;
+  const consider = (key: QueryDocKey): void => {
+    if (updates.has(key) || !state.tracker.has(key)) return;
     const snapshot = snapshotForDocKey(space, manager, state.branch, key);
-    if (snapshot === null) continue;
+    if (snapshot === null) return;
     const delivered = state.entities.get(key);
     if (
       !dirty.has(key) && delivered !== undefined &&
       delivered.seq === snapshot.seq &&
       (delivered.document === null) === (snapshot.document === null)
     ) {
-      continue;
+      return;
     }
     updates.set(key, snapshot);
-  }
+  };
+  for (const key of touched) consider(key);
   const staged = assembleSchemaDocClosures(
     space,
     engine,
@@ -2368,11 +2384,23 @@ const deliverTouched = (
     state.tracksOf.get(closureReferrer)?.delete(entry);
     dropAttribution(state, entry, closureReferrer, retirement);
   }
-  // A schema document attributes nothing of its own, so retiring one
-  // uncovers nothing and the cascade ends here.
-  retireOrphans(state, retirement);
-  retireEmptied(state, retirement, changedMisses);
-  forgetRetired(state, retirement);
+  // A dropped ref retires like anything else: a schema document retired
+  // releases the closure it kept, and a root the record covered is walked
+  // on its own.
+  for (
+    const key of settleRetirement(
+      space,
+      manager,
+      state,
+      retirement,
+      recorders,
+      sharedMemo,
+      stats,
+      changedMisses,
+    )
+  ) {
+    consider(key);
+  }
   for (const [key, snapshot] of staged.additions) {
     updates.set(key, snapshot);
   }
@@ -2412,13 +2440,14 @@ export const releaseTrackedRoots = (
   }
   // A memo of this release's own, as a refresh takes: the graph's memo
   // would answer a re-walk from a traversal that recorded nothing here.
+  const sharedMemo = createSchemaMemo();
   const touched = settleRetirement(
     space,
     manager,
     state,
     retirement,
     recorders,
-    createSchemaMemo(),
+    sharedMemo,
     stats,
     changedMisses,
   );
@@ -2430,6 +2459,7 @@ export const releaseTrackedRoots = (
     touched,
     new Set(),
     recorders,
+    sharedMemo,
     stats,
     changedMisses,
   );
@@ -2786,6 +2816,7 @@ export const extendTrackedGraph = (
     touched,
     touched,
     recorders,
+    state.memo,
     stats,
     changedMisses,
   );
@@ -3080,13 +3111,14 @@ export const refreshTrackedGraph = (
       touched,
       dirty,
       recorders,
+      sharedMemo,
       stats,
       changedMisses,
     );
     phases.enter("merge");
     for (const key of delivered.retired) retirement.retired.add(key);
     state.manager.mergeFrom(manager);
-    forgetRetiredFromManager(state.manager, retirement);
+    forgetRetiredFromManager(state.manager, state, retirement, changedMisses);
 
     stats.managerReads = manager.readCount - readCountBefore;
 
