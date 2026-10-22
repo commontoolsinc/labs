@@ -85,9 +85,10 @@ import { cfcPolicyManifestDocId, type PolicyTemplateV1 } from "./policy.ts";
 import { collectConsumedLabel } from "./prepare.ts";
 import { CfcReadCeilingError } from "./read-ceiling.ts";
 import {
-  exactPrincipalAttestations,
+  mintedProfilePrincipals,
   principalClaimEntries,
   PROFILE_NAME_FIELD,
+  representsPrincipalEntries,
 } from "./represents-principal.ts";
 import { snapshotJsonValue } from "./share-snapshot-value.ts";
 import { type CfcTrustConfig, createTrustResolver } from "./trust.ts";
@@ -1391,7 +1392,7 @@ const clauseWithheldFromRoom = (
 /**
  * Returns `terms` with each seat named by a reference replaced by the one
  * principal its cell attests, in exactly the form a runtime mints (see
- * `exactPrincipalAttestations`), with a well-formed DID for its subject. A
+ * `mintedProfilePrincipals()`), with a well-formed DID for its subject. A
  * pattern holds a member's profile, not the member's DID, so a seat can name
  * what the member's own runtime attested. The reads are added to `evidence`,
  * so the transaction that writes the entry verifies them.
@@ -1425,14 +1426,19 @@ const resolveSeats = async (
       // The seal writes the DID into terms every reader of the room sees, so
       // the cell must already be one they hold, whether or not its label
       // traveled into the terms with the reference.
-      // The attestation is read from these entries (from the root's and the
-      // `name` field's among them, for a seat whose owner wrote a name), so
-      // they are the ones the room's readers must hold, whatever their
-      // observation class. The attestation's subject is itself public
+      // The attestation is read from the entries the profile rule counts, and
+      // checked on the root and top-level fields besides, so those are the
+      // entries the room's readers must hold, whatever their observation
+      // class. The attestation's subject is itself public
       // metadata (a `represents-principal` subject is classified public for
       // invariant 12), so no label-metadata clause governs the DID.
+      const nameWritten = profileNameWrittenAt(runtime, tx, target);
+      const attesting = new Set([
+        ...principalClaimEntries(view),
+        ...representsPrincipalEntries(view, nameWritten),
+      ]);
       const withheld = clauseWithheldFromRoom(
-        principalClaimEntries(view)
+        [...attesting]
           .flatMap((entry) =>
             (entry.label.confidentiality ?? []) as CfcConfClause[]
           ),
@@ -1444,11 +1450,7 @@ const resolveSeats = async (
           debugStr`Custody terms name seat ${index} by a cell with a clause the room's readers do not hold: $quote,long${withheld}`,
         );
       }
-      const principals = exactPrincipalAttestations(
-        view,
-        "represents-principal",
-        profileNameWrittenAt(runtime, tx, target),
-      );
+      const principals = mintedProfilePrincipals(view, nameWritten);
       if (
         principals === undefined || !principals.every(isWellFormedDID)
       ) {

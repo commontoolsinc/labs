@@ -167,14 +167,14 @@ describe("represents-principal", () => {
       expect(authorPrincipalCandidates(label, false)).toEqual([]);
     });
 
-    it("returns no DID for a subject that is not a DID as written", () => {
+    it("returns a subject that begins `did:` as written, and nothing for one that does not", () => {
       const label = view([
         representsAt(["name"], ` ${DID}`),
         representsAt(["avatar"], `${DID}\n`),
         representsAt(["bio"], DID.replace("did:", "DID:")),
         representsAt(["elements"], "alice"),
       ]);
-      expect(authorPrincipalCandidates(label, false)).toEqual([]);
+      expect(authorPrincipalCandidates(label, false)).toEqual([`${DID}\n`]);
     });
 
     it("counts an entry a link carries from another document for a value with no written name", () => {
@@ -227,10 +227,9 @@ describe("represents-principal", () => {
         .toEqual([]);
     });
 
-    it("refuses a claim in any form the runtime does not mint", () => {
-      // No reader counts a string-form or padded claim, and one with another
-      // key is read for its subject; a caller that must know who wrote an
-      // attestation refuses the whole label for any of them.
+    it("skips a claim in any form but an object of the kind with a `did:` subject, and reads one with other keys", () => {
+      // The string form and a padded subject name nothing, and an atom with
+      // another key is read for its subject. None of them refuses the read.
       const cases: [
         NonNullable<CfcLabelView["entries"][number]["label"]["integrity"]>[
           number
@@ -245,7 +244,7 @@ describe("represents-principal", () => {
         const label = view([{ path: ["name"], label: { integrity: [atom] } }]);
         expect(authorPrincipalCandidates(label, false)).toEqual(candidates);
         expect(exactPrincipalAttestations(label, "represents-principal", false))
-          .toBeUndefined();
+          .toEqual(candidates);
       }
     });
 
@@ -259,18 +258,18 @@ describe("represents-principal", () => {
       ).toEqual([DID, OTHER_DID]);
     });
 
-    it("refuses a claim in a form the runtime does not mint on any field, whether or not the name is written", () => {
+    it("skips a string-form claim on another field, whether or not the name is written", () => {
       const label = view([
         representsAt(["name"], DID),
         {
           path: ["bio"],
-          label: { integrity: [`represents-principal:${DID}`] },
+          label: { integrity: [`represents-principal:${OTHER_DID}`] },
         },
       ]);
       expect(exactPrincipalAttestations(label, "represents-principal", true))
-        .toBeUndefined();
+        .toEqual([DID]);
       expect(exactPrincipalAttestations(label, "represents-principal", false))
-        .toBeUndefined();
+        .toEqual([DID]);
     });
 
     it("counts an `authored-by` claim on any field whether or not the name is written", () => {
@@ -307,13 +306,13 @@ describe("represents-principal", () => {
         .toEqual([OTHER_DID, DID]);
     });
 
-    it("refuses a claim in a form the runtime does not mint on a deeper entry it counts", () => {
+    it("counts a deeper `did:` subject as written for a value with no written name", () => {
       const label = view([
         representsAt(["name"], DID),
         representsAt(["elements", "0"], "did:key:not well formed"),
       ]);
       expect(exactPrincipalAttestations(label, "represents-principal", false))
-        .toBeUndefined();
+        .toEqual([DID, "did:key:not well formed"]);
       expect(exactPrincipalAttestations(label, "represents-principal", true))
         .toEqual([DID]);
     });

@@ -362,7 +362,7 @@ describe("principalOf()", () => {
       expect(callIn(edit(), profile, "represents-principal")).toBeUndefined();
     });
 
-    it("returns `undefined` for a label holding a claim in any form but the one a runtime mints", async () => {
+    it("skips a claim in any form but an object of the kind with a `did:` subject, which refuses nothing", async () => {
       const forms = [
         `represents-principal:${bob.did()}`,
         { kind: "represents-principal", subject: ` ${bob.did()}` },
@@ -374,8 +374,7 @@ describe("principalOf()", () => {
           claimsAt([], claim("represents-principal", bob.did())),
           claimsAt(["name"], form),
         ]);
-        expect(callIn(edit(), profile, "represents-principal"))
-          .toBeUndefined();
+        expect(callIn(edit(), profile, "represents-principal")).toBe(bob.did());
       }
     });
 
@@ -558,16 +557,13 @@ describe("principalOf()", () => {
       expect(callIn(edit(), profile, "represents-principal")).toBe(bob.did());
     });
 
-    it("refuses a claim in a form the runtime does not mint on any field, whether or not the name is written", async () => {
-      // The written name narrows which fields are counted, not which are
-      // checked.
-
+    it("skips a string-form claim on another field, whether or not the name is written", async () => {
       const profile = await seed("profile", [
         claimsAt(["name"], claim("represents-principal", bob.did())),
         claimsAt(["bio"], `represents-principal:${alice.did()}`),
       ], { name: "Bob" });
-      expect(callIn(edit(), profile, "represents-principal")).toBeUndefined();
-      expect(principalsIn(edit(), profile)).toBeUndefined();
+      expect(callIn(edit(), profile, "represents-principal")).toBe(bob.did());
+      expect(principalsIn(edit(), profile)).toEqual([bob.did()]);
     });
 
     it("returns an `authored-by` claim on any field, whether or not the name is written", async () => {

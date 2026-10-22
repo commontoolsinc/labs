@@ -31,14 +31,15 @@ for.
 claim for both sides: the check `prepare.ts` makes on a write, and the readers.
 
 `principalOf()` reads a claim as `exactPrincipalAttestations()` in that module
-does, in exactly the form a runtime mints: an object of `kind` and `subject`
-and nothing else, with a subject that is a well-formed DID as written. Which
-label entries it reads depends on the kind.
+does. Which label entries it reads, and how strictly it reads a claim, depend
+on the kind.
 
-An `authored-by` claim is read from the value's root and its top-level fields.
-It is not read from deeper down, which describes a document the value links
-to, nor from an entry a link carries from the document it points to (one
-observed as `followRef`).
+An `authored-by` claim is read from the value's root and its top-level fields,
+in exactly the form a runtime mints: an object of `kind` and `subject` and
+nothing else, with a subject that is a well-formed DID as written. It is not
+read from deeper down, which describes a document the value links to, nor from
+an entry a link carries from the document it points to (one observed as
+`followRef`).
 
 A `represents-principal` claim depends on whether the value holds a name its
 owner wrote: whether its `name` field, followed through its links, holds a
@@ -56,11 +57,16 @@ string with something besides whitespace in it.
   and a value whose own fields name no one represents whoever a deeper or a
   link-carried entry names.
 
-This is the reading an earlier reader of profiles in this system already
-applied, so the two read a profile alike. The entries counted are checked for a
-claim in a form a runtime does not mint, and so are the root and every
-top-level field whatever is counted: such a claim on any of them gives
-`undefined`. `isWrittenProfileName()` and `representsPrincipalEntries()` in
+A `represents-principal` claim counts when it is an object whose `kind` is
+`represents-principal` and whose `subject` is a string beginning `did:`,
+whatever other keys it holds (`profileClaimSubject()`). An atom in any other
+form, the `<kind>:<subject>` string form among them, is skipped rather than
+refusing the read. This is the reading an earlier reader of profiles in this
+system already applied, so the two read a profile alike. The custody seal's
+seats are the exception: the seal reads them in exactly the form a runtime
+mints (`mintedProfilePrincipals()`), since it writes the principal where every
+reader of the room sees it. `isWrittenProfileName()` and
+`representsPrincipalEntries()` in
 `represents-principal.ts` decide this for every reader of a profile's
 principal: `principalOf()` and `principalsOf()`, the host's
 `attestedPrincipalsAt()` (the pieces controller's root check and the
@@ -100,8 +106,7 @@ other keys are not read.
 | --- | --- |
 | a DID | the claims of `kind` it reads name exactly one principal |
 | `undefined` | they name none, or more than one |
-| `undefined` | a claim of `kind` there is in any other form: extra keys, a padded subject, a subject that is not a DID |
-| `undefined` | a claim of either kind there is in the string form `<kind>:<subject>` |
+| `undefined` | for `authored-by`, a claim there is in any other form: extra keys, a padded subject, a subject that is not a DID, or a claim of either kind in the string form `<kind>:<subject>` |
 | `undefined` | `target` was passed as `undefined` |
 | `undefined` | the label cannot be observed: the document is missing, or its read is refused, by construction or by the storage manager |
 | throws | the stored label is in a form this build cannot interpret, or the transaction's read of it fails |

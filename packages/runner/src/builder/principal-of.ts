@@ -24,26 +24,26 @@ import { cellOfTarget } from "./space-access.ts";
 /**
  * Returns the one principal that the label on `target`'s value attests with a
  * claim of `kind`: for `represents-principal`, whom the value stands for, as a
- * profile's label says; for `authored-by`, who wrote it. The claim is read in
- * exactly the form a runtime mints, as `exactPrincipalAttestations()` reads
- * it. An `authored-by` claim is read at the value's root and on its top-level
- * fields, and never from what a link the value holds carries. A
+ * profile's label says; for `authored-by`, who wrote it, each as
+ * `exactPrincipalAttestations()` reads it. An `authored-by` claim is read at
+ * the value's root and on its top-level fields, in exactly the form a runtime
+ * mints, and never from what a link the value holds carries. A
  * `represents-principal` claim is read as `representsPrincipalEntries()`
  * chooses: on a value holding a name its owner wrote, from the root and the
  * `name` field alone, since the written name says whose the value is and a
  * field still at its default may carry another runtime's principal; on any
  * other value, from every entry its label holds, deeper ones and those a link
- * carries included.
+ * carries included; an atom not in `profileClaimSubject()`'s form is skipped.
  *
- * Returns `undefined` when the label names no verified single principal of
- * that kind: when it attests none, when it attests more than one, when a claim
- * there is in any form but the one a runtime mints, and for a `target` passed
- * as `undefined`. It never guesses. A label the caller cannot observe, one
- * whose read is refused by construction or by the storage manager, also
- * returns `undefined`, as missing metadata does, which is the normalization
- * of hidden cases that CFC spec §4.6.4.1 requires. A label still loading is
- * not one of them, in a handler: the handler is withdrawn and runs again once
- * its document arrives. So is a `name` still loading.
+ * Returns `undefined` when the label names no verified single principal of that
+ * kind: when it attests none, when it attests more than one, when a claim of
+ * `authored-by` there is in any form but the one a runtime mints, and for a
+ * `target` passed as `undefined`. It never guesses. A label the caller cannot
+ * observe, one whose read is refused by construction or by the storage manager,
+ * also returns `undefined`, as missing metadata does, which is the
+ * normalization of hidden cases that CFC spec §4.6.4.1 requires. A label still
+ * loading is not one of them, in a handler: the handler is withdrawn and runs
+ * again once its document arrives. So is a `name` still loading.
  *
  * The read is of `target`'s label: the value's cell is followed through any
  * links it holds, which reads the pointers along the way, and then its stored
@@ -106,12 +106,11 @@ export function principalOf(
  *
  * Returns `[]` when the label attests none, and for a label the caller cannot
  * observe, as `principalOf()` normalizes one with missing metadata; and the
- * DIDs it attests, in the order they first appear, when it attests one or
- * more. Returns `undefined`
- * when a claim there is in any form but the one a runtime mints, since no
- * principal can then be read from it, and for a `target` passed as
- * `undefined`. The claims are read where, and as, `principalOf()` reads them,
- * `options.label` included.
+ * DIDs it attests, in the order they first appear, when it attests one or more.
+ * Returns `undefined` when an `authored-by` claim there is in any form but the
+ * one a runtime mints, since no principal can then be read from it, and for a
+ * `target` passed as `undefined`. The claims are read where, and as,
+ * `principalOf()` reads them, `options.label` included.
  *
  * @throws In every case `principalOf()` throws.
  */
@@ -219,7 +218,8 @@ function attestedPrincipals(
  * Returns every principal the stored label at `link` attests with a claim of
  * `kind`, read through `tx` as `principalsOf()` reads a cell's: `[]` when it
  * attests none and for a label the caller cannot observe, and `undefined` when
- * a claim there is in any form but the one a runtime mints. `link` names the
+ * an `authored-by` claim there is in any form but the one a runtime mints.
+ * `link` names the
  * document whose label is read. For a `represents-principal` claim the value's
  * `name` field is followed from there, through `runtime`, to see whether it
  * holds a written name (`profileNameWrittenAt()`); nothing else is followed.
