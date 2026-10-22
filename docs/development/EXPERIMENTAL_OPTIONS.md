@@ -41,7 +41,7 @@ was last checked against the code.
 | [`localSessionDocuments`](#localsessiondocuments) | `EXPERIMENTAL_LOCAL_SESSION_DOCUMENTS` env / shell build define, or `RuntimeOptions.experimental`; clients adopt the deployment value | off | Bernhard Seefeld (#8919) | validate local session semantics and performance, then graduate for client execution | implemented, opt-in; requires validation-only commit support |
 | [`sharedMemoryConnection`](#sharedmemoryconnection) | `EXPERIMENTAL_SHARED_MEMORY_CONNECTION` env, or `RuntimeOptions.experimental`; the shell adopts it from its deployment, and an explicit build define of the same name overrides it | off | Bernhard Seefeld (2026-09-29) | turn on once a deployment's routing serves a connection carrying several spaces, then delete the flag and the connection-per-space path | implemented, off by default |
 | [`localFold`](#localfold) | `EXPERIMENTAL_LOCAL_FOLD` env / shell build define, or `RuntimeOptions.experimental` | off | Robin McCollum (2026-10-14) | decide between the fold and reverting a refused derived write, then delete the flag and the losing arm | implemented, off by default |
-| [`instanceNames`](#instancenames) | `EXPERIMENTAL_INSTANCE_NAMES` env, or `RuntimeOptions.experimental`; the shell adopts it from its deployment, and an explicit build define of the same name overrides it | off | Dan Bornstein (2026-10-22) | exclude a runtime whose naming mode differs from its space's, turn it on, then delete the flag and the positional compile of `const`-bound instances | implemented, off by default; must not turn on before that exclusion exists |
+| [`instanceNames`](#instancenames) | `RuntimeOptions.experimental` only (mapped `null` in the canonical env registry); the shell adopts it from its deployment | off | Dan Bornstein (2026-10-22) | exclude a runtime whose naming mode differs from its space's, turn it on, then delete the flag and the positional compile of `const`-bound instances | implemented, off by default; must not turn on before that exclusion exists |
 | [`connectionAuth`](#connectionauth) | Memory hello capability | advertised by a host that verifies `connection.auth`; toolshed does under `sharedMemoryConnection` | Bernhard Seefeld (2026-09-29) | retain as protocol negotiation until signed `session.open` retires | optional capability |
 | [`agentBuiltin`](#agentbuiltin) | `EXPERIMENTAL_AGENT_BUILTIN` env, or `RuntimeOptions.experimental` | on | Bernhard Seefeld (agent requests stage 3) | delete the flag after the default-on posture soaks | implemented, on by default |
 | [`cfcEnforcementMode`](#cfcenforcementmode)                                 | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse)                                                                    | `enforce-strict`                                                                     | Bernhard Seefeld (#3263)                              | the ladder stays; the default is at its top rung                                                                                                                                                                                  | implemented, on by default at the strictest rung                                |
@@ -933,13 +933,16 @@ holds the measurements and the conditions for revisiting.
 
 ### `instanceNames`
 
-- **Toggle via.** `EXPERIMENTAL_INSTANCE_NAMES` environment variable (through
-  the canonical env registry) or `RuntimeOptions.experimental.instanceNames`.
+- **Toggle via.** `RuntimeOptions.experimental.instanceNames` only. It is
+  mapped to `null` in the canonical env registry, and the shell has no build
+  define for it, so no environment can turn it on: one process naming
+  instances binds a parent's children to other documents than the rest of its
+  space does, which is what the requirement below rules out. The flip makes it
+  env-reachable along with whatever keeps the other naming mode out.
   Server-authoritative in `EXPERIMENTAL_FLAG_AUTHORITY`, so a deployed CLI
   adopts the posture its server publishes, and `"deployment"` in
   `SHELL_FLAG_SOURCES`, so the shell runs the naming mode of the deployment it
-  is served by; an explicit `EXPERIMENTAL_*` (or, in the shell, the build
-  define of the same name) still wins. The flag is consumed from the Runtime
+  is served by. The flag is consumed from the Runtime
   instance through `namesInstances()` in
   [`packages/runner/src/builder/instance-name.ts`](../../packages/runner/src/builder/instance-name.ts),
   its one read: the engine passes it to every transformer pipeline it builds
@@ -983,10 +986,9 @@ holds the measurements and the conditions for revisiting.
   the flag on. The transformer's off arm is held to `main`'s output by the
   golden fixtures and `pipeline-regressions.test.ts`, and both arms by
   `transform.test.ts`.
-- **Path to removal.** Once on everywhere, delete the env mapping, the runtime
-  option and its authority and shell-source entries, the shell define,
-  `namesInstances()`, `TransformationOptions.instanceNames`, and the cache
-  variant.
+- **Path to removal.** Once on everywhere, delete the runtime option, its env,
+  authority and shell-source entries, `namesInstances()`,
+  `TransformationOptions.instanceNames`, and the cache variant.
 
 ## Category 2: Contextual Flow Control enforcement rollout dials
 

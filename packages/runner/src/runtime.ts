@@ -461,7 +461,8 @@ export interface ExperimentalOptions {
    * positionally, so nothing names an instance and nothing is carried over.
    * Turning it on is one-way for the data it writes, and needs every runtime
    * that opens the same space to run the same naming mode first
-   * (`docs/development/EXPERIMENTAL_OPTIONS.md#instancenames`).
+   * (`docs/development/EXPERIMENTAL_OPTIONS.md#instancenames`), so no
+   * environment variable reaches it.
    */
   instanceNames?: boolean | undefined;
 }

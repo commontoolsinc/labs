@@ -70,9 +70,11 @@ export const EXPERIMENTAL_ENV_VARS = {
   // The local fold of a refused derived write is default-off; env-reachable
   // so a process can opt in with an explicit "true".
   localFold: "EXPERIMENTAL_LOCAL_FOLD",
-  // Instance naming is default-off; env-reachable so a process can opt in
-  // with an explicit "true".
-  instanceNames: "EXPERIMENTAL_INSTANCE_NAMES",
+  // Instance naming is default-off, and reachable programmatically only: one
+  // process naming instances binds a parent's children to other documents
+  // than the rest of its space does, so no environment may turn it on before
+  // a runtime of the other naming mode is kept away from a space.
+  instanceNames: null,
 } as const satisfies Record<keyof ExperimentalOptions, string | null>;
 
 /**
