@@ -2668,7 +2668,6 @@ ID from it, as [Space invitations](#space-invitations) describes.
 
 ## Command visibility
 
-Each command sits under the noun it acts on, and answers at that spelling alone.
 A registered command appears in `cf --help` unless it is hidden, as
 `cf completion complete` is: the completion scripts call it, and nobody types
 it. The direct `fuse-daemon` and `fuse-supervisor` entry points are visible
