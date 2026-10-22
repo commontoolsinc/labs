@@ -266,7 +266,9 @@ export function orderProfileCandidates(
  * them. A retired profile is left out before its document is loaded, and one
  * whose document is absent is left out. One whose document failed to load is
  * a candidate, with its failure in `failures`, so that a failure never
- * changes which profile is first.
+ * changes which profile is first. The caller passes a freshly read
+ * `defaultPattern`, since a handle read before a change, a retire among
+ * them, keeps returning what it held then.
  *
  * @throws DocumentLoadError when the home's root, or a document ordering
  * reads, fails to load.
