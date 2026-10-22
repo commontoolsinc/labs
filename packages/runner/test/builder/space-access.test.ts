@@ -1539,11 +1539,11 @@ describe("spaceAccess()", () => {
     });
 
     describe("under `enforce-strict`", () => {
-      it("commits a computation's list into a user document of the space, where a read of the viewer's private Home is refused", async () => {
-        // Bob's Home holds a document whose label is private to Home's own
-        // readers, as a Home's root can be. The control writes the same
-        // document after also reading that one, and is refused, so what
-        // admits the first write is that the list carries no such label.
+      it("commits a computation's list into a user document of the space, where a read of the viewer's private Home root is refused", async () => {
+        // Bob's Home root carries a label private to Home's own readers. The
+        // control writes the same document after also reading the root, and
+        // is refused, so what admits the first write is that the list
+        // carries no such label.
 
         const setAcl = await aclWriter();
         await setAcl({ [alice.did()]: "OWNER", [bob.did()]: "WRITE" });
@@ -1553,15 +1553,14 @@ describe("spaceAccess()", () => {
         const runtime = clientRuntime(bob, { strict: true });
         await syncAcl(runtime);
         await syncAcl(runtime, home);
-        const secretId = runtime.getCell<unknown>(home, "space-members secret")
-          .getAsNormalizedFullLink().id;
+        const rootId = runtime.getHomeSpaceCell().getAsNormalizedFullLink().id;
         {
           const seed = runtime.edit();
           writeSeedEnvelopeDoc(seed, home);
           seedStoredEnvelope(seed, {
             space: home,
             scope: "space",
-            id: secretId,
+            id: rootId,
             path: [],
           }, {
             value: { secret: "s3cr3t" },
@@ -1571,7 +1570,7 @@ describe("spaceAccess()", () => {
               labelMap: {
                 version: 1,
                 entries: [{
-                  path: ["secret"],
+                  path: [],
                   label: {
                     confidentiality: [{
                       type: "https://commonfabric.org/cfc/atom/Space",
@@ -1595,7 +1594,7 @@ describe("spaceAccess()", () => {
           }));
           const secret = readHome
             ? (runtime.getCellFromLink<{ secret?: string }>(
-              { space: home, scope: "space", id: secretId, path: [] },
+              { space: home, scope: "space", id: rootId, path: [] },
               undefined,
               tx,
             ).getRaw())?.secret
