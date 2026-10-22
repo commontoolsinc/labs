@@ -11,7 +11,7 @@
 
 import {
   type AliasResolver,
-  isMainPush,
+  isMainRun,
   parseReportGroups,
   type RunContext,
   type StoredReport,
@@ -24,6 +24,7 @@ import {
   costSeconds,
   type DaySamples,
   daysBetween,
+  daysHeld,
   emptyContext,
   emptySamples,
   emptyState,
@@ -32,10 +33,16 @@ import {
   type FoldContext,
   foldObservations,
   type IdentityState,
+  isDay,
+  isDaySamples,
   mergeSamples,
+  moveHistory,
+  NEW_REAL_TEST_FAILURE_RULE,
   type Observation,
   parseContext,
   readCostsForward,
+  readNewRealTestFailuresForward,
+  renameInContext,
   sampleDuration,
   scoreInputs,
   sealDay,
@@ -46,7 +53,7 @@ import {
   value,
 } from "./score.ts";
 import { claimsFor } from "../test-topology.ts";
-import { isLaneMeasurement } from "../lane-measurement.ts";
+import { hooksMeasurement, isLaneMeasurement } from "../lane-measurement.ts";
 import {
   isLaneObservation,
   type LaneObservation,
@@ -65,6 +72,7 @@ import {
   writtenAhead,
 } from "./manifest.ts";
 import { ObservationSpool } from "./observation-spool.ts";
+import { COMPACTION_LAG_DAYS } from "../test-records-compact.ts";
 import {
   COST_WINDOW_DAYS,
   FLAKE_ANCHOR_EXECUTIONS,
@@ -81,6 +89,13 @@ export interface AggregateState {
 
   /** The day the counters were last aged to. */
   day: string;
+
+  /**
+   * The set of rules its new real test failures were credited under (see
+   * `NEW_REAL_TEST_FAILURE_RULE`), absent for an aggregate written before
+   * the stamps began.
+   */
+  catchRule?: number;
 
   /**
    * The reports already folded in, by object name. Object names carry the
@@ -103,7 +118,7 @@ export interface AggregateState {
    * raw objects, each `"<source>\t<date>"`. A rollup carries its pair's
    * reports whole, so those raw objects are not in `folded` and a later
    * run over a wide window would otherwise fold them on top of it and
-   * double every catch in them.
+   * double every new real test failure in them.
    *
    * Scoped to the source and not only to the date, because rollups cover
    * the continuous-integration area alone. A receipt naming the date by
@@ -112,6 +127,21 @@ export interface AggregateState {
    * read.
    */
   compacted: string[];
+
+  /**
+   * The last day, as a partition, on or before which every source and
+   * date is closed: nothing of it is read again, so neither `folded` nor
+   * `compacted` holds anything for it, apart from the first day the history
+   * holds (see `firstDay`). Absent where nothing is closed.
+   *
+   * An incremental run reads from the last day its aggregate read, so
+   * every day up to that one has been read, and a day closes once it is
+   * `COMPACTION_LAG_DAYS` behind, which is when the store stops expecting
+   * late arrivals for it. Closing is what keeps `folded` the size of a week
+   * of objects rather than of the whole history. A bootstrap closes every
+   * day before the first day it reads, as `coldStart` says.
+   */
+  closed?: string;
 
   states: Record<string, IdentityState>;
 
@@ -139,6 +169,14 @@ export interface AggregateState {
    * names.
    */
   lanes?: LaneObservation[];
+
+  /**
+   * What each unit's hooks took, by the name of the lane measurement that
+   * names the unit and then by day, counted by bucket as a test's
+   * durations are and aged over `COST_WINDOW_DAYS` as the lane
+   * measurements are.
+   */
+  hooks?: Record<string, Record<string, DaySamples>>;
 }
 
 /** A fresh aggregate, for a cold start. */
@@ -146,12 +184,112 @@ export function emptyAggregate(day: string): AggregateState {
   return {
     schema: MANIFEST_SCHEMA_VERSION,
     day,
+    catchRule: NEW_REAL_TEST_FAILURE_RULE,
     folded: [],
     context: serializeContext(emptyContext()),
     compacted: [],
     states: {},
     files: {},
   };
+}
+
+/**
+ * The first day an aggregate's history holds, as "yyyy-mm-dd": the
+ * earliest day it folded an object or a rollup from. Absent for an
+ * aggregate that has folded nothing.
+ *
+ * Closing a day keeps the names and receipts of this one, because they are
+ * what it is read from, here and by every publisher that folds a whole
+ * history again from the day this gives.
+ */
+export function firstDay(
+  aggregate: Pick<AggregateState, "folded" | "compacted">,
+): string | undefined {
+  let first: string | undefined;
+  const consider = (day: string) => {
+    if (day.length > 0 && (first === undefined || day < first)) first = day;
+  };
+  for (const name of aggregate.folded) consider(partitionOf(name));
+  for (const pair of aggregate.compacted) consider(pair.split("\t")[1] ?? "");
+  return first?.replaceAll("/", "-");
+}
+
+/**
+ * The aggregate a bootstrap folds into: nothing, with every day before
+ * `from`, the first day the bootstrap reads, closed. That day is where the
+ * history it counts begins, and a run folding an earlier day would fold it
+ * after the days that follow it, where the rules that decide whether a
+ * failure is a new real test failure read the runs in the order they
+ * happened.
+ */
+export function coldStart(from: string, today: string): AggregateState {
+  return { ...emptyAggregate(today), closed: partitionShifted(from, -1) };
+}
+
+/**
+ * The last day, as a partition, a run folding into an aggregate read: the
+ * day it ran on, which it read before the day was over. An incremental
+ * run reads from that day, so every day up to it has been read.
+ */
+export function lastReadDay(aggregate: AggregateState): string {
+  return aggregate.day.replaceAll("-", "/");
+}
+
+/** The day partition a number of days after another, or before it. */
+export function partitionShifted(partition: string, days: number): string {
+  const at = Date.parse(`${partition.replaceAll("/", "-")}T00:00:00Z`);
+  return new Date(at + days * 86_400_000).toISOString().slice(0, 10)
+    .replaceAll("-", "/");
+}
+
+/**
+ * Moves each day of history the states hold to the identity a record of
+ * that day resolves to, which is what the fold does with every record it
+ * reads. A state folded under a name before an alias line for that name
+ * was written holds history the alias gives to the new name, and moving
+ * it here, on every run, is what keeps that history from being stranded
+ * under a name nothing records any more and then dropped with it.
+ *
+ * A day on or after an alias's date stays where it is, as a record of
+ * that day would. The file the old name's records named goes with it
+ * where the new name has none yet, and the next record naming a file
+ * replaces it. Returns how many identities had history moved.
+ */
+export function resolveHistory(
+  states: Map<string, IdentityState>,
+  files: Record<string, string>,
+  resolver: AliasResolver,
+): number {
+  if (resolver.empty) return 0;
+  let moved = 0;
+  for (const [key, state] of [...states]) {
+    const test = testIdentityOfKey(key);
+    if (test === undefined) continue;
+    const targets = new Map<string, string>();
+    for (const day of daysHeld(state)) {
+      const target = testIdentityKey(resolver.resolve(test, day));
+      if (target !== key) targets.set(day, target);
+    }
+    if (targets.size === 0) continue;
+    for (const target of new Set(targets.values())) {
+      let into = states.get(target);
+      if (into === undefined) {
+        into = emptyState();
+        states.set(target, into);
+      }
+      moveHistory(state, into, (day) => targets.get(day) === target);
+      const file = files[key];
+      if (files[target] === undefined && file !== undefined) {
+        files[target] = file;
+      }
+    }
+    if (daysHeld(state).size === 0) {
+      states.delete(key);
+      delete files[key];
+    }
+    moved++;
+  }
+  return moved;
 }
 
 /** The submission area an object was written into. */
@@ -184,7 +322,8 @@ export function sourceDateKey(source: string, date: string): string {
  * That is a statement about the one body, not about what the publisher
  * has: it folds onto the newest stored state this reads, over a walk
  * back bounded by the days its run covers, and starts from an empty
- * aggregate only where the store holds no state object at all.
+ * aggregate only in a bootstrap, which the store holding no state any
+ * publisher can read is the whole of what allows.
  *
  * Takes the body's text or the value it parses to, as `parseManifest`
  * does, so that a reader asking this and `writtenAhead` about one body
@@ -202,8 +341,8 @@ export function parseAggregate(value: unknown): AggregateState | undefined {
   const state = value as Record<string, unknown>;
   // An aggregate written under an older shape is read forward, field by
   // field, the way each field below says. Refusing it instead would cost
-  // every catch it holds, which accumulate over unbounded history and
-  // cannot be recovered from a window of records.
+  // every new real test failure it holds. Those accumulate over unbounded
+  // history and cannot be recovered from a window of records.
   if (declaredSchema(state) === undefined || writtenAhead(state)) {
     return undefined;
   }
@@ -272,17 +411,55 @@ export function parseAggregate(value: unknown): AggregateState | undefined {
     }
     states[key] = held as IdentityState;
   }
-  for (const identity of Object.values(states)) readCostsForward(identity);
+  for (const identity of Object.values(states)) {
+    readCostsForward(identity);
+    readNewRealTestFailuresForward(identity);
+  }
+  // This says which days are not read again, so one that is not a day is
+  // a state this cannot read rather than one to guess at: read as later
+  // than it is, it would close days nothing has read.
+  const { closed } = state;
+  if (
+    closed !== undefined &&
+    (typeof closed !== "string" || !/^\d{4}\/\d{2}\/\d{2}$/.test(closed) ||
+      !isDay(closed.replaceAll("/", "-")))
+  ) {
+    return undefined;
+  }
   return {
     schema: MANIFEST_SCHEMA_VERSION,
     day: state.day,
+    ...(typeof state.catchRule === "number"
+      ? { catchRule: state.catchRule }
+      : {}),
     folded: state.folded as string[],
     context: serializeContext(parseContext(state.context)),
     compacted,
+    ...(closed === undefined ? {} : { closed }),
     states,
     files: files as Record<string, string>,
     ...(lanes === undefined ? {} : { lanes }),
+    ...(isObjectNotArray(state.hooks) ? { hooks: readHooks(state.hooks) } : {}),
   };
+}
+
+/**
+ * Helper for `parseAggregate()`, which reads what a stored aggregate holds
+ * of each unit's hooks, leaving out a day that is not one counted by bucket.
+ */
+function readHooks(
+  stored: Readonly<Record<string, unknown>>,
+): Record<string, Record<string, DaySamples>> {
+  const hooks: Record<string, Record<string, DaySamples>> = {};
+  for (const [name, byDay] of Object.entries(stored)) {
+    if (!isObjectNotArray(byDay)) continue;
+    const days: Record<string, DaySamples> = {};
+    for (const [day, held] of Object.entries(byDay)) {
+      if (isDaySamples(held)) days[day] = held;
+    }
+    hooks[name] = days;
+  }
+  return hooks;
 }
 
 /** The reporting person named by a local submission's object name. */
@@ -317,7 +494,7 @@ export function provenance(
   const branch = context.branch ?? "";
   if (branch.length === 0) return undefined;
   // A baseline is a run of code the tree itself carries.
-  const place = isMainPush(context) ? "main" : "pr";
+  const place = isMainRun(context) ? "main" : "pr";
   return { place, source: branch };
 }
 
@@ -331,7 +508,9 @@ export interface ReadReport {
   /**
    * Every passing duration a continuous-integration runner measured, by
    * identity key and then by day. A workstation's are left out, since a
-   * cost predicts what a lane's runner will spend.
+   * cost predicts what a lane's runner will spend. What a unit's hooks took
+   * in a passing batch is here too, by the name of the lane measurement
+   * that names the unit, which no identity key is.
    */
   durations: Map<string, Map<string, number[]>>;
 
@@ -393,15 +572,26 @@ export function readReport(
     const observed = laneObservationsOf(report.objectName, group.records, day);
     for (const lane of observed) lanes.push(lane);
     for (const record of group.records) {
-      // A lane measuring its own setup or one of its batches is not a
-      // test, so nothing here scores it: a catch, a flake observation and
-      // a churn rate are all statements about a test, and a lane is
-      // neither passing nor failing in the sense they read. It reaches
-      // the store as an ordinary record so that it travels the path every
-      // record travels, and this is where that path parts. What a record
-      // is, is asked of the identity the lane wrote, so no line in the
-      // alias file decides whether a measurement is scored as a test.
-      if (isLaneMeasurement(record.test)) continue;
+      // A lane measuring its own setup or one of its batches is not a test, so
+      // nothing here scores it: a new real test failure, a flake observation
+      // and a churn rate are all statements about a test, and a lane is neither
+      // passing nor failing in the sense they read. It reaches the store as an
+      // ordinary record so that it travels the path every record travels, and
+      // this is where that path parts. What a record is, is asked of the
+      // identity the lane wrote, so no line in the alias file decides whether a
+      // measurement is scored as a test.
+      if (isLaneMeasurement(record.test)) {
+        // Only a passing batch on a lane's runner says what a unit's hooks
+        // take, for the reasons only such an execution says what a test
+        // costs.
+        if (
+          record.outcome === "pass" && where.place !== "local" &&
+          hooksMeasurement(record.test.n) !== undefined
+        ) {
+          addDuration(durations, record.test.n, day, record.durationMs);
+        }
+        continue;
+      }
       const test = resolver.resolve(record.test, day);
       const key = testIdentityKey(test);
       // A record with no file names its own identity as the unit, which
@@ -432,15 +622,25 @@ export function readReport(
       // machine, faster or slower by however it differs, so its record
       // counts as evidence about the test and not about its cost.
       if (record.outcome !== "pass" || where.place === "local") continue;
-      let byDay = durations.get(key);
-      if (byDay === undefined) {
-        byDay = new Map();
-        durations.set(key, byDay);
-      }
-      byDay.set(day, [...(byDay.get(day) ?? []), record.durationMs]);
+      addDuration(durations, key, day, record.durationMs);
     }
   }
   return { observations, surfaces, durations, lanes, declinedDays };
+}
+
+/** Helper for `readReport()`, which adds one duration to a key's day. */
+function addDuration(
+  durations: Map<string, Map<string, number[]>>,
+  key: string,
+  day: string,
+  durationMs: number,
+): void {
+  let byDay = durations.get(key);
+  if (byDay === undefined) {
+    byDay = new Map();
+    durations.set(key, byDay);
+  }
+  byDay.set(day, [...(byDay.get(day) ?? []), durationMs]);
 }
 
 /** The invocation unit and suite a record belongs to. */
@@ -599,9 +799,9 @@ export function locateSurfaces(
  * would have claimed with no unit, and every one of those is running, so
  * none of them is dropped.
  *
- * A skip is not a run, so a test the tree holds that nothing ever runs
- * is dropped like a deleted one. What that costs is catches from before
- * the window: every counter inside it is empty either way, since a skip
+ * A skip is not a run, so a test the tree holds that nothing ever runs is
+ * dropped like a deleted one. What that costs is new real test failures from
+ * before the window: every counter inside it is empty either way, since a skip
  * is the one outcome a state records nothing for.
  *
  * A unit a configuration declares unavailable is kept, under the variant
@@ -773,7 +973,10 @@ interface Contributions {
   /** What the lanes in them measured about themselves. */
   lanes: LaneObservation[];
 
-  /** The passing runs of each identity, by key and then by day. */
+  /**
+   * The passing runs of each identity, by key and then by day, and what
+   * each unit's hooks took, by the name of the lane measurement naming it.
+   */
   samples: Map<string, Map<string, DaySamples>>;
 
   /**
@@ -855,7 +1058,10 @@ export class Fold {
   readonly #states: Map<string, IdentityState>;
   readonly #context: FoldContext;
   readonly #held: Contributions;
-  readonly #compacted: string[];
+  readonly #compacted: Set<string>;
+  readonly #closed: string | undefined;
+  readonly #lastRead: string;
+  readonly #catchRule: number | undefined;
 
   /**
    * The source-and-date pairs `folded` holds raw objects from, which is
@@ -864,6 +1070,7 @@ export class Fold {
   readonly #rawPairs: Set<string>;
   readonly #resolver: AliasResolver;
   readonly #today: string;
+  readonly #resolved: number;
   #observations = 0;
   #intact = true;
 
@@ -885,6 +1092,8 @@ export class Fold {
         })
         .map(([key, state]) => [key, { ...emptyState(), ...state }]),
     );
+    const files = { ...aggregate.files };
+    this.#resolved = resolveHistory(this.#states, files, resolver);
     // A record produces a state and a surface together, so an identity
     // the aggregate holds a state for has a surface, and the file its
     // records named is the only part of that surface the identity does
@@ -895,12 +1104,30 @@ export class Fold {
     for (const key of this.#states.keys()) {
       const test = testIdentityOfKey(key);
       if (test === undefined) continue;
-      this.#held.surfaces.set(key, recordSurface(test, aggregate.files[key]));
+      this.#held.surfaces.set(key, recordSurface(test, files[key]));
     }
     this.#context = parseContext(aggregate.context);
+    if (!resolver.empty) {
+      renameInContext(this.#context, (key, day) => {
+        const test = testIdentityOfKey(key);
+        return test === undefined
+          ? key
+          : testIdentityKey(resolver.resolve(test, day));
+      });
+    }
     for (const lane of aggregate.lanes ?? []) this.#held.lanes.push(lane);
+    // Copied, because a day's sample is counted into where it is held.
+    for (const [name, byDay] of Object.entries(aggregate.hooks ?? {})) {
+      this.#held.samples.set(
+        name,
+        new Map(Object.entries(structuredClone(byDay))),
+      );
+    }
     for (const name of aggregate.folded) this.#held.objects.add(name);
-    this.#compacted = [...aggregate.compacted];
+    this.#compacted = new Set(aggregate.compacted);
+    this.#closed = aggregate.closed;
+    this.#lastRead = lastReadDay(aggregate);
+    this.#catchRule = aggregate.catchRule;
     this.#rawPairs = new Set(
       aggregate.folded.map((name) =>
         sourceDateKey(sourceOf(name), partitionOf(name))
@@ -942,18 +1169,31 @@ export class Fold {
     return this.#intact;
   }
 
+  /**
+   * How many identities the aggregate held history for under a name an
+   * alias has since replaced, which this fold moved to the new name.
+   */
+  get resolved(): number {
+    return this.#resolved;
+  }
+
   /** Whether this object's records are already part of the aggregate. */
   knows(objectName: string): boolean {
-    return this.#held.objects.has(objectName);
+    return this.#held.objects.has(objectName) ||
+      this.settled(sourceOf(objectName), partitionOf(objectName));
   }
 
   /**
-   * Whether this source and date were folded from a rollup. Their raw
+   * Whether this source and date are closed: folded from a rollup, or on
+   * or before the day through which every day is closed. Their raw
    * objects are not in `folded`, so a caller listing them has to ask
    * about the pair instead or it will fold the pair twice.
    */
   settled(source: string, date: string): boolean {
-    return this.#compacted.includes(sourceDateKey(source, date));
+    if (date.length > 0 && this.#closed !== undefined && date <= this.#closed) {
+      return true;
+    }
+    return this.#compacted.has(sourceDateKey(source, date));
   }
 
   /**
@@ -971,15 +1211,14 @@ export class Fold {
    * run folds the raw objects the rollup summarizes.
    */
   markSettled(source: string, date: string): void {
-    const key = sourceDateKey(source, date);
-    if (!this.#compacted.includes(key)) this.#compacted.push(key);
+    this.#compacted.add(sourceDateKey(source, date));
   }
 
   /**
    * Folds one batch. The batch must be in ascending time order, and later
    * batches must be later than earlier ones, because the rules that decide
-   * whether a failure is a catch look backwards at what `main` last said
-   * and forwards at what it says next.
+   * whether a failure is a new real test failure look backwards at what
+   * `main` last said and forwards at what it says next.
    *
    * An object the aggregate already holds contributes nothing, however
    * often it is handed over. Its executions are in the counters and its
@@ -1004,8 +1243,9 @@ export class Fold {
     // Sorted here rather than by object, because one object can hold many
     // reports — a rollup holds a whole day of them — and a batch can hold
     // objects whose reports interleave in time. The rules that decide
-    // whether a failure is a catch look backwards and forwards along this
-    // order, so it has to be the order the runs actually happened in.
+    // whether a failure is a new real test failure look backwards and
+    // forwards along this order, so it has to be the order the runs
+    // actually happened in.
     // By the parsed instant rather than the text: these come from two
     // producers, and one writing fractional seconds where the other does
     // not makes the later run sort first, because "." precedes "Z".
@@ -1091,8 +1331,35 @@ export class Fold {
     return daysBetween(lane.day, this.#today) <= COST_WINDOW_DAYS;
   }
 
-  /** Closes the fold, sealing each day's cost and aging the counters. */
-  finish(): FoldResult {
+  /**
+   * Closes the fold, sealing each day's cost and aging the counters.
+   *
+   * `read` is the window the run read whole, as day partitions. Where it
+   * starts no later than the last day the aggregate read, every day up to
+   * its end has now been read, and every one of those `COMPACTION_LAG_DAYS`
+   * behind is closed, which drops its objects from `folded` and its
+   * receipts from `compacted`, apart from those of the first day the
+   * history holds. A window that starts later leaves the days before it
+   * unread, so nothing more closes.
+   */
+  finish(read?: { from: string; through: string }): FoldResult {
+    const lagged = partitionShifted(this.#today, -COMPACTION_LAG_DAYS);
+    const reached = read === undefined || read.from > this.#lastRead
+      ? undefined
+      : read.through < lagged
+      ? read.through
+      : lagged;
+    const closed = reached === undefined ||
+        (this.#closed !== undefined && this.#closed > reached)
+      ? this.#closed
+      : reached;
+    const first = firstDay({
+      folded: [...this.#held.objects],
+      compacted: [...this.#compacted],
+    })?.replaceAll("-", "/");
+    const kept = (date: string) =>
+      date.length === 0 || date === first || closed === undefined ||
+      date > closed;
     for (const [key, byDay] of this.#held.samples) {
       const state = this.#states.get(key);
       if (state === undefined) continue;
@@ -1110,11 +1377,28 @@ export class Fold {
       aggregate: {
         schema: MANIFEST_SCHEMA_VERSION,
         day: this.#today,
-        folded: [...this.#held.objects],
+        ...(this.#catchRule === undefined
+          ? {}
+          : { catchRule: this.#catchRule }),
+        folded: [...this.#held.objects].filter((name) =>
+          kept(partitionOf(name))
+        ),
         context: serializeContext(this.#context),
-        compacted: this.#compacted,
+        compacted: [...this.#compacted].filter((pair) =>
+          kept(pair.slice(pair.indexOf("\t") + 1))
+        ),
+        ...(closed === undefined ? {} : { closed }),
         states: Object.fromEntries(this.#states),
         lanes,
+        hooks: Object.fromEntries(
+          [...this.#held.samples].flatMap(([name, byDay]) => {
+            if (hooksMeasurement(name) === undefined) return [];
+            const days = [...byDay].filter(([day]) =>
+              daysBetween(day, this.#today) <= COST_WINDOW_DAYS
+            );
+            return days.length === 0 ? [] : [[name, Object.fromEntries(days)]];
+          }),
+        ),
         files: Object.fromEntries(
           [...this.#held.surfaces]
             .filter(([, surface]) => surface.fromFile)

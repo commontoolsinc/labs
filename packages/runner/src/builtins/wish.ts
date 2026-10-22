@@ -15,7 +15,7 @@ import { type DID, isDID } from "@commonfabric/identity/did";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { extractHashtags } from "@commonfabric/utils/hashtags";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import { h } from "../builder/h.ts";
 // The sidecar instantiation observes its wave settlement (a serving-wave
@@ -36,17 +36,24 @@ import {
   createSigilLinkFromParsedLink,
   isPrimitiveCellLink,
   type NormalizedFullLink,
-  parseLink,
   toMemorySpaceAddress,
 } from "../link-utils.ts";
-import type { RawBuiltinResult } from "../module.ts";
+import type { RawBuiltinResult, RawNodeCause } from "../module.ts";
 import { systemPatternSource } from "../pattern-source-scheme.ts";
+import {
+  homeHasDefaultProfileSlot,
+  orderProfileCandidates,
+  profileCellIsValid,
+  profileLinkListSchema,
+  sameProfileCell,
+} from "../profile-order.ts";
 import { setRunnableName } from "../runner-utils.ts";
 import { type Runtime, spaceCellSchema } from "../runtime.ts";
 import { type Action, type ReactivityLog } from "../scheduler.ts";
 import { RetryImmediately } from "../scheduler/retry-immediately.ts";
 import { isCellScope, narrowestScope } from "../scope.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { transactionFailureMessage } from "../storage/transaction-errors.ts";
 import {
   isConflictRejection,
   isStorageTransactionInconsistent,
@@ -55,6 +62,7 @@ import { isCfcRejectedCommitError } from "../scheduler/cfc-rejection-report.ts";
 import { schemaRegistryEpoch } from "../schema-registry.ts";
 import {
   enrollRuntimeOwnedStore,
+  ownedStoreLinks,
   recordRuntimeOwnedStore,
 } from "./runtime-owned-store.ts";
 import { scopedCell } from "./scope-policy.ts";
@@ -104,28 +112,6 @@ const profileElementListSchema = internSchema(
   },
 );
 
-// Schema for a list of profile links (the home `profiles` and `mru` lists). Each
-// element is read as a cell *reference* (`asCell`), NOT its inlined value, so the
-// list can be enumerated without deep-resolving every profile's own space. A
-// plain `.get()` inlines each element and returns `undefined` for the whole list
-// whenever any element is a link into a space not yet loaded in the reading
-// context — e.g. a shared piece resolving `#profile` right after a profile was
-// created in its own (`inSpace`) space. That collapsed the list to length 0 and
-// hid the just-created profile behind the "No profile" / create surface.
-//
-// The item type is `unknown` (not `object`) on purpose: with `asCell`, an
-// `object` item schema would trigger a *deep* sync of each linked profile —
-// fetching its entire object graph and everything it transitively links, across
-// space boundaries — just to count the list. `unknown` keeps the sync shallow
-// (we only need the links here). The default profile's name is loaded lazily and
-// targeted via `subscribeProfileName` once a candidate is selected.
-const profileLinkListSchema = internSchema(
-  {
-    type: "array",
-    items: { type: "unknown", asCell: ["cell"] },
-  },
-);
-
 class WishError extends Error {
   constructor(message: string) {
     super(message);
@@ -140,6 +126,17 @@ const NO_PROFILE_ERROR = "No profile exists yet";
 class NoProfileError extends WishError {
   constructor() {
     super(NO_PROFILE_ERROR);
+  }
+}
+
+/**
+ * A headless wish for a Home target while Home has no root. A headless wish
+ * brings up no root, so it resolves to nothing: no result and no error.
+ */
+class NoHomeRootError extends Error {
+  constructor() {
+    super("The home space has no root.");
+    this.name = "NoHomeRootError";
   }
 }
 
@@ -241,6 +238,7 @@ function getResolutionKind(parsed: ParsedWishTarget): string {
     case "#profile":
     case "#profileName":
     case "#profileAvatar":
+    case "#profilePicture":
     case "#profileBio":
     case "#profileSpace":
       return "home-target";
@@ -306,11 +304,17 @@ type WishContext = {
   spaceCell?: Cell<unknown>;
   scope?: ("~" | "." | "profile" | string)[];
 
+  /**
+   * Whether the wish is headless, in which case it offers none of its own
+   * surfaces: no picker, no suggestions, and no profile creation.
+   */
+  headless?: boolean;
+
   /** Cached #now cell to avoid non-idempotent re-runs from Date.now() */
   nowCell?: Cell<unknown>;
 
-  /** The wish node's cause, keying the durable one-shot #now capture cell. */
-  nowCause?: Cell<any>[];
+  /** The wish node's cause, which keys the durable one-shot #now capture cell. */
+  nowCause?: unknown;
 
   usedHomeSpace?: boolean;
 };
@@ -412,6 +416,40 @@ function getHomeSpaceCell(ctx: WishContext): Cell<unknown> {
 }
 
 /**
+ * The root of the wishing user's Home, the cell its space links as
+ * `defaultPattern`, when the slot holds anything at all, which is then
+ * resolved through as it stands. `undefined` when the slot is empty.
+ */
+function findHomeRootCell(ctx: WishContext): Cell<any> | undefined {
+  const homeSpaceCell = getHomeSpaceCell(ctx) as Cell<any>;
+  ctx.readiness.requireDocument(homeSpaceCell, ctx.tx);
+  const slot = homeSpaceCell.key("defaultPattern");
+  if (slot.getRaw() === undefined) return undefined;
+  const root = slot.resolveAsCell();
+  ctx.readiness.requireDocument(root, ctx.tx);
+  return root;
+}
+
+/**
+ * The cell under which every Home target a wish hands out lies: the root of
+ * the wishing user's Home when its space links one ({@link findHomeRootCell}),
+ * and otherwise the space cell's empty `defaultPattern` slot itself. A wish
+ * creates no root. A read through the empty slot finds nothing, and a write
+ * through it is refused unless the root exists by then
+ * (`SpaceRootMissingError`); on a client runtime, when a handler's write there
+ * is refused and the refusal escapes the handler, the root is brought up and
+ * the handler runs again (`bringUpHomeRootForRefusedWrite`). A headless wish
+ * hands out nothing over an empty slot, and throws `NoHomeRootError`, so it
+ * resolves to nothing.
+ */
+function getHomeRootCell(ctx: WishContext): Cell<any> {
+  const found = findHomeRootCell(ctx);
+  if (found !== undefined) return found;
+  if (ctx.headless) throw new NoHomeRootError();
+  return (getHomeSpaceCell(ctx) as Cell<any>).key("defaultPattern");
+}
+
+/**
  * The user whose HOME SPACE this wish resolution targets (server-execution
  * v2 Phase 5; builtins.md §5's per-demanding-identity wish resolution,
  * RULED 2026-08-14): the runtime's own user on a client (cardinality 1,
@@ -423,83 +461,6 @@ function getHomeSpaceCell(ctx: WishContext): Cell<unknown> {
  */
 function homeSpaceUserDID(ctx: WishContext): string | undefined {
   return ctx.runtime.homeSpacePrincipalFor(ctx.tx);
-}
-
-/**
- * A profile link is valid when it resolves to a cell in another space (the
- * profile's own `inSpace` space) with an empty path. An unset link, or one that
- * still points into the home space, means the profile does not exist yet.
- */
-function profileCellIsValid(
-  cell: Cell<unknown>,
-  rawIsSet: boolean,
-  homeSpace: Cell<unknown>["space"],
-): boolean {
-  if (!rawIsSet) return false;
-  const link = cell.getAsNormalizedFullLink();
-  return link.space !== homeSpace && link.path.length === 0;
-}
-
-/**
- * Whether home `defaultPattern` keeps its default in a slot: whether its
- * `defaultProfile` holds an object at its root, read in the cell the field
- * names rather than through it. A home without the slot keeps its default as a
- * link at the root of that cell, or has nothing there; one with the slot keeps
- * such a link, chosen before the slot, as `legacyDefaultProfile`.
- */
-function homeHasDefaultProfileSlot(
-  runtime: Runtime,
-  defaultPattern: Cell<unknown>,
-  tx: IExtendedStorageTransaction | undefined,
-): boolean {
-  const field = defaultPattern.key("defaultProfile");
-  const fieldRaw = field.getRaw();
-  const root = isPrimitiveCellLink(fieldRaw)
-    ? runtime.getCellFromLink(parseLink(fieldRaw, field), undefined, tx)
-      .getRaw()
-    : fieldRaw;
-  return isObjectOrArray(root) && !Array.isArray(root) &&
-    !isPrimitiveCellLink(root);
-}
-
-/**
- * Whether a `mru` / `defaultProfile` entry names the SAME profile as a candidate
- * from the home `profiles` list — compared by the profile's own SPACE, NOT by
- * `Cell.equals` or by entity id.
- *
- * CT-1842: the `#profile` ordering matches candidates (from `profiles`) against
- * the `defaultProfile` link and the `mru` list. Those name the same profiles but
- * reach them through DIFFERENT links. Two distinct differences defeat a naive
- * comparison, both observed on live data:
- *   - `scope` skew — `Cell.equals` (`areNormalizedLinksSame`) compares `scope`,
- *     which the two sides don't always agree on; and
- *   - DIFFERENT entity `id` — the `mru`/`defaultProfile` link and the `profiles`
- *     link for the SAME profile point at different cells WITHIN that profile's
- *     space (e.g. the picker stores the profile pattern's result cell while the
- *     list stores the pattern cell). So even id+space+path comparison fails.
- *
- * The stable per-profile identity is the profile's own SPACE. Each profile is a
- * distinct anonymous `ProfileHome.inSpace()` (see submitProfileCreation), whose
- * DID is unique per user AND per creation event, and `profileCellIsValid`
- * guarantees every valid candidate lives in its OWN non-home space. No two
- * distinct valid profiles ever share a space, so equal space ⇒ same profile.
- * Reading each cell's normalized link keeps the ordering reactive to
- * `mru`/`defaultProfile` changes.
- *
- * `homeSpace` guards the degenerate case: a `mru`/`defaultProfile` entry that
- * still resolves into the home space (an unmaterialized / invalid link) must
- * never match — candidates are never in the home space, but the guard makes the
- * intent explicit and defends against a future home-space candidate slipping in.
- */
-function sameProfileCell(
-  a: Cell<unknown>,
-  b: Cell<unknown>,
-  homeSpace: Cell<unknown>["space"],
-): boolean {
-  const spaceA = a.getAsNormalizedFullLink().space;
-  const spaceB = b.getAsNormalizedFullLink().space;
-  if (spaceA === homeSpace || spaceB === homeSpace) return false;
-  return spaceA === spaceB;
 }
 
 /**
@@ -597,58 +558,15 @@ function getProfileCandidateCells(
     return { ordered: [], defaultValid: false };
   }
 
-  // Ordering inputs: the default and the MRU list. The default is the link
-  // under `profile` in home's slot, or, while the slot holds none, the link a
-  // home keeps an earlier default in: `legacyDefaultProfile`, or
-  // `defaultProfile` itself for a home without the slot.
-  const hasSlot = homeHasDefaultProfileSlot(
-    ctx.runtime,
-    defaultPattern,
-    ctx.tx,
-  );
-  const slotEntry = defaultPattern.key("defaultProfile").key("profile");
-  const slotCell = slotEntry.resolveAsCell();
-  const slotValid = hasSlot &&
-    profileCellIsValid(
-      slotCell,
-      slotEntry.getRaw() !== undefined,
-      homeSpaceCell.space,
-    );
-  const legacyEntry = defaultPattern.key(
-    hasSlot ? "legacyDefaultProfile" : "defaultProfile",
-  );
-  const defaultCell = slotValid ? slotCell : legacyEntry.resolveAsCell();
-  const defaultValid = slotValid ||
-    profileCellIsValid(
-      defaultCell,
-      legacyEntry.getRaw() !== undefined,
-      homeSpaceCell.space,
-    );
-
-  const mruCell = defaultPattern.key("mru");
-  const mruRaw = mruCell.asSchema(profileLinkListSchema).get();
-  const mruLength = Array.isArray(mruRaw) ? mruRaw.length : 0;
-  const mruCells: Cell<unknown>[] = [];
-  for (let j = 0; j < mruLength; j++) {
-    mruCells.push(mruCell.key(j).resolveAsCell());
-  }
-  // Match by the profile's own space, not `Cell.equals` — see sameProfileCell.
   const homeSpace = homeSpaceCell.space;
-  const mruRank = (cell: Cell<unknown>): number => {
-    const idx = mruCells.findIndex((m) => sameProfileCell(m, cell, homeSpace));
-    return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
-  };
-
-  const ordered = [...candidates];
-  ordered.sort((a, b) => {
-    if (defaultValid) {
-      const aDef = sameProfileCell(defaultCell, a, homeSpace);
-      const bDef = sameProfileCell(defaultCell, b, homeSpace);
-      if (aDef && !bDef) return -1;
-      if (bDef && !aDef) return 1;
-    }
-    return mruRank(a) - mruRank(b);
-  });
+  const { ordered, defaultValid, defaultCell, mruCells } =
+    orderProfileCandidates(
+      ctx.runtime,
+      defaultPattern,
+      homeSpace,
+      candidates,
+      ctx.tx,
+    );
   // Falling back past the selected profile would switch persona silently.
   const selectedFailure = failures.get(ordered[0]);
   if (selectedFailure) throw selectedFailure;
@@ -998,22 +916,25 @@ function searchByHashtag(
 }
 
 /**
- * Throws a `WishError` naming the remedies when the home pattern in
- * `homeSpaceCell` holds nothing at `field`, which it names to the user as
- * `what`. The system home pattern gains a field its current source adds only
- * when the home space is next opened, since nothing updates a piece nobody
- * opens, so a home set up before the field existed lacks it until then. A
- * custom home pattern follows no source of the system's, and holds the field
- * only if it says so. The wish does not open the home itself.
+ * Throws a `WishError` naming the remedies when the home pattern `homeRoot`
+ * holds nothing at `field`, which it names to the user as `what`, or when there
+ * is no home pattern at all (`homeRoot` is `undefined`). The system home
+ * pattern gains a field its current source adds only when the home space is
+ * next opened, since nothing updates a piece nobody opens, so a home set up
+ * before the field existed lacks it until then. A custom home pattern follows
+ * no source of the system's, and holds the field only if it says so. The wish
+ * neither creates a home root nor opens an existing one to bring it up to date.
  */
 function requireHomeField(
-  homeSpaceCell: Cell<unknown>,
+  homeRoot: Cell<unknown> | undefined,
   field: string,
   what: string,
   ctx: WishContext,
-): void {
-  const held = resolvePath(homeSpaceCell, ["defaultPattern", field], ctx);
-  if (held.getRaw() === undefined) {
+): asserts homeRoot is Cell<unknown> {
+  if (
+    homeRoot === undefined ||
+    resolvePath(homeRoot, [field], ctx).getRaw() === undefined
+  ) {
     throw new WishError(
       `The home space holds no ${what}. If its home pattern is the system ` +
         `one, set up before it had one, open the home space once, which ` +
@@ -1036,15 +957,11 @@ function resolveHomeSpaceTarget(
       if (!userDID) {
         throw new WishError("User identity DID not available for #favorites");
       }
-      const homeSpaceCell = getHomeSpaceCell(ctx);
-
       // No path = return favorites list
       if (parsed.path.length === 0) {
-        return [{
-          cell: homeSpaceCell,
-          pathPrefix: ["defaultPattern", "favorites"],
-        }];
+        return [{ cell: getHomeRootCell(ctx), pathPrefix: ["favorites"] }];
       }
+      const homeSpaceCell = getHomeSpaceCell(ctx);
 
       // Path provided = search by tag (legacy behavior)
       const searchTerm = parsed.path[0].toLowerCase();
@@ -1084,10 +1001,7 @@ function resolveHomeSpaceTarget(
       if (!userDID) {
         throw new WishError("User identity DID not available for #journal");
       }
-      return [{
-        cell: getHomeSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "journal"],
-      }];
+      return [{ cell: getHomeRootCell(ctx), pathPrefix: ["journal"] }];
     }
 
     case "#learned": {
@@ -1095,10 +1009,7 @@ function resolveHomeSpaceTarget(
       if (!userDID) {
         throw new WishError("User identity DID not available for #learned");
       }
-      return [{
-        cell: getHomeSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "learned"],
-      }];
+      return [{ cell: getHomeRootCell(ctx), pathPrefix: ["learned"] }];
     }
 
     case "#agent_queue": {
@@ -1111,10 +1022,7 @@ function resolveHomeSpaceTarget(
           "User identity DID not available for #agent_queue",
         );
       }
-      return [{
-        cell: getHomeSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "agentQueue"],
-      }];
+      return [{ cell: getHomeRootCell(ctx), pathPrefix: ["agentQueue"] }];
     }
 
     case "#chatManager": {
@@ -1127,12 +1035,11 @@ function resolveHomeSpaceTarget(
           "User identity DID not available for #chatManager",
         );
       }
-      const homeSpaceCell = getHomeSpaceCell(ctx);
-      requireHomeField(homeSpaceCell, "chatManager", "chat manager", ctx);
-      return [{
-        cell: homeSpaceCell,
-        pathPrefix: ["defaultPattern", "chatManager"],
-      }];
+      // The chat manager is read, never created, so a Home with no root is
+      // one with no chat manager, and no root is brought up for it.
+      const homeRoot = findHomeRootCell(ctx);
+      requireHomeField(homeRoot, "chatManager", "chat manager", ctx);
+      return [{ cell: homeRoot, pathPrefix: ["chatManager"] }];
     }
 
     case "#learnedSummary": {
@@ -1146,8 +1053,8 @@ function resolveHomeSpaceTarget(
         );
       }
       return [{
-        cell: getHomeSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "learned", "summary"],
+        cell: getHomeRootCell(ctx),
+        pathPrefix: ["learned", "summary"],
       }];
     }
 
@@ -1182,6 +1089,14 @@ function resolveHomeSpaceTarget(
       return [{
         cell: getDefaultProfileCell(ctx),
         pathPrefix: ["avatar"],
+      }];
+    }
+
+    case "#profilePicture": {
+      // The default profile's picture: the bytes of a raster image.
+      return [{
+        cell: getDefaultProfileCell(ctx),
+        pathPrefix: ["picture"],
       }];
     }
 
@@ -1323,6 +1238,26 @@ function scheduleIntervalNowTick(
   }, delay);
 }
 
+/**
+ * The ticking cell of the interval `#now` timer for `space` and `intervalMs`:
+ * content-addressed by interval, so one document per space and interval is
+ * shared by every piece that wishes for it, in whichever session acquires it
+ * first.
+ */
+function intervalNowCell(
+  runtime: Runtime,
+  space: MemorySpace,
+  intervalMs: number,
+  tx: IExtendedStorageTransaction,
+): Cell<number> {
+  return runtime.getCell<number>(
+    space,
+    { wish: { now: true, interval: intervalMs } },
+    undefined,
+    tx,
+  );
+}
+
 function acquireIntervalNowTimer(
   runtime: Runtime,
   space: MemorySpace,
@@ -1333,14 +1268,7 @@ function acquireIntervalNowTimer(
   const key = intervalNowTimerKey(space, intervalMs);
   let timer = timers.get(key);
   if (!timer) {
-    // Content-addressed by interval, so all instances in the same space with
-    // the same interval share one cell.
-    const cell = runtime.getCell<number>(
-      space,
-      { wish: { now: true, interval: intervalMs } },
-      undefined,
-      tx,
-    );
+    const cell = intervalNowCell(runtime, space, intervalMs, tx);
     timer = { cell, timerId: undefined, generation: 0, refCount: 0 };
     timers.set(key, timer);
   }
@@ -1452,8 +1380,33 @@ function handleIntervalNow(
   const intervalMs = seconds * 1000;
 
   // Acquire the shared timer for this (space, interval), releasing the
-  // previously-held one when the interval changes.
+  // previously-held one when the interval changes. The ticking cell is shared
+  // across sessions, so another session may already have written it. A
+  // replica that has not loaded it reads it as absent, and the first tick
+  // staged on that read is refused as stale, taking every commit of the same
+  // batch that read this wish's result down with it. Hold the wish until the
+  // cell has loaded; the acquisition then reads the stored tick, or a
+  // confirmed absence it may fill. The previous interval keeps beating
+  // through the wait, and is released when the replacement's load fails:
+  // the wish reports the failure and holds no timer nothing consumes.
   if (state.intervalMs !== intervalMs) {
+    try {
+      ctx.readiness.requireDocument(
+        intervalNowCell(ctx.runtime, ctx.parentCell.space, intervalMs, ctx.tx),
+        ctx.tx,
+      );
+    } catch (error) {
+      if (!(error instanceof DocumentPending) && state.intervalMs !== 0) {
+        releaseIntervalNowTimer(
+          ctx.runtime,
+          ctx.parentCell.space,
+          state.intervalMs,
+        );
+        state.intervalMs = 0;
+        state.cell = undefined;
+      }
+      throw error;
+    }
     if (state.intervalMs !== 0) {
       releaseIntervalNowTimer(
         ctx.runtime,
@@ -1503,6 +1456,47 @@ function handleIntervalNow(
 }
 
 /**
+ * The cell a one-shot #now's capture lives in, keyed by the wish node's piece
+ * and output spot, and the cell it lived in when the node's full cause keyed
+ * it, inputs document included. A capture made under that key is read once,
+ * while the positional cell is still empty, and copied: the documented value
+ * is the piece's first-ever load time, and a change to the wish's inputs
+ * document, a schema change among them, is not a new load. A cause carrying
+ * no output spot keys both cells the same way, so there is nothing to carry
+ * over.
+ */
+function nowOneShotCells(
+  ctx: WishContext,
+): { cell: Cell<unknown>; legacy?: Cell<unknown> } {
+  const cell = ctx.runtime.getCell(
+    ctx.parentCell.space,
+    wishStoreCause("nowOneShot", ctx.nowCause),
+    undefined,
+    ctx.tx,
+  );
+  const legacy = isNodeCauseWithOutputSpot(ctx.nowCause)
+    ? ctx.runtime.getCell(
+      ctx.parentCell.space,
+      { wish: { nowOneShot: ctx.nowCause } },
+      undefined,
+      ctx.tx,
+    )
+    : undefined;
+  wishNowDiagnostics.lastOneShot = {
+    cell: cell.getAsNormalizedFullLink(),
+    legacy: legacy?.getAsNormalizedFullLink(),
+  };
+  return { cell, legacy };
+}
+
+// Test seam: the cells of the last one-shot #now resolved in this process,
+// so a test can write the cell a capture is carried over from, which is
+// keyed on a node cause nothing outside the runtime can rebuild.
+export const wishNowDiagnostics: {
+  lastOneShot?: { cell: NormalizedFullLink; legacy?: NormalizedFullLink };
+} = {};
+
+/**
  * Resolve well-known targets that map to current space paths.
  */
 function resolveSpaceTarget(
@@ -1515,26 +1509,38 @@ function resolveSpaceTarget(
     if (parsed.path.length > 0) return null;
 
     // One-shot #now captures the load time ONCE and keeps it, durably. The value
-    // lives in a per-instance content-addressed cell (keyed by the wish node's
-    // cause), written only when the cell is still empty — so re-instantiating the
-    // piece (a stop/start, or a reload in another runtime) reads the first-ever
-    // captured time instead of re-reading the clock and jumping forward. sample()
-    // reads without subscribing the resolving action, so the write does not
-    // re-trigger it. The per-instance closure cache (ctx.nowCell) just avoids
-    // re-fetching the cell on every sync re-run within one instantiation.
+    // lives in a content-addressed cell keyed by the wish node's piece and
+    // output spot, written only when the cell is still empty — so
+    // re-instantiating the piece (a stop/start, a reload in another runtime,
+    // or a run from a later compilation of its pattern) reads the first-ever
+    // captured time instead of re-reading the clock and jumping forward. A
+    // capture written under the earlier key, the node's full cause, is carried
+    // over rather than taken from the clock again, once its document has
+    // loaded. sample() reads without subscribing the resolving action, so the
+    // write does not re-trigger it.
+    // The per-instance closure cache (ctx.nowCell) just avoids re-fetching the
+    // cell on every sync re-run within one instantiation.
     if (!ctx.nowCell) {
-      const cell = ctx.runtime.getCell(
-        ctx.parentCell.space,
-        { wish: { nowOneShot: ctx.nowCause } },
-        undefined,
-        ctx.tx,
-      );
+      const { cell, legacy } = nowOneShotCells(ctx);
       recordRuntimeOwnedStore(ctx.tx, ctx.parentCell, cell);
       enrollRuntimeOwnedStore(ctx.tx, ctx.parentCell, cell);
       const existing = cell.withTx(ctx.tx).sample();
       if (existing == null) {
+        // The capture may sit in the earlier key's document, which this
+        // replica need not have loaded: a cold replica reads it as absent
+        // while the store holds the capture. Hold the wish until the document
+        // has loaded, or its absence is confirmed, as the shared clock cell is
+        // held for in handleIntervalNow(); the read it stages re-runs the wish
+        // when the answer arrives. A confirmed absence is not read again,
+        // since a read of it would start a load of its own.
+        const carried = legacy !== undefined &&
+            ctx.readiness.requireDocument(legacy, ctx.tx)
+          ? legacy.withTx(ctx.tx).sample()
+          : undefined;
         cell.withTx(ctx.tx).set(
-          coarsenTimestamp(Date.now(), ONE_SHOT_RESOLUTION_MS),
+          typeof carried === "number"
+            ? carried
+            : coarsenTimestamp(Date.now(), ONE_SHOT_RESOLUTION_MS),
         );
       }
       ctx.nowCell = cell;
@@ -1574,10 +1580,23 @@ function resolveSpaceTarget(
     results.push(resolutionFor(getSpaceCell(ctx)));
   }
 
-  // "~" → include home space
+  // "~" → include home space, through its root for a target under the root.
+  // A headless wish leaves out a Home with no root, and resolves to nothing
+  // only when nothing else resolves.
+  let homeRootAbsent = false;
   if (ctx.scope?.includes("~") && homeSpaceUserDID(ctx) !== undefined) {
-    const homeSpaceCell = getHomeSpaceCell(ctx);
-    results.push(resolutionFor(homeSpaceCell));
+    const resolution = resolutionFor(getHomeSpaceCell(ctx));
+    const [first, ...rest] = resolution.pathPrefix ?? [];
+    if (first !== "defaultPattern") {
+      results.push(resolution);
+    } else {
+      try {
+        results.push({ cell: getHomeRootCell(ctx), pathPrefix: rest });
+      } catch (error) {
+        if (!(error instanceof NoHomeRootError)) throw error;
+        homeRootAbsent = true;
+      }
+    }
   }
 
   // Arbitrary DIDs → include each space
@@ -1587,6 +1606,7 @@ function resolveSpaceTarget(
   }
 
   if (results.length === 0) {
+    if (homeRootAbsent) throw new NoHomeRootError();
     console.warn(
       `[wish] Target "${parsed.key}" cannot resolve with scope: [${
         ctx.scope?.join(", ")
@@ -2124,6 +2144,52 @@ function wishOutputScope(
   return inputScope;
 }
 
+/** The stores a wish mints, each named by the key its cause carries. */
+type WishStoreKind =
+  | "state"
+  | "suggestionPattern"
+  | "profileCreatePattern"
+  | "profileCreatePatternReady"
+  | "profilePickerPattern"
+  | "nowOneShot";
+
+/**
+ * The cause a store the wish mints is keyed on: the node's owning piece and
+ * its output spot, under `kind` and beside `fields`, the way
+ * `ownedResultCause()` keys a branching builtin's store, with the node's
+ * inputs document left out. That document is content-addressed over the
+ * node's serialized inputs, the schema generated for the wish's type
+ * parameter among them, so two compilations of one pattern can bind one node
+ * to two inputs documents, and two sessions holding one each then run that
+ * node against one output slot. The piece and the spot are what every
+ * compilation shares. Every run re-derives the whole state, the sidecar
+ * surfaces keep what they produce in Home, and a one-shot #now carries its
+ * capture over from the cell the inputs document once keyed
+ * (`nowOneShotCells()`), so no store needs an earlier compilation's write. A
+ * cause carrying no output spot, as a hand-built one in a test, is used as
+ * it is.
+ */
+function wishStoreCause(
+  kind: WishStoreKind,
+  cause: unknown,
+  fields: Record<string, unknown> = {},
+): unknown {
+  const positional = isNodeCauseWithOutputSpot(cause)
+    ? { parents: cause.parents, outputSpot: cause.outputSpot }
+    : cause;
+  return { wish: { [kind]: positional, ...fields } };
+}
+
+/** Whether `cause` is a node cause whose output binding reached a redirect. */
+function isNodeCauseWithOutputSpot(
+  cause: unknown,
+): cause is RawNodeCause & {
+  outputSpot: NonNullable<RawNodeCause["outputSpot"]>;
+} {
+  return isObjectNotArray(cause) && cause.parents !== undefined &&
+    cause.outputSpot !== undefined;
+}
+
 /**
  * Whether a settled wish-state commit failure deserves the error surface
  * (verification-coverage OW50, seat S-J). Excluded, because re-running
@@ -2150,27 +2216,6 @@ export function isSurfacableWishCommitFailure(
     return false;
   }
   return true;
-}
-
-/**
- * The text the wish surface shows for a settled commit failure: the
- * informative layer, not the debug dump. A plain abort's own message is the
- * generic "Transaction was aborted" — the cause rides `reason` — while a
- * CFC-modeled rejection carries everything in `message`.
- */
-export function wishCommitFailureMessage(
-  error: { message?: string; reason?: unknown },
-): string {
-  const message = typeof error.message === "string" ? error.message : "";
-  if (message !== "" && !message.startsWith("Transaction was aborted")) {
-    return message;
-  }
-  const reason = (error as { reason?: unknown }).reason;
-  if (reason instanceof Error && reason.message !== "") {
-    return reason.message;
-  }
-  if (message !== "") return message;
-  return toCompactDebugString(error);
 }
 
 export function wishTargetMayUseHomeSpace(
@@ -2387,7 +2432,7 @@ export function wish(
   ): void {
     const baseCell = runtime.getCell(
       parentCell.space,
-      { wish: { state: cause } },
+      wishStoreCause("state", cause),
       wishStateSchemaForResult(schema),
       tx,
     );
@@ -2437,7 +2482,7 @@ export function wish(
     tx.addCommitCallback((_tx, result) => {
       if (!result.error) return;
       if (!isSurfacableWishCommitFailure(result.error)) return;
-      const message = wishCommitFailureMessage(result.error);
+      const message = transactionFailureMessage(result.error);
       // Keyed per scoped INSTANCE: scope and identity separate user/session
       // instances of one doc id, so one demander's in-flight report cannot
       // hide another's failure.
@@ -2518,11 +2563,12 @@ export function wish(
     // there, and that link persists a label entry under `[UI]/props/$cell`,
     // so on such a document `[UI]` is one of those paths.
     //
-    // The schema named is `true`, which is what the wish-state schema says
-    // at both paths. It declares nothing, so a stored claim at either path
-    // is not checked against this write; and a candidate declaring nothing
-    // is covered by whatever the document has stored, which keeps the report
-    // out of the schema merge.
+    // The schema named is `true`. The wish-state schema declares no value
+    // shape and no label at either path: `error` is `true` there, and `[UI]`
+    // is an opaque handle. `true` declares nothing, so a stored claim at
+    // either path is not checked against this write; and a candidate
+    // declaring nothing is covered by whatever the document has stored,
+    // which keeps the report out of the schema merge.
     //
     // The requirement is decided per document rather than per path. What
     // bounds the report is this transaction: it is created here, carries
@@ -2625,19 +2671,13 @@ export function wish(
     if (!slot.resultCell) {
       slot.resultCell = runtime.getCell(
         parentCell.space,
-        {
-          wish: {
-            suggestionPattern: cause,
-            situation: input.situation,
-            // The F2 fix's suggestion half (pre-existing gap: this cause
-            // carried NO user key): on a SERVING runtime the cell keys
-            // by the demanding identity, so two demanders never share a
-            // suggestion cell. Clients keep the pre-existing cause
-            // byte-identical (cardinality 1 — re-keying would orphan
-            // every persisted client suggestion cell for no gain).
-            ...(runtime.servingPosture ? { user: sidecarUser } : {}),
-          },
-        },
+        wishStoreCause("suggestionPattern", cause, {
+          situation: input.situation,
+          // On a serving runtime the cell keys by the demanding identity, so
+          // two demanders never share a suggestion cell. A client has one
+          // demander, the runtime's own user, and carries no user key.
+          ...(runtime.servingPosture ? { user: sidecarUser } : {}),
+        }),
         undefined,
         tx,
       );
@@ -2878,8 +2918,7 @@ export function wish(
       sidecarUser,
       (): ProfileCreateSidecarSlot => ({}),
     );
-    const homeDefaultPattern = getHomeSpaceCell(ctx).key("defaultPattern")
-      .resolveAsCell();
+    const homeDefaultPattern = getHomeRootCell(ctx);
     slot.input = {
       profiles: createSigilLinkFromParsedLink(
         homeDefaultPattern.key("profiles").getAsNormalizedFullLink(),
@@ -2897,12 +2936,7 @@ export function wish(
     if (!slot.resultCell) {
       slot.resultCell = runtime.getCell(
         parentCell.space,
-        {
-          wish: {
-            profileCreatePattern: cause,
-            user: sidecarUser,
-          },
-        },
+        wishStoreCause("profileCreatePattern", cause, { user: sidecarUser }),
         undefined,
         tx,
       );
@@ -2910,12 +2944,9 @@ export function wish(
     if (!slot.readyCell) {
       slot.readyCell = runtime.getCell<boolean>(
         parentCell.space,
-        {
-          wish: {
-            profileCreatePatternReady: cause,
-            user: sidecarUser,
-          },
-        },
+        wishStoreCause("profileCreatePatternReady", cause, {
+          user: sidecarUser,
+        }),
         undefined,
         tx,
       );
@@ -3052,8 +3083,7 @@ export function wish(
       sidecarUser,
       (): ProfilePickerSidecarSlot => ({}),
     );
-    const homeDefaultPattern = getHomeSpaceCell(ctx).key("defaultPattern")
-      .resolveAsCell();
+    const homeDefaultPattern = getHomeRootCell(ctx);
     // A home with the slot hands it over for "Set default" and its earlier
     // default as `legacyDefaultProfile`. A home without hands over no slot and
     // `offersSetDefault: false`, since a write through a cell whose root holds
@@ -3093,14 +3123,9 @@ export function wish(
     if (!slot.resultCell) {
       slot.resultCell = runtime.getCell(
         parentCell.space,
-        {
-          wish: {
-            profilePickerPattern: cause,
-            // Phase 5: keyed by the home-space user (the demanding
-            // identity on serving) — see launchProfileCreatePattern.
-            user: sidecarUser,
-          },
-        },
+        // Keyed by the home-space user, the demanding identity on a serving
+        // runtime; see launchProfileCreatePattern.
+        wishStoreCause("profilePickerPattern", cause, { user: sidecarUser }),
         undefined,
         tx,
       );
@@ -3248,6 +3273,7 @@ export function wish(
             tx,
             parentCell,
             scope,
+            headless: headless === true,
             nowCell,
             nowCause: cause,
           };
@@ -3508,9 +3534,27 @@ export function wish(
             }
           } catch (e) {
             if (e instanceof DocumentPending) return;
+            if (e instanceof NoHomeRootError) {
+              measureWishPhase(
+                "send-no-home-root",
+                queryKey,
+                () =>
+                  sendWishState(
+                    tx,
+                    {
+                      result: undefined,
+                      candidates: [],
+                      [UI]: undefined,
+                    } satisfies WishState<any>,
+                    wishOutputScope(schema, inputScope, true),
+                    schema,
+                  ),
+              );
+              return;
+            }
             const errorMsg = e instanceof WishError ? e.message : String(e);
             const ui = e instanceof NoProfileError && parsed &&
-                isProfilePersonaTarget(parsed)
+                isProfilePersonaTarget(parsed) && !headless
               ? profileCreateUI(ctx)
               : errorUI(errorMsg);
             measureWishPhase(
@@ -3611,5 +3655,15 @@ export function wish(
       );
     }
   };
-  return { action, onActionRegistered: readiness.onActionRegistered };
+  return {
+    action,
+    onActionRegistered: readiness.onActionRegistered,
+    // The stores keyed by this node's cause alone. The others also name the
+    // demanding user, the situation a suggestion is for, or the interval a
+    // `#now` ticks at, none of which is known until the action runs.
+    storeWrites: ownedStoreLinks(runtime, parentCell, [
+      wishStoreCause("state", cause),
+      wishStoreCause("nowOneShot", cause),
+    ]),
+  };
 }

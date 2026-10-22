@@ -311,7 +311,11 @@ nothing else, so a subscription's delivered shape does not depend on the
 order in which documents changed or on which query first reached a
 document. Coverage follows the same rule: a later query naming a document
 an earlier evaluation reached is covered by existing watch state when the
-tracker already covers its selector.
+tracker already covers its selector. A server records each watch it leaves
+unwalked on that ground, since nothing in the tracker is attributable to it.
+Removing such a watch changes nothing. Removing a walked watch rebuilds its
+branch's tracker from the walked watches that remain. The server then walks
+each recorded watch of that branch that the rebuilt tracker no longer covers.
 
 Content-addressed schema documents ride the same mechanism
 (`docs/specs/content-addressed-schemas.md`): a link or selector schema
@@ -955,7 +959,7 @@ selector is built as:
 // Shown for illustration only.
 const selector = {
   path: cell.path.map((p) => p.toString()),
-  schema: schema ?? false,
+  schema: ContextualFlowControl.declaresStream(schema) ? false : schema ?? false,
 };
 ```
 
@@ -963,3 +967,10 @@ When a cell has no schema (common for many cell types), the selector becomes
 `{ path: [...], schema: false }`. Per section 5.3.2, `schema: false` means
 "reject — skip this subtree." A traverser with `schema: false` will not follow
 any references or discover any linked entities.
+
+A cell whose schema declares a stream is asked for the same way. Its document
+holds no value a read uses: an event sent to it is appended beside the
+document, and the handler reads the event, never the document. A selector
+carrying the stream's event schema would walk a shape the document never
+holds, and would cost the request a root carrying that schema per stream; the
+whole document is what a meta write to it retries a conflict against.

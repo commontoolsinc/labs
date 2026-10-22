@@ -314,6 +314,13 @@ export const COMMONFABRIC_RUNTIME_EXPORT_REGISTRY = [
     category: "ignored",
     reactiveOrigin: false,
   },
+  // spaceAccessOf(target, principal) reads a named principal's level the same
+  // way, and builds no graph node either.
+  {
+    exportName: "spaceAccessOf",
+    category: "ignored",
+    reactiveOrigin: false,
+  },
   // spaceOf(target) returns the DID of the space a cell's value lives in, or
   // `undefined`. It builds no graph node, so it is a plain call inside the
   // computation or handler that makes it.
@@ -333,6 +340,14 @@ export const COMMONFABRIC_RUNTIME_EXPORT_REGISTRY = [
   },
   {
     exportName: "revokeSpaceAccess",
+    category: "ignored",
+    reactiveOrigin: false,
+  },
+  // nameBlob(target, blobId, name) stages a blob's record in the running
+  // handler and returns its id. It builds no graph node, so it is a plain call
+  // inside the handler that makes it.
+  {
+    exportName: "nameBlob",
     category: "ignored",
     reactiveOrigin: false,
   },

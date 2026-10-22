@@ -58,8 +58,11 @@ const sameSessionDescriptor = (
     sessionId?: string;
     seenSeq?: number;
     sessionToken?: string;
+    resumeKey?: string;
+    resumeAttempt?: number;
     actingAs?: string;
     genesisRoot?: FabricValue;
+    spaceKind?: string;
   },
 ): boolean =>
   (typeof left.sessionId === "string" ? left.sessionId : undefined) ===
@@ -68,12 +71,21 @@ const sameSessionDescriptor = (
     right.seenSeq &&
   (typeof left.sessionToken === "string" ? left.sessionToken : undefined) ===
     right.sessionToken &&
+  // The key that lets a resume present the token before the latest one, so
+  // it cannot be injected in transit either.
+  (typeof left.resumeKey === "string" ? left.resumeKey : undefined) ===
+    right.resumeKey &&
+  (typeof left.resumeAttempt === "number" ? left.resumeAttempt : undefined) ===
+    right.resumeAttempt &&
   // The delegated READ binding (OW31) is part of the signed descriptor:
   // a message-level marker that disagrees with the signed one is a
   // mismatch, so the binding cannot be injected or stripped in transit.
   (typeof left.actingAs === "string" ? left.actingAs : undefined) ===
     right.actingAs &&
-  valueEqual(left.genesisRoot, right.genesisRoot);
+  valueEqual(left.genesisRoot, right.genesisRoot) &&
+  // Compared as signed, so a signed kind the message does not carry, of any
+  // form, is a mismatch rather than read as no kind.
+  left.spaceKind === right.spaceKind;
 
 export type SessionOpenMessage = {
   space: string;
@@ -81,7 +93,10 @@ export type SessionOpenMessage = {
     sessionId?: string;
     seenSeq?: number;
     sessionToken?: string;
+    resumeKey?: string;
+    resumeAttempt?: number;
     genesisRoot?: FabricValue;
+    spaceKind?: string;
   };
   invocation?: FabricPlainObject;
   authorization?: FabricValue;

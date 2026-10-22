@@ -8,7 +8,10 @@
  * - `GET /health` — the lane is serving.
  * - `POST /jobs` — enqueue `{caller, profile, idempotencyKey, task,
  *   instructions?, context?, resultSchema, tools?, maxModelTurns?,
- *   maxInputBytes?, maxOutputTokens?, imageAttachments?, browserHost?}`;
+ *   maxInputBytes?, maxOutputTokens?, imageAttachments?, depth?, tags?,
+ *   domains?, reasoningEffort?, browserHost?, inputs?, foreignSpaces?}`,
+ *   where `inputs` maps a name to a piece address and `foreignSpaces` a
+ *   space DID an input names to the origin serving it;
  *   answers `201` with the new job, or `200` with the one the key already
  *   names for the same request.
  * - `GET /jobs?limit=n` — the newest jobs, newest first.
@@ -27,12 +30,24 @@
  * A refusal is `{ok: false, code, error}` with a 4xx status.
  */
 
+import {
+  HARNESS_RUN_DEPTHS,
+  parseHarnessRunDepth,
+} from "@commonfabric/cf-harness/contracts/run-depth";
+import {
+  HARNESS_TASK_DOMAINS,
+  HARNESS_TASK_TAGS,
+} from "@commonfabric/cf-harness/task-classification";
 import type { HarnessInlineImageAttachment } from "@commonfabric/cf-harness/contracts/image";
 import { decodeHarnessInlineImage } from "@commonfabric/cf-harness/image-attachments";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import type { LocalJobBrowserHost } from "./browser-host.ts";
-import { narrowLocalJobProfile } from "./profiles.ts";
+import {
+  narrowLocalJobProfile,
+  REASONING_EFFORTS,
+  reasoningEffortOf,
+} from "./profiles.ts";
 import type { LocalJobProfiles } from "./profiles.ts";
 import {
   LOCAL_JOB_TERMINAL_STATES,
@@ -56,6 +71,8 @@ export const LOCAL_JOB_HEARTBEAT_MS = 15_000;
  */
 export const LOCAL_BROWSER_RESULT_MAX_BYTES = 32 * 1024 * 1024;
 
+import type { RunnerHealth } from "./readiness.ts";
+
 /** What the API answers requests with. */
 export interface LocalJobApiOptions {
   store: LocalJobStore;
@@ -75,6 +92,9 @@ export interface LocalJobApiOptions {
 
   /** Whether the runner's Fabric lane is running, for `/health`. */
   fabricLane?: () => boolean;
+
+  /** Readiness and configuration of the serving runner. */
+  health?: () => RunnerHealth;
 
   /** The keep-alive interval of an event stream. */
   heartbeatMs?: number;
@@ -124,6 +144,21 @@ const imagesOf = (
   });
 };
 
+/**
+ * `value` as a list of `vocabulary` words, each once, or undefined when it is
+ * not a list of them.
+ */
+const listOf = <T extends string>(
+  value: unknown,
+  vocabulary: readonly T[],
+): T[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const words = value.map((item) => vocabulary.find((word) => word === item));
+  return words.every((word) => word !== undefined)
+    ? [...new Set(words.filter((word) => word !== undefined))]
+    : undefined;
+};
+
 /** Helper for enqueue, which reads a request body or names what is wrong. */
 const enqueueRequestOf = (
   value: unknown,
@@ -148,8 +183,14 @@ const enqueueRequestOf = (
     maxModelTurns,
     maxInputBytes,
     maxOutputTokens,
+    depth,
+    tags,
+    domains,
+    reasoningEffort,
     browserHost,
     imageAttachments,
+    inputs,
+    foreignSpaces,
   } = value as Record<string, unknown>;
   const name = (field: unknown) =>
     typeof field === "string" && field.length > 0 &&
@@ -199,6 +240,36 @@ const enqueueRequestOf = (
       };
     }
   }
+  const runDepth = parseHarnessRunDepth(depth);
+  if (depth !== undefined && runDepth === undefined) {
+    return {
+      error: `\`depth\` must be one of ${HARNESS_RUN_DEPTHS.join(", ")}.`,
+    };
+  }
+  const taskTags = listOf(tags, HARNESS_TASK_TAGS);
+  if (tags !== undefined && (taskTags === undefined || taskTags.length === 0)) {
+    return {
+      error: `\`tags\` must be a nonempty list of ${
+        HARNESS_TASK_TAGS.join(", ")
+      }.`,
+    };
+  }
+  const taskDomains = listOf(domains, HARNESS_TASK_DOMAINS);
+  if (domains !== undefined && taskDomains === undefined) {
+    return {
+      error: `\`domains\` must be a list of ${
+        HARNESS_TASK_DOMAINS.join(", ")
+      }.`,
+    };
+  }
+  const effort = reasoningEffortOf(reasoningEffort);
+  if (reasoningEffort !== undefined && effort === undefined) {
+    return {
+      error: `\`reasoningEffort\` must be one of ${
+        REASONING_EFFORTS.join(", ")
+      }.`,
+    };
+  }
   if (browserHost !== undefined && !isObjectNotArray(browserHost)) {
     return { error: "`browserHost` must be an object." };
   }
@@ -211,6 +282,24 @@ const enqueueRequestOf = (
         ? error.message
         : "Invalid image attachments.",
     };
+  }
+  if (
+    inputs !== undefined &&
+    (!isObjectNotArray(inputs) ||
+      !Object.values(inputs).every((address) =>
+        typeof address === "string" && address.length > 0
+      ))
+  ) {
+    return { error: "`inputs` must map names to piece addresses." };
+  }
+  if (
+    foreignSpaces !== undefined &&
+    (!isObjectNotArray(foreignSpaces) ||
+      !Object.values(foreignSpaces).every((host) =>
+        typeof host === "string" && host.length > 0
+      ))
+  ) {
+    return { error: "`foreignSpaces` must map space DIDs to host origins." };
   }
   return {
     caller: caller as string,
@@ -226,8 +315,18 @@ const enqueueRequestOf = (
       ...(maxModelTurns !== undefined ? { maxModelTurns } : {}),
       ...(typeof maxInputBytes === "number" ? { maxInputBytes } : {}),
       ...(typeof maxOutputTokens === "number" ? { maxOutputTokens } : {}),
+      ...(runDepth !== undefined ? { depth: runDepth } : {}),
+      ...(taskTags !== undefined ? { tags: taskTags } : {}),
+      ...(taskDomains !== undefined ? { domains: taskDomains } : {}),
+      ...(effort !== undefined ? { reasoningEffort: effort } : {}),
       ...(browserHost !== undefined
         ? { browserHost: browserHost as Record<string, unknown> }
+        : {}),
+      ...(inputs !== undefined
+        ? { inputs: inputs as Record<string, string> }
+        : {}),
+      ...(foreignSpaces !== undefined
+        ? { foreignSpaces: foreignSpaces as Record<string, string> }
         : {}),
     },
   };
@@ -473,10 +572,13 @@ async (request: Request): Promise<Response> => {
   const { store } = options;
 
   if (request.method === "GET" && url.pathname === "/health") {
-    return json(200, {
-      ok: true,
-      lanes: { local: true, fabric: options.fabricLane?.() ?? false },
-    });
+    return json(
+      200,
+      options.health?.() ?? {
+        ok: true,
+        lanes: { local: true, fabric: options.fabricLane?.() ?? false },
+      },
+    );
   }
 
   if (parts[0] !== "jobs") {

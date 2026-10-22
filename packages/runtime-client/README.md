@@ -39,11 +39,11 @@ refusal carries nothing of the cell, and is never an empty value, so a read the
 host could not make never reads as a cell that holds nothing.
 
 A handle holds a refusal in place of a value. `refusal` and `lastRead()` report
-it; `get()` throws `CellReadRefusedError`; `sync()`, `pull()` and `initialize()`
-reject with it. A subscriber hears each refusal through the `onRefused` option
-of `subscribe()`, which runs at once for a handle already refused, and its value
-callback never receives one. The next admitted value, or a value the host
-writes, ends the refusal.
+it; `get()` throws `CellReadRefusedError`; `sync()`, `pull()`, `initialize()`
+and `update()` reject with it. A subscriber hears each refusal through the
+`onRefused` option of `subscribe()`, which runs at once for a handle already
+refused, and its value callback never receives one. The next admitted value, or
+a value the host writes, ends the refusal.
 
 The worker builds its gate with no display ceiling, so it refuses no read.
 
@@ -53,6 +53,21 @@ rendered, carrying no cell value, a reference, a trusted operation, or ungated.
 The answers of the channels marked as decided carry a mark only the gate gives
 them, and a type-level check holds the tables to it, so a new channel fails to
 type-check until it says how it stands.
+
+## The order of a cell's operations
+
+A cell's reads and writes through one runtime client run in the order they were
+asked for, through whichever handle on the cell and path: `sync()`, `pull()`,
+`set()`, `setStrict()`, `push()`, `initialize()`, `send()`, `sendStrict()`,
+`sendReviewed()` and `update()` share one queue, and each request goes to the
+worker once the one before it has been answered. `set()` shows its value at once
+and sends it in its turn. `update(updater)` computes a write in its turn, from
+the value the operations queued before it left, or else what its handle holds,
+reading the cell first where the handle holds nothing. A write asked for after
+it lands after it. A write another handle made that has already settled counts
+only once its update reaches this handle, so an update can compute from a value
+that write has since replaced. Its write is a blind overwrite, as `set()`'s is,
+not an atomic read-modify-write; `push()` appends as the worker merges.
 
 ## Observing authorship
 
@@ -86,7 +101,14 @@ age, affected spaces, transaction state and known local/store sequence numbers.
 Per-space snapshots include the existing session ID, replica catch-up marker,
 unsettled sequences, conflict repairs and accepted writes waiting for coverage.
 These identifiers can be correlated with memory-server traces without exporting
-cell values or credentials. Reading the snapshot starts no storage I/O.
+cell values or credentials. Each per-space snapshot also carries the space's
+`sizes`: its share of the storage counts that `getLoggerCounts().sizes.storage`
+adds across every open space, such as documents, subscriptions and watched
+documents. Reading the snapshot starts no storage I/O. `getLoggerCounts().sizes`
+goes further in two directions: `storage.bySpace` ranks the open spaces by the
+approximate size of their documents, measured across reads within a budget, and
+`ipc` counts what each of the worker's ports has carried and how many it holds
+(`null` for a processor with no client registry behind it, as a test's is).
 
 The pending count measures promise registrations, not distinct writes. A write
 and its scheduler disposition can both appear. Lists contain at most 64 entries;
@@ -118,6 +140,39 @@ the handle, and the room once its last handle is gone.
 
 A server that does not advertise `presenceV1` makes the join reject; nothing is
 sent to it.
+
+## Sending events
+
+`CellHandle.send()` sends an event to the stream a handle names and logs a
+refusal; `sendStrict()` rejects with it. Either resolves once the runtime has
+taken the event, which says nothing of its handling: a write the stream's
+handler makes that the runtime refuses, such as one whose UI contract the event
+does not satisfy, resolves `sendStrict()` all the same.
+`sendStrict(event, { awaitHandling: true })` waits for the handler's run as
+well, and rejects with the reason when that run's commit is refused, when it
+throws, and when the event is dropped or refused admission. A run that finishes
+without an error resolves it, whether or not it wrote anything; a handler that
+turns an event down throws, which fails its run and rejects the send. Under
+server execution the run it waits for is the served one, whose outcome reaches
+the worker as the consequence the serving loop recorded for the event.
+
+`CellHandle.sendReviewed(event, { surface, action })` sends a reviewed action
+from a control the host draws itself, bound to one trusted surface and one
+action. The worker stamps the event with `native` provenance for them, replacing
+any `provenance` the payload carries, and marks it renderer-trusted, so a write
+gated on that surface and action commits as it would for a reviewed gesture on
+the pattern's rendered surface. It always waits for the handler's run, as
+`sendStrict()` does with `awaitHandling`, and rejects with the reason on the
+same refusals. The event is a trusted gesture, as a DOM event on the pattern's
+rendered surface is, so it meets what `grantSpaceAccess()` and
+`revokeSpaceAccess()` require of a handler's event; the change they stage is
+still held to every other check.
+[Host embedding, §11](../../docs/features/host-embedding.md#11-policy-record-native-reviewed-acts-count-as-trusted-gestures)
+records the principle that a native reviewed act counts wherever a trusted
+gesture does. `sendReviewed()` mints trusted events, so it is for the host's own
+code alone;
+[host embedding, §10](../../docs/features/host-embedding.md#10-native-reviewed-controls)
+says what it owes in exchange.
 
 ## Refused event admission
 

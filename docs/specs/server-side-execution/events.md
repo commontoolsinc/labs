@@ -186,7 +186,10 @@ handler fires
   unless the event carries an acting user.
 - Ordering: per stream, events process in commit-seq order. Across
   streams in one space, wave order (arrival). No global ordering claim
-  beyond the space's commit sequence — same as today.
+  beyond the space's commit sequence — same as today. A consequence
+  takes effect at its event's place in the firing session's order: a
+  write that session committed after the event supersedes the
+  consequence writes it overwrote (serving-loop.md §3d).
 - **Terminal positions.** An error consequence, a T3 dropped notice,
   and a `needs-attention` notice each complete processing at the event's
   arrival position even when the handler produces no domain writes. A
@@ -289,7 +292,15 @@ ambient-state one.
   client-written ones; a flag-ON client's diverted echo publishes that
   same address on its transaction, and the durable-ack coupling settles
   the sender's callback only after the handling consequenced — the
-  receipt is durable before the address is ever dereferenced. A sender
+  receipt is durable before the address is ever dereferenced. The
+  callback reads that outcome rather than the echo's: where the echo's
+  own transaction failed — an echo that withdrew (speculation.md §2), or
+  one whose commit was refused — the transaction it is handed reports
+  done once the handling consequenced. A delivery that fails instead
+  reports `status: "error"` with an `EventDeliveryError` whose `kind`
+  names the failure (`append-refused`, or the §5 outcome: `errored` when
+  the handler threw, `refused`, `dropped`, `needs-attention`) and whose
+  `reason` carries the outcome's words. A sender
   that needs only its own act on the record takes the send's
   `onAppended` hook, which settles when the append is durable and
   carries the delivery outcome; the commit callback keeps the coupling
@@ -504,8 +515,13 @@ loop's duty).
   message, `eventWatermark` advances past it, and the unconditional
   dropped-write report still fires. A crash while preparing the commit
   is a distinct `CommitPreparationError`; it is a delivery failure,
-  not a CFC verdict. An explicit handler abort is a handler-error
-  consequence, not an infrastructure retry.
+  not a CFC verdict. So is a CFC refusal that is not wholly a verdict,
+  which keeps the retryable `StorageTransactionAborted` name: prepare
+  could not evaluate an input the transaction did not have, or the
+  prepared state drifted (`packages/runner/src/cfc/verdict-reason.ts`),
+  and a fresh attempt may land the write that sealing an error would
+  end. An explicit handler abort is a handler-error consequence, not an
+  infrastructure retry.
 - **Handler body DID NOT RUN — not a consequence (RULED 2026-08-27;
   mark/effects atomicity, the a04 write-side member).** A served
   dispatch whose handler body never executed — the runner's
@@ -586,7 +602,15 @@ loop's duty).
   active interval without erasing the accumulated time. A served
   `RetryImmediately` used for in-space name resolution is settlement
   and never creates or ages this checkpoint. Only a committed handler
-  consequence or terminal notice clears it.
+  consequence or terminal notice clears it. A commit-preparation
+  failure carries §2's arrival-order barrier as the other deferral arms
+  do: every later same-space arrival already queued behind the failed
+  head defers with it. A head retried after such a failure is the last
+  entry its drain pass queues, and a pass that finds that retry still
+  in flight queues nothing behind it, so the events behind it wait in
+  the drain for the pass its outcome arms rather than for the backstop
+  rescan a swept event waits for. An input wake such a pass takes is
+  kept for the attempt after the one in flight.
 - The failed-state budget is 60 seconds. This terminal-disposition
   budget is an explicit exception to the repository's no-timeout rule:
   it starts only after an observed failure, never cancels an in-flight
@@ -618,14 +642,22 @@ loop's duty).
   and ambiguous storage-time or transport outcomes, are not authorized
   for explicit replay.
 - A serving runtime's refusal of a foreign scoped read (protocol.md §2's
-  fail-closed interim) is a `protocol` verdict in `dispatch-load` and
-  terminalizes immediately. The read's scope and the runtime's serving
-  posture decide it, so the same read from the same runtime is refused
-  every time. A handler whose declared inputs reach a user- or
-  session-scoped document in another space therefore seals its
-  `needs-attention` notice at once, and the arrival barrier releases the
-  space's later events without waiting out the budget. Explicit retry
-  is the recovery once a runtime no longer refuses the read.
+  fail-closed interim) is no load in flight. The read's scope and the
+  runtime's serving posture decide it, so the same read from the same
+  runtime is refused every time, and the storage manager registers no
+  pending load for it, so a served event's preflight never parks on one.
+  What decides the event is what its run reads. A run that reads the
+  value of such a document, a user- or session-scoped document in
+  another space reached through its declared event or its bound state,
+  read an absence that is not the document's state: the run is withdrawn
+  and the event fails as a permanent `protocol` verdict in
+  `dispatch-load`, sealing its `needs-attention` notice at once, the same
+  every time. A run that passes a link to such a document along reads
+  only the document's CFC metadata and dispatches. So does a run whose
+  refused documents only the preflight reaches: the preflight's
+  dependency walk reads beyond the handler's declared schema, following a
+  linked piece's own fields (a profile's view and per-user state, for
+  example), and what it reads there decides nothing.
 - An event held only behind an earlier failed head preserves arrival
   order but records no checkpoint and spends no budget. A load-park
   observation neither increments nor clears the independent cold-view
@@ -718,6 +750,49 @@ loop's duty).
   test reads whether the piece has a graph installed, not what its
   start reported.
 
+  A served event's piece can also be one that an EARLIER arrival's
+  handler creates. A handler that instantiates a piece hands the
+  sender's speculative echo the new piece's streams before the server
+  has run that handler, so the sender's next event can target a stream
+  no stored document holds yet. A not-started verdict for that event
+  is then reached against state that §2's arrival order has not
+  produced: the run raced the earlier event, and this predicate does
+  not apply. So a deferral spends the deferral budget only when no
+  entry that arrived earlier in the same space is still pending. Held
+  behind one, the entry keeps the budget it had and arms no backstop:
+  it is re-drained by input, or by the wave that commits the earlier
+  entry's consequence while it is still pending. The earliest pending
+  entry always spends the budget, so an event addressing a piece that
+  nothing creates still hardens into this drop once the events ahead
+  of it have their consequences.
+
+  With server execution off, a CLIENT event — one with no served
+  carriage, so no durable entry for a later pass to re-drain, and no
+  server delivering it — whose piece cannot be started yet waits
+  instead, holding its slot at the head of the event queue as
+  the piece load it follows does. A send can reach a piece before the
+  commit that creates it does: another participant's runtime has
+  written the link the send follows and not yet the piece itself. The
+  start is asked again when something could change its answer: a
+  commit touching a document the start read, or a handler registering
+  for the stream, which is how a piece standing between graphs
+  returns. The head holds every later event in that runtime's queue,
+  whatever stream it targets, so the wait is bounded twice: at the
+  serving drain's deferral threshold in re-attempts, and at the retry
+  window the commit backpressure policy gives a client re-delivery,
+  which ends a wait nothing re-arms. A piece the start will never
+  find — a document holding a value of its own and no pattern
+  pointer, a start that throws, a chain that cycles, a pattern that
+  cannot be loaded — does not wait. Every client drop on this path
+  reaches the scheduler error channel as an `EventDroppedError` as
+  well as settling the commit callback, since a send made from inside
+  a handler has no callback to settle; its `pieceStartReason` names
+  why the last start did not start the piece, the verdict's own
+  reason or `start-failed` for a start that threw. A runtime being disposed ends
+  every such wait, settling the event as dropped. With server
+  execution on, such an event is the echo of a run the server makes
+  and reports on itself, so it neither waits nor reports its drop.
+
   **Where the notice lives, and when it retires (T7).** The
   dropped-event notice — `{ status: "dropped", reason }` naming the
   eventId — is a FIELD ON THE STREAM DOC'S OWN ENTRY for that event,
@@ -769,7 +844,10 @@ choice.
 
 ## 7. What the client loses, explicitly
 
-Under the flag, the client handler path commits **only the event**. The
+Under the flag, the client handler path commits **only the event**: the
+append, together with whatever schema documents its payload's links
+reference that the stream's space does not hold
+(`docs/specs/content-addressed-schemas.md`, the write-side guarantee). The
 handler's writes apply to the speculation overlay, never to a storage
 transaction. The client's handler-write commit path was DELETED with
 Phase 3 (D-v2-1): the overlay destination diverts event-handler runs

@@ -14,11 +14,13 @@ import {
   type PiecePatternRef,
   type PiecePlan,
   type PieceSelector,
+  PieceSourceChangedError,
   type PlanDiff,
   type RepairReport,
   type RepairRow,
   type RestorableRevision,
 } from "@commonfabric/piece/ops";
+import { listFlags } from "@commonfabric/piece/refusal";
 import ports from "@commonfabric/ports" with { type: "json" };
 import { isSlugAddress, parseCellPath, UI } from "@commonfabric/runner";
 import {
@@ -43,7 +45,6 @@ import {
   runSurvey,
 } from "../lib/bulk.ts";
 import { addressArgument, VerbInputValidationError } from "../lib/callable.ts";
-import { listFlags } from "../lib/refusal.ts";
 import { refuseSectionMarker } from "../lib/section-marker.ts";
 import { suppressDeferredSkewNote } from "../lib/version-check.ts";
 import {
@@ -90,6 +91,7 @@ import {
   type EntryConfig,
   executePieceCallable,
   followPieceSource,
+  type FollowPieceSourceResult,
   formatViewTree,
   generateSpaceMap,
   getCellCfcLabel,
@@ -113,12 +115,10 @@ import {
   PieceVerbReadError,
   recreateSpaceRootPattern,
   removePiece,
-  resetHomePattern,
   savePiecePattern,
   searchPieces,
   setCellCfcLabel,
   setCellValue,
-  setHomePattern,
   setPiecePattern,
   setPieceSlug,
   SpaceConfig,
@@ -2057,14 +2057,13 @@ function refuseJsonOutput(spelling: string, options: { json?: boolean }): void {
 }
 
 /**
- * The shared target options, plus the flags the two space-level commands add.
+ * The shared target options, plus the flags the space-level commands add.
  *
- * `quiet` and `reset` reach an action from Cliffy's parse rather than from
+ * `quiet` and `label` reach an action from Cliffy's parse rather than from
  * {@link PieceCLIOptions}, which describes only what a target is named with.
  */
 interface SpaceCommandCLIOptions extends PieceCLIOptions {
   quiet?: boolean;
-  reset?: boolean;
   label?: string;
 }
 
@@ -2118,118 +2117,56 @@ export function buildRecreateRootCommand(
 }
 
 /**
- * `set-home`, which initializes an absent identity Home with custom or
- * system source. Existing Home roots require an in-place source update.
+ * The last day `cf space set-home` and its superseded `cf piece set-home`
+ * mount answer at all.
  *
- * `spelling` and `replacedBy` carry the meanings they have in
- * {@link buildRecreateRootCommand}.
+ * A literal, fixed when the retirement reaches main, for the reason
+ * `COMMAND_SPELLING_END_DATE` gives: a caller who reads the refusal today and
+ * acts on it next week has to be told the same day both times. Nothing
+ * consults it at run time; what removes the mounts is a later change that
+ * deletes them with this constant.
+ */
+export const SET_HOME_RETIRED_END_DATE = "2026-10-21";
+
+/**
+ * What a run of the retired command is told, on its help page and in the
+ * refusal: what creates a Home, and what changes one.
+ */
+const SET_HOME_RETIREMENT = "A Home is created on its user's first open, " +
+  "and its source is changed in place: " +
+  "cf piece setsrc --cell <home-root> ./my-home.tsx, where the root is the " +
+  "link cf wish '#default' --select @ answers with in the Home space. " +
+  "This spelling stops answering after " + SET_HOME_RETIRED_END_DATE + ".";
+
+/**
+ * `set-home`, retired.
+ *
+ * A Home is created on its user's first open and changed only by an in-place
+ * source update, which retains the account data its root owns, so there is
+ * nothing for a command that installs a Home root to do. Both mounts stay,
+ * hidden, through {@link SET_HOME_RETIRED_END_DATE}, so a script that still
+ * writes the command meets the replacement instead of an unknown command.
+ * Options are not parsed: every line written for the command is answered the
+ * same way.
  */
 // deno-lint-ignore no-explicit-any
-export function buildSetHomeCommand(
-  spelling: string,
-  replacedBy?: string,
-): Command<any> {
-  const notice = mountNotice(spelling, replacedBy);
-  const act = async (options: SpaceCommandCLIOptions, main?: string) => {
-    refuseJsonOutput(spelling, options);
-    setQuietMode(!!options.quiet);
-
-    if (!options.reset && !main) {
+export function buildRetiredSetHomeCommand(spelling: string): Command<any> {
+  return new Command()
+    .description(`Retired. ${SET_HOME_RETIREMENT}`)
+    .useRawArgs()
+    // Raw arguments reach the action unparsed, `--help` among them, so the
+    // page a caller asks for is rendered here rather than by the parser.
+    // deno-lint-ignore no-explicit-any
+    .action(function (this: Command<any>, _options, ...args: string[]) {
+      if (args.some((word) => word === "--help" || word === "-h")) {
+        this.showHelp();
+        return;
+      }
       throw new ValidationError(
-        "Provide a pattern file path or use --reset.",
+        `'cf ${spelling}' is retired. ${SET_HOME_RETIREMENT}`,
         { exitCode: 1 },
       );
-    }
-    if (options.reset && main) {
-      throw new ValidationError(
-        "Cannot use --reset with a pattern file path.",
-        { exitCode: 1 },
-      );
-    }
-    if (options.reset && options.repository !== undefined) {
-      throw new ValidationError(
-        "Cannot use --repository with --reset.",
-        { exitCode: 1 },
-      );
-    }
-    if (options.reset && options.test !== undefined) {
-      throw new ValidationError(
-        "Cannot use --test with --reset.",
-        { exitCode: 1 },
-      );
-    }
-    if (options.reset && options.datafile !== undefined) {
-      throw new ValidationError(
-        "Cannot use --datafile with --reset.",
-        { exitCode: 1 },
-      );
-    }
-
-    const baseConfig = parseSetHomeOptions(options);
-
-    if (options.reset) {
-      await resetHomePattern(baseConfig);
-      render("Initialized home with the system default pattern.");
-    } else {
-      await setHomePattern(baseConfig, localPatternEntry(main!, options));
-      render("Deployed custom home pattern.");
-    }
-
-    // The hint names the spelling to write next, which is the blessed one
-    // even when this run arrived through the superseded mount: a next step
-    // that teaches the spelling the notice just told the caller to stop
-    // writing is the notice arguing with itself.
-    hint(cliText(`NEXT STEPS:
-  → Open home in browser: ${baseConfig.apiUrl}
-  → Update this root:     cf piece setsrc --cell <home-root> ...`));
-  };
-  // deno-lint-ignore no-explicit-any
-  const command: Command<any> = new Command()
-    .description(
-      "Initialize an absent identity Home with custom or system source. Update an existing Home in place with piece setsrc.",
-    )
-    .example(
-      cliText(
-        `cf ${spelling} ${EX_ID} -a http://localhost:${ports.toolshed} ./my-home.tsx`,
-      ),
-      `Initialize the identity's Home with a custom pattern.`,
-    )
-    .example(
-      cliText(
-        `cf ${spelling} ${EX_ID} -a http://localhost:${ports.toolshed} --reset`,
-      ),
-      `Initialize an absent Home with the system default pattern.`,
-    )
-    .option(
-      "--reset",
-      "Initialize an absent Home with the system default pattern",
-    )
-    .option(
-      "--main-export <export:string>",
-      'Named export from entry for pattern definition. Defaults to "default".',
-    )
-    .option(
-      "--root <path:string>",
-      "Root directory for imports and authored source paths. Use a repository root to preserve repository-relative paths.",
-    )
-    .option(
-      "--repository <repository:string>",
-      "Repository locator associated with the authored source (stored exactly as supplied).",
-    )
-    .option(
-      "--test <path:string>",
-      "Attach a test pattern source file to the deployed source package. Repeatable.",
-      { collect: true },
-    )
-    .option(
-      "--datafile <path:string>",
-      "Attach a data file to the deployed source package. Repeatable.",
-      { collect: true },
-    )
-    .arguments("[main:string]");
-  return notice.helpPage(
-    targetOptions(command.action(notice.action(act)), { global: false }),
-  );
+    });
 }
 
 /**
@@ -2241,7 +2178,7 @@ export function buildCreateSpaceCommand(spelling: string): Command<any> {
   const act = async (options: SpaceCommandCLIOptions) => {
     refuseJsonOutput(spelling, options);
     setQuietMode(!!options.quiet);
-    const baseConfig = parseSetHomeOptions(options);
+    const baseConfig = parseIdentityTargetOptions(options);
     const space = await createSpace(baseConfig, options.label);
     render(space);
     hint(cliText(`NEXT STEPS:
@@ -2673,7 +2610,11 @@ the children of system pieces, say:
 
 Unlike 'setsrc', which detaches, the origin is recorded with the revision.
 Not served yet: against a deployment that serves piece lifecycle verbs the
-command refuses, since the served update takes no origin.`,
+command refuses, since the served update takes no origin.
+
+--expect and --expect-revision make the follow conditional on the source state
+a caller inspected ('cf piece inspect --pattern-identity --json' reports both):
+a piece that is off either pin is refused, writing nothing, with exit status 3.`,
     ),
   )
   .example(
@@ -2682,7 +2623,22 @@ command refuses, since the served update takes no origin.`,
     ),
     `Make "${EX_PIECE}" follow the deployment's profile pattern.`,
   )
+  .example(
+    cliText(
+      `cf piece follow ${EX_ID} ${EX_COMP_PIECE} --expect <identity>#default --expect-revision none system:fabrichat/room.tsx`,
+    ),
+    `Follow only while "${EX_PIECE}" runs that pattern and its source log is empty.`,
+  )
   .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_HELP)
+  .option(
+    "--expect <pattern:string>",
+    "Follow only while the piece runs this pattern, as <identity>#<symbol>.",
+  )
+  .option(
+    "--expect-revision <revision:string>",
+    "Follow only while the piece's source log ends at this revision, or is " +
+      "empty for none.",
+  )
   .option(
     "--dangerously-allow-incompatible-schema",
     "Accept the reviewed incompatibility, including a current pattern " +
@@ -3302,11 +3258,8 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
     buildRecreateRootCommand("piece recreate-root", "space recreate-root")
       .hidden(),
   )
-  /* piece set-home — moved to `cf space set-home` */
-  .command(
-    "set-home",
-    buildSetHomeCommand("piece set-home", "space set-home").hidden(),
-  );
+  /* piece set-home — retired, with `cf space set-home` */
+  .command("set-home", buildRetiredSetHomeCommand("piece set-home").hidden());
 
 /** Shared flags accepted by piece commands that resolve a target or source. */
 export interface PieceCLIOptions {
@@ -5149,6 +5102,18 @@ export async function setPieceSourceFromCommand(
   return { config, update };
 }
 
+/** The flags `cf piece follow` takes beyond the shared piece flags. */
+export interface FollowPieceSourceCLIOptions extends PieceCLIOptions {
+  /** The pattern the piece must still run, as `<identity>#<symbol>`. */
+  expect?: string;
+
+  /** The revision the piece's source log must still end at, or `none`. */
+  expectRevision?: string;
+}
+
+/** Exit status of a follow refused because the piece is off a pin. */
+export const FOLLOW_PIN_REFUSED_EXIT_CODE = 3;
+
 /** Injectable effects for {@link followPieceSourceAction}. */
 export interface FollowPieceSourceCommandDependencies {
   followPieceSource?: typeof followPieceSource;
@@ -5164,7 +5129,7 @@ export interface FollowPieceSourceCommandDependencies {
  * with the compatibility message and a non-zero exit, and nothing is written.
  */
 export async function followPieceSourceAction(
-  options: PieceCLIOptions,
+  options: FollowPieceSourceCLIOptions,
   origin: string,
   deps: FollowPieceSourceCommandDependencies = {},
 ): Promise<void> {
@@ -5173,14 +5138,36 @@ export async function followPieceSourceAction(
   if (trimmed.length === 0) {
     throw new ValidationError("An origin is required.", { exitCode: 1 });
   }
-  const result = await (deps.followPieceSource ?? followPieceSource)(
-    config,
-    trimmed,
-    {
-      dangerouslyAllowIncompatibleSchema:
-        options.dangerouslyAllowIncompatibleSchema,
-    },
-  );
+  const setExitCode = deps.setExitCode ?? ((code: number) => {
+    Deno.exitCode = code;
+  });
+  let result: FollowPieceSourceResult;
+  try {
+    result = await (deps.followPieceSource ?? followPieceSource)(
+      config,
+      trimmed,
+      {
+        dangerouslyAllowIncompatibleSchema:
+          options.dangerouslyAllowIncompatibleSchema,
+        ...(options.expect === undefined
+          ? {}
+          : { expectedPattern: parsePatternPin(options.expect) }),
+        ...(options.expectRevision === undefined
+          ? {}
+          : { expectedRevision: parseRevisionPin(options.expectRevision) }),
+      },
+    );
+  } catch (error) {
+    if (!(error instanceof PieceSourceChangedError)) throw error;
+    // A refusal the caller asked for rather than a failure: the piece moved
+    // off what was inspected, nothing was written, and the status says so to
+    // a script that has to tell the two apart.
+    (deps.printError ?? console.error)(
+      `${config.piece} was not pointed at ${trimmed}: ${error.message}`,
+    );
+    setExitCode(FOLLOW_PIN_REFUSED_EXIT_CODE);
+    return;
+  }
   if (result.status === "incompatible") {
     (deps.printError ?? console.error)(
       `The source ${trimmed} serves now cannot replace what ${config.piece} ` +
@@ -5193,9 +5180,7 @@ export async function followPieceSourceAction(
           "longer fit the new pattern.",
       );
     }
-    (deps.setExitCode ?? ((code: number) => {
-      Deno.exitCode = code;
-    }))(1);
+    setExitCode(1);
     return;
   }
   if (result.acceptedIncompatibility !== undefined) {
@@ -5211,14 +5196,52 @@ export async function followPieceSourceAction(
     (deps.printError ?? console.error)(
       `The follow committed, but refreshing the running piece failed: ${result.executionWarning}`,
     );
-    (deps.setExitCode ?? ((code: number) => {
-      Deno.exitCode = code;
-    }))(1);
+    setExitCode(1);
     return;
   }
   (deps.hint ?? hint)(cliText(`NEXT STEPS:
   → Inspect state: cf piece inspect --cell ${config.piece} ...
   → Open the piece in the shell; each later release of the origin is adopted there.`));
+}
+
+/**
+ * Parses `--expect`, a pattern written `<identity>#<symbol>`. The
+ * `cf:module/` prefix `cf piece inspect` prints before a pattern reference is
+ * accepted, so a reference copied from there pins as written.
+ *
+ * @throws ValidationError when either half is empty or `#` is missing.
+ */
+export function parsePatternPin(
+  spec: string,
+): { identity: string; symbol: string } {
+  const ref = spec.trim().replace(/^cf:module\//, "");
+  const hash = ref.lastIndexOf("#");
+  const identity = ref.slice(0, hash);
+  const symbol = ref.slice(hash + 1);
+  if (hash < 0 || identity.length === 0 || symbol.length === 0) {
+    throw new ValidationError(
+      `--expect takes <identity>#<symbol>, got "${spec}".`,
+      { exitCode: 1 },
+    );
+  }
+  return { identity, symbol };
+}
+
+/**
+ * Parses `--expect-revision`: a revision id, or `none` for a source log that
+ * must be empty, which `changeSource()` pins as `null`.
+ *
+ * @throws ValidationError for an empty value.
+ */
+export function parseRevisionPin(spec: string): string | null {
+  const revision = spec.trim();
+  if (revision.length === 0) {
+    throw new ValidationError(
+      "--expect-revision takes a revision id, or none.",
+      { exitCode: 1 },
+    );
+  }
+  return revision === "none" ? null : revision;
 }
 
 /** Applies `piece setsrc` and renders the receipt returned by the commit. */
@@ -5269,7 +5292,11 @@ function parseScopedId(id: string): { id: string; scope?: CellScope } {
   }
 }
 
-function parseSetHomeOptions(
+/**
+ * The target of a command that acts on the identity's own Home space: the
+ * identity and the server, with no space to name.
+ */
+function parseIdentityTargetOptions(
   input: PieceCLIOptions,
 ): Omit<SpaceConfig, "space"> {
   if (!input.identity) {

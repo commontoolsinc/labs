@@ -2,7 +2,10 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { type JSONSchema, type Pattern } from "@commonfabric/runner";
 import { validateSchemaValue } from "@commonfabric/runner/cfc";
-import type { FabricPrimitiveSchemaType } from "@commonfabric/api";
+import type {
+  FabricPrimitiveSchemaType,
+  JSONSchemaObj,
+} from "@commonfabric/api";
 import type { FabricPrimitive } from "@commonfabric/data-model";
 import {
   FABRIC_PRIMITIVE_SCHEMA_TYPES,
@@ -10,6 +13,9 @@ import {
 } from "@commonfabric/data-model/fabric-primitives";
 import { FABRIC_PRIMITIVE_EXAMPLES_FOR_TESTING_ONLY } from "@commonfabric/data-model/for-testing-only";
 import { FABRIC_SPECIAL_OBJECT_BRAND } from "@commonfabric/runner/fabric-special-object-brand";
+import { internSchema } from "@commonfabric/data-model-schema";
+import { formatExternalSchemaRef } from "@commonfabric/data-model-schema/schema-refs";
+import { registerSchemaDocument } from "../../runner/src/schema-registry.ts";
 import {
   assertPatternSchemasBackwardCompatible,
   assertSchemaSubset,
@@ -170,9 +176,68 @@ describe("piece schema compatibility", () => {
       expect(schemasHaveSameContract(reference, reference)).toBe(false);
     });
 
+    it("ignores unrelated definitions while retaining a recursive contract's reachable defaults", () => {
+      const root = (fallback = "Donut"): JSONSchemaObj => ({
+        $defs: {
+          row: {
+            type: "object",
+            properties: {
+              title: { $ref: "#/$defs/text" },
+              children: { type: "array", items: { $ref: "#/$defs/row" } },
+            },
+          },
+          text: { type: "string", default: fallback },
+          unrelated: { type: "number" },
+        },
+      });
+      const reference = { $ref: "#/$defs/row" } as const;
+      const addedDefinition = {
+        ...root(),
+        $defs: {
+          ...root().$defs,
+          unrelated: { type: "string" },
+          meeting: { type: "object", default: {} },
+        },
+      } as const;
+      expect(schemasHaveSameContract(reference, reference, {
+        sourceRoot: root(),
+        targetRoot: addedDefinition,
+      })).toBe(true);
+      expect(schemasHaveSameContract(reference, reference, {
+        sourceRoot: addedDefinition,
+        targetRoot: root("Glaze"),
+      })).toBe(false);
+    });
+
     it("returns false when the consumer value contract changes", () => {
       expect(schemasHaveSameContract({ type: "string" }, { type: "number" }))
         .toBe(false);
+    });
+
+    it("compares external contracts independently of enclosing definition scopes", () => {
+      const reference = (fallback: string, register = true): JSONSchema => {
+        const document = {
+          type: "object",
+          properties: { value: { $ref: "#/$defs/value" } },
+          $defs: { value: { type: "string", default: fallback } },
+        } as const;
+        const { taggedHashString } = internSchema(document, true);
+        if (register) registerSchemaDocument(taggedHashString, document);
+        return {
+          type: "array",
+          items: { $ref: formatExternalSchemaRef(taggedHashString) },
+        };
+      };
+      const same = reference("same external default");
+      expect(schemasHaveSameContract(same, same, {
+        sourceRoot: { $defs: { value: { type: "number" } } },
+        targetRoot: { $defs: { value: { type: "boolean" } } },
+      })).toBe(true);
+      expect(
+        schemasHaveSameContract(same, reference("changed external default")),
+      ).toBe(false);
+      const missing = reference("unregistered external contract", false);
+      expect(schemasHaveSameContract(missing, missing)).toBe(false);
     });
   });
 
@@ -1685,6 +1750,39 @@ describe("piece schema compatibility", () => {
     ).toThrow(/not stable under default insertion/);
   });
 
+  it("admits a recursive labeled schema with no default, and refuses one whose recursion holds a default", () => {
+    // A FabriChat message replies to a message, so the walk for defaults below
+    // a label meets the node it is already walking. It stops there rather than
+    // recursing without end, and still finds a default the recursion holds.
+    const message = (withReactionsDefault: boolean): JSONSchema => ({
+      $defs: {
+        message: {
+          type: "object",
+          ifc: { addIntegrity: ["fabrichat-test-message"] },
+          properties: {
+            body: { type: "string" },
+            replyTo: { $ref: "#/$defs/message" },
+            ...(withReactionsDefault
+              ? {
+                reactions: {
+                  type: "array",
+                  items: { type: "string" },
+                  default: [],
+                },
+              }
+              : {}),
+          },
+        },
+      },
+      $ref: "#/$defs/message",
+    });
+    expect(() => assertSchemaSubset(message(false), message(false))).not
+      .toThrow();
+    expect(() => assertSchemaSubset(message(true), message(true))).toThrow(
+      /not stable under default insertion/,
+    );
+  });
+
   it("rejects cell and scope changes when a record gains a default", () => {
     for (
       const [before, after, message] of [
@@ -2740,6 +2838,7 @@ describe("piece schema compatibility", () => {
     const a: JSONSchema = {
       type: "object",
       properties: { a: { type: "string" } },
+      required: ["a"],
     };
     const b: JSONSchema = {
       type: "object",
@@ -5130,6 +5229,119 @@ describe("piece schema compatibility", () => {
         pattern(incompatibleAnyOf, oldPattern.resultSchema),
       )
     ).toThrow(/argument/);
+  });
+
+  describe("field evolution on a union branch", () => {
+    const profile = (
+      extra: Record<string, JSONSchema> = {},
+    ): JSONSchemaObj => ({
+      type: "object",
+      properties: { name: { type: "string" }, ...extra },
+    });
+    const withPicture = (base: JSONSchemaObj = profile()): JSONSchemaObj => ({
+      ...base,
+      properties: { ...base.properties, picture: { type: "FabricBytes" } },
+    });
+    const update = (previous: JSONSchema, candidate: JSONSchema) => () =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(
+          { type: "object", properties: { player: previous } },
+          oldPattern.resultSchema,
+        ),
+        pattern(
+          { type: "object", properties: { player: candidate } },
+          oldPattern.resultSchema,
+        ),
+      );
+    // Each wraps an object in a union node whose other keywords are
+    // descriptive annotations or keywords judged at the node itself.
+    const unions: ((branch: JSONSchema) => JSONSchema)[] = [
+      (branch) => ({ anyOf: [branch, { type: "null" }] }),
+      (branch) => ({ anyOf: [branch, { type: "null" }], default: null }),
+      (branch) => ({ anyOf: [{ type: "undefined" }, branch] }),
+      (branch) => ({ anyOf: [branch, { type: "null" }], asCell: ["cell"] }),
+      (branch) => ({
+        anyOf: [branch, { type: "null" }],
+        description: "The player, once one has joined.",
+        title: "Player",
+      }),
+    ];
+
+    it("does not throw for a new optional field on a branch, as on a bare object", () => {
+      expect(update(profile(), withPicture())).not.toThrow();
+      for (const union of unions) {
+        expect(update(union(profile()), union(withPicture()))).not.toThrow();
+      }
+      expect(
+        update(unions[0]!(profile()), {
+          ...withPicture(),
+          type: ["object", "null"],
+        }),
+      ).not.toThrow();
+      expect(update(profile(), unions[0]!(withPicture()))).not.toThrow();
+    });
+
+    it("does not throw for a union of open objects becoming one of them, as for the bare objects", () => {
+      const other = profile({ score: { type: "number" } });
+      expect(update(other, profile())).not.toThrow();
+      expect(update({ anyOf: [profile(), other] }, profile())).not.toThrow();
+    });
+
+    it("does not throw for a new optional field on a referenced branch", () => {
+      const argument = (player: JSONSchemaObj): JSONSchema => ({
+        type: "object",
+        properties: {
+          player: { anyOf: [{ $ref: "#/$defs/Player" }, { type: "null" }] },
+        },
+        $defs: { Player: player },
+      });
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(argument(profile()), oldPattern.resultSchema),
+          pattern(argument(withPicture()), oldPattern.resultSchema),
+        )
+      ).not.toThrow();
+    });
+
+    it("throws on a branch for each change it throws for on a bare object", () => {
+      const refusals: [JSONSchemaObj, JSONSchemaObj][] = [
+        [profile(), { ...withPicture(), required: ["picture"] }],
+        [
+          { ...profile(), additionalProperties: { type: "string" } },
+          {
+            ...withPicture(),
+            additionalProperties: { type: "string" },
+          },
+        ],
+        [withPicture(), profile({ picture: { type: "string" } })],
+      ];
+      for (const [previous, candidate] of refusals) {
+        expect(update(previous, candidate)).toThrow(/argument\.player/);
+        for (const union of unions) {
+          expect(update(union(previous), union(candidate))).toThrow(
+            /argument\.player/,
+          );
+        }
+      }
+    });
+
+    it("throws for a new field on a branch when the union node constrains a value", () => {
+      const unions: ((branch: JSONSchema) => JSONSchema)[] = [
+        (branch) => ({
+          properties: { picture: { type: "string" } },
+          anyOf: [branch, { type: "null" }],
+        }),
+        (branch) => ({
+          $comment: "emptyProperties",
+          anyOf: [branch, { type: "null" }],
+        }),
+      ];
+      for (const union of unions) {
+        expect(update(union(profile()), union(withPicture()))).toThrow(
+          /argument\.player/,
+        );
+      }
+    });
   });
 
   it("preserves required result guarantees and allows new required results", () => {

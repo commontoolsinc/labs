@@ -1,6 +1,6 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { dirname, fromFileUrl, relative, SEPARATOR } from "@std/path";
+import { dirname, fromFileUrl, join, relative, SEPARATOR } from "@std/path";
 import { walk } from "@std/fs/walk";
 import { FakeTime } from "@std/testing/time";
 import { type GitHubRun, RunLists, type RunReading } from "./github-runs.ts";
@@ -9,6 +9,8 @@ import {
   GitHubStatusError,
   RUN_LIST_ACCESS,
 } from "./lib.ts";
+import { RELAY_VOUCH_MS } from "./github-webhooks.ts";
+import { FakeRelay, workflowRunPayload } from "./test/webhook-relay.ts";
 
 const REPO = "example/repo";
 const WORKFLOW = "ci.yml";
@@ -52,6 +54,8 @@ class FakeGitHub {
   list: GitHubRun[];
   /** What every filtered list answers. */
   filtered: GitHubRun[] = [];
+  /** Runs that can be read by their ids that the list leaves out. */
+  unlisted: GitHubRun[] = [];
   /** Every path requested, in order. */
   paths: string[] = [];
   /**
@@ -88,7 +92,9 @@ class FakeGitHub {
     const url = new URL(path, "https://api.github.com/");
     const id = path.match(/\/actions\/runs\/(\d+)$/);
     if (id) {
-      const found = this.list.find((held) => held.id === Number(id[1]));
+      const found = [...this.list, ...this.unlisted].find((held) =>
+        held.id === Number(id[1])
+      );
       if (!found) {
         return Promise.reject(
           new GitHubStatusError(`GitHub API ${path} failed: HTTP 404`, 404),
@@ -1050,6 +1056,40 @@ describe("github-runs", () => {
           expect(github.pages).toEqual([]);
         });
 
+        it("keeps the runs a failed reading read when another reader reads", async () => {
+          const github = new FakeGitHub(runs(400, 1));
+          const request = github.request;
+          const page = (path: string) =>
+            new URL(path, "https://api.github.com/").searchParams.get("page");
+          github.request = <T>(
+            path: string,
+            options: GitHubRequestOptions,
+          ): Promise<T> =>
+            page(path) === "4"
+              ? Promise.reject(new Error("HTTP 502"))
+              : request<T>(path, options);
+          const lists = new RunLists();
+          await expect(
+            read(lists, github, {
+              reader: "deep",
+              until: (held) => held.id === 1,
+            }),
+          ).rejects.toThrow("HTTP 502");
+          github.request = request;
+          await read(lists, github, {
+            reader: "shallow",
+            until: (held) => held.id === 390,
+          });
+          github.paths = [];
+
+          await read(lists, github, {
+            reader: "deep",
+            until: (held) => held.id === 1,
+          });
+
+          expect(github.pages).toEqual(["4@97", "5@96"]);
+        });
+
         it("rejects a page whose runs are not listed newest first", async () => {
           const github = new FakeGitHub([run(5), run(7), run(6)]);
 
@@ -1075,6 +1115,599 @@ describe("github-runs", () => {
           expect(
             seen.every((options) => options.runListAccess === RUN_LIST_ACCESS),
           ).toBe(true);
+        });
+
+        describe("given the relay", () => {
+          /** Has `relay` deliver `run` as a run of the workflow `file`. */
+          const deliver = (relay: FakeRelay, held: GitHubRun, file = WORKFLOW) =>
+            relay.deliver(
+              "workflow_run",
+              workflowRunPayload(REPO, held, `.github/workflows/${file}`),
+            );
+
+          /** The filtered lists requested, by their query. */
+          const filtered = (github: FakeGitHub) =>
+            github.paths.filter((path) => path.includes("branch="));
+
+          it("reads nothing from GitHub while the relay vouches for the runs held", async () => {
+            using time = new FakeTime();
+            const relay = new FakeRelay();
+            await relay.open();
+            const github = new FakeGitHub(runs(30, 1));
+            const lists = new RunLists(undefined, relay.webhooks);
+            await read(lists, github, { recheck: [{ branch: "main" }] });
+            github.paths = [];
+            time.tick(HEAD_REUSE_MS);
+
+            const read2 = await read(lists, github, {
+              recheck: [{ branch: "main" }],
+            });
+
+            expect(ids(read2)).toEqual(ids(runs(30, 1)));
+            expect(github.paths).toEqual([]);
+          });
+
+          it("reads the top and the filtered lists again once the connection they were read under ends", async () => {
+            using time = new FakeTime();
+            const relay = new FakeRelay();
+            await relay.open();
+            const github = new FakeGitHub(runs(30, 1));
+            const lists = new RunLists(undefined, relay.webhooks);
+            await read(lists, github, { recheck: [{ branch: "main" }] });
+            await relay.end();
+            await relay.deliver("ping", {});
+            github.paths = [];
+            time.tick(HEAD_REUSE_MS);
+
+            await read(lists, github, { recheck: [{ branch: "main" }] });
+
+            expect(github.pages).toEqual(["1@20"]);
+            expect(filtered(github)).toHaveLength(1);
+          });
+
+          it("reads the top again when it was last read before the connection opened, and then no more", async () => {
+            using time = new FakeTime();
+            const relay = new FakeRelay();
+            const github = new FakeGitHub(runs(30, 1));
+            const lists = new RunLists(undefined, relay.webhooks);
+            await read(lists, github);
+            await relay.open();
+            time.tick(HEAD_REUSE_MS);
+            await read(lists, github);
+            github.paths = [];
+            time.tick(HEAD_REUSE_MS);
+
+            await read(lists, github);
+
+            expect(github.paths).toEqual([]);
+          });
+
+          it("returns a delivered run held in place of the copy held, without reading GitHub", async () => {
+            using time = new FakeTime();
+            const relay = new FakeRelay();
+            await relay.open();
+            const github = new FakeGitHub([
+              run(30, { status: "in_progress", conclusion: null }),
+              ...runs(29, 1),
+            ]);
+            const lists = new RunLists(undefined, relay.webhooks);
+            await read(lists, github);
+            github.paths = [];
+            const finished = run(30, {
+              conclusion: "failure",
+              updated_at: new Date(Date.UTC(2026, 0, 2)).toISOString(),
+            });
+            await deliver(relay, finished);
+            time.tick(HEAD_REUSE_MS);
+
+            const read2 = await read(lists, github);
+
+            expect(read2[0]).toEqual({
+              ...finished,
+              name: "CI",
+              path: `.github/workflows/${WORKFLOW}`,
+            });
+            expect(github.paths).toEqual([]);
+          });
+
+          it("keeps the copy held when the delivered copy is older", async () => {
+            const relay = new FakeRelay();
+            await relay.open();
+            const github = new FakeGitHub(runs(30, 1));
+            const lists = new RunLists(undefined, relay.webhooks);
+            await read(lists, github);
+            await deliver(
+              relay,
+              run(30, {
+                status: "in_progress",
+                conclusion: null,
+                updated_at: new Date(Date.UTC(2025, 0, 1)).toISOString(),
+              }),
+            );
+
+            const read2 = await read(lists, github);
+
+            expect(read2[0]).toEqual(run(30));
+          });
+
+          it("takes in the newest of several delivered copies of a run, in whatever order they arrive", async () => {
+            const relay = new FakeRelay();
+            await relay.open();
+            const github = new FakeGitHub(runs(30, 1));
+            const lists = new RunLists(undefined, relay.webhooks);
+            await read(lists, github);
+            const at = (day: number) => new Date(Date.UTC(2026, 0, day)).toISOString();
+            await deliver(relay, run(30, { conclusion: "failure", updated_at: at(3) }));
+            await deliver(
+              relay,
+              run(30, { status: "in_progress", conclusion: null, updated_at: at(2) }),
+            );
+
+            const read2 = await read(lists, github);
+
+            expect(read2[0].conclusion).toBe("failure");
+          });
+
+          it("reads the top again at once when a run newer than every run held is delivered", async () => {
+            const relay = new FakeRelay();
+            await relay.open();
+            const github = new FakeGitHub(runs(30, 1));
+            const lists = new RunLists(undefined, relay.webhooks);
+            await read(lists, github);
+            github.paths = [];
+            github.list = runs(31, 1);
+            await deliver(relay, run(31));
+
+            const read2 = await read(lists, github);
+
+            expect(ids(read2)).toEqual(ids(runs(31, 1)));
+            expect(github.pages).toEqual(["1@20"]);
+          });
+
+          it("reads the top again on each reading until it shows a delivered run the list was behind", async () => {
+            const relay = new FakeRelay();
+            await relay.open();
+            const github = new FakeGitHub(runs(30, 1));
+            const lists = new RunLists(undefined, relay.webhooks);
+            await read(lists, github);
+            github.unlisted = [run(31)];
+            await deliver(relay, run(31));
+            expect(ids(await read(lists, github))).toEqual(ids(runs(30, 1)));
+            github.list = runs(31, 1);
+            github.unlisted = [];
+            github.paths = [];
+
+            expect(ids(await read(lists, github))).toEqual(ids(runs(31, 1)));
+            expect(github.pages).toEqual(["1@20"]);
+            github.paths = [];
+            await read(lists, github);
+            expect(github.paths).toEqual([]);
+          });
+
+          it("stops reading the top for a delivered run once reading it by its id shows it deleted", async () => {
+            const relay = new FakeRelay();
+            await relay.open();
+            const github = new FakeGitHub(runs(30, 1));
+            const lists = new RunLists(undefined, relay.webhooks);
+            await read(lists, github);
+            await deliver(relay, run(31));
+            await read(lists, github);
+            expect(github.byId).toEqual([31]);
+            github.paths = [];
+
+            await read(lists, github);
+
+            expect(github.paths).toEqual([]);
+          });
+
+          it("places a delivered run the list leaves out below a newer run it shows", async () => {
+            const relay = new FakeRelay();
+            await relay.open();
+            const github = new FakeGitHub(runs(30, 1));
+            const lists = new RunLists(undefined, relay.webhooks);
+            await read(lists, github);
+            github.list = [run(32), ...runs(30, 1)];
+            github.unlisted = [run(31)];
+            await deliver(relay, run(31));
+            await deliver(relay, run(32));
+
+            expect(ids(await read(lists, github))).toEqual(ids(runs(32, 1)));
+            github.paths = [];
+            expect(ids(await read(lists, github))).toEqual(ids(runs(32, 1)));
+            expect(github.paths).toEqual([]);
+          });
+
+          it("keeps a delivered copy of a run over a copy the list shows updated at the same moment", async () => {
+            const relay = new FakeRelay();
+            await relay.open();
+            const running = run(31, { status: "in_progress", conclusion: null });
+            const github = new FakeGitHub(runs(30, 1));
+            const lists = new RunLists(undefined, relay.webhooks);
+            await read(lists, github);
+            github.list = [running, ...runs(30, 1)];
+            await deliver(relay, run(31, { updated_at: running.updated_at }));
+
+            const read2 = await read(lists, github);
+
+            expect(read2[0].status).toBe("completed");
+          });
+
+          it("keeps a delivered copy of a run over an older copy the list shows", async () => {
+            const relay = new FakeRelay();
+            await relay.open();
+            const running = run(30, { status: "in_progress", conclusion: null });
+            const github = new FakeGitHub([running, ...runs(29, 1)]);
+            const lists = new RunLists(undefined, relay.webhooks);
+            await read(lists, github);
+            const later = new Date(Date.UTC(2026, 0, 2)).toISOString();
+            github.unlisted = [run(31, { status: "queued", conclusion: null })];
+            await deliver(
+              relay,
+              run(30, { conclusion: "failure", updated_at: later }),
+            );
+            await deliver(relay, run(31, { updated_at: later }));
+
+            const read2 = await read(lists, github);
+            expect(read2[0].conclusion).toBe("failure");
+
+            github.list = [
+              run(31, { status: "queued", conclusion: null }),
+              running,
+              ...runs(29, 1),
+            ];
+            const read3 = await read(lists, github);
+            expect(ids(read3)).toEqual(ids(runs(31, 1)));
+            expect(read3[0].status).toBe("completed");
+            expect(read3[1].conclusion).toBe("failure");
+          });
+
+          it("reads the top again once RELAY_VOUCH_MS has passed since it was read, however the relay carries on", async () => {
+            using time = new FakeTime();
+            const relay = new FakeRelay();
+            await relay.open();
+            const github = new FakeGitHub(runs(30, 1));
+            const lists = new RunLists(undefined, relay.webhooks);
+            await read(lists, github);
+            github.paths = [];
+            // A delivery a minute keeps the connection heard.
+            const minutes = RELAY_VOUCH_MS / 60_000;
+            for (let minute = 1; minute < minutes; minute++) {
+              time.tick(60_000);
+              await relay.deliver("star", {});
+            }
+            await read(lists, github);
+            expect(github.paths).toEqual([]);
+            time.tick(60_000);
+            await relay.deliver("star", {});
+
+            await read(lists, github);
+
+            expect(github.pages).toEqual(["1@20"]);
+          });
+
+          it("passes over a run of another workflow or another repository", async () => {
+            const relay = new FakeRelay();
+            await relay.open();
+            const github = new FakeGitHub(runs(30, 1));
+            const lists = new RunLists(undefined, relay.webhooks);
+            await read(lists, github);
+            github.paths = [];
+            await deliver(relay, run(31), "other.yml");
+            await relay.deliver(
+              "workflow_run",
+              workflowRunPayload("example/other", run(32)),
+            );
+
+            const read2 = await read(lists, github);
+
+            expect(ids(read2)).toEqual(ids(runs(30, 1)));
+            expect(github.paths).toEqual([]);
+          });
+
+          it("takes in a run of a workflow read by its id", async () => {
+            const relay = new FakeRelay();
+            await relay.open();
+            const github = new FakeGitHub(runs(30, 1));
+            const lists = new RunLists(undefined, relay.webhooks);
+            const byId = () =>
+              lists.runs(github.request, REPO, 1, {
+                reader: "reader",
+                recheck: [],
+                wants: () => true,
+                until: () => false,
+              });
+            await byId();
+            github.list = runs(31, 1);
+            await relay.deliver(
+              "workflow_run",
+              workflowRunPayload(REPO, run(31), ".github/workflows/x.yml", 1),
+            );
+
+            expect(ids(await byId())).toEqual(ids(runs(31, 1)));
+          });
+        });
+
+        describe("given a file", () => {
+          let directory: string;
+          let file: string;
+
+          beforeEach(async () => {
+            directory = await Deno.makeTempDir({ prefix: "github-runs-" });
+            file = join(directory, "run-lists.json");
+          });
+
+          afterEach(async () => {
+            await Deno.remove(directory, { recursive: true });
+          });
+
+          it("reads only the top of the list after a restart once the runs below it are in the file", async () => {
+            const github = new FakeGitHub(runs(250, 1));
+            await read(new RunLists(file), github, {
+              until: (held) => held.id === 10,
+            });
+            github.paths = [];
+            github.list = runs(253, 1);
+
+            const read2 = await read(new RunLists(file), github, {
+              until: (held) => held.id === 10,
+            });
+
+            expect(ids(read2)).toEqual(ids(runs(253, 10)));
+            expect(github.pages).toEqual(["1@20"]);
+            expect(github.byId).toEqual([]);
+          });
+
+          it("reads from the top after a restart until it reaches the runs in the file", async () => {
+            const github = new FakeGitHub(runs(250, 1));
+            await read(new RunLists(file), github, {
+              until: (held) => held.id === 10,
+            });
+            github.paths = [];
+            github.list = runs(500, 1);
+
+            const read2 = await read(new RunLists(file), github, {
+              until: (held) => held.id === 10,
+            });
+
+            expect(ids(read2)).toEqual(ids(runs(500, 10)));
+            expect(github.pages).toEqual(["1@20", "1@100", "2@99", "3@98"]);
+          });
+
+          it("drops a run in the file that was deleted from the top of the list before a restart", async () => {
+            const github = new FakeGitHub(runs(300, 1));
+            await read(new RunLists(file), github, {
+              until: (held) => held.id === 250,
+            });
+            github.list = runs(301, 1).filter((held) => held.id !== 290);
+
+            const read2 = await read(new RunLists(file), github, {
+              until: (held) => held.id === 250,
+            });
+
+            expect(ids(read2)).toEqual(
+              ids(runs(301, 250)).filter((id) => id !== 290),
+            );
+          });
+
+          it("reads again by its id a run in the file that had not finished", async () => {
+            const github = new FakeGitHub(runs(100, 1));
+            github.list = github.list.map((held) =>
+              held.id === 30
+                ? run(30, { status: "in_progress", conclusion: null })
+                : held
+            );
+            await read(new RunLists(file), github, {
+              until: (held) => held.id === 10,
+            });
+            github.list = runs(100, 1);
+            github.paths = [];
+
+            const read2 = await read(new RunLists(file), github, {
+              until: (held) => held.id === 10,
+            });
+
+            expect(github.byId).toEqual([30]);
+            expect(read2.find((held) => held.id === 30)?.status).toBe(
+              "completed",
+            );
+          });
+
+          it("reads again by its id a run in the file that a `recheck` list shows run again", async () => {
+            const github = new FakeGitHub(runs(250, 1));
+            await read(new RunLists(file), github, {
+              until: (held) => held.id === 1,
+            });
+            const rerun = run(5, {
+              run_attempt: 2,
+              updated_at: "2026-02-01T00:00:00Z",
+            });
+            github.list = github.list.map((held) =>
+              held.id === 5 ? rerun : held
+            );
+            github.filtered = [rerun];
+            github.paths = [];
+
+            const read2 = await read(new RunLists(file), github, {
+              recheck: [{ branch: "main" }],
+              until: (held) => held.id === 1,
+            });
+
+            expect(github.byId).toEqual([5]);
+            expect(read2.find((held) => held.id === 5)?.run_attempt).toBe(2);
+          });
+
+          it("keeps in the file the runs a reading read before it failed", async () => {
+            const github = new FakeGitHub(runs(400, 1));
+            const request = github.request;
+            const page = (path: string) =>
+              new URL(path, "https://api.github.com/").searchParams.get("page");
+            github.request = <T>(
+              path: string,
+              options: GitHubRequestOptions,
+            ): Promise<T> =>
+              page(path) === "4"
+                ? Promise.reject(new Error("HTTP 502"))
+                : request<T>(path, options);
+            await expect(
+              read(new RunLists(file), github, {
+                until: (held) => held.id === 1,
+              }),
+            ).rejects.toThrow("HTTP 502");
+            github.request = request;
+            github.paths = [];
+
+            const read2 = await read(new RunLists(file), github, {
+              until: (held) => held.id === 1,
+            });
+
+            expect(ids(read2)).toEqual(ids(runs(400, 1)));
+            expect(github.pages).toEqual(["1@20", "4@97", "5@96"]);
+          });
+
+          it("reads only the top of the list after a restart when runs landed during the reading that filled the file", async () => {
+            const github = new FakeGitHub(runs(300, 1));
+            github.before = (requests) => {
+              if (requests === 2) github.list = runs(305, 1);
+            };
+            await read(new RunLists(file), github, {
+              until: (held) => held.id === 1,
+            });
+            github.before = () => {};
+            github.paths = [];
+
+            const read2 = await read(new RunLists(file), github, {
+              until: (held) => held.id === 1,
+            });
+
+            expect(ids(read2)).toEqual(ids(runs(305, 1)));
+            expect(github.pages).toEqual(["1@20"]);
+          });
+
+          it("logs a write of the file that fails, and writes it again after the next reading", async () => {
+            const github = new FakeGitHub(runs(30, 1));
+            const lists = new RunLists(join(directory, "absent", "lists.json"));
+            const logged: string[] = [];
+            const realError = console.error;
+            console.error = (...parts: unknown[]) =>
+              logged.push(parts.map(String).join(" "));
+            try {
+              const read1 = await read(lists, github);
+              expect(ids(read1)).toEqual(ids(runs(30, 1)));
+            } finally {
+              console.error = realError;
+            }
+            expect(logged.length).toBe(1);
+            expect(logged[0]).toContain("run lists could not be saved to");
+            await Deno.mkdir(join(directory, "absent"));
+
+            await read(lists, github, { reader: "second" });
+
+            github.paths = [];
+            await read(
+              new RunLists(join(directory, "absent", "lists.json")),
+              github,
+            );
+            expect(github.pages).toEqual(["1@20"]);
+          });
+
+          it("keeps in the file the heads of readings that finish together", async () => {
+            // The heads are held already, so the three readings finish while
+            // the file is still being written for the first of them.
+            const github = new FakeGitHub(runs(30, 1));
+            const lists = new RunLists(file);
+            const workflows = ["a.yml", "b.yml", "c.yml"];
+            const reading = (on: RunLists, workflow: string) =>
+              on.runs(github.request, REPO, workflow, {
+                reader: "reader",
+                recheck: [],
+                wants: () => true,
+                until: () => false,
+              });
+            for (const workflow of workflows) await reading(lists, workflow);
+            github.list = runs(32, 1);
+            await Deno.remove(file);
+
+            await Promise.all(
+              workflows.map((workflow) => reading(lists, workflow)),
+            );
+
+            github.paths = [];
+            const again = new RunLists(file);
+            for (const workflow of workflows) await reading(again, workflow);
+            expect(github.pages).toEqual(["1@20", "1@20", "1@20"]);
+          });
+
+          it("forgets a reader in the file that has not read for a day", async () => {
+            using time = new FakeTime();
+            const github = new FakeGitHub(runs(300, 1));
+            const shallow = () =>
+              read(new RunLists(file), github, {
+                reader: "shallow",
+                until: (held) => held.id === 290,
+              });
+            const deep = () =>
+              read(new RunLists(file), github, {
+                reader: "deep",
+                until: (held) => held.id === 1,
+              });
+            await deep();
+            await shallow();
+            time.tick(13 * 3_600_000);
+            await shallow();
+            time.tick(13 * 3_600_000);
+            await shallow();
+            github.paths = [];
+
+            await deep();
+
+            expect(github.pages).toEqual([
+              "1@20",
+              "1@100",
+              "2@99",
+              "3@98",
+              "4@97",
+            ]);
+          });
+
+          it("keeps in the file a reader that has read within a day", async () => {
+            using time = new FakeTime();
+            const github = new FakeGitHub(runs(300, 1));
+            await read(new RunLists(file), github, {
+              reader: "deep",
+              until: (held) => held.id === 1,
+            });
+            time.tick(23 * 3_600_000);
+            github.paths = [];
+
+            await read(new RunLists(file), github, {
+              reader: "deep",
+              until: (held) => held.id === 1,
+            });
+
+            expect(github.pages).toEqual(["1@20"]);
+          });
+
+          it("reads the whole list again after a day in which nobody read it", async () => {
+            using time = new FakeTime();
+            const github = new FakeGitHub(runs(300, 1));
+            await read(new RunLists(file), github, {
+              until: (held) => held.id === 1,
+            });
+            time.tick(24 * 3_600_000 + 1);
+            github.paths = [];
+
+            await read(new RunLists(file), github, {
+              until: (held) => held.id === 1,
+            });
+
+            expect(github.pages).toEqual([
+              "1@20",
+              "1@100",
+              "2@99",
+              "3@98",
+              "4@97",
+            ]);
+          });
         });
       });
     });

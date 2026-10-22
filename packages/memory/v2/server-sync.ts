@@ -5,6 +5,7 @@ import {
   DEFAULT_BRANCH,
   type EntitySnapshot,
   type GraphQuery,
+  type OperationWatchSpec,
   resolveScopeKey,
   type ScopeKey,
   type ScopeKeyIdentity,
@@ -14,7 +15,11 @@ import {
   type SessionSyncUpsert,
   type WatchSpec,
 } from "../v2.ts";
-import { toDirtyKey } from "./query.ts";
+import {
+  isGraphQueryCoveredByState,
+  toDirtyKey,
+  type TrackedGraphState,
+} from "./query.ts";
 
 /**
  * A session's cached snapshot of one tracked doc INSTANCE. `scopeKey` is
@@ -55,6 +60,7 @@ export const sameSnapshot = (
 
 export const isEmptySync = (sync: SessionSync): boolean =>
   sync.upserts.length === 0 && sync.removes.length === 0 &&
+  (sync.crossings?.length ?? 0) === 0 &&
   (sync.operationFields?.length ?? 0) === 0 && sync.viewPlans === undefined;
 
 /**
@@ -230,6 +236,56 @@ export const groupedQueries = (
     for (const root of watch.query.roots) existing.roots.push(root);
   }
   return grouped;
+};
+
+/** A watch whose query is a graph query, which is every kind but `operation`. */
+export type GraphQueryWatchSpec = Exclude<WatchSpec, OperationWatchSpec>;
+
+/** The graph-query watches among `watches`, by branch, each in list order. */
+export const graphWatchesByBranch = (
+  watches: readonly WatchSpec[],
+): Map<string, GraphQueryWatchSpec[]> => {
+  const grouped = new Map<string, GraphQueryWatchSpec[]>();
+  for (const watch of watches) {
+    if (watch.kind === "operation") continue;
+    const branch = watch.query.branch ?? "";
+    const existing = grouped.get(branch);
+    if (existing === undefined) grouped.set(branch, [watch]);
+    else existing.push(watch);
+  }
+  return grouped;
+};
+
+/** The roots of `watches` as one query on `branch`. */
+export const unionQuery = (
+  branch: string,
+  watches: readonly GraphQueryWatchSpec[],
+): GraphQuery => ({
+  branch,
+  roots: watches.flatMap((watch) => watch.query.roots),
+});
+
+/**
+ * Splits `watches`, all on the branch `state` tracks, by whether `state`
+ * already covers every root of theirs. Walking a covered watch would add
+ * nothing to the graph, so a caller leaves it unwalked and records it as
+ * covered (`SessionState.coveredWatchIds`), and walks the rest.
+ */
+export const partitionWatchesByCoverage = (
+  space: string,
+  state: TrackedGraphState,
+  watches: readonly GraphQueryWatchSpec[],
+): { covered: GraphQueryWatchSpec[]; uncovered: GraphQueryWatchSpec[] } => {
+  const covered: GraphQueryWatchSpec[] = [];
+  const uncovered: GraphQueryWatchSpec[] = [];
+  for (const watch of watches) {
+    if (isGraphQueryCoveredByState(space, state, watch.query)) {
+      covered.push(watch);
+    } else {
+      uncovered.push(watch);
+    }
+  }
+  return { covered, uncovered };
 };
 
 export const mergeWatchesById = (

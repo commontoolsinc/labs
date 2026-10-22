@@ -16,6 +16,10 @@ import { isAbsolute, relative } from "@std/path";
 
 import { PIECE_TARGETING_GUIDANCE } from "./piece-targeting.ts";
 import {
+  PATTERN_SOURCE_GUIDANCE,
+  RUN_PATTERN_GUIDANCE,
+} from "./tool-guidance.ts";
+import {
   type HarnessModelProviderId,
   isHarnessModelProviderId,
 } from "./config.ts";
@@ -168,6 +172,7 @@ import { OpenAICompatibleGatewayClient } from "./gateway/openai-client.ts";
 import {
   createHarnessHandleTable,
   defineOwnEntry,
+  markHandleDescribed,
   mintAddressHandle,
   mintReferentHandle,
   referentDraft,
@@ -200,6 +205,7 @@ import { collapseSupersededRunPatternDiagnostics } from "./run-pattern-diagnosti
 import { collapseSupersededRunPatternSources } from "./run-pattern-source-collapse.ts";
 import {
   type HarnessOpeningResearch,
+  type HarnessRunState,
   isTerminalHarnessRunStatus,
 } from "./run-state.ts";
 import {
@@ -219,6 +225,20 @@ import {
   parseSubagentReturnSchema,
   validateAndSanitizeSubagentReturn,
 } from "./subagent-return.ts";
+import {
+  classifyTask,
+  type HarnessTaskClassification,
+  type HarnessTaskShape,
+} from "./task-classification.ts";
+import {
+  classifiedShape,
+  type RunShape,
+  sendsSection,
+} from "./prompt-sections.ts";
+import {
+  DEFAULT_HARNESS_RUN_DEPTH,
+  type HarnessRunDepth,
+} from "./contracts/run-depth.ts";
 import { createResearchRunner } from "./research/runner.ts";
 import { researchPatternRecords } from "./research/context.ts";
 import { REVISION_VERIFICATION_GUIDANCE } from "./revision-verification.ts";
@@ -230,7 +250,10 @@ import { projectHarnessResearchKitForModel } from "./research/model-projection.t
 import { isBrowserScreenshotOutput } from "./tools/browser.ts";
 import { isEditFileToolSuccessOutput } from "./tools/edit-file.ts";
 import { isStructuredFileToolErrorOutput } from "./tools/file-errors.ts";
-import { loomCommandModelContextObservation } from "./tools/loom-commands.ts";
+import {
+  loomCommandModelContextObservation,
+  runCommandModelView,
+} from "./tools/loom-commands.ts";
 import { loomRetrievalModelContextObservation } from "./tools/loom-retrieval.ts";
 import { isReadFileToolSuccessOutput } from "./tools/read-file.ts";
 import {
@@ -264,7 +287,8 @@ import {
   type WebFetchToolOutput,
 } from "./tools/web-fetch.ts";
 
-const DEFAULT_MAX_MODEL_TURNS = 8;
+/** Root model turns a run gets when its host names no budget. */
+export const DEFAULT_MAX_MODEL_TURNS = 32;
 const BASH_CWD_MARKER_PREFIX = "__CF_HARNESS_CWD__";
 
 export interface CreateHarnessPromptLoopOptions
@@ -280,7 +304,11 @@ export interface CreateHarnessPromptLoopOptions
   /** Reserves the last root model turn for a partial answer without tools. */
   finalizeOnTurnLimit?: boolean;
 
-  /** Ends a host job after an accepted structured result, without a prose turn. */
+  /**
+   * Requires `submit_result` alone in its model turn, so a host job's result
+   * never shares the turn that ends the run with another tool call. An
+   * accepted result ends every run, with or without this.
+   */
   stopOnStructuredResult?: boolean;
 
   /**
@@ -305,6 +333,19 @@ export interface CreateHarnessPromptLoopOptions
 
   promptCacheMode?: "implicit" | "explicit";
   reasoningEffort?: string;
+
+  /**
+   * How far the caller wants the run taken; `standard` when absent. A deep
+   * run in the `fabric` domain gets the opening research pass, as an `author`
+   * task does at any depth.
+   */
+  depth?: HarnessRunDepth;
+
+  /**
+   * What the caller says about a fresh root task: its tags, its domains, or
+   * both, each taken in place of the classifier's.
+   */
+  taskShape?: HarnessTaskShape;
 
   /**
    * Reasoning effort for the `research` tool's private model turns. Research
@@ -542,6 +583,13 @@ const transcriptTimelineEntry = (
 
 const toErrorDetail = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+/**
+ * The host's answer to a turn that carried neither text nor a tool call, in a
+ * run that returns through `submit_result`.
+ */
+const EMPTY_TURN_NOTICE =
+  "Host completion check: the last turn carried no words and no tool call. Call submit_result with the answer, or with why it cannot be given.";
 
 const PROMPT_LOOP_MODEL_TURNS = Symbol("cf-harness.prompt-loop.model-turns");
 
@@ -1231,7 +1279,11 @@ export const seedSubagentHandleTable = (
   }
   return {
     ...createHarnessHandleTable(childRunId),
-    entries: [...seeded.values()].map((entry) => ({ ...entry })),
+    // A child looks at a handle's shape itself before read_value admits it,
+    // so a parent's describe does not carry over.
+    entries: [...seeded.values()].map(({ described: _described, ...entry }) =>
+      entry
+    ),
     ...(seededReferents.size > 0
       ? {
         referents: [...seededReferents.values()].map((referent) => ({
@@ -1663,6 +1715,7 @@ const buildSubagentSystemPrompt = (
           ]
           : []),
         "Pass pattern source inline as the run_pattern `sourceText` argument. You have no write_file or edit_file; do not try to author patterns as workspace files.",
+        PATTERN_SOURCE_GUIDANCE,
         "Return a durable result object directly — `return { count, $UI: <div>…</div> }`. A whole-result derived wrapper is a known smell, but not a deterministic failure: after instantiation run_pattern checks the actual pattern pointer and refuses a piece materialized under a session-only identity.",
         "You own the write, compile-error, fix loop. A `compile-error` result is normal iteration material: read the diagnostic, correct the source, and call run_pattern again. Do not hand a compile error back to the parent as the answer.",
         PATTERN_AUTHORING_GUIDANCE,
@@ -1685,6 +1738,10 @@ const buildSubagentSystemPrompt = (
         }>} with an optional free-text "detail".`,
         "A failure is a complete, correct answer. Never return a reference to something you did not produce, never hand back a reference from an earlier step as if it were your result, and never present a partial or non-compiling pattern as a finished one.",
       ]
+      : []),
+    ...(profileConfig.profile !== PATTERN_AUTHOR_SUBAGENT_PROFILE &&
+        profileConfig.allowedToolIds.includes("run_pattern")
+      ? [RUN_PATTERN_GUIDANCE]
       : []),
     ...(profileConfig.profile === WEB_FETCH_SUBAGENT_PROFILE
       ? [
@@ -2134,6 +2191,9 @@ interface InvokedToolCallMessages {
 
   /** The admitted user-facing result before model-bound handle substitution. */
   taskOutcome?: HarnessTaskOutcome;
+
+  /** The call was a `submit_result` whose value the schema accepted. */
+  resultAccepted?: true;
 
   followupMessages?: readonly HarnessTranscriptMessage[];
   cfcModelContextObservations?:
@@ -3081,6 +3141,8 @@ export class CfHarnessPromptLoop {
   readonly #cacheAffinityKey?: string;
   readonly #promptCacheMode?: "implicit" | "explicit";
   readonly #reasoningEffort?: string;
+  readonly #depth: HarnessRunDepth;
+  readonly #taskShape: HarnessTaskShape;
   readonly #researchReasoningEffort?: string;
   readonly #compactThreshold?: number;
   readonly #subagentCompositionGuidance: boolean;
@@ -3230,6 +3292,8 @@ export class CfHarnessPromptLoop {
     this.#cacheAffinityKey = options.cacheAffinityKey;
     this.#promptCacheMode = options.promptCacheMode;
     this.#reasoningEffort = options.reasoningEffort;
+    this.#depth = options.depth ?? DEFAULT_HARNESS_RUN_DEPTH;
+    this.#taskShape = options.taskShape ?? {};
     this.#researchReasoningEffort = options.researchReasoningEffort;
     this.#compactThreshold = options.compactThreshold;
     this.#subagentCompositionGuidance = options.subagentCompositionGuidance ??
@@ -3265,7 +3329,7 @@ export class CfHarnessPromptLoop {
       // it — the acquiring parent, or a child sharing a handed-in runtime —
       // has nothing to run and is not backed.
       acquiredSkillsAvailable: acquiredSkillScriptBacking(
-        this.engine.ownedSandboxConfig ?? this.engine.ownedRunscSandboxConfig,
+        this.engine.ownedRunscSandboxConfig,
         this.engine.getRunState().acquiredSkills?.skills,
       ),
       docsCorpusAvailable: this.engine.docsCorpusAvailable,
@@ -3275,6 +3339,15 @@ export class CfHarnessPromptLoop {
       structuredResultAvailable: this.engine.structuredResultAvailable,
       clientActionsAvailable: this.engine.clientActionsAvailable,
     };
+  }
+
+  /**
+   * Whether the run must still name a piece before it ends: it requires one,
+   * has not browsed, and holds no naming receipt.
+   */
+  #pieceOutputOwed(): boolean {
+    return this.#requirePieceOutput && !this.#browsed &&
+      (this.engine.getRunState().assignedPieces?.length ?? 0) === 0;
   }
 
   #parentToolAllowance(): HarnessParentToolAllowance {
@@ -3584,6 +3657,7 @@ export class CfHarnessPromptLoop {
     if (
       options.task === undefined || this.engine.resumedRun ||
       runState.lineage !== undefined || !this.#allowedToolIds.has("research") ||
+      !sendsSection("opening-research", this.#shapeOf(runState)) ||
       isClosedResearchTask(options.task, runState)
     ) {
       return undefined;
@@ -3706,6 +3780,33 @@ export class CfHarnessPromptLoop {
     return { index: taskIndex, inserted: true };
   }
 
+  /** What decides which sections a run of this loop is sent. */
+  #shapeOf(
+    runState: Pick<HarnessRunState, "taskClassification">,
+  ): RunShape {
+    return classifiedShape(runState.taskClassification, this.#depth);
+  }
+
+  /**
+   * Tags a fresh root task with the kinds of work it calls for and the
+   * domains it happens in, taking each part the caller stated in its task
+   * shape, and records them on the run, before the host assembles the prompt
+   * they shape. They gate the opening research pass and the parent's browser
+   * guidance here.
+   */
+  async classifyTask(task: string): Promise<HarnessTaskClassification> {
+    const runState = this.engine.getRunState();
+    const classification = classifyTask(task, {
+      patternRefs: runState.patternRefs,
+      skillRegistry: runState.skillRegistry,
+      inputCells: runState.inputCells,
+      browserHost: this.engine.browserHost !== undefined &&
+        this.#allowedSubagentProfiles.has(BROWSER_SUBAGENT_PROFILE),
+    }, this.#taskShape);
+    await this.engine.recordTaskClassification(classification);
+    return classification;
+  }
+
   async runPrompt(
     options: RunHarnessPromptOptions,
   ): Promise<HarnessPromptLoopResult> {
@@ -3793,7 +3894,8 @@ export class CfHarnessPromptLoop {
     // A host the run cannot delegate to has nothing to brief the parent on.
     const browserHost = this.#allowedSubagentProfiles.has(
         BROWSER_SUBAGENT_PROFILE,
-      )
+      ) &&
+        sendsSection("browser-host-parent", this.#shapeOf(initialRunState))
       ? this.engine.browserHost
       : undefined;
     if (this.#requirePieceOutput || browserHost !== undefined) {
@@ -3942,7 +4044,8 @@ export class CfHarnessPromptLoop {
     for (const message of transcript) {
       await options.onTranscriptEvent?.({ message, transcript });
     }
-    // A normal final answer or an admitted finish_task ends the model loop.
+    // A normal final answer, an admitted finish_task, or an accepted
+    // submit_result ends the model loop.
     let finalAssistantText: string | undefined;
     let taskOutcome: HarnessTaskOutcome = { outcome: "completed" };
     try {
@@ -3997,20 +4100,42 @@ export class CfHarnessPromptLoop {
           runState: this.engine.getRunState(),
         });
       }
+      /** Appends a host notice that answers the turn just taken. */
+      const appendHostNotice = async (content: string): Promise<void> => {
+        const notice: HarnessTranscriptMessage = { role: "user", content };
+        turnNotices.add(notice);
+        transcript.push(notice);
+        await this.engine.persistTranscript(transcript);
+        reportTimeline.push(transcriptTimelineEntry(
+          notice,
+          transcript.length - 1,
+          this.engine.getRunState().updatedAt,
+          modelTurns,
+        ));
+        await options.onTranscriptEvent?.({ message: notice, transcript });
+      };
+      let emptyTurnNudged = false;
       while (modelTurns < maxModelTurns) {
         options.signal?.throwIfAborted();
         modelTurns += 1;
         const finalizing = this.#finalizeOnTurnLimit &&
           modelTurns === maxModelTurns;
-        if (
-          finalizing ||
-          (this.#finalizeOnTurnLimit && modelTurns === maxModelTurns - 2)
-        ) {
+        // Every run is warned two turns out, so a model can wrap up rather
+        // than be cut off; only a finalizing run also gets the last turn's
+        // notice, since only it holds that turn back for the answer.
+        if (finalizing || modelTurns === maxModelTurns - 2) {
           const budgetMessage: HarnessTranscriptMessage = {
             role: "user",
             content: finalizing
-              ? "Host turn budget: provide your final response now. Tools are unavailable. Summarize verified findings with source citations, explicitly identify unread material and uncertainty, and do not claim exhaustive coverage. This notice applies only to this user turn; subsequent user requests have a fresh budget."
-              : "Host turn budget: two root turns remain after this call, with the last reserved for your final response. Prioritize essential source reads and prepare verified findings and remaining gaps. This notice applies only to this user turn; subsequent user requests have a fresh budget.",
+              ? "Host turn budget: provide your final response now. Tools are unavailable. Report what you established and how, name what remains unchecked or uncertain, and do not claim the task is complete if it is not. This notice applies only to this user turn; subsequent user requests have a fresh budget."
+              : this.#finalizeOnTurnLimit
+              ? "Host turn budget: two root turns remain after this call, with the last reserved for your final response. Spend the next on what matters most, and prepare what you established and what remains open. This notice applies only to this user turn; subsequent user requests have a fresh budget."
+              : `Host turn budget: two model turns remain after this call, and the run fails if they end without your final response. Stop gathering and finish.${
+                // A run that returns through `submit_result` ends on the
+                // turn whose submission is accepted.
+                this.#allowedToolIds.has("submit_result")
+                  ? " Call submit_result on the next turn; an accepted result ends the run."
+                  : ""} This notice applies only to this user turn; subsequent user requests have a fresh budget.`,
           };
           turnNotices.add(budgetMessage);
           transcript.push(budgetMessage);
@@ -4028,6 +4153,7 @@ export class CfHarnessPromptLoop {
         const toolRun = {
           cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
           browserHost: this.engine.browserHost !== undefined,
+          subagentProfiles: [...this.#allowedSubagentProfiles],
         };
         try {
           response = await this.modelClient.complete({
@@ -4112,34 +4238,30 @@ export class CfHarnessPromptLoop {
         }
         if (toolCalls.length === 0) {
           if (assistantMessage.content.trim().length === 0) {
-            throw new HarnessControlError(
-              "provider-unavailable",
-              "The model returned an empty assistant response with no tool calls",
-            );
+            // A run that returns through `submit_result` is asked once to
+            // submit rather than failed on its first blank turn, provided a
+            // turn that still offers tools follows; a second blank turn
+            // fails it.
+            const toolTurnFollows = modelTurns <
+              maxModelTurns - (this.#finalizeOnTurnLimit ? 1 : 0);
+            if (
+              !toolTurnFollows || emptyTurnNudged ||
+              !this.#allowedToolIds.has("submit_result")
+            ) {
+              throw new HarnessControlError(
+                "provider-unavailable",
+                "The model returned an empty assistant response with no tool calls",
+              );
+            }
+            emptyTurnNudged = true;
+            await appendHostNotice(EMPTY_TURN_NOTICE);
+            continue;
           }
-          if (
-            !finalizing && this.#requirePieceOutput && !this.#browsed &&
-            (this.engine.getRunState().assignedPieces?.length ?? 0) === 0
-          ) {
-            const correction: HarnessTranscriptMessage = {
-              role: "user",
-              content:
-                "Host completion check: this run has no successful assign_slug receipt. " +
+          if (!finalizing && this.#pieceOutputOwed()) {
+            await appendHostNotice(
+              "Host completion check: this run has no successful assign_slug receipt. " +
                 PIECE_OUTPUT_GUIDANCE,
-            };
-            turnNotices.add(correction);
-            transcript.push(correction);
-            await this.engine.persistTranscript(transcript);
-            reportTimeline.push(transcriptTimelineEntry(
-              correction,
-              transcript.length - 1,
-              this.engine.getRunState().updatedAt,
-              modelTurns,
-            ));
-            await options.onTranscriptEvent?.({
-              message: correction,
-              transcript,
-            });
+            );
             continue;
           }
           finalAssistantText = assistantMessage.content;
@@ -4211,6 +4333,17 @@ export class CfHarnessPromptLoop {
         // Every invocation has settled, and none rejected: a rejection is
         // the turn's failure and was thrown above.
         const invokedToolCalls = await Promise.all(invocations);
+        // An accepted result is the run's return, so the turn that made it
+        // is the run's last: the model is asked for nothing further, and a
+        // turn it would have spent cannot lose the result. The words written
+        // beside the call are the final answer, which may be empty. A run
+        // that still owes a piece keeps going until it names one.
+        if (
+          invokedToolCalls.some((invoked) => invoked.resultAccepted === true) &&
+          !this.#pieceOutputOwed()
+        ) {
+          finalAssistantText = assistantMessage.content;
+        }
         for (const invokedToolCall of invokedToolCalls) {
           const toolMessage = invokedToolCall.toolMessage;
           const outcome = invokedToolCall.taskOutcome;
@@ -4406,6 +4539,28 @@ export class CfHarnessPromptLoop {
     if (minted.table !== table) {
       await this.engine.recordHandleTable(minted.table);
     }
+  }
+
+  /**
+   * Helper for `#invokeToolCall()`, which records on the handle that
+   * `describe_handle` answered for it, which is what admits a `read_value` of
+   * that handle. A token the table does not hold, or a refusal, marks nothing.
+   */
+  async #recordDescribedHandle(
+    toolId: BuiltinToolId,
+    output: unknown,
+  ): Promise<void> {
+    if (
+      toolId !== "describe_handle" || !isObjectNotArray(output) ||
+      output.known !== true || output.error !== undefined ||
+      typeof output.token !== "string"
+    ) {
+      return;
+    }
+    const table = this.engine.handleTable;
+    if (table === undefined) return;
+    const marked = markHandleDescribed(table, output.token);
+    if (marked !== table) await this.engine.recordHandleTable(marked);
   }
 
   /**
@@ -4743,10 +4898,10 @@ export class CfHarnessPromptLoop {
         : {}),
     });
     const recordPolicyEvent = async (
-      event: Parameters<CfHarnessEngine["recordPolicyEvent"]>[0],
+      ...args: Parameters<CfHarnessEngine["recordPolicyEvent"]>
     ): Promise<void> => {
       const index = this.engine.getRunState().policyEvents.length;
-      await this.engine.recordPolicyEvent(event);
+      await this.engine.recordPolicyEvent(...args);
       policyEventIndexes.push(index);
     };
     if (!this.#allowedToolIds.has(toolId)) {
@@ -4987,7 +5142,7 @@ export class CfHarnessPromptLoop {
           toolInputSummary,
           detail,
           observationDenied: denial,
-        });
+        }, { failureKind: "subagent_profile_not_allowed" });
         recordActivity({
           type: "cf-harness.tool-activity",
           ...baseActivity("denied", "not-run"),
@@ -5183,6 +5338,13 @@ export class CfHarnessPromptLoop {
           toolId,
           input,
           signal,
+          evaluateToolPolicy(
+            this.engine.getRunState().cfcEnforcementMode,
+            tool.descriptor,
+            "side-effect",
+            promptSlotBinding,
+            input,
+          ).allowed,
         );
       signal?.throwIfAborted();
     } catch (error) {
@@ -5246,6 +5408,7 @@ export class CfHarnessPromptLoop {
       result.output,
     );
     await this.#persistRunPatternSource(toolId, input, result.resultRef);
+    await this.#recordDescribedHandle(toolId, result.output);
     const modelOutputResult = await this.#modelFacingToolOutput(
       toolId,
       result.output,
@@ -5320,18 +5483,17 @@ export class CfHarnessPromptLoop {
         ...labeled,
       };
     }
-    const taskOutcome: HarnessTaskOutcome | undefined =
-      this.#stopOnStructuredResult && toolId === "submit_result" &&
-        isObjectNotArray(result.output) && result.output.status === "ok"
-        ? { outcome: "completed", answer: "Structured result submitted." }
-        : toolId === "finish_task" &&
-            isObjectNotArray(result.output) && result.output.status === "ok" &&
-            "taskOutcome" in result.output
-        ? readHarnessTaskOutcome(result.output.taskOutcome)
-        : undefined;
+    const taskOutcome = toolId === "finish_task" &&
+        isObjectNotArray(result.output) && result.output.status === "ok" &&
+        "taskOutcome" in result.output
+      ? readHarnessTaskOutcome(result.output.taskOutcome)
+      : undefined;
+    const resultAccepted = toolId === "submit_result" &&
+      isObjectNotArray(result.output) && result.output.status === "ok";
     return {
       toolMessage,
       ...(taskOutcome !== undefined ? { taskOutcome } : {}),
+      ...(resultAccepted ? { resultAccepted } : {}),
       ...labeled,
     };
   }
@@ -5537,10 +5699,15 @@ export class CfHarnessPromptLoop {
       };
     }
     if (toolId === "assign_slug" && isObjectNotArray(output)) {
-      // The slug is the model's own word and the URL is composed from the
-      // session's API URL and space name, so neither is a fabric identifier;
-      // the piece id stays in the artifact, and the error text is scrubbed.
-      const { pieceId: _pieceId, ...publicOutput } = output;
+      // The slug is the model's own word. The piece id, the space's DID, and
+      // the URL that carries it stay in the artifact, where the console reads
+      // the address a person opens; the error text is scrubbed.
+      const {
+        pieceId: _pieceId,
+        space: _space,
+        url: _url,
+        ...publicOutput
+      } = output;
       const scrubbed: Record<string, unknown> = { ...publicOutput };
       if (typeof scrubbed.message === "string") {
         scrubbed.message = scrubBareFabricIdentifiers(scrubbed.message);
@@ -5551,7 +5718,7 @@ export class CfHarnessPromptLoop {
           createHarnessTranscriptOmissionRuleRecord(
             "artifact-only",
             resultRef,
-            presentFieldPointers(output, ["pieceId"]),
+            presentFieldPointers(output, ["pieceId", "space", "url"]),
           ),
           createHarnessTranscriptOmissionRuleRecord(
             "bare-fabric-identifier-scrub",
@@ -5640,23 +5807,23 @@ export class CfHarnessPromptLoop {
         ),
       };
     }
-    if (
-      (toolId === "run_command" || toolId === "run_read_command") &&
-      isObjectNotArray(output)
-    ) {
-      // A command's answer is measured like a retrieval row: the model sees
-      // the entry, and the answer's label stays on the artifact as the
+    if (toolId === "read_value" && isObjectNotArray(output)) {
+      // The value reaches the model; its label stays on the artifact as the
       // observation the run's model context accumulates.
-      const { cfc: _cfc, ...publicOutput } = output;
-      const observation = loomCommandModelContextObservation(
-        output,
-        resultRef,
-        toolCallId,
-      );
+      const { cfc, ...publicOutput } = output;
+      const label = isObjectNotArray(cfc) ? cfc.observedLabel : undefined;
       return {
         output: stripInternalToolFields(publicOutput),
-        ...(observation !== undefined
-          ? { cfcModelContextObservations: [observation] }
+        ...(label !== undefined
+          ? {
+            cfcModelContextObservations: [{
+              toolCallId,
+              toolId,
+              outputId: resultRef.outputId,
+              channels: ["output" as const],
+              label: label as IFCLabel,
+            }],
+          }
           : {}),
         omissionRules: omissionRules(
           createHarnessTranscriptOmissionRuleRecord(
@@ -5664,10 +5831,38 @@ export class CfHarnessPromptLoop {
             resultRef,
             presentFieldPointers(output, ["cfc"]),
           ),
+        ),
+      };
+    }
+    if (
+      (toolId === "run_command" || toolId === "run_read_command") &&
+      isObjectNotArray(output)
+    ) {
+      // A command's answer is measured like a retrieval row: the model sees
+      // the entry, and the answer's label stays on the artifact as the
+      // observation the run's model context accumulates — for a batch, each
+      // result's entry and one observation joining their labels.
+      const view = runCommandModelView(output);
+      const observation = loomCommandModelContextObservation(
+        output,
+        resultRef,
+        toolCallId,
+      );
+      return {
+        output: stripInternalToolFields(view.output),
+        ...(observation !== undefined
+          ? { cfcModelContextObservations: [observation] }
+          : {}),
+        omissionRules: omissionRules(
+          createHarnessTranscriptOmissionRuleRecord(
+            "artifact-only",
+            resultRef,
+            view.artifactOnlyPointers,
+          ),
           createHarnessTranscriptOmissionRuleRecord(
             "model-context-truncation",
             resultRef,
-            output.truncated === true ? ["/entry"] : [],
+            view.truncationPointers,
           ),
         ),
       };
@@ -5826,7 +6021,8 @@ export class CfHarnessPromptLoop {
   async #invokeBuiltinTool<TToolId extends BuiltinToolId>(
     toolId: TToolId,
     input: Record<string, unknown>,
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    sideEffectsAuthorized: boolean,
   ): Promise<{
     output: Awaited<ReturnType<CfHarnessEngine["invokeBuiltinTool"]>>["output"];
     resultRef: ToolResultRef;
@@ -5834,7 +6030,7 @@ export class CfHarnessPromptLoop {
     const result = await this.engine.invokeBuiltinTool(
       toolId,
       input as unknown as BuiltinToolInputMap[TToolId],
-      signal !== undefined ? { signal } : {},
+      { ...(signal !== undefined ? { signal } : {}), sideEffectsAuthorized },
     );
     return {
       output: result.output,
@@ -5935,14 +6131,12 @@ export class CfHarnessPromptLoop {
       runId: childRunId,
       lineage: childLineage,
       // What sandbox a child gets depends on how this run's was made: see
-      // `childSandboxOptions`. Under the direct runsc driver every child builds
-      // a runtime of its own; under Docker a child shares this run's unless it
-      // mounts an acquired skill.
+      // `childSandboxOptions`. Where this engine built its runtime, every
+      // child builds a runtime of its own; where it was handed one, the
+      // child shares it.
       ...childSandboxOptions({
         sandbox: this.engine.sandbox,
-        ownedSandboxConfig: this.engine.ownedSandboxConfig,
         ownedRunscSandboxConfig: this.engine.ownedRunscSandboxConfig,
-        configuredSandbox: this.engine.config.sandbox,
       }, childAcquiredSkill),
       // Whichever of those it is, the child runs on the runtime this run's
       // entrypoint selected, and records that it was selected the same way.

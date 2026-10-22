@@ -6,6 +6,11 @@ export type {
   ResolvedLabelReadOptions,
 } from "./label-view.ts";
 export {
+  type ConsumedLocation,
+  exchangeEachObservation,
+  joinLocationIntegrity,
+} from "./access-integrity.ts";
+export {
   type CfcCellLinkRefPayload,
   linkCfcLabelView,
   stripSigilCfcLabelViews,
@@ -213,8 +218,11 @@ export type {
   RuleFiring,
 } from "./exchange-eval.ts";
 export {
+  admitsRulesOfKind,
   DEFAULT_EXCHANGE_FUEL,
   evaluateExchangeRules,
+  type ExchangeRuleKind,
+  isValueIntrinsicExchangeRule,
 } from "./exchange-eval.ts";
 export type {
   CfcGrant,
@@ -255,6 +263,7 @@ export {
 } from "./space-membership.ts";
 export {
   CFC_PREFIX_PROVENANCE_MAX_WRITES,
+  collectConsumedLabel,
   describeSinkReleaseRefusal,
   flowLabelWorkExists,
   gatedSinkRequestExists,
@@ -407,6 +416,7 @@ export {
   uniqueCfcAtoms,
 } from "./observation.ts";
 export {
+  canonicalizeCfcSchemaDocument,
   cfcSchemaIsFalse,
   cfcSchemaIsInternalKey,
   cfcSchemaIsTrue,

@@ -36,7 +36,12 @@ import {
   type CommonfabricDebugState,
   exposeCommonfabricGlobals,
 } from "../lib/debug-utils.ts";
-import { COMMIT_SHA, ENVIRONMENT, EXPERIMENTAL } from "../lib/env.ts";
+import {
+  COMMIT_SHA,
+  ENVIRONMENT,
+  experimentalForDeployment,
+  shellDeployment,
+} from "../lib/env.ts";
 import { runtimeHostFlags } from "../lib/host-toggles.ts";
 import { type BrowserTelemetry, initBrowserOtel } from "../lib/otel.ts";
 import { RefusedSpaceRetry } from "../lib/refused-space-retry.ts";
@@ -45,6 +50,7 @@ import {
   getThemePreference,
   type ThemePreference,
 } from "../lib/theme-preference.ts";
+import type { XAppView } from "./AppView.ts";
 import {
   BaseView,
   type Command,
@@ -270,10 +276,16 @@ export class XRootView extends BaseView implements ShellApp {
         });
         this.#telemetry = telemetry ?? undefined;
 
+        // Awaited at each creation; kept unless the read failed for a
+        // transient reason (holdDeployment). A later value does not recreate
+        // this runtime. The first creation takes the read the shell's entry
+        // started, usually settled by now.
+        const deployment = await shellDeployment.get();
         const rt = await RuntimeInternals.create({
           identity: app.identity,
           apiUrl: app.apiUrl,
-          experimental: EXPERIMENTAL,
+          memoryUrl: deployment.memoryUrl,
+          experimental: experimentalForDeployment(deployment.experimental),
           // Select the deployed shell's immutable worker asset graph. Source
           // runs keep the explicit mutable /scripts URL below.
           clientVersion: COMMIT_SHA,
@@ -327,6 +339,7 @@ export class XRootView extends BaseView implements ShellApp {
           this.runtime,
           () => this.runtime,
           () => this.space as DID,
+          () => this.#appView?.settling,
         );
 
         return rt;
@@ -735,6 +748,11 @@ export class XRootView extends BaseView implements ShellApp {
       console.log(`[app] ${time}s ${description}`, next);
     }
     return this.updateComplete.then((_) => undefined);
+  }
+
+  /** The app view this element renders, once it has rendered one. */
+  get #appView(): XAppView | null {
+    return this.renderRoot?.querySelector<XAppView>("x-app-view") ?? null;
   }
 
   getRuntimeSpaceDID(): DID | undefined {

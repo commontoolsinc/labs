@@ -5,10 +5,20 @@
  * another space: its sends are then refused, and, when the event drain
  * delivers it, so is its record that it handled the event. Read as a typed
  * link, the pointer joins no confidentiality. Every reader, the host vetting
- * the inbox a profile advertises, Home's ensure step, both the profiles'
- * pointers and the inbox the host names for it to adopt, Home's pointing step,
- * the seed step that points a profile once it is created, and a sender reading
- * through `profile-home.tsx`'s own types, therefore reads it as a typed link.
+ * the inbox a profile advertises, Home's ensure step, the profiles' pointers,
+ * the inbox the host names for it to adopt, the inbox Home holds, the ones it
+ * retains, the one its refusal record names and the one its replacement
+ * record names, Home's pointing and re-pointing steps, the seed step that
+ * points a profile once it is created, and a sender reading through
+ * `profile-home.tsx`'s own types, as FabriChat's manager does offering a room,
+ * therefore reads it as a typed link.
+ *
+ * The inbox an event names as refused is read as the same typed link, for a
+ * narrower reason. The event carries no label of its own, so that link read
+ * untyped joins nothing; what the type bars is naming a labeled member of the
+ * inbox's result through it, such as `offers`, which joins the inbox's label.
+ * For that link, the clause below about naming another member is the one that
+ * matters.
  *
  * The check is made by the type checker. A pointee that is `unknown` or `any`
  * fails to compile here under `deno task check`, and so does one naming a
@@ -23,11 +33,16 @@ import { expect } from "@std/expect";
 import type { Cell, NAME } from "commonfabric";
 import type { inboxPieceLinkSchema } from "@commonfabric/piece/ops";
 import type { Schema } from "@commonfabric/runner";
+import type { ChatManagerProfile } from "../fabrichat/schemas.tsx";
 import type {
   advertisedInbox,
   EnsurePrivateInboxEvent,
   PointTarget,
+  PrivateInboxHolder,
   PrivateInboxOutput,
+  PrivateInboxRefusalHolder,
+  PrivateInboxReplacementRecord,
+  RetainedPrivateInboxes,
 } from "./private-inbox.tsx";
 import type { SeedProfileTarget } from "./profile-create.tsx";
 import type { ProfileInbox } from "./profile-home.tsx";
@@ -60,6 +75,36 @@ const adoptedInboxReachesOnlyTheName: ReachesOnlyTheName<
   PointeeOf<{ piece?: EnsurePrivateInboxEvent["adopt"] }>
 > = true;
 
+const refusedInboxReachesOnlyTheName: ReachesOnlyTheName<
+  PointeeOf<
+    { piece?: NonNullable<EnsurePrivateInboxEvent["refused"]>["inbox"] }
+  >
+> = true;
+
+const heldInboxReachesOnlyTheName: ReachesOnlyTheName<
+  PointeeOf<PrivateInboxHolder>
+> = true;
+
+const retainedInboxReachesOnlyTheName: ReachesOnlyTheName<
+  PointeeOf<{ piece?: RetainedPrivateInboxes[number] }>
+> = true;
+
+const recordedRefusalReachesOnlyTheName: ReachesOnlyTheName<
+  PointeeOf<
+    { piece?: NonNullable<PrivateInboxRefusalHolder["refusal"]>["inbox"] }
+  >
+> = true;
+
+const replacedInboxReachesOnlyTheName: ReachesOnlyTheName<
+  PointeeOf<
+    {
+      piece?: NonNullable<
+        PrivateInboxReplacementRecord["replacement"]
+      >["inbox"];
+    }
+  >
+> = true;
+
 /** The pointee the host reads an advertised inbox's link as. */
 type HostPointee = Schema<typeof inboxPieceLinkSchema> extends Cell<infer T> ? T
   : Schema<typeof inboxPieceLinkSchema>;
@@ -78,6 +123,10 @@ const seedStepReachesOnlyTheName: ReachesOnlyTheName<
   PointeeOf<NonNullable<SeedProfileTarget["inbox"]>>
 > = true;
 
+const fabriChatManagerReachesOnlyTheName: ReachesOnlyTheName<
+  PointeeOf<NonNullable<ChatManagerProfile["inbox"]>>
+> = true;
+
 describe("private-inbox pointer type", () => {
   it("types the host's pointer as a link naming only the inbox's name", () => {
     expect(hostReachesOnlyTheName).toBe(true);
@@ -91,6 +140,26 @@ describe("private-inbox pointer type", () => {
     expect(adoptedInboxReachesOnlyTheName).toBe(true);
   });
 
+  it("types the inbox the ensure step records as refused as a link naming only the inbox's name", () => {
+    expect(refusedInboxReachesOnlyTheName).toBe(true);
+  });
+
+  it("types the inbox Home's refusal record names as a link naming only the inbox's name", () => {
+    expect(recordedRefusalReachesOnlyTheName).toBe(true);
+  });
+
+  it("types the inbox Home's replacement record names as a link naming only the inbox's name", () => {
+    expect(replacedInboxReachesOnlyTheName).toBe(true);
+  });
+
+  it("types the inbox Home holds as a link naming only the inbox's name", () => {
+    expect(heldInboxReachesOnlyTheName).toBe(true);
+  });
+
+  it("types each inbox Home retains as a link naming only the inbox's name", () => {
+    expect(retainedInboxReachesOnlyTheName).toBe(true);
+  });
+
   it("types the pointing step's pointer as a link naming only the inbox's name", () => {
     expect(pointingStepReachesOnlyTheName).toBe(true);
   });
@@ -101,5 +170,9 @@ describe("private-inbox pointer type", () => {
 
   it("types the seed step's pointer as a link naming only the inbox's name", () => {
     expect(seedStepReachesOnlyTheName).toBe(true);
+  });
+
+  it("types FabriChat's manager's pointer as a link naming only the inbox's name", () => {
+    expect(fabriChatManagerReachesOnlyTheName).toBe(true);
   });
 });

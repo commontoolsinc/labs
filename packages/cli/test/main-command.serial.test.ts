@@ -6,7 +6,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
 import { test as testCommand } from "../commands/test-command.ts";
-import { cf, checkStderr, stripAnsi, withEnv } from "./utils.ts";
+import { argv, cf, checkStderr, stripAnsi, withEnv } from "./utils.ts";
 import { COMMAND_SPELLING_END_DATE } from "../lib/deprecated-spelling.ts";
 
 class ExitError extends Error {
@@ -119,7 +119,7 @@ describe("main command", () => {
     // the handling committed. The two sit adjacent in `--help`, so a caveat
     // on one and silence on the other reads as a real difference between
     // them.
-    const { code, stdout, stderr } = await cf("piece call --help");
+    const { code, stdout, stderr } = await cf(argv`piece call --help`);
     checkStderr(stderr);
     const help = stripAnsi(stdout.join("\n")).replaceAll(/\s+/g, " ");
     expect(help).toContain(
@@ -145,7 +145,7 @@ describe("main command", () => {
       "<callable:string> [tail...:string]",
     );
     expect(call.getUsage()).toBe(expectedUsage);
-    const { code, stdout, stderr } = await cf("piece call --help");
+    const { code, stdout, stderr } = await cf(argv`piece call --help`);
     checkStderr(stderr);
     const help = stripAnsi(stdout.join("\n"));
     const renderedUsage = help.split("\n").find((line) =>
@@ -315,10 +315,9 @@ describe("main command", () => {
         ["piece get-label", "cell get-label"],
         ["piece set-label", "cell set-label"],
         ["piece recreate-root", "space recreate-root"],
-        ["piece set-home", "space set-home"],
       ] as const
     ) {
-      const old = await cf(`${superseded} --help`);
+      const old = await cf(argv`${superseded.split(" ")} --help`);
       expect(old.code, superseded).toBe(0);
       // One line, on stderr, naming both spellings and the date. Asserted on
       // stderr because the page itself is stdout: a notice written there
@@ -332,7 +331,7 @@ describe("main command", () => {
       );
       expect(old.stdout.join("\n"), superseded).not.toContain("is deprecated");
 
-      const current = await cf(`${blessed} --help`);
+      const current = await cf(argv`${blessed.split(" ")} --help`);
       expect(current.code, blessed).toBe(0);
       checkStderr(current.stderr);
       expect(current.stderr.join("\n"), blessed).not.toContain(
@@ -350,13 +349,13 @@ describe("main command", () => {
     // `set` reserves nothing, so the same refusal prints a page and the notice
     // rides it. Both are asserted, because a test that read only the silent
     // half would pass with the notice removed altogether.
-    const reserved = await cf("get --bogus");
+    const reserved = await cf(argv`get --bogus`);
     expect(reserved.code).toBe(2);
     expect(reserved.stderr.join("\n")).toContain('Unknown option "--bogus"');
     expect(reserved.stderr.join("\n")).not.toContain("is deprecated");
     expect(reserved.stdout).toEqual([]);
 
-    const unreserved = await cf("set --bogus");
+    const unreserved = await cf(argv`set --bogus`);
     expect(unreserved.code).toBe(2);
     expect(unreserved.stderr.join("\n")).toContain(
       "'cf set' is deprecated; spell it 'cf cell set'.",
@@ -414,11 +413,11 @@ describe("main command", () => {
           // asking it again proves nothing: those are driven instead, and
           // must refuse for want of a space when the variable is absent.
           //
-          // Declaring the option is not reading it. `space set-home` takes
+          // Declaring the option is not reading it. A command that takes
           // `--space` through the shared target flags and acts on the
-          // identity's own home space regardless, so it satisfies every
-          // structural check and belongs on no list of what the variable
-          // serves. That is the failure this shape exists to catch.
+          // identity's own home space regardless satisfies every structural
+          // check and belongs on no list of what the variable serves. That is
+          // the failure this shape exists to catch.
           const spaceLine = description.split("\n").find((text: string) =>
             text.includes("CF_SPACE    = ambient")
           );
@@ -465,11 +464,11 @@ describe("main command", () => {
           };
           for (const entry of named) {
             if (!entry.includes(" ")) continue;
-            const absent = await cf(entry, { env: reachesSpace });
+            const absent = await cf(entry.split(" "), { env: reachesSpace });
             expect(stripAnsi(absent.stderr.join("\n")), entry).toContain(
               'Missing required option: "--space"',
             );
-            const ambient = await cf(entry, {
+            const ambient = await cf(entry.split(" "), {
               env: { ...reachesSpace, CF_SPACE: "ambient" },
             });
             expect(stripAnsi(ambient.stderr.join("\n")), entry).not.toContain(
@@ -486,10 +485,10 @@ describe("main command", () => {
     // one. A stale key here is silent: the command runs, the list selector
     // wins, and a repair --apply mutates a target the line does not name.
     for (const flag of ["--cell", "--piece"]) {
-      for (const command of ["piece survey", "piece repair"]) {
-        const where = `${command} ${flag}`;
+      for (const command of [argv`piece survey`, argv`piece repair`]) {
+        const where = `${command.join(" ")} ${flag}`;
         const { code, stderr } = await cf(
-          `${command} ${flag} holder --list member`,
+          argv`${command} ${flag} holder --list member`,
         );
         // The whole command line is echoed to stderr, so a looser assertion
         // here passes whether or not the conflict fires. Name the refusal.
@@ -502,7 +501,7 @@ describe("main command", () => {
   });
 
   it("shows exec command help before trying to resolve a mounted file", async () => {
-    const { code, stdout } = await cf("exec --help");
+    const { code, stdout } = await cf(argv`exec --help`);
     const help = stripAnsi(stdout.join("\n"));
 
     expect(code).toBe(0);
@@ -513,7 +512,7 @@ describe("main command", () => {
   });
 
   it("shows help for the direct FUSE daemon entry point", async () => {
-    const { code, stdout } = await cf("fuse-daemon --help");
+    const { code, stdout } = await cf(argv`fuse-daemon --help`);
 
     expect(code).toBe(0);
     expect(stripAnsi(stdout.join("\n"))).toContain(
@@ -525,7 +524,7 @@ describe("main command", () => {
     // The subcommand forwards its raw argv to the supervisor's parser, so the
     // compiled binary and a direct `deno run` of the supervisor produce the
     // same flags and the same help.
-    const { code, stdout } = await cf("fuse-supervisor --help");
+    const { code, stdout } = await cf(argv`fuse-supervisor --help`);
 
     expect(code).toBe(0);
     expect(stdout.join("\n")).toContain(
@@ -535,7 +534,9 @@ describe("main command", () => {
   });
 
   it("rejects an unknown flag on the direct supervisor entry point", async () => {
-    const { code, stdout, stderr } = await cf("fuse-supervisor /mnt --json");
+    const { code, stdout, stderr } = await cf(
+      argv`fuse-supervisor /mnt --json`,
+    );
 
     expect(code).not.toBe(0);
     expect(stdout).toEqual([]);
@@ -545,7 +546,7 @@ describe("main command", () => {
   });
 
   it("keeps rejection help off stdout when --json is unsupported", async () => {
-    const { code, stdout, stderr } = await cf("acl --json");
+    const { code, stdout, stderr } = await cf(argv`acl --json`);
 
     expect(code).not.toBe(0);
     expect(stdout).toEqual([]);

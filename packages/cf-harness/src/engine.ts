@@ -14,6 +14,10 @@ import type {
 } from "./loom-retrieval.ts";
 import type { JSONSchema } from "@commonfabric/api";
 import type { LoomRetrievalToolOutput } from "./tools/loom-retrieval.ts";
+import {
+  createLoomCommandCatalogSource,
+  type LoomCommandCatalogSource,
+} from "./loom-commands.ts";
 import type {
   ListCommandsInput,
   ListCommandsOutput,
@@ -139,6 +143,7 @@ import {
   type ClassifyHarnessRunErrorOptions,
   collectHarnessCapabilitySnapshot,
   createHarnessFailureRecord,
+  type HarnessFailureKind,
   type HarnessFailureRecord,
 } from "./diagnostics.ts";
 import {
@@ -158,7 +163,7 @@ import {
   cacheHarnessPatternIndexClientFactory,
   createHarnessPatternIndexClientFactory,
   type HarnessPatternIndexClientFactory,
-} from "./pattern-index/client.ts";
+} from "./pattern-index/factory.ts";
 import {
   createPatternIndexLedger,
   type PatternIndexLedger,
@@ -215,12 +220,9 @@ import {
   setHarnessOpeningResearch,
   setHarnessRunStatus,
   setHarnessSubagentRun,
+  setHarnessTaskClassification,
 } from "./run-state.ts";
-import {
-  assertDockerRunscCfcTransportForMode,
-  DockerRunscSandboxRuntime,
-  resolveDockerRunscSandboxConfig,
-} from "./sandbox/docker-runsc.ts";
+import type { HarnessTaskClassification } from "./task-classification.ts";
 import {
   assertRunscCfcPolicyForMode,
   resolveRunscSandboxConfig,
@@ -232,7 +234,6 @@ import {
   CFC_VM_HOME_ENV,
   recordedSandboxRuntime,
   sandboxRuntimeOfOptions,
-  sandboxRuntimeResumeRefusal,
   unnamedRuntimeMountNote,
 } from "./sandbox/runtime-selection.ts";
 import {
@@ -240,8 +241,7 @@ import {
   type ProcessRunner,
 } from "./sandbox/process-runner.ts";
 import type {
-  DockerRunscAdditionalMountConfig,
-  DockerRunscSandboxConfig,
+  SandboxAdditionalMountConfig,
   SandboxPlatform,
   SandboxRuntime,
   SandboxRuntimeChoice,
@@ -261,6 +261,14 @@ import {
   type BrowserToolInput,
   type BrowserToolOutput,
 } from "./tools/browser.ts";
+import {
+  type CallVerbToolInput,
+  type CallVerbToolOutput,
+} from "./tools/call-verb.ts";
+import type {
+  ReadValueToolInput,
+  ReadValueToolOutput,
+} from "./tools/read-value.ts";
 import {
   type DescribeHandleToolInput,
   type DescribeHandleToolOutput,
@@ -345,6 +353,8 @@ export interface BuiltinToolInputMap {
   run_pattern: RunPatternToolInput;
   read_piece_source: ReadPieceSourceToolInput;
   revise_piece: RevisePieceToolInput;
+  call_verb: CallVerbToolInput;
+  read_value: ReadValueToolInput;
   assign_slug: AssignSlugToolInput;
   resolve_piece: ResolvePieceToolInput;
   describe_handle: DescribeHandleToolInput;
@@ -386,6 +396,8 @@ export interface BuiltinToolOutputMap {
   run_pattern: RunPatternToolOutput;
   read_piece_source: ReadPieceSourceToolOutput;
   revise_piece: RevisePieceToolOutput;
+  call_verb: CallVerbToolOutput;
+  read_value: ReadValueToolOutput;
   assign_slug: AssignSlugToolOutput;
   resolve_piece: ResolvePieceToolOutput;
   describe_handle: DescribeHandleToolOutput;
@@ -437,13 +449,14 @@ export interface CreateHarnessEngineOptions
 
   lineage?: HarnessSubagentLineage;
   subagentResumeContext?: HarnessSubagentResumeContext;
-  workspaceHostPath?: string;
-  sandboxImage?: string;
-  sandboxDockerRuntime?: string;
   /**
-   * Which sandbox the engine builds when none is injected: `docker` (the
-   * default) drives Docker with the runsc-cfc runtime; `runsc` runs runsc
-   * directly, with no Docker, and honours tool-call sessions.
+   * The host directory the sandbox mounts as its workspace. Required where
+   * the engine builds its sandbox, which it does where none is injected.
+   */
+  workspaceHostPath?: string;
+  /**
+   * Which sandbox the engine builds when none is injected: `runsc`, the
+   * direct driver, the one there is. It honours tool-call sessions.
    */
   sandboxRuntimeKind?: SandboxRuntimeKind;
   /** runsc runtime: the rootfs a bundle names. */
@@ -453,11 +466,20 @@ export interface CreateHarnessEngineOptions
   /** runsc runtime: the binary, default `runsc` on PATH. */
   sandboxRunscBinary?: string;
   sandboxRunscNetworkMode?: RunscNetworkMode;
+  /** runsc runtime: whether runsc runs with `--rootless`. */
+  sandboxRunscRootless?: boolean;
+  /** runsc runtime: the `pasta` that gives the `sandbox` network on Linux. */
+  sandboxRunscNetworkHelper?: string;
+  /** runsc runtime: the `unshare` root's pasta runs under. */
+  sandboxRunscUnshare?: string;
+  /** runsc runtime: the `setpriv` that ties what pasta runs to pasta. */
+  sandboxRunscSetpriv?: string;
 
   /**
    * runsc runtime: the platform whose driver defaults apply, as
    * `Deno.build.os` writes it, which it is when absent. On macOS an unnamed
-   * rootfs is the kitchen-sink image of the macOS `runsc`'s store.
+   * rootfs is the kitchen-sink image of the macOS `runsc`'s store, and on
+   * Linux the kitchen-sink rootfs of the Linux store under the home.
    */
   sandboxPlatform?: SandboxPlatform;
 
@@ -467,9 +489,7 @@ export interface CreateHarnessEngineOptions
    */
   sandboxRuntimeChoice?: SandboxRuntimeChoice;
 
-  additionalMounts?: readonly DockerRunscAdditionalMountConfig[];
-  cfcResultDir?: string;
-  cfcInvocationContextDir?: string;
+  additionalMounts?: readonly SandboxAdditionalMountConfig[];
   sandboxRuntime?: SandboxRuntime;
   /**
    * Whether an injected `sandboxRuntime` is this engine's to close when the
@@ -637,48 +657,6 @@ const isToolOutputWithId = (value: unknown): value is ToolOutputWithId =>
   "outputId" in value &&
   typeof value.outputId === "string";
 
-interface ResolveSandboxConfigOptions {
-  workspaceHostPath?: string;
-  sandboxImage?: string;
-  sandboxDockerRuntime?: string;
-  additionalMounts?: readonly DockerRunscAdditionalMountConfig[];
-  cfcResultDir?: string;
-  cfcInvocationContextDir?: string;
-}
-
-const resolveSandboxConfig = (
-  config: HarnessConfig,
-  options: ResolveSandboxConfigOptions,
-): DockerRunscSandboxConfig => {
-  if (config.sandbox !== undefined) {
-    return config.sandbox;
-  }
-  if (options.workspaceHostPath === undefined) {
-    throw new Error(
-      "sandbox config is required when no workspaceHostPath default is provided",
-    );
-  }
-  return resolveDockerRunscSandboxConfig({
-    workspaceHostPath: options.workspaceHostPath,
-    ...(options.sandboxImage !== undefined
-      ? { image: options.sandboxImage }
-      : {}),
-    ...(options.sandboxDockerRuntime !== undefined
-      ? { runtimeName: options.sandboxDockerRuntime }
-      : {}),
-    ...(options.additionalMounts !== undefined &&
-        options.additionalMounts.length > 0
-      ? { additionalMounts: options.additionalMounts }
-      : {}),
-    ...(options.cfcResultDir !== undefined
-      ? { cfcResultDir: options.cfcResultDir }
-      : {}),
-    ...(options.cfcInvocationContextDir !== undefined
-      ? { cfcInvocationContextDir: options.cfcInvocationContextDir }
-      : {}),
-  });
-};
-
 const resolveInitialCurrentDir = (
   sandbox: SandboxRuntime,
   config: HarnessConfig,
@@ -760,6 +738,9 @@ export class CfHarnessEngine {
   readonly #skillsShAcquisitionClientFactory?:
     HarnessSkillsShAcquisitionClientFactory;
   #docsCorpus?: Promise<HarnessDocsCorpus>;
+
+  /** The run's host command catalog, made on the first tool context. */
+  #loomCommandCatalog?: LoomCommandCatalogSource;
   #researchRunner?: HarnessResearchRunner;
   #patternIndexLedger?: PatternIndexLedger;
   readonly #taskText?: string;
@@ -770,7 +751,6 @@ export class CfHarnessEngine {
   readonly #patternRefs: readonly HarnessPatternRefSpec[];
   readonly #spaceDbPath?: string;
   readonly #hostMounts: readonly HostSandboxMount[];
-  readonly #ownedRunscConfig?: DockerRunscSandboxConfig;
   /** The runsc configuration this engine built, when it built one. */
   readonly #ownedNativeConfig?: RunscSandboxConfig;
   readonly #sandboxRuntimeChoice?: SandboxRuntimeChoice;
@@ -938,21 +918,13 @@ export class CfHarnessEngine {
       );
     }
     // A run's files carry the CFC labels of the runtime that wrote them,
-    // kept where the other runtime need not read them, so a run stays on the
-    // runtime its state records. A state that records none has nothing to
-    // compare, and is bound to this runtime where the state is taken below.
+    // kept where another runtime need not read them, so a run stays on the
+    // runtime its state records: one recording the Docker driver, or a
+    // runtime this build does not know, is refused here. A state that records
+    // none is bound to this runtime where the state is taken below.
     const sandboxRuntime = sandboxRuntimeOfOptions(options);
-    const recordedRuntime = options.runState === undefined
-      ? undefined
-      : recordedSandboxRuntime(options.runState);
-    if (recordedRuntime !== undefined && recordedRuntime !== sandboxRuntime) {
-      throw sandboxRuntimeResumeRefusal(
-        recordedRuntime,
-        options.sandboxRuntimeChoice?.runtime === sandboxRuntime
-          ? options.sandboxRuntimeChoice
-          : sandboxRuntime,
-        false,
-      );
+    if (options.runState !== undefined) {
+      recordedSandboxRuntime(options.runState);
     }
     const runId = options.runState?.runId ?? options.runId ??
       crypto.randomUUID();
@@ -1027,42 +999,13 @@ export class CfHarnessEngine {
     this.#connectorGrants = options.connectorGrants ?? [];
     this.#patternRefs = options.patternRefs ?? [];
     this.#spaceDbPath = options.spaceDbPath;
-    const useRunsc = options.sandboxRuntime === undefined &&
-      options.sandboxRuntimeKind === "runsc";
-    // Under the runsc runtime no docker configuration describes this run,
-    // whatever `config.sandbox` holds: the mounts below come from the runsc
-    // configuration, so host-backed tools resolve against the sandbox that
-    // actually executes.
-    const sandboxConfig = useRunsc
-      ? undefined
-      : options.sandboxRuntime === undefined
-      ? resolveSandboxConfig(this.config, {
-        workspaceHostPath: options.workspaceHostPath,
-        sandboxImage: options.sandboxImage,
-        sandboxDockerRuntime: options.sandboxDockerRuntime,
-        additionalMounts: options.additionalMounts,
-        cfcResultDir: options.cfcResultDir,
-        cfcInvocationContextDir: options.cfcInvocationContextDir,
-      })
-      : this.config.sandbox;
-    // Capture the engine-owned docker-runsc config so we can refuse to *run*
-    // enforce-mode sandbox work — capability probes or tools — whose sandbox
-    // lacks the CFC sidecar transports (the check fires at run start, not
-    // construction — see #assertCfcTransportReady).
-    // Only when the engine constructs the docker runtime itself: an injected
-    // sandboxRuntime is the thing that actually executes and carries its own
-    // enforcement guarantees, while `sandboxConfig` in that branch is the
-    // unused resolved config and may describe a different sandbox entirely.
-    // The runsc runtime carries the CFC transport on descriptors it opens
-    // itself, so it has no registration to check.
-    this.#ownedRunscConfig = options.sandboxRuntime === undefined && !useRunsc
-      ? sandboxConfig
-      : undefined;
     this.hostProcessRunner = options.processRunner ?? new DenoProcessRunner();
-    const runscConfig = useRunsc
+    // The engine builds the direct runsc runtime unless one is handed in. The
+    // mounts below come from the configuration it builds from, so host-backed
+    // tools resolve against the sandbox that actually executes.
+    const runscConfig = options.sandboxRuntime === undefined
       ? resolveRunscSandboxConfig({
         workspaceHostPath: options.workspaceHostPath ??
-          this.config.sandbox?.workspaceHostPath ??
           (() => {
             throw new Error("runsc sandbox needs a workspaceHostPath");
           })(),
@@ -1070,6 +1013,16 @@ export class CfHarnessEngine {
         runscBinary: options.sandboxRunscBinary,
         cfcPolicyPath: options.sandboxCfcPolicy,
         networkMode: options.sandboxRunscNetworkMode,
+        ...(options.sandboxRunscRootless === true ? { rootless: true } : {}),
+        ...(options.sandboxRunscNetworkHelper !== undefined
+          ? { networkHelper: options.sandboxRunscNetworkHelper }
+          : {}),
+        ...(options.sandboxRunscUnshare !== undefined
+          ? { unshare: options.sandboxRunscUnshare }
+          : {}),
+        ...(options.sandboxRunscSetpriv !== undefined
+          ? { setpriv: options.sandboxRunscSetpriv }
+          : {}),
         additionalMounts: options.additionalMounts,
         runId,
         ...(options.sandboxPlatform !== undefined
@@ -1088,18 +1041,18 @@ export class CfHarnessEngine {
     this.#sandboxRuntimeChoice = options.sandboxRuntimeChoice;
     this.#ownsSandbox = options.sandboxRuntime === undefined ||
       options.ownsSandboxRuntime === true;
-    this.sandbox = options.sandboxRuntime ??
-      (runscConfig !== undefined
-        ? new RunscSandboxRuntime(runscConfig, options.processRunner)
-        : new DockerRunscSandboxRuntime(sandboxConfig!, options.processRunner));
-    this.workspaceHostPath = sandboxConfig?.workspaceHostPath ??
-      runscConfig?.workspaceHostPath ??
+    this.sandbox = runscConfig !== undefined
+      ? new RunscSandboxRuntime(runscConfig, options.processRunner)
+      : options.sandboxRuntime ??
+        (() => {
+          throw new Error("the engine has no sandbox runtime to run in");
+        })();
+    this.workspaceHostPath = runscConfig?.workspaceHostPath ??
       options.workspaceHostPath;
     this.workspaceMountPath = normalizeSandboxRoot(
-      sandboxConfig?.workspaceMountPath ??
-        this.sandbox.defaultWorkingDirectory(),
+      this.sandbox.defaultWorkingDirectory(),
     );
-    const mountSource = sandboxConfig ?? runscConfig;
+    const mountSource = runscConfig;
     this.#hostMounts = mountSource !== undefined
       ? [
         {
@@ -1386,24 +1339,9 @@ export class CfHarnessEngine {
   }
 
   /**
-   * The sandbox configuration this engine built its own runtime from, absent
-   * when the runtime was handed in.
-   *
-   * A caller that wants a sandbox differing from this run's — a child that
-   * mounts something its parent does not — needs the configuration rather than
-   * the runtime, and needs to know it may build one at all: where the runtime
-   * was injected, that object is the thing that executes and a configuration
-   * beside it describes something else.
-   */
-  get ownedSandboxConfig(): DockerRunscSandboxConfig | undefined {
-    return this.#ownedRunscConfig;
-  }
-
-  /**
-   * The runsc counterpart of {@link ownedSandboxConfig}: the configuration
-   * the engine built its direct runsc runtime from, or `undefined` when the
-   * runtime is docker or was handed in. Every child of a run that has one
-   * builds its own runtime from it; see `childSandboxOptions()`.
+   * The configuration the engine built its direct runsc runtime from, or
+   * `undefined` when the runtime was handed in. Every child of a run that has
+   * one builds its own runtime from it; see `childSandboxOptions()`.
    */
   get ownedRunscSandboxConfig(): RunscSandboxConfig | undefined {
     return this.#ownedNativeConfig;
@@ -1572,6 +1510,19 @@ export class CfHarnessEngine {
     this.#runState = setHarnessOpeningResearch(
       this.#runState,
       openingResearch,
+      this.#now(),
+    );
+    await this.persistRunState();
+    return this.getRunState();
+  }
+
+  /** Persists the kinds of work the root task was classified with. */
+  async recordTaskClassification(
+    taskClassification: HarnessTaskClassification,
+  ): Promise<HarnessRunState> {
+    this.#runState = setHarnessTaskClassification(
+      this.#runState,
+      taskClassification,
       this.#now(),
     );
     await this.persistRunState();
@@ -1792,8 +1743,13 @@ export class CfHarnessEngine {
     return this.getRunState();
   }
 
+  /**
+   * Records a policy event, and a denial among the run's failures, as
+   * `failureKind` when given.
+   */
   async recordPolicyEvent(
     event: Omit<HarnessPolicyEvent, "type" | "at">,
+    options: { failureKind?: HarnessFailureKind } = {},
   ): Promise<HarnessRunState> {
     const now = this.#now();
     const policyEvent = createHarnessPolicyEvent({ ...event, at: now });
@@ -1803,7 +1759,10 @@ export class CfHarnessEngine {
       policyEvent,
       now,
     );
-    const failure = classifyHarnessPolicyEventFailure(policyEvent);
+    const failure = classifyHarnessPolicyEventFailure(
+      policyEvent,
+      options.failureKind,
+    );
     if (failure !== undefined) {
       this.#runState = appendHarnessFailureRecord(this.#runState, failure, now);
     }
@@ -2079,19 +2038,16 @@ export class CfHarnessEngine {
       );
     }
     const session = await this.#fabricSessionFactory();
+    const space = session.pieces.getSpace();
     const minted = await mintInputCellHandles(
       this.handleTable,
       this.#runState.runId,
       this.#inputCells,
-      session.pieces.getSpace(),
+      space,
       {
-        // The space by NAME, which is the vocabulary a named address speaks;
-        // the mint checks references against the DID beside it. A space
-        // configured by `did:key` has no name, and an address naming a space
-        // is then refused rather than assumed to mean this one.
-        ...(session.pieces.getSpaceName() !== undefined
-          ? { spaceName: session.pieces.getSpaceName() }
-          : {}),
+        // A named address may spell the space by the DID beside it or by the
+        // legacy name the session opened it by.
+        spaceName: session.pieces.getSpaceName(),
         resolvePiece: (slug) => resolvePieceAddress(session.pieces, slug),
         foreignSpaces: session.foreignSpaces,
       },
@@ -2530,31 +2486,25 @@ export class CfHarnessEngine {
 
   /**
    * Fails fast before any sandbox execution under enforcement on a sandbox
-   * that lacks the CFC sidecar transports — capability probes included, since
-   * they run scripts inside the same sandbox (not just builtin tools). Checked
-   * at run start rather than construction so an engine can be built and
-   * inspected (config threading, `--describe-capabilities`) without a live CFC
-   * wiring. Idempotent so the cost is paid once per run.
+   * this engine built with no CFC policy — capability probes included, since
+   * they run scripts inside the same sandbox (not just builtin tools). No
+   * policy means no `--cfc`, so an enforcing run would execute unmediated and
+   * deny afterwards. Checked at run start rather than construction so an
+   * engine can be built and inspected (config threading,
+   * `--describe-capabilities`) without a policy. Idempotent so the cost is
+   * paid once per run.
    */
   #assertCfcTransportReady(): void {
     if (this.#cfcTransportChecked) {
       return;
     }
-    if (this.#ownedRunscConfig !== undefined) {
-      assertDockerRunscCfcTransportForMode(
-        this.#runState.cfcEnforcementMode,
-        this.#ownedRunscConfig,
-      );
-    } else if (this.#ownedNativeConfig !== undefined) {
-      // The same floor for the direct runtime: no policy means no `--cfc`,
-      // so an enforcing run would execute unmediated and deny afterwards.
-      assertRunscCfcPolicyForMode(
-        this.#runState.cfcEnforcementMode,
-        this.#ownedNativeConfig,
-      );
-    } else {
+    if (this.#ownedNativeConfig === undefined) {
       return;
     }
+    assertRunscCfcPolicyForMode(
+      this.#runState.cfcEnforcementMode,
+      this.#ownedNativeConfig,
+    );
     this.#cfcTransportChecked = true;
   }
 
@@ -2632,7 +2582,7 @@ export class CfHarnessEngine {
   async invokeBuiltinTool<TToolId extends BuiltinToolId>(
     toolId: TToolId,
     input: BuiltinToolInputMap[TToolId],
-    options: { signal?: AbortSignal } = {},
+    options: { signal?: AbortSignal; sideEffectsAuthorized?: boolean } = {},
   ): Promise<BuiltinToolInvocationResult<TToolId>> {
     const tool = getBuiltinTool(toolId);
     if (tool === undefined) {
@@ -2642,7 +2592,10 @@ export class CfHarnessEngine {
     await this.ensureDiagnosticsInitialized();
     try {
       const output = await tool.invoke(
-        this.#createToolContext(options.signal),
+        this.#createToolContext(
+          options.signal,
+          options.sideEffectsAuthorized,
+        ),
         input,
       ) as BuiltinToolOutputMap[TToolId];
       return await this.recordBuiltinToolOutput(toolId, input, output, options);
@@ -3053,11 +3006,12 @@ export class CfHarnessEngine {
     );
   }
 
-  #createToolContext(signal?: AbortSignal) {
+  #createToolContext(signal?: AbortSignal, sideEffectsAuthorized?: boolean) {
     const researchTaskCfcLabel = this.#researchTaskCfcLabel();
     return {
       runId: this.#runState.runId,
       cfcEnforcementMode: this.#runState.cfcEnforcementMode,
+      ...(sideEffectsAuthorized !== undefined ? { sideEffectsAuthorized } : {}),
       currentDir: this.#runState.currentDir,
       workspaceHostPath: this.workspaceHostPath,
       ...(signal !== undefined ? { signal } : {}),
@@ -3150,6 +3104,15 @@ export class CfHarnessEngine {
       loomAuthoring: this.config.loomAuthoring,
       loomRetrieval: this.config.loomRetrieval,
       loomCommands: this.config.loomCommands,
+      ...(this.config.loomCommands !== undefined
+        ? {
+          loomCommandCatalog: this.#loomCommandCatalog ??=
+            createLoomCommandCatalogSource(
+              this.config.loomCommands,
+              this.hostProcessRunner,
+            ),
+        }
+        : {}),
       mintReferentHandle: (referent: HarnessDocumentReferentDraft) =>
         this.mintReferentHandle(referent),
       mintResearchHandle: (

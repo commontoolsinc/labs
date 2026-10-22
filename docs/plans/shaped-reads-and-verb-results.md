@@ -140,7 +140,7 @@ position neither declares nor admits, a field named below a scalar, one below
 a verb, which dispatches rather than holding a value. The refusal names the
 position, the vocabulary that position declares, and — where the vocabulary has
 a name close enough — the one the path is a typo of, the wording every other
-misspelled name gets (`packages/cli/lib/refusal.ts`). Everything the
+misspelled name gets (`packages/piece/src/refusal.ts`). Everything the
 schema leaves open passes: an open `additionalProperties`, a `patternProperties`
 map that names a pattern, a disjunction, an untyped position, a position that
 only may hold an array rather than proving it, a tuple-shaped array, a

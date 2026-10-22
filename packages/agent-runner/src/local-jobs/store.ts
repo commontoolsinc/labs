@@ -15,11 +15,17 @@
  * them twice.
  */
 
-import type { HarnessModelLimits } from "@commonfabric/cf-harness/model/client";
 import type { HarnessInlineImageAttachment } from "@commonfabric/cf-harness/contracts/image";
-
+import type { HarnessRunDepth } from "@commonfabric/cf-harness/contracts/run-depth";
+import type { HarnessModelLimits } from "@commonfabric/cf-harness/model/client";
+import type {
+  HarnessTaskDomain,
+  HarnessTaskTag,
+} from "@commonfabric/cf-harness/task-classification";
 import { hashStringOf } from "@commonfabric/data-model";
 import { Database } from "@db/sqlite";
+
+import type { ReasoningEffort } from "./profiles.ts";
 
 /** A job's state. */
 export type LocalJobState =
@@ -51,11 +57,40 @@ export interface LocalJobRequest extends HarnessModelLimits {
   maxModelTurns?: number;
   imageAttachments?: HarnessInlineImageAttachment[];
 
+  /** How far the caller wants the job taken; the harness's default when absent. */
+  depth?: HarnessRunDepth;
+
+  /** The task's kinds of work, in place of the harness's classification. */
+  tags?: HarnessTaskTag[];
+
+  /** Where the task's work happens, in place of the harness's; `[]` is none. */
+  domains?: HarnessTaskDomain[];
+
+  /**
+   * The reasoning effort the job runs at, no more than its profile's; the
+   * profile's when absent.
+   */
+  reasoningEffort?: ReasoningEffort;
+
   /**
    * The caller can host the job's browser. Its contents are not read yet;
    * declaring it is what counts, as on the console's task route.
    */
   browserHost?: Record<string, unknown>;
+
+  /**
+   * Pieces the job holds from its first turn, by the name the model sees:
+   * each address becomes an input cell, and the model a handle to it. Only a
+   * profile with a fabric session holds them, and only pieces in its space.
+   */
+  inputs?: Record<string, string>;
+
+  /**
+   * Where each space an input names outside the profile's own is served: a
+   * space DID mapped to its toolshed's origin. The job is routed there for
+   * that space and nowhere else.
+   */
+  foreignSpaces?: Record<string, string>;
 }
 
 /** One event of a job, in `seq` order. */
@@ -78,7 +113,10 @@ export interface LocalJob {
   /** The `seq` of the job's latest event. */
   seq: number;
 
-  /** The tool the job is using, from its latest `step` event. */
+  /**
+   * The tool the job is using, from its latest `step` event; `returned`
+   * when that call has returned and its loop's model is working.
+   */
   step?: Record<string, unknown>;
 
   /** Every command the job ran, from its `command` events, in order. */
@@ -88,6 +126,9 @@ export interface LocalJob {
   result?: unknown;
 
   errorCode?: string;
+
+  /** What the run said of its error, from the job's final `state` event. */
+  errorDetail?: string;
 
   /** Usage, turns and tool calls, once the job ran. */
   report?: Record<string, unknown>;
@@ -103,6 +144,7 @@ export interface LocalJobEnding {
   state: "completed" | "failed" | "cancelled" | "interrupted";
   result?: unknown;
   errorCode?: string;
+  errorDetail?: string;
   report?: Record<string, unknown>;
 }
 
@@ -397,9 +439,15 @@ export class LocalJobStore {
         "state",
         {
           state,
-          ...(!completed && state !== "cancelled" &&
-              ending.errorCode !== undefined
-            ? { errorCode: ending.errorCode }
+          ...(!completed && state !== "cancelled"
+            ? {
+              ...(ending.errorCode !== undefined
+                ? { errorCode: ending.errorCode }
+                : {}),
+              ...(ending.errorDetail !== undefined
+                ? { errorDetail: ending.errorDetail }
+                : {}),
+            }
             : {}),
         },
         at,
@@ -480,6 +528,8 @@ export class LocalJobStore {
   #view(row: JobRow): LocalJob {
     const events = this.events(row.id);
     const steps = events.filter((event) => event.kind === "step");
+    const errorDetail = events.findLast((event) => event.kind === "state")
+      ?.body.errorDetail;
     return {
       id: row.id,
       caller: row.caller,
@@ -496,6 +546,7 @@ export class LocalJobStore {
         ? { result: JSON.parse(row.result_json) }
         : {}),
       ...(row.error_code !== null ? { errorCode: row.error_code } : {}),
+      ...(typeof errorDetail === "string" ? { errorDetail } : {}),
       ...(row.report_json !== null
         ? { report: JSON.parse(row.report_json) }
         : {}),

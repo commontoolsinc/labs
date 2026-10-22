@@ -58,6 +58,7 @@ import type {
   HarnessModelAuthSource,
   HarnessModelProviderId,
 } from "./config.ts";
+import type { HarnessTaskClassification } from "./task-classification.ts";
 
 export type HarnessRunStatus =
   | "pending"
@@ -80,7 +81,7 @@ export interface HarnessOpeningResearch {
 
 /**
  * How a run ended. `assistant_completed` means the model returned a final
- * answer or an admitted task outcome. `budget_finalized` is a partial answer
+ * answer, an admitted task outcome, or an accepted structured result. `budget_finalized` is a partial answer
  * produced on the reserved final root turn. `setup_error` is a run that died before
  * its first model turn, while what it holds — skill registry, grants, input
  * cells — was being established; the others end the loop itself.
@@ -191,9 +192,11 @@ export interface HarnessRunState {
    * before anything runs in a sandbox, so that a resume can be held to it
    * whatever became of the run afterwards. Absent from a record written
    * before runs recorded it; such a run's runtime is the kind its capability
-   * snapshot describes, where it has one.
+   * snapshot describes, where it has one. Stored records may hold `docker`,
+   * written by an older cf-harness that had the Docker driver; this build
+   * reads them and refuses to resume them.
    */
-  sandboxRuntime?: SandboxRuntimeKind;
+  sandboxRuntime?: SandboxRuntimeKind | "docker";
 
   /**
    * How an entrypoint chose that runtime when the run started: named, and by
@@ -289,6 +292,9 @@ export interface HarnessRunState {
 
   /** Opening-research intent and recoverable model-context handoff. */
   openingResearch?: HarnessOpeningResearch;
+
+  /** The kinds of work a fresh root task was judged to call for. */
+  taskClassification?: HarnessTaskClassification;
 
   /**
    * How many `research` calls in this run and its descendants returned no kit.
@@ -702,6 +708,18 @@ export const setHarnessOpeningResearch = (
   patchHarnessRunState(
     state,
     { openingResearch: structuredClone(openingResearch) },
+    now,
+  );
+
+/** Records the tags a fresh root task was classified with. */
+export const setHarnessTaskClassification = (
+  state: HarnessRunState,
+  taskClassification: HarnessTaskClassification,
+  now = new Date().toISOString(),
+): HarnessRunState =>
+  patchHarnessRunState(
+    state,
+    { taskClassification: structuredClone(taskClassification) },
     now,
   );
 

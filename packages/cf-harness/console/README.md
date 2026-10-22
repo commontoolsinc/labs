@@ -46,17 +46,31 @@ shared host, a tailnet with an access policy — and not behind a public address
   sandbox. On macOS that is, unless the environment names another, the native
   runtime: the direct `runsc` driver over the cfc-vm store gVisor's macOS
   installer writes, with no Docker, and the console refuses to start where that
-  store is not set up. On every other platform it is, by default, a Docker
-  container under the `runsc-cfc` runtime, and a stopped Docker daemon is a run
-  that fails on its first `bash` call. `CF_HARNESS_SANDBOX_RUNTIME` names either
-  on any platform; see [Sandbox runtime](#sandbox-runtime).
+  store is not set up, and on a Mac that is not Apple silicon at all. On Linux
+  it is the direct driver too, over the store gVisor's Linux installer writes
+  under `~/.local/share/runsc-cfc`, run rootless for a console that is not root,
+  with `pasta` (passt) giving its default network egress and the host. The
+  console refuses to start where the default network
+  (`CF_HARNESS_DOCKER_NETWORK_MODE` unset, or `bridge`) finds no `pasta` or
+  `setpriv` on `PATH`, or, for a console run as root, no `unshare` (install
+  passt or util-linux; `none` or `host` needs none of the three), and where a
+  piece of that store that no setting replaces is missing. A console that is not
+  root also needs unprivileged user namespaces, for the store's `runsc`, which
+  runs rootless whatever the network, and for pasta's network even where
+  `CF_HARNESS_RUNSC_BINARY` names a `runsc`, which runs as it is: where
+  `user.max_user_namespaces` is 0, `kernel.unprivileged_userns_clone` is 0 or
+  `kernel.apparmor_restrict_unprivileged_userns` is 1, it refuses, naming the
+  `sudo sysctl -w` that allows them, or running as root. Every other platform
+  has no default, and the console refuses to start there unless
+  `CF_HARNESS_SANDBOX_RUNTIME=runsc` names the runtime; see
+  [Sandbox runtime](#sandbox-runtime).
 - **An identity keyfile.** A PKCS#8 key on this host, the same one the `cf` CLI
   uses. The fabric session loads it to sign with, and the pattern index signs
   its requests with the same identity.
-- **A space named by name.** `assign_slug` composes the URL a person opens from
-  the API URL and the space's name, and offers no URL at all for a space named
-  by `did:key`. The server refuses a `did:` space at startup rather than
-  finishing a run with no link to show.
+- **A space.** Opening a space never creates one, so the console needs a space
+  its identity can write to: the DID of one `cf space create` makes, or the
+  legacy name of one that already exists. `assign_slug` composes the URL a
+  person opens from the API URL, the space's DID, and the slug.
 - **A connected model provider.** The provider preference lives in
   `$CF_HARNESS_HOME/config.json` and its credentials in
   `$CF_HARNESS_HOME/auth.json`, both written by `cf-harness config set` and
@@ -97,44 +111,41 @@ The flag calls `console:launch`, which is also how to put a console on a fabric
 that is already running:
 
 ```sh
-CF_HARNESS_SANDBOX_RUNTIME=docker \
+CF_HARNESS_SANDBOX_RUNTIME=runsc \
   deno task --cwd packages/cf-harness console:launch --instance <loom-instance>
 deno task --cwd packages/cf-harness console:launch \
   --fabric-api-url http://localhost:8000 --store packages/toolshed/cache/memory \
-  --fabric-identity "$HOME/.cf/my-key.pkcs8" --fabric-space my-space
+  --fabric-identity "$HOME/.cf/my-key.pkcs8" --fabric-space <space-did>
 ```
 
-The first names the sandbox runtime, here the one an instance on Docker runs on:
-a launch with `--instance` takes no default, as
+The first names the sandbox runtime, `runsc`, with its settings in the
+environment as Loom sets them: a launch with `--instance` takes no default, as
 [Sandbox runtime](#sandbox-runtime) says.
 
 That task reads the identity, the space and the toolshed URL off a loom
 instance's `pieces.json` when `--instance` names one, the store off
 `loom toolshed-store-dir`, the connector handles that instance has injected off
-its `sqlite-injection/handles.json` receipt, and, on the Docker driver, the two
-`runsc-cfc` sidecar directories off the runtime registration `docker info`
-reports — so a sidecar path is fixed where Docker registers the runtime, not in
-loom. Without an instance the identity and the space are named — by the flags
-above, or by `CF_HARNESS_FABRIC_IDENTITY` and `CF_HARNESS_FABRIC_SPACE`, or by
-the `cf` CLI's own `CF_IDENTITY` and `CF_SPACE` — and their absence is an error
-naming them. The pattern index and skills registry are this deployment's
-constants rather than any fabric's. It prints every value with the record that
-decided it, and serves on the port Weaver pairs with. Arguments after `--` reach
-this server untouched, so every flag in the tables below is reachable through
-it. Each of the two refuses a flag it does not take, naming it and, where one is
-close, the flag it most likely meant, and `console:launch` holds the arguments
-after `--` to the server's flags before it reads anything, so a misspelled
-switch stops the launch rather than going unapplied. A console flag given to the
-launcher is refused with a pointer to `--`. A flag given no value is refused
-too, whether nothing follows it, the word after it starts with `-`, or its value
-is empty, rather than falling back to the default: a value starting with `-`
-needs the `--name=<value>` spelling. The server takes no positional argument,
-and so nothing after a `--` of its own. `--help` or `-h`, as a word of its own,
-prints the flags each takes, the launcher's before `--` and the server's after
-it, and serves nothing, unless it is the word after a flag that takes a value,
-which is that flag given no value. [`../docs/WEAVER.md`](../docs/WEAVER.md) is
-the operator procedure it belongs to, including the tailnet topology and the
-pre-demo preflight.
+its `sqlite-injection/handles.json` receipt. Without an instance the identity
+and the space are named — by the flags above, or by `CF_HARNESS_FABRIC_IDENTITY`
+and `CF_HARNESS_FABRIC_SPACE`, or by the `cf` CLI's own `CF_IDENTITY` and
+`CF_SPACE` — and their absence is an error naming them. The pattern index and
+skills registry are this deployment's constants rather than any fabric's. It
+prints every value with the record that decided it, and serves on the port
+Weaver pairs with. Arguments after `--` reach this server untouched, so every
+flag in the tables below is reachable through it. Each of the two refuses a flag
+it does not take, naming it and, where one is close, the flag it most likely
+meant, and `console:launch` holds the arguments after `--` to the server's flags
+before it reads anything, so a misspelled switch stops the launch rather than
+going unapplied. A console flag given to the launcher is refused with a pointer
+to `--`. A flag given no value is refused too, whether nothing follows it, the
+word after it starts with `-`, or its value is empty, rather than falling back
+to the default: a value starting with `-` needs the `--name=<value>` spelling.
+The server takes no positional argument, and so nothing after a `--` of its own.
+`--help` or `-h`, as a word of its own, prints the flags each takes, the
+launcher's before `--` and the server's after it, and serves nothing, unless it
+is the word after a flag that takes a value, which is that flag given no value.
+[`../docs/WEAVER.md`](../docs/WEAVER.md) is the operator procedure it belongs
+to, including the tailnet topology and the pre-demo preflight.
 
 Against a toolshed of your own, the environment below is what `console:launch`
 would otherwise have resolved:
@@ -142,7 +153,7 @@ would otherwise have resolved:
 ```sh
 export CF_HARNESS_FABRIC_API_URL=http://localhost:8000
 export CF_HARNESS_FABRIC_IDENTITY="$HOME/.cf/my-key.pkcs8"
-export CF_HARNESS_FABRIC_SPACE=my-space
+export CF_HARNESS_FABRIC_SPACE=<space-did>
 export CF_HARNESS_PATTERN_INDEX_URL=https://index.example/   # optional
 export CF_HARNESS_SKILLS_REGISTRY_URL=https://www.skills.sh/  # optional
 
@@ -170,7 +181,7 @@ Every environment variable has a flag, and the flag wins:
 | `--port`                      | `CF_HARNESS_CONSOLE_PORT`              | `8100`                                |
 | `--fabric-api-url`            | `CF_HARNESS_FABRIC_API_URL`            | `http://localhost:8000`               |
 | `--fabric-identity`           | `CF_HARNESS_FABRIC_IDENTITY`           | required                              |
-| `--fabric-space`              | `CF_HARNESS_FABRIC_SPACE`              | required, a name                      |
+| `--fabric-space`              | `CF_HARNESS_FABRIC_SPACE`              | required, a DID or a legacy name      |
 | `--fabric-foreign-spaces`     | `CF_HARNESS_FABRIC_FOREIGN_SPACES`     | no foreign spaces admitted            |
 | `--pattern-index-url`         | `CF_HARNESS_PATTERN_INDEX_URL`         | unset                                 |
 | `--skills-registry-url`       | `CF_HARNESS_SKILLS_REGISTRY_URL`       | unset                                 |
@@ -179,6 +190,7 @@ Every environment variable has a flag, and the flag wins:
 | `--research-reasoning-effort` | `CF_HARNESS_RESEARCH_REASONING_EFFORT` | the provider's default                |
 | `--workspace`                 | `CF_HARNESS_CONSOLE_WORKSPACE`         | `.cf-harness-console/workspace`       |
 | `--artifact-root`             | `CF_HARNESS_ARTIFACT_ROOT`             | `.cf-harness-console/runs`            |
+| `--agent-runs-root`           | `CF_HARNESS_CONSOLE_AGENT_RUNS_ROOT`   | `$CF_HARNESS_HOME/agent-runs`; `none` |
 | `--session-db`                | `CF_HARNESS_CONSOLE_SESSION_DB`        | `.cf-harness-console/sessions.sqlite` |
 | `--space-db`                  | `CF_HARNESS_SPACE_DB`                  | the space's own database, discovered  |
 | `--max-model-turns`           | `CF_HARNESS_CONSOLE_MAX_MODEL_TURNS`   | the prompt loop's default             |
@@ -233,31 +245,29 @@ in.
 The console selects its sandbox the way the interactive entrypoints do: from its
 environment alone, through the derivation every cf-harness entrypoint shares
 (`src/sandbox/runtime-selection.ts`), so a console and a batch run started from
-one environment execute on the same driver. The package's
-[CURRENT_STATE](../docs/CURRENT_STATE.md#sandbox-runtimes) describes both
-drivers.
+one environment execute in the same sandbox. The package's
+[CURRENT_STATE](../docs/CURRENT_STATE.md#sandbox-runtimes) describes the driver.
 
-| Environment                      | Selects                                                                                                                                                                                         |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CF_HARNESS_SANDBOX_RUNTIME`     | `docker` or `runsc`; any other value refuses to start. Unset, macOS takes the native runtime from the cfc-vm store, and every other platform takes `docker`; a launch with `--instance` refuses |
-| `CF_HARNESS_SANDBOX_ROOTFS`      | under `runsc`, the rootfs a bundle names; unset on macOS, `images/kitchensink` in the store `CFC_VM_HOME` names, else in the one under the home, whether `runsc` is named or the default        |
-| `CF_HARNESS_RUNSC_BINARY`        | under `runsc`, the `runsc` binary; unset, `runsc` is looked for on `PATH`, or under the macOS default it is the store's `bin/runsc`                                                             |
-| `CF_HARNESS_RUNSC_CFC_POLICY`    | under `runsc`, the CFC policy; unset, `$HOME/.local/share/runsc-cfc/cfc-policy.json` if there, and under the macOS default the store's `policy.json` next                                       |
-| `CF_HARNESS_DOCKER_NETWORK_MODE` | the network mode, in Docker's vocabulary, on either driver                                                                                                                                      |
-| `CFC_VM_HOME`                    | the cfc-vm store the macOS `runsc` and the macOS default use; unset, `~/Library/Application Support/cfc-vm`                                                                                     |
+| Environment                      | Selects                                                                                                                                                                                                                                                                                                               |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CF_HARNESS_SANDBOX_RUNTIME`     | `runsc`; `docker`, the Docker driver cf-harness no longer has, and any other value refuse to start. Unset, or set to white space alone, macOS takes the native runtime from the cfc-vm store and Linux from the store under `~/.local/share/runsc-cfc`; every other platform, and a launch with `--instance`, refuses |
+| `CF_HARNESS_SANDBOX_ROOTFS`      | under `runsc`, the rootfs a bundle names; unset on macOS, `images/kitchensink` in the store `CFC_VM_HOME` names, else in the one under the home, and unset on Linux, `images/kitchensink` in `~/.local/share/runsc-cfc`, whether `runsc` is named or the default                                                      |
+| `CF_HARNESS_RUNSC_BINARY`        | under `runsc`, the `runsc` binary; unset, a named `runsc` is looked for on `PATH`, and the macOS or Linux default takes its store's `bin/runsc` (on Linux, `~/.local/share/runsc-cfc/bin/runsc`). On Linux, a named one is run as it is, without `--rootless`                                                         |
+| `CF_HARNESS_RUNSC_CFC_POLICY`    | under `runsc`, the CFC policy; unset, `$HOME/.local/share/runsc-cfc/cfc-policy.json` if there, which is the Linux store's own, and under the macOS default the store's `policy.json` next                                                                                                                             |
+| `CF_HARNESS_DOCKER_NETWORK_MODE` | the network mode, in the vocabulary of the Docker driver it kept the name of                                                                                                                                                                                                                                          |
+| `CFC_VM_HOME`                    | the cfc-vm store the macOS `runsc` and the macOS default use; unset, `~/Library/Application Support/cfc-vm`                                                                                                                                                                                                           |
 
 A console launched for a Loom instance takes no default at all. `console:launch`
 given `--instance`, which is how `scripts/start-local-dev.sh` launches it where
 `LOOM_INSTANCE_ID` is set, refuses to start on any platform where the
-environment names no runtime, saying that Loom must name `docker` or `runsc`:
-Loom chooses each instance's runtime, and a console on a default could be on
-another than the instance's runs. It tells the console it serves to hold to the
-same. What follows is the default of a launch with no `--instance`.
+environment names no runtime, saying that Loom must name `runsc`: Loom chooses
+each instance's runtime, and a console on a default could be on another than the
+instance's runs. It tells the console it serves to hold to the same. What
+follows is the default of a launch with no `--instance`.
 
-A session stays on the runtime it started on. After a restart under another
-runtime, a follow-up turn on a session started before it is refused as
-`provider-mismatch`, naming the runtime the session started on: restart the
-console with that runtime named, or start a new session. The
+A session stays on the runtime it started on. A follow-up turn on a session a
+console with the Docker driver started is refused as `provider-mismatch`, saying
+that driver is gone: start a new session. The
 [cf-harness README](../README.md#sandbox-runtimes) sets out how runs and
 sessions are bound.
 
@@ -269,42 +279,38 @@ unless `CF_HARNESS_SANDBOX_ROOTFS` names a rootfs, and its own `policy.json`
 unless a CFC policy is under the home or `CF_HARNESS_RUNSC_CFC_POLICY` names
 one. The binaries, `config.json`, the rootfs directory and the image have to be
 the files and directories themselves, not symbolic links. The refusal names the
-store and what is missing, and says to set `CF_HARNESS_SANDBOX_RUNTIME=docker`
-to serve on Docker instead. They refuse the same way where the environment sets
-one of the Docker driver's own variables, `CF_HARNESS_RUNSC_CFC_RESULT_DIR` and
-`CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR` among them, since whoever set it
-means Docker; where a default CFC policy could not be read; and where the store
-is reached through a symbolic link, which the macOS `runsc` cannot run from.
-There is no fallback from one driver to the other. The package's
+store and what is missing. They refuse the same way where a default CFC policy
+could not be read, and where the store is reached through a symbolic link, which
+the macOS `runsc` cannot run from. The Docker driver's own variables,
+`CF_HARNESS_RUNSC_CFC_RESULT_DIR` and
+`CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR` among them, are read by nothing,
+so a stale environment that sets them serves as if it did not. The package's
 [current-state reference](../docs/CURRENT_STATE.md#selection) has the rule in
 full.
 
 The batch CLI's `--sandbox-runtime`, `--sandbox-rootfs` and
 `--sandbox-cfc-policy` are refused here and by `console:launch`, in any
 spelling, naming the variable to set instead: the launcher reads the same
-environment to decide whether Docker is involved at all, and a flag one of them
-read and the other did not would leave the launch and the console describing two
-different sandboxes. The Docker image and the Docker runtime name are not
-configurable on the console.
+environment to decide what it prints, and a flag one of them read and the other
+did not would leave the launch and the console describing two different
+sandboxes.
 
-Under `runsc` the console builds the direct driver: no Docker, and the runtime
-description reads `runsc-cfc`. `bash` takes no `session`, as on Docker: the
-console's turns run at `enforce-strict`, and no enforcing run can use a sandbox
-session. `console:launch` reads no Docker runtime table, sites no sidecar
-directory, and refuses `--cfc-result-dir` and `--cfc-invocation-context-dir`,
-which it takes on the Docker driver only, because only that driver reads them;
-it prints the `runsc` binary, rootfs and CFC policy in their place, and so does
-the server when it binds. With no CFC policy, which only a named `runsc` can
-have, both say that every turn is refused. A console that names `docker`, or
-names no runtime off macOS, builds the Docker driver.
+The console builds the direct driver: no Docker, and the runtime description
+reads `runsc-cfc`. `bash` takes no `session`: the console's turns run at
+`enforce-strict`, and no enforcing run can use a sandbox session, and on Linux
+pasta's default network offers none either. `console:launch` refuses
+`--cfc-result-dir` and `--cfc-invocation-context-dir`, the Docker driver's
+sidecar directories, as flags it does not take. It prints the `runsc` binary,
+rootfs and CFC policy, and so does the server when it binds. With no CFC policy,
+which only a named `runsc` can have, both say that every turn is refused.
 
 Both printouts say how the driver was selected. `console:launch` prints a
 `sandbox` row whose source is `CF_HARNESS_SANDBOX_RUNTIME`, inherited, or the
-harness default with its platform and, on macOS, the native store; and beside
-each of the `runsc` binary, rootfs and CFC policy, the variable that named it,
-the native store, or the harness default. The server's banner opens its sandbox
-lines with the driver followed by `named by CF_HARNESS_SANDBOX_RUNTIME` or
-`default on <platform>` and the reason.
+harness default with its platform and, on macOS and Linux, the native store (on
+Linux `~/.local/share/runsc-cfc`); and beside each of the `runsc` binary, rootfs
+and CFC policy, the variable that named it, the native store, or the harness
+default. The server's banner opens its sandbox lines with the driver followed by
+`named by CF_HARNESS_SANDBOX_RUNTIME` or `default on <platform>` and the reason.
 
 Every turn scans the skills root and records the registry on its run before the
 first model call, so `read_skill_resource` can answer and a delegated
@@ -315,12 +321,7 @@ registry names host paths, and the run's `skill-registry.json` artifact records
 what the scan found.
 
 Everything the server writes lives under `.cf-harness-console/` in the working
-directory — the sandbox workspace, run artifacts, the session database, and, on
-the Docker driver, the sandbox's two CFC sidecar transport directories. The
-harness refuses to start an enforcing run on that driver without those
-transports wired, so this surface sites them itself;
-`CF_HARNESS_RUNSC_CFC_RESULT_DIR` and
-`CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR` move them somewhere else.
+directory — the sandbox workspace, run artifacts, and the session database.
 `CF_HARNESS_CONSOLE_DIR` moves the whole tree. Give each console a directory of
 its own: nothing stops two from sharing one, and two that do interleave their
 runs, so a run record names a session the other console holds. `console:launch`
@@ -395,17 +396,15 @@ External rows check the selected sandbox driver and the configured index's
 health and enrollment for the console identity. The **Sandbox Runtime** row,
 `sandbox.runtime`, ends its detail with how the driver was selected, as
 `selected: runsc (default on macOS: the native store at <store>)` reads for the
-native runtime. On the Docker driver the sandbox rows read the running daemon's
-`runsc-cfc` registration. On the direct `runsc` driver they ask Docker nothing:
-they resolve the driver's configuration the way a turn resolves it, and report
-whether the `runsc` binary is an executable file, whether the rootfs is a
-directory, and whether a CFC policy is configured, readable and a JSON object. A
-policy that is missing, not a file, unreadable for want of permission or
-malformed is failed: runsc cannot use it, and every command's output then
-arrives without a CFC result and is denied to the model. The console takes no
-enforcement mode, so its turns run at `enforce-strict`, and with no policy the
-runtime row is failed because the engine refuses every turn before any tool
-runs.
+native runtime. The sandbox rows resolve the driver's configuration the way a
+turn resolves it, and report whether the `runsc` binary is an executable file,
+whether the rootfs is a directory, and whether a CFC policy is configured,
+readable and a JSON object. A policy that is missing, not a file, unreadable for
+want of permission or malformed is failed: runsc cannot use it, and every
+command's output then arrives without a CFC result and is denied to the model.
+The console takes no enforcement mode, so its turns run at `enforce-strict`, and
+with no policy the runtime row is failed because the engine refuses every turn
+before any tool runs.
 
 On macOS the direct driver runs every sandbox in one VM, which `runsc` starts on
 a command's first use and which stops itself once it has gone its idle timeout
@@ -458,12 +457,12 @@ current snapshot immediately and schedules stale checks in the background,
 sharing any in-flight check. No probe is awaited by the route. The timestamp
 remains visible while an observation is being refreshed. Model rows describe the
 startup provider and credential source without exposing credentials or making a
-model request; a configured API key does not prove provider acceptance. Neither
-a Docker registration nor an executable `runsc` proves a sandbox can execute a
-task, nor does a rootfs directory, a running VM holding its image, or a policy
-that parses: nothing here starts a sandbox, and only `runsc` knows a policy's
-schema. Fabric-session liveness remains unverified, and Loom, toolshed, and
-application pin status belong to the application that observes them directly.
+model request; a configured API key does not prove provider acceptance. An
+executable `runsc` does not prove a sandbox can execute a task, nor does a
+rootfs directory, a running VM holding its image, or a policy that parses:
+nothing here starts a sandbox, and only `runsc` knows a policy's schema.
+Fabric-session liveness remains unverified, and Loom, toolshed, and application
+pin status belong to the application that observes them directly.
 
 A task body carries the text, optionally the session to continue, and optionally
 the cells the task is to be computed over, published patterns, and the
@@ -510,27 +509,32 @@ caller showing a rendered piece has to work with:
 {
   "text": "make the headings readable",
   "inputCells": [
-    { "name": "pattern_1", "ref": "pattern:my-space/reading-list" }
+    { "name": "pattern_1", "ref": "pattern:<space-did>/reading-list" }
   ]
 }
 ```
 
 `pattern:<space>/<slug>`, or the bare `<slug>` meaning a piece in this console's
-own space. The session resolves the name to the piece's address before it mints
-a handle, so what the handle table holds is the address either way and the model
-is told no more than it is told for any other cell. The alternative is every
-surface holding a piece deriving fabric ids of its own, which is one copy of the
-runtime's addressing rules per client — and a client is exactly where that copy
-goes stale.
+own space. `<space>` is the space's DID, or the legacy name a console was
+configured with. The session resolves the name to the piece's address before it
+mints a handle, so what the handle table holds is the address either way and the
+model is told no more than it is told for any other cell. The alternative is
+every surface holding a piece deriving fabric ids of its own, which is one copy
+of the runtime's addressing rules per client — and a client is exactly where
+that copy goes stale.
 
 Which side answers which mistake follows from what each side can know. A slug
 the runtime's own rule refuses, an address carrying a path under the piece
-rather than the piece, and an address naming a space that is not this console's
-are decidable from the text, so the route answers **400** naming which — the
-caller cannot see the space this console runs against, so a mismatch is this
-side's to explain. Whether the space HOLDS that slug is not a fact about the
-text; the turn finds it out and fails naming the slug, under the rule above that
-governs every reference which parses and still cannot mint.
+rather than the piece, an address naming a space that is not this console's, and
+a reference into a foreign space the operator did not admit are decidable from
+the text, so the route answers **400** naming which — the caller cannot see the
+space this console runs against, so a mismatch is this side's to explain. The
+route holds each reference to the rule the session's mint holds it to: the
+console resolves a configured legacy name to its DID at startup, as the session
+does, so an address may name this console's space by either. Whether the space
+HOLDS that slug is not a fact about the text; the turn finds it out and fails
+naming the slug, under the rule above that governs every reference which parses
+and still cannot mint.
 
 The address is scoped to pieces. A pane may show any cell in a space, and the
 general case is CT-2319's; a slug names a piece or it names nothing, which is
@@ -565,10 +569,11 @@ The completed-turn result is:
   "pieces": [
     {
       "slug": "reading-list",
-      "url": "http://localhost:8000/my-space/reading-list"
+      "url": "http://localhost:8000/<space-did>/reading-list",
+      "space": "<space-did>"
     }
   ],
-  "spaceName": "my-space",
+  "spaceName": "<space-did>",
   "finalText": "Your reading list is ready."
 }
 ```
@@ -610,17 +615,20 @@ receipts, replay flags, and current versions, and is empty when the run composed
 none. Optional `originLoomId` is the turn's submitted origin. Enable the tools
 with `--loom-authoring-config` or `CF_HARNESS_LOOM_AUTHORING_CONFIG`; the
 complete contract is [Durable Loom authoring](../docs/LOOM_AUTHORING.md). Each
-entry copies `slug` and `url` from the successful `assign_slug` observation.
-When that same held token also appeared in a verified successful composition,
-optional `loomComponents: [{loomId, componentId}]` identifies its saved
-membership. The correlation uses unique matching current-turn tool calls and
-request-order receipt IDs, never the human slug or assistant prose. When using
-this metadata, clients suppress duplicate placement only after verifying the
-pair in a freshly opened manifest. Weaver also retains a legacy exact-reference
-membership check; absent either proof it keeps ordinary placement. Different
-tokens for the same Pattern are not inferred equivalent. No cell address or
-token is added to the result. `spaceName` identifies this console's configured
-space.
+entry copies `slug`, `url`, and the piece's space DID `space` from the output a
+successful `assign_slug` call persisted; the model is shown the slug alone. A
+successful call whose output does not read back makes the result unavailable
+rather than leave the piece out. When that same held token also appeared in a
+verified successful composition, optional
+`loomComponents: [{loomId, componentId}]` identifies its saved membership. The
+correlation uses unique matching current-turn tool calls and request-order
+receipt IDs, never the human slug or assistant prose. When using this metadata,
+clients suppress duplicate placement only after verifying the pair in a freshly
+opened manifest. Weaver also retains a legacy exact-reference membership check;
+absent either proof it keeps ordinary placement. Different tokens for the same
+Pattern are not inferred equivalent. No cell address or token is added to the
+result. `spaceName` is this console's space as it was configured: its DID, or
+the legacy name it was started with.
 
 The route never holds a request open; it answers with where the turn stands, and
 the status code says whether asking again can change the answer:
@@ -702,12 +710,11 @@ sentence as "done", "waiting for your answer", or "stopped", without a failure
 badge. Child agents report blockers to their parent; they cannot end the user's
 task themselves.
 
-When the run names a piece, the `assign_slug` result carries a `slug` and a
-`url`, and the page raises an **Open your piece** link above the feed. That link
-is the point of the surface: everything above it is the work, and the link is
-what the work produced. The same result is durable under
-`<artifact-root>/<run-id>/tool-outputs/`; when a run ends without the link
-appearing, the Runs view below reads it back.
+When a turn that named a piece completes, the page raises an **Open your piece**
+link above the feed, with the URL the `assign_slug` call persisted under
+`<artifact-root>/<run-id>/tool-outputs/`. That link is the point of the surface:
+everything above it is the work, and the link is what the work produced. The
+Runs view below reads the same output back.
 
 Cancel stops the running turn. The session survives a cancel and a page reload
 both — the stream resumes from the last event the page rendered rather than
@@ -807,13 +814,14 @@ address is the one `assign_slug` recorded, which is the Fabric API's; a host
 that shows pieces somewhere else — a pane of its own, say, where the API's
 address answers with a login gate instead of the piece — names its prefix here,
 and every piece link on the page is composed as `<piecesBase>/<space>/<slug>`
-from the space and slug the turn's result carries, each escaped. With no prefix
-named, the recorded URL is used as it stands rather than rebuilt. The prefix has
-to be an absolute `http` or `https` URL: it arrives from whatever opened the
-page and ends up in an `href`, so anything else — a `javascript:` URL, a
-relative path — is refused, the page says so, and the links stay on the recorded
-address. The console composes against a prefix it is given and knows nothing
-about the host that gave it.
+from the space DID and slug the run recorded, written as the shell writes a
+piece's path. With no prefix named, or no space recorded, the recorded URL is
+used as it stands rather than rebuilt. The prefix has to be an absolute `http`
+or `https` URL: it arrives from whatever opened the page and ends up in an
+`href`, so anything else — a `javascript:` URL, a relative path — is refused,
+the page says so, and the links stay on the recorded address. The console
+composes against a prefix it is given and knows nothing about the host that gave
+it.
 
 The pane reads the same event stream the console page reads, from sequence zero
 — so a pane opened halfway through a turn shows the steps that already happened
@@ -1153,7 +1161,7 @@ exist:
 | `allowedToolIds`          | the tools a new session's policy asks for                             |
 | `allowedSubagentProfiles` | the subagent profiles it authorizes                                   |
 | `artifactRoot`            | where runs are filed                                                  |
-| `fabricSpace`             | the space name runs build in                                          |
+| `fabricSpace`             | the space runs build in, as configured                                |
 | `sessionDbPath`           | the durable session store, or `null` when sessions are held in memory |
 
 The prompt crosses as a digest and never as text, so a client can check that
@@ -1162,9 +1170,8 @@ process. `allowedToolIds` is what the policy asks for; the prompt loop withholds
 a tool again when its backing is absent, so this says a session may reach a tool
 rather than that a turn will hold it.
 
-The route carries the space name and the two host paths alongside the digest, so
-it says what a session here would run under without a session having been
-started.
+The route carries the space and the two host paths alongside the digest, so it
+says what a session here would run under without a session having been started.
 
 An unattended client is the caller this route is for: the measurement batch
 runner refuses a whole batch when the console it found is not the cell its
@@ -1210,12 +1217,21 @@ space is stated as read for none of them: one member's reading cannot speak for
 another member's cells. `--space-db` reaches the children as it reaches the
 parent.
 
-The read is one hop wide. A pattern's results are their own cells, linked from
-the piece that names them, and the derived label sits on the cell — so the
-labels of the cells a run's own cells link to are read too, at the path the link
-sits at. The walk descends through the objects and arrays of a value to find
-those links and stops at each: a linked cell's own links belong to that cell,
-not to this one.
+The read follows links. A pattern's results are their own cells, linked from the
+piece that names them, and the derived label sits on the cell — so the labels of
+the cells a run's own cells link to are read too, each under the path that
+reached it, and so are the cells those link to in turn, up to sixteen links out.
+The walk descends through the objects and arrays of a value to find the links. A
+link further out than it follows is recorded unread at its path, and a walk that
+has read four thousand and ninety-six documents for one cell stops and marks
+that cell's labels partial.
+
+Each cell's record also lists the path of every link the walk found, as
+`linkPaths`, whether the link was followed or left unread, and whether or not
+what it reaches carries a label. A reference leaves a label entry of its own
+only where it carries one, so a link to a cell the space holds no label for
+leaves no entry at its path or beneath it. The list is what tells that cell from
+one holding no link.
 
 It descends a bounded way, and what it does not reach it records rather than
 passes over. The bounds sit far above the shape of any document a pattern writes
@@ -1260,6 +1276,21 @@ run and its map. The step the scrubber sits on survives the re-read.
 The left column lists every run the server has made, each named by the task it
 was given, with a `delegate_task` child nested under the run that delegated to
 it.
+
+Beside them it lists the runs the agent runner made on this machine, read from
+its work root (`--agent-runs-root`, `$CF_HARNESS_HOME/agent-runs` by default):
+an `/ask` job's runs, under `local/<job-id>/artifacts/`, are labelled `/ask`,
+and the runs of an `agent()` built-in, under `<run-key>/artifacts/`, are
+labelled `agent()`. They open, map and graph like the console's own, but no
+session holds them, so they appear here and nowhere else. A run id two roots
+both hold is read from the console's own root first, then from `/ask` jobs, then
+from `agent()` runs. Only checkpoints with the required run-state fields and an
+ID matching their directory are listed or take precedence; malformed and
+incomplete checkpoints are skipped individually. If no valid checkpoint holds an
+ID, a real run directory still permits artifact and tool-output reads. Lane,
+job, `artifacts` and run directories must be real directories: symlinked
+descendants are skipped by both listing and resolution. A work root that does
+not exist lists nothing.
 
 ### The map
 

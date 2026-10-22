@@ -893,7 +893,8 @@ export function wishTargetCandidates(): ProviderResult {
   return values([
     { value: "#profile", description: "the viewer's active profile object" },
     { value: "#profileName", description: "its live display name" },
-    { value: "#profileAvatar", description: "its avatar" },
+    { value: "#profileAvatar", description: "its avatar text" },
+    { value: "#profilePicture", description: "its picture, as image bytes" },
     { value: "#profileBio", description: "its owner-authored bio" },
     { value: "#profileSpace", description: "its own space cell" },
     { value: "#favorites", description: "space-relative" },
@@ -969,10 +970,6 @@ function onlyOn(
 const ROOT_DIRECTORY_COMMANDS: readonly string[] = [
   "check",
   "piece new",
-  // Both mounts of `set-home`: the superseded one keeps completing its own
-  // flags for a caller who has not migrated, it is only never suggested.
-  "piece set-home",
-  "space set-home",
   "piece setsrc",
   "piece survey",
   "test",
@@ -1095,6 +1092,8 @@ const OPTION_VALUE_PROVIDERS: Readonly<Record<string, OptionProvider>> = {
   plan: () => Promise.resolve(directive({ kind: "files" })),
   // `cf inspect --dir` is an extra directory to search for space DBs.
   dir: () => Promise.resolve(directive({ kind: "dirs" })),
+  // `cf profile repair-root --from-snapshot` is a directory of space DBs.
+  "from-snapshot": () => Promise.resolve(directive({ kind: "dirs" })),
   // `cf inspect html --out` and `cf check --output` write a file.
   out: () => Promise.resolve(directive({ kind: "files" })),
   output: () => Promise.resolve(directive({ kind: "files" })),
@@ -1108,9 +1107,42 @@ const OPTION_VALUE_PROVIDERS: Readonly<Record<string, OptionProvider>> = {
     ["space clone"],
     () => Promise.resolve(directive({ kind: "files" })),
   ),
-  // A hashtag search scope on `wish`, and a scope key on `inspect`.
-  scope: onlyOn(["wish"], () => wishScopeCandidates()),
+  // A hashtag search scope on `wish`, a scope kind on `space compact`, and a
+  // scope key on `inspect`.
+  scope: onlyOn(
+    ["wish", "space compact"],
+    (line) =>
+      line.path.join(" ") === "space compact"
+        ? Promise.resolve(values(SCOPE_KIND_CANDIDATES))
+        : wishScopeCandidates(),
+  ),
+  // `cf space compact --documents` names an id namespace; the three the
+  // store uses are the candidates, and a longer prefix is typed past them.
+  documents: onlyOn(
+    ["space compact"],
+    () => Promise.resolve(values(ID_PREFIX_CANDIDATES)),
+  ),
+  // `cf space compact --verify --against` names the backup a result was
+  // compacted from: a store file, like the positional.
+  against: onlyOn(
+    ["space compact"],
+    () => Promise.resolve(directive({ kind: "files", glob: "*.sqlite" })),
+  ),
 };
+
+/** The scope kinds `cf space compact --scope` restricts a selection to. */
+const SCOPE_KIND_CANDIDATES: readonly Candidate[] = [
+  { value: "space", description: "space-scoped instances" },
+  { value: "user", description: "per-user instances" },
+  { value: "session", description: "per-session instances" },
+];
+
+/** The id namespaces a store holds, as `cf space compact --documents` prefixes. */
+const ID_PREFIX_CANDIDATES: readonly Candidate[] = [
+  { value: "of:", description: "entity documents" },
+  { value: "computed:", description: "computed cells" },
+  { value: "cid:", description: "content-addressed label documents" },
+];
 
 /** `cf inspect` subcommands whose first positional opens a local space. */
 const INSPECT_SPACE_COMMANDS: readonly string[] = [
@@ -1190,8 +1222,6 @@ const ARGUMENT_PROVIDERS: Readonly<
   "exec:mountedFile": () => Promise.resolve(directive({ kind: "files" })),
   "id did:keypath": () =>
     Promise.resolve(directive({ kind: "files", glob: "*.key" })),
-  "piece set-home:main": patternFiles,
-  "space set-home:main": patternFiles,
   "piece getsrc:outpath": () => Promise.resolve(directive({ kind: "files" })),
   "deps update:file": () => Promise.resolve(directive({ kind: "files" })),
   "fuse mount:mountpoint": () => Promise.resolve(directive({ kind: "dirs" })),
@@ -1208,6 +1238,9 @@ const ARGUMENT_PROVIDERS: Readonly<
   // candidates.
   "space clone:space": () => spaceCandidates(),
   "space fingerprint:space": () => spaceCandidates(),
+  // `compact` takes a store file by path, never a space name.
+  "space compact:store": () =>
+    Promise.resolve(directive({ kind: "files", glob: "*.sqlite" })),
   // `verify`/`reset` take a clone directory built by `space clone`.
   "space verify:dir": () => Promise.resolve(directive({ kind: "dirs" })),
   "space reset:dir": () => Promise.resolve(directive({ kind: "dirs" })),

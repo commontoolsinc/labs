@@ -1,5 +1,14 @@
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
-import { parseFlagValue } from "@commonfabric/runner/experimental-posture";
+import type { ExperimentalOptions } from "@commonfabric/runner";
+import {
+  adoptServerExperimentalOptions,
+  parseFlagValue,
+} from "@commonfabric/runner/experimental-posture";
+import {
+  holdDeployment,
+  resolveDeployment,
+  type ShellDeployment,
+} from "./deployment.ts";
 
 declare global {
   var $ENVIRONMENT: string | undefined;
@@ -13,7 +22,9 @@ declare global {
   var $EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION: string | undefined;
   var $EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS: string | undefined;
   var $EXPERIMENTAL_READER_SCHEMA_PRECEDENCE: string | undefined;
+  var $EXPERIMENTAL_LOCAL_SESSION_DOCUMENTS: string | undefined;
   var $EXPERIMENTAL_SHARED_MEMORY_CONNECTION: string | undefined;
+  var $EXPERIMENTAL_LOCAL_FOLD: string | undefined;
 }
 
 const ENVIRONMENT_DEFINE = typeof $ENVIRONMENT === "string"
@@ -50,12 +61,37 @@ const EXPERIMENTAL_READER_SCHEMA_PRECEDENCE_DEFINE =
     ? $EXPERIMENTAL_READER_SCHEMA_PRECEDENCE
     : undefined;
 
+const EXPERIMENTAL_LOCAL_FOLD_DEFINE =
+  typeof $EXPERIMENTAL_LOCAL_FOLD === "string"
+    ? $EXPERIMENTAL_LOCAL_FOLD
+    : undefined;
+
 export const ENVIRONMENT: "development" | "production" =
   ENVIRONMENT_DEFINE === "production" ? ENVIRONMENT_DEFINE : "development";
 
 export const API_URL: URL = new URL(
   API_URL_DEFINE ||
     `${globalThis.location.protocol}//${globalThis.location.host}`,
+);
+
+/**
+ * What this page's worker takes from its deployment: the memory URL it opens
+ * Memory on and the flags the deployment decides ({@link resolveDeployment}).
+ * The shell's entry calls `prefetch` as early as it can, so that a page which
+ * has to read the API URL's meta document does so alongside the rest of
+ * startup, and the root view awaits `get` before creating each runtime. The
+ * first runtime takes that read's result, unless it is a transient failure
+ * more than ten seconds old. A result that is not a transient failure is kept
+ * for the page's lifetime; a transient failure is not
+ * ({@link holdDeployment}), so the next runtime the page creates reads again.
+ */
+export const shellDeployment: ShellDeployment = holdDeployment(
+  () =>
+    resolveDeployment(
+      globalThis.document,
+      API_URL,
+      globalThis.location?.origin,
+    ),
 );
 
 export const COMMIT_SHA: string | undefined = COMMIT_SHA_DEFINE;
@@ -85,6 +121,15 @@ export const EXPERIMENTAL = {
   webViewScopedReplication: flagValue(
     typeof $EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION === "string"
       ? $EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION
+      : undefined,
+  ),
+  // Decided by the deployment (SHELL_FLAG_SOURCES): a runtime takes the
+  // value the deployment publishes unless this define pins it
+  // ({@link experimentalForDeployment}). The define is the rollback and CI
+  // lever, as for the other flags; it is unset in a release build.
+  localSessionDocuments: flagValue(
+    typeof $EXPERIMENTAL_LOCAL_SESSION_DOCUMENTS === "string"
+      ? $EXPERIMENTAL_LOCAL_SESSION_DOCUMENTS
       : undefined,
   ),
   sharedMemoryConnection: flagValue(
@@ -117,4 +162,24 @@ export const EXPERIMENTAL = {
   readerSchemaPrecedence: flagValue(
     EXPERIMENTAL_READER_SCHEMA_PRECEDENCE_DEFINE,
   ),
+  // The local fold of a refused derived write. Off by default in the runner;
+  // `EXPERIMENTAL_LOCAL_FOLD=true` bakes a shell whose worker keeps such a
+  // write as a fold instead of reverting it.
+  localFold: flagValue(EXPERIMENTAL_LOCAL_FOLD_DEFINE),
 };
+
+/**
+ * The flags a runtime runs: the build defines, with the flags the deployment
+ * decides for the shell adopted from `declared` where no define pins them.
+ * `declared` is what the page or the meta document declared of
+ * `SHELL_DEPLOYMENT_FLAGS` (`shellDeployment.get().experimental`), so the
+ * adoption is `adoptServerExperimentalOptions` as `cf` runs it: an explicit
+ * define wins, otherwise the deployment's value, otherwise the built-in
+ * default. One shell build thereby runs a flag on against a deployment that
+ * turned it on and off against one that did not.
+ */
+export function experimentalForDeployment(
+  declared: ExperimentalOptions,
+): ExperimentalOptions {
+  return adoptServerExperimentalOptions(declared, EXPERIMENTAL);
+}

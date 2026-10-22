@@ -100,8 +100,15 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   apiUrl: URL;
 
   /**
+   * Optional default storage host, forwarded to the worker: Memory opens here
+   * for any space `spaceHostMap` does not list. Everything else stays on
+   * `apiUrl`. Absent, Memory opens on `apiUrl`.
+   */
+  memoryUrl?: URL;
+
+  /**
    * Optional map from space DIDs to HTTP or HTTPS origins, forwarded to the
-   * worker. Spaces absent from the map resolve to `apiUrl`, the default host.
+   * worker. Spaces absent from the map resolve to the default host.
    */
   spaceHostMap?: Record<string, string>;
 
@@ -299,6 +306,7 @@ export async function resolveWorkerUrl(
 export function createRuntimeClientOptions({
   session,
   apiUrl,
+  memoryUrl,
   spaceHostMap,
   experimental,
   cfcEnforcementMode = "enforce-strict",
@@ -330,6 +338,7 @@ export function createRuntimeClientOptions({
 }: {
   session: Session;
   apiUrl: URL;
+  memoryUrl?: URL;
   spaceHostMap?: Record<string, string>;
   experimental?: ExperimentalRuntimeFlags;
   cfcEnforcementMode?: RuntimeCfcEnforcementMode;
@@ -353,6 +362,7 @@ export function createRuntimeClientOptions({
 
   return {
     apiUrl,
+    memoryUrl,
     spaceHostMap,
     identity: session.as,
     spaceDid: session.space,
@@ -442,7 +452,10 @@ export class RuntimeInternals extends EventTarget {
    * running. */
   #spaceRootPatterns: Map<
     DID,
-    { pattern: Promise<PieceHandle<NameSchema>>; started: boolean }
+    {
+      pattern: Promise<PieceHandle<NameSchema> | undefined>;
+      started: boolean;
+    }
   > = new Map();
   /**
    * Loaded pieces, nested space → scope → id: a piece's whole address, held
@@ -549,14 +562,15 @@ export class RuntimeInternals extends EventTarget {
   }
 
   /**
-   * The space's root pattern. `start` defaults to true, which a view that
-   * renders the root needs; pass false to read its exports without running
-   * it.
+   * The space's root pattern, or `undefined` when the space has none. `start`
+   * defaults to true, which a view that renders the root needs; pass false to
+   * read its exports without running it. See
+   * `RuntimeClient.getSpaceRootPattern` for when asking creates the root.
    */
   getSpaceRootPattern(
     space: DID,
     options: { start?: boolean } = {},
-  ): Promise<PieceHandle<NameSchema>> {
+  ): Promise<PieceHandle<NameSchema> | undefined> {
     this.#check();
     const start = options.start ?? true;
     const cached = this.#spaceRootPatterns.get(space);
@@ -565,12 +579,16 @@ export class RuntimeInternals extends EventTarget {
     const entry = { pattern, started: start };
     this.#spaceRootPatterns.set(space, entry);
     // Evict on rejection: a transient failure (unreachable host, authz)
-    // must not poison the space for the runtime's lifetime.
-    pattern.catch(() => {
+    // must not poison the space for the runtime's lifetime. Evict on no root
+    // too, since the space's owner can create its root at any time.
+    const evict = () => {
       if (this.#spaceRootPatterns.get(space) === entry) {
         this.#spaceRootPatterns.delete(space);
       }
-    });
+    };
+    pattern.then((root) => {
+      if (root === undefined) evict();
+    }, evict);
     return pattern;
   }
 
@@ -582,18 +600,6 @@ export class RuntimeInternals extends EventTarget {
   createSpace(label?: string): Promise<DID> {
     this.#check();
     return this.#client.createSpace(label);
-  }
-
-  async recreateSpaceRootPattern(space: DID): Promise<PieceHandle<NameSchema>> {
-    this.#check();
-    // Clear cached pattern since we're recreating it
-    this.#spaceRootPatterns.delete(space);
-    const pattern = await this.#client.recreateSpaceRootPattern(space);
-    this.#spaceRootPatterns.set(space, {
-      pattern: Promise.resolve(pattern),
-      started: true,
-    });
-    return pattern;
   }
 
   /**
@@ -805,6 +811,7 @@ export class RuntimeInternals extends EventTarget {
     space: DID;
     contentType: string;
     body: Uint8Array | ArrayBufferLike;
+    name?: string;
     suffix?: string;
   }): Promise<{ id: string; url: string }> {
     this.#check();
@@ -930,6 +937,7 @@ export class RuntimeInternals extends EventTarget {
   static async create({
     identity,
     apiUrl,
+    memoryUrl,
     spaceHostMap,
     experimental,
     cfcEnforcementMode,
@@ -975,6 +983,7 @@ export class RuntimeInternals extends EventTarget {
     const clientOptions = createRuntimeClientOptions({
       session,
       apiUrl,
+      memoryUrl,
       spaceHostMap,
       experimental,
       cfcEnforcementMode,

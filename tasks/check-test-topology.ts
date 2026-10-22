@@ -10,8 +10,8 @@
  *
  * The tree half needs no store and runs on every pull request. It reads
  * every file the repository holds for things that look like tests, and
- * fails on any that no suite accounts for, or that two suites claim under
- * the same record surface and variant. This is what catches a pull
+ * fails on any that no suite accounts for, or that two suites of the same
+ * variant claim. This is what catches a pull
  * request adding a test surface nobody registered, at the moment it is
  * added.
  *
@@ -36,8 +36,8 @@
  * every test deleted or renamed since.
  *
  * The reverse direction is reported rather than failed. A unit the
- * topology holds that no run has ever recorded is either a test that
- * never runs or a mapping that is wrong, and both are worth knowing
+ * topology holds that the run's records never reached is either a test
+ * that never runs or a mapping that is wrong, and both are worth knowing
  * about without blocking anybody.
  *
  *   deno task check-test-topology            # tree and workflows
@@ -113,6 +113,25 @@ const NOT_A_TEST_SURFACE: ReadonlyArray<{ path: string; reason: string }> = [
   {
     path: "packages/deno-web-test/test/bundle-project/bundled.test.ts",
     reason: "a project the harness runs to prove it bundles before serving",
+  },
+  {
+    path: "packages/deno-web-test/test/commands-project/press.test.ts",
+    reason: "a project the harness runs to prove a test can press trusted keys",
+  },
+  {
+    path: "packages/deno-web-test/test/late-registration-project/late.test.ts",
+    reason: "a project the harness runs to prove a run with a test it never " +
+      "ran claims nothing",
+  },
+  {
+    path: "packages/deno-web-test/test/load-error-project/loads.test.ts",
+    reason: "a project the harness runs to prove a run with a file that " +
+      "failed to load claims nothing",
+  },
+  {
+    path: "packages/deno-web-test/test/load-error-project/throws.test.ts",
+    reason: "a project the harness runs to prove a run with a file that " +
+      "failed to load claims nothing",
   },
   {
     path: "packages/deno-web-test/test/project-with-config/ed25519.test.ts",
@@ -486,6 +505,9 @@ export function checkStore(
     }
   }
   for (const suite of suites) {
+    // A gate's verdict is recorded by the job this check runs in, after it
+    // reads the lanes' records, so no gate is among them.
+    if (suite.judges !== undefined) continue;
     // A leaf declared unavailable leaves its unit expected to record,
     // because every other identity in that unit still runs.
     const unavailable = unavailableUnits(suite);

@@ -15,6 +15,7 @@ import { HarnessControlError } from "@commonfabric/cf-harness/control-errors";
 import { renderCellReference } from "@commonfabric/runner/shared";
 
 import {
+  HARNESS_JOB_GRANT_ENV_KEYS,
   type HarnessJobSpec,
   runHarnessJob,
   selectHarnessJobSandboxRuntime,
@@ -39,6 +40,18 @@ const plainSpec = (
   model: "scripted",
   ...overrides,
 });
+
+/** The environment a scripted job's harness reads. */
+const SCRIPTED_ENV = {
+  CF_HARNESS_MODEL_PROVIDER: "openai-compatible-gateway",
+  CF_HARNESS_GATEWAY_AUTH_MODE: "none",
+  // Named, with a `runsc` and a rootfs nothing runs, so a job selects
+  // the same sandbox on every machine: macOS and Linux otherwise take
+  // the native runtime, from a store this has none of.
+  CF_HARNESS_SANDBOX_RUNTIME: "runsc",
+  CF_HARNESS_RUNSC_BINARY: "/nonexistent/harness-job-test/runsc",
+  CF_HARNESS_SANDBOX_ROOTFS: "/nonexistent/harness-job-test/rootfs",
+};
 
 /** What the scripted loop saw of one job. */
 interface Seen {
@@ -102,6 +115,12 @@ describe("runHarnessJob()", () => {
       onEvent?: (event: HarnessTranscriptEvent) => void;
       report?: (message: string) => void;
       browserHost?: LocalJobBrowserHost;
+
+      /** Leaves the harness to read the process's environment. */
+      processEnv?: boolean;
+
+      /** Classifies the task with a real loop on the job's own engine. */
+      classify?: boolean;
     } = {},
   ) => {
     const seen: Seen = {};
@@ -114,13 +133,7 @@ describe("runHarnessJob()", () => {
         ? { browserHost: options.browserHost }
         : {}),
       harnessDeps: {
-        env: {
-          CF_HARNESS_MODEL_PROVIDER: "openai-compatible-gateway",
-          CF_HARNESS_GATEWAY_AUTH_MODE: "none",
-          // Named, so a job selects the same sandbox on every machine: a Mac
-          // otherwise takes the native runtime, from a store this has none of.
-          CF_HARNESS_SANDBOX_RUNTIME: "docker",
-        },
+        ...(options.processEnv === true ? {} : { env: SCRIPTED_ENV }),
         fabricSessionFactory: () =>
           Promise.reject(new Error("this job opens no fabric session")),
         createPromptLoop: (loopOptions) => {
@@ -152,6 +165,12 @@ describe("runHarnessJob()", () => {
               });
             },
             runTranscript: () => Promise.reject(new Error("not a resume")),
+            ...(options.classify
+              ? {
+                classifyTask: (task: string) =>
+                  new CfHarnessPromptLoop(loopOptions).classifyTask(task),
+              }
+              : {}),
           };
         },
       },
@@ -178,14 +197,11 @@ describe("runHarnessJob()", () => {
           signal: new AbortController().signal,
           harnessDeps: {
             env: {
-              CF_HARNESS_MODEL_PROVIDER: "openai-compatible-gateway",
-              CF_HARNESS_GATEWAY_AUTH_MODE: "none",
-              CF_HARNESS_SANDBOX_RUNTIME: "docker",
-              CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR: join(
-                runRoot,
-                "contexts",
-              ),
-              CF_HARNESS_RUNSC_CFC_RESULT_DIR: join(runRoot, "results"),
+              ...SCRIPTED_ENV,
+              // The real loop refuses an enforcing run without a policy; it
+              // is never read, since nothing here starts the sandbox.
+              CF_HARNESS_RUNSC_CFC_POLICY:
+                "/nonexistent/harness-job-test/policy.json",
             },
             createPromptLoop: (options) =>
               new CfHarnessPromptLoop({
@@ -311,6 +327,49 @@ describe("runHarnessJob()", () => {
     ]);
   });
 
+  it("takes no grant from the runner's environment, and keeps its model settings", async () => {
+    const set = {
+      ...SCRIPTED_ENV,
+      CF_HARNESS_MODEL: "from-the-environment",
+      ...Object.fromEntries(
+        HARNESS_JOB_GRANT_ENV_KEYS.map((key) => [key, `/granted/${key}`]),
+      ),
+      CF_HARNESS_FABRIC_API_URL: "https://toolshed.example",
+      CF_HARNESS_FABRIC_SPACE: SPACE,
+      CF_HARNESS_FABRIC_FOREIGN_SPACES: "did:key:z6MkforeignSpace",
+      CF_HARNESS_PATTERN_INDEX_URL: "https://index.example",
+      CF_HARNESS_CFC_ENFORCEMENT_MODE: "disabled",
+      CF_CFC_MODE: "disabled",
+    };
+    const before = Object.fromEntries(
+      Object.keys(set).map((key) => [key, Deno.env.get(key)]),
+    );
+    for (const [key, value] of Object.entries(set)) Deno.env.set(key, value);
+    try {
+      const { result, seen } = await runScripted(
+        plainSpec({ model: undefined }),
+        answering("Titan"),
+        { processEnv: true },
+      );
+
+      expect(result.outcome).toBe("completed");
+      expect(seen.loopOptions?.model).toBe("from-the-environment");
+      expect(seen.loopOptions?.fabricSession).toBeUndefined();
+      expect(seen.loopOptions?.engine?.config.patternIndex).toBeUndefined();
+      expect(seen.loopOptions?.loomRetrieval).toBeUndefined();
+      expect(seen.loopOptions?.loomCommands).toBeUndefined();
+      // An inherited `disabled` would let a `context` task use write tools.
+      expect(seen.loopOptions?.cfcEnforcementModeOverride).toBe(
+        "enforce-explicit",
+      );
+    } finally {
+      for (const [key, value] of Object.entries(before)) {
+        if (value === undefined) Deno.env.delete(key);
+        else Deno.env.set(key, value);
+      }
+    }
+  });
+
   it("allows no subagent profile and hands no host when the spec names none", async () => {
     const { seen } = await runScripted(plainSpec(), answering("Titan"));
     expect(seen.loopOptions?.engine?.browserHost).toBeUndefined();
@@ -342,6 +401,19 @@ describe("runHarnessJob()", () => {
         "submit_result",
       ]);
       expect(seen.loopOptions?.model).toBe("scripted");
+    });
+
+    it("records the task's classification in the job's run state and orients the prompt by it", async () => {
+      const { result, seen } = await runScripted(
+        plainSpec({ task: "what's on Thursday?" }),
+        answering("Nothing."),
+        { classify: true },
+      );
+
+      expect(result.outcome).toBe("completed");
+      expect(seen.loopOptions?.engine?.getRunState().taskClassification)
+        .toMatchObject({ tags: ["find"], path: "rule" });
+      expect(seen.systemPrompt).not.toContain("When you delegate");
     });
 
     it("passes no fabric session and no input cell", async () => {
@@ -398,6 +470,33 @@ describe("runHarnessJob()", () => {
         "Answer in one word.",
       );
       expect(plain.seen.maxModelTurns).not.toBe(6);
+    });
+
+    it("gives the harness the spec's task tags and domains, an empty list as none", async () => {
+      const { seen } = await runScripted(
+        plainSpec({ taskTags: ["find"], taskDomains: [] }),
+        answering("Titan"),
+      );
+      const plain = await runScripted(plainSpec(), answering("Titan"));
+
+      expect(seen.loopOptions?.taskShape).toEqual({
+        tags: ["find"],
+        domains: [],
+      });
+      expect(plain.seen.loopOptions?.taskShape).toBeUndefined();
+    });
+
+    it("gives the harness the spec's depth and reasoning effort, and neither when the spec names none", async () => {
+      const { seen } = await runScripted(
+        plainSpec({ depth: "deep", reasoningEffort: "low" }),
+        answering("Titan"),
+      );
+      const plain = await runScripted(plainSpec(), answering("Titan"));
+
+      expect(seen.loopOptions?.depth).toBe("deep");
+      expect(seen.loopOptions?.reasoningEffort).toBe("low");
+      expect(plain.seen.loopOptions?.depth).toBeUndefined();
+      expect(plain.seen.loopOptions?.reasoningEffort).toBeUndefined();
     });
 
     it("leaves usage out of the report when the loop reports none", async () => {
@@ -471,6 +570,89 @@ describe("runHarnessJob()", () => {
       expect(
         (seen.loopOptions?.inputCells ?? []).map((cell) => cell.name),
       ).toEqual(["book"]);
+    });
+
+    it("admits the spec's foreign spaces to the fabric session", async () => {
+      // A piece handed in from another space is reached in that space.
+      const other = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+      const { seen } = await runScripted(
+        plainSpec({
+          fabric: {
+            host: "https://toolshed.example",
+            space: SPACE,
+            identityKeyPath: join(runRoot, "unused.key"),
+            maxConfidentiality: [
+              { type: "https://cfc.test/atom/user", subject: "me" },
+            ] as never,
+            inputs: {},
+            foreignSpaces: { [other]: "https://toolshed.example" },
+          },
+        }),
+        answering("Titan"),
+      );
+
+      expect(seen.loopOptions?.fabricSession?.foreignSpaces).toEqual({
+        [other]: "https://toolshed.example/",
+      });
+    });
+
+    /** A fabric part with no input cells, as a local job's is. */
+    const localFabric = () => ({
+      host: "https://toolshed.example",
+      space: SPACE,
+      identityKeyPath: join(runRoot, "unused.key"),
+      maxConfidentiality: [
+        { type: "https://cfc.test/atom/user", subject: "me" },
+      ] as never,
+      inputs: {},
+    });
+
+    it("configures the spec's pattern index, publishing unless the spec says not to", async () => {
+      for (
+        const [publish, expected] of [
+          [undefined, { baseUrl: "https://index.example" }],
+          [true, { baseUrl: "https://index.example" }],
+          [false, { baseUrl: "https://index.example", publish: false }],
+        ] as const
+      ) {
+        const { seen } = await runScripted(
+          plainSpec({
+            tools: ["run_pattern", "search_patterns", "delegate_task"],
+            subagentProfiles: ["default", "pattern-author"],
+            fabric: localFabric(),
+            patternIndexUrl: "https://index.example",
+            ...(publish !== undefined ? { patternIndexPublish: publish } : {}),
+          }),
+          answering("Titan"),
+        );
+
+        expect(seen.loopOptions?.engine?.config.patternIndex).toEqual(
+          expected,
+        );
+        expect(seen.loopOptions?.fabricSession).toMatchObject({
+          apiUrl: "https://toolshed.example",
+          space: SPACE,
+        });
+        expect(seen.loopOptions?.allowedSubagentProfiles).toEqual([
+          "default",
+          "pattern-author",
+        ]);
+        expect(seen.loopOptions?.allowedToolIds).toEqual([
+          "run_pattern",
+          "search_patterns",
+          "delegate_task",
+          "submit_result",
+        ]);
+      }
+    });
+
+    it("configures no pattern index for a spec that names none", async () => {
+      const { seen } = await runScripted(
+        plainSpec({ tools: ["run_pattern"], fabric: localFabric() }),
+        answering("Titan"),
+      );
+
+      expect(seen.loopOptions?.engine?.config.patternIndex).toBeUndefined();
     });
   });
 
@@ -623,6 +805,7 @@ describe("runHarnessJob()", () => {
               HOME: home,
             },
             platform: "darwin",
+            arch: "aarch64",
             createPromptLoop: () => {
               looped = true;
               throw new Error("no loop is built for a refused job");
@@ -637,12 +820,12 @@ describe("runHarnessJob()", () => {
         const refusal = reported.find((message) =>
           message.includes("No sandbox runtime is named")
         );
-        // The job's argument list is written for it, so the way to Docker it
-        // is told is the variable, and no flag.
+        // The job's argument list is written for it, so the way to a CFC
+        // policy it is told is the variable, and no flag.
         expect(refusal).toContain(
-          "select Docker with `CF_HARNESS_SANDBOX_RUNTIME=docker`.",
+          "(name one with `CF_HARNESS_RUNSC_CFC_POLICY`)",
         );
-        expect(refusal).not.toContain("--sandbox-runtime");
+        expect(refusal).not.toContain("--sandbox-");
       });
     }
 
@@ -657,8 +840,26 @@ describe("runHarnessJob()", () => {
       expect(result.outcome).toBe("failed");
       if (result.outcome !== "failed") throw new Error("unreachable");
       expect(result.errorCode).toBe("INVALID_RESULT");
+      expect(result.errorDetail).toBe("no structured result was submitted");
       expect(result.report?.modelTurns).toBe(2);
       expect(reported.join("\n")).not.toBe("");
+    });
+
+    it("ends `failed` as `INVALID_RESULT` with the field and the reason, when the result does not match the schema", async () => {
+      const { result } = await runScripted(
+        plainSpec(),
+        async ({ resultPath }) => {
+          await Deno.writeTextFile(resultPath, JSON.stringify({ answer: 7 }));
+          return loopResult(runRoot);
+        },
+      );
+
+      expect(result).toMatchObject({
+        outcome: "failed",
+        errorCode: "INVALID_RESULT",
+        errorDetail:
+          "structured result did not match the schema: answer: value does not match type string",
+      });
     });
 
     it("removes a result file an earlier job left before the job starts", async () => {
@@ -681,27 +882,63 @@ describe("runHarnessJob()", () => {
 describe("selectHarnessJobSandboxRuntime()", () => {
   it("takes the runtime the environment names, on any platform", async () => {
     const selection = await selectHarnessJobSandboxRuntime({
-      platform: "darwin",
-      env: { CF_HARNESS_SANDBOX_RUNTIME: "docker" },
+      platform: "freebsd",
+      env: { CF_HARNESS_SANDBOX_RUNTIME: "runsc" },
     });
 
     expect(selection.sandboxRuntimeChoice).toEqual({
-      runtime: "docker",
+      runtime: "runsc",
       source: "environment",
     });
   });
 
-  it("takes Docker by default off macOS", async () => {
-    const selection = await selectHarnessJobSandboxRuntime({
-      platform: "linux",
-      env: {},
-    });
+  it("refuses `docker` named in the environment, as every job would be refused, naming the variable alone", async () => {
+    const refusal = await selectHarnessJobSandboxRuntime({
+      platform: "darwin",
+      env: { CF_HARNESS_SANDBOX_RUNTIME: "docker" },
+    }).then(() => undefined, (error: unknown) => error);
 
-    expect(selection.sandboxRuntimeChoice).toEqual({
-      runtime: "docker",
-      source: "default",
+    expect(refusal).toBeInstanceOf(HarnessControlError);
+    expect(String(refusal)).toContain(
+      "`CF_HARNESS_SANDBOX_RUNTIME=docker` names the Docker driver, which " +
+        "this cf-harness no longer has",
+    );
+    expect(String(refusal)).not.toContain("--sandbox-runtime");
+  });
+
+  it("refuses, as every job would be refused, off macOS and Linux, where no runtime is the default", async () => {
+    const refusal = await selectHarnessJobSandboxRuntime({
+      platform: "freebsd",
+      env: {},
+    }).then(() => undefined, (error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(HarnessControlError);
+    expect(String(refusal)).toContain(
+      "No sandbox runtime is named, and `freebsd` has no default",
+    );
+  });
+
+  it("refuses, as every job would be refused, on Linux for a runner that is not root on a host that allows it no user namespace", async () => {
+    const refusal = await selectHarnessJobSandboxRuntime({
       platform: "linux",
-    });
+      uid: () => 1000,
+      readSysctl: (name) =>
+        Promise.resolve(
+          name === "kernel.apparmor_restrict_unprivileged_userns"
+            ? "1"
+            : undefined,
+        ),
+      env: { HOME: "/home/runner" },
+    }).then(() => undefined, (error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(HarnessControlError);
+    expect(String(refusal)).toContain(
+      "this process is not root (uid 1000), so the store's `runsc` runs " +
+        "rootless, in a user namespace of its own, and " +
+        "`kernel.apparmor_restrict_unprivileged_userns` is 1",
+    );
+    // The runner writes the job's arguments itself, so it names no flag.
+    expect(String(refusal)).not.toContain("--sandbox-runtime");
   });
 
   it("refuses, as every job would be refused, on a Mac whose native runtime is not set up", async () => {
@@ -713,6 +950,7 @@ describe("selectHarnessJobSandboxRuntime()", () => {
     try {
       const refusal = await selectHarnessJobSandboxRuntime({
         platform: "darwin",
+        arch: "aarch64",
         env: { HOME: home },
       }).then(() => undefined, (error: unknown) => error);
 

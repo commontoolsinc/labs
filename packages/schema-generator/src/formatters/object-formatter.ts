@@ -29,18 +29,29 @@ import {
   safeGetPropertyType,
 } from "../type-utils.ts";
 import { getCellWrapperInfo } from "../typescript/cell-brand.ts";
+import {
+  readWriterPolicy,
+  writerPolicyHeldWithin,
+} from "../typescript/writer-policy.ts";
+import { reportUnreadWriterBinding } from "../writer-binding-diagnostics.ts";
 import { isInternalMemberName } from "../typescript/property-name.ts";
 import {
   isDefaultNodeWithUndefined,
   isOptionalSymbol,
 } from "../typescript/property-optionality.ts";
+import { propertiesInSourceOrder } from "../typescript/source-order.ts";
 import {
   holdsTypeParameter,
   typeParameterOfType,
   unwrapTypeParentheses,
 } from "../typescript/type-node.ts";
+import {
+  namesOnlyPolicyBindings,
+  readBindingAnnotation,
+  readDeclaringSymbol,
+} from "../typescript/value-annotation.ts";
 import { usesParameterUnreachably } from "../type-parameter-bindings.ts";
-import { CFC_CARRIER_PROPERTY } from "./common-fabric-formatter.ts";
+import { CFC_CARRIER_PROPERTY } from "../typescript/cfc-carrier.ts";
 import { attachUiContract, getUiContractHint } from "../ui-contract.ts";
 
 const logger = getLogger("schema-generator.object", {
@@ -269,7 +280,12 @@ export class ObjectFormatter implements TypeFormatter {
       context.typeNode,
     );
 
-    const props = checker.getPropertiesOfType(type);
+    const props = propertiesInSourceOrder(
+      type,
+      checker.getPropertiesOfType(type),
+      context.typeNode,
+      checker,
+    );
     // A CFC metadata carrier a mapped type folded into the object is a
     // label, not a member: no value holds it.
     let carrier: ts.Symbol | undefined;
@@ -300,6 +316,34 @@ export class ObjectFormatter implements TypeFormatter {
           if (!propTypeNode && propDecl.type) {
             propTypeNode = propDecl.type as ts.TypeNode;
           }
+        } else if (
+          !propTypeNode &&
+          (ts.isPropertyAssignment(propDecl) ||
+            ts.isShorthandPropertyAssignment(propDecl))
+        ) {
+          // An object literal's member writes no annotation, and the value it
+          // is written from may be one only syntax spells, such as a
+          // `PolicyOf<typeof rules>` label. It is read at the annotation of
+          // the binding it reads, where that annotation names a value binding
+          // and denotes the member's type (`readBindingAnnotation()`). An
+          // annotation that names a writer leaves the value read from its
+          // type: this object views the document that stores the writer's
+          // policy, and reads that policy in part
+          // (`GenerationContext.definesDocument`).
+          const annotation = readBindingAnnotation(
+            readDeclaringSymbol(
+              ts.isPropertyAssignment(propDecl)
+                ? propDecl.initializer
+                : propDecl.name,
+              checker,
+            ),
+            checker.getTypeOfSymbol(prop),
+            checker,
+          );
+          propTypeNode = annotation &&
+              namesOnlyPolicyBindings(annotation, checker)
+            ? annotation
+            : undefined;
         }
       }
 
@@ -467,6 +511,29 @@ export class ObjectFormatter implements TypeFormatter {
       }
       (schema as Record<string, unknown>).additionalProperties =
         apSchema as MutableJSONSchemaObj;
+      // A number index signature beside a string one is lowered as the string
+      // one alone, so a writer policy only its values hold is lost. A document
+      // stored that way would admit any writer to them. A string side whose
+      // reading stopped at a bound is not known to hold one, and a number
+      // side whose reading stopped at one may: either way the policy may be
+      // lost.
+      const lostPolicy =
+        context.definesDocument && stringIndex && numberIndex &&
+          writerPolicyHeldWithin(stringIndex, checker) === undefined
+          ? readWriterPolicy(numberIndex, checker)
+          : undefined;
+      if (lostPolicy !== undefined) {
+        reportUnreadWriterBinding(
+          context,
+          // A policy past a bound names no alias; the report names the one a
+          // single writer's policy is written with.
+          lostPolicy === "unread" ? "WriteAuthorizedBy" : lostPolicy,
+          "This schema defines a document, which would admit any writer, and " +
+            "a number index signature beside a string one is lowered as the " +
+            "string one alone, so the writer policy its values hold is lost. " +
+            "Declare the policy on the string index signature too.",
+        );
+      }
     }
     if (required.length > 0) schema.required = required;
 

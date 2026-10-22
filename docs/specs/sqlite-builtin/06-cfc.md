@@ -473,6 +473,13 @@ remain gated, including reads of a value already examined during preflight.
 Cell traversal caches are partitioned by ambient read metadata so a cached
 scheduling probe cannot supply an ordinary payload read.
 
+Before the runner runs a piece set up elsewhere, or swaps one to another
+pattern, it probes whether the documents that run reads are on the replica, so
+that it can name the piece's family first when they are not. Those probes are
+verifier-internal reads on a read-only transaction of their own, and do not
+require the read ceiling: a document whose value the ceiling withholds is
+present all the same. The run's own reads of it remain gated.
+
 A **session-scoped** query result (`PerSession<>`, `.asScope("session")`,
 `scope: "session"`, or a session-scoped db) meets the runtime ceiling with the
 query's declared ceiling before materialization. Placeholder atoms resolve
@@ -864,38 +871,40 @@ column labels on its root as an `observes: "shape"` entry, so its existence
 carries them. A row under a row label carries the row label at its root for
 every class; where such a row also carries per-column labels, its existence
 carries the row label and its columns carry theirs. A row of a query that
-projects an `asCell` link column declares no existence label: a label at a
-row's root subjects every link written beneath it to the link write policy,
-which refuses a link to a cell that carries no label metadata.
+projects an `asCell` link column declares no existence label, so its
+existence does not carry the join of its column labels.
 
 A row to which neither its columns nor a row rule assign a label stores none,
-and declares an empty one. The link write policy governs the slots of a
-result store that carries a label, and refuses a link there to a document
-that stores no label and for which the writing transaction declares none. A
-settle that finds a row's document standing writes the slot and not the
-document, so the declaration cannot rely on what the document stores: every
-settle into a store that carries a label, or is written under one, declares
-the empty label at the root of each such row. The declaration stores nothing
-on the row document, and it does not subject a link written beneath the
-row's root to the link write policy, which counts a declaration by the atoms
-it holds. Into a store that carries no label a row declares nothing, so the
-rows of an unlabeled result do not make its settle relevant to commit
-preparation.
+and declares an empty one: every settle into a store that carries a label, or
+is written under one, declares the empty label at the root of each such row.
+The declaration stores nothing on the row document, and no check depends on
+it. Into a store that carries no label a row declares nothing, so the rows of
+an unlabeled result do not make its settle relevant to commit preparation.
+
+A link write takes nothing from the document it points at, so neither
+arrangement is needed to link a row or a cell a row's column names.
+`docs/plans/cfc-independent-reference-labels.md` (stage 6) records giving a
+row that holds a link column its existence label and dropping the empty
+declaration.
 
 A row document's id is hashed with the space's row salt as well as the row
 key and the result cell's coordinates. The salt is a runtime secret
 (`packages/runner/src/runtime-secret.ts`): one document per space at a
 reserved id, minted with a random value by the first settle that needs it.
 The transaction write chokepoint refuses every unprivileged write to that id,
-and the one writer, `ensureRuntimeSecret()`, returns nothing. A stored salt is
-trusted only when its stored schema carries the writer claim
-`writeAuthorizedBy: ["runtime-secret"]`, which the runtime records under that
-builtin identity when it mints one and which no executed code can satisfy. A
-value planted in the namespace before the chokepoint existed, or through a
-runtime without it, carries no such claim, and the next settle replaces it. The salt is labeled with the
-read-failed atom, which no ceiling admits, so code that reads it cannot
-write, display or send anything derived from it; the builtin reads it as a
-verifier-internal read, which joins nothing to the settle's label. Without
+and the one writer, `ensureRuntimeSecret()`, returns nothing; the read
+chokepoint refuses every read of its value but the runtime's own, so no
+executed code reads the salt. A stored salt is trusted only when its stored
+schema carries the writer claim `writeAuthorizedBy: ["runtime-secret"]`, which
+the runtime records under that builtin identity when it mints one and which no
+executed code can satisfy. A value planted in the namespace before the
+chokepoint existed, or through a runtime without it, carries no such claim,
+and the next settle replaces it. A value whose stored schema resolves neither
+in the replica nor in the schema registry is neither trusted nor untrusted,
+and the settle fails rather than replace it, since replacing a trusted salt
+would re-key every row document. The salt is labeled with the read-failed
+atom, which no ceiling admits; the builtin reads it as a verifier-internal
+read, which joins nothing to the settle's label. Without
 the salt the id would be a value computable from the row, and the reference
 at each slot would have to carry the row's label so that a reader could not
 confirm a guess at a row by recomputing its id (§8.17.6 rule 4). With it the
@@ -907,11 +916,10 @@ Three residuals are recorded against §8.17.6:
   slots holding equal rows hold one id, and a row that stays in a result
   across a change of parameter keeps its id. A reader of the result learns
   both under `S` and the membership labels, without reading a row.
-- **The salt's protection is its label.** Anything that reads the space's
-  documents outside the runtime, or a runtime whose enforcement mode does not
-  refuse writes on labels, can read the salt and recompute ids. The residual
-  a recomputed id opens is the one the salt closes: whether a guessed row is
-  in a result, disclosed without the row's label.
+- **The salt's protection is the runtime's.** Anything that reads the
+  space's documents outside the runtime can read the salt and recompute ids.
+  The residual a recomputed id opens is the one the salt closes: whether a
+  guessed row is in a result, disclosed without the row's label.
 - **A row document is immutable by construction of its writer, and nothing
   refuses another writer.** The builtin never writes a document twice. A
   pattern holding a row reference can write to it. A writer claim naming the

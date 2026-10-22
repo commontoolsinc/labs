@@ -33,7 +33,12 @@ import {
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
 import type { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
-import type { Cell, MemorySpace } from "@commonfabric/runner";
+import type { JSONSchema } from "@commonfabric/api";
+import type {
+  Cell,
+  MemorySpace,
+  NormalizedFullLink,
+} from "@commonfabric/runner";
 import {
   cellRuntime,
   convertCellsToLinks,
@@ -42,6 +47,7 @@ import {
   parseLink,
   type RuntimeTelemetry,
   type RuntimeTelemetryEvent,
+  sendEvent,
   setBlindStructuralTarget,
   unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
@@ -53,11 +59,18 @@ import {
   reviewedActionProvenance,
 } from "@commonfabric/runner/cfc";
 import { Identity } from "@commonfabric/identity";
-import { ensurePrivateInboxOf } from "@commonfabric/piece/ops";
+import {
+  ensurePrivateInboxOf,
+  inboxPieceLinkSchema,
+  requestPrivateInboxOf,
+  type ShareIntake,
+  startShareIntakeOf,
+} from "@commonfabric/piece/ops";
 import {
   commitSnapshotShare,
   prepareSnapshotShare,
 } from "@commonfabric/runner/cfc/share-snapshot";
+import { setCfcImplementationIdentity } from "@commonfabric/runner/cfc/trust-authority";
 import {
   initializePiecesController,
   type PieceController,
@@ -91,6 +104,9 @@ let watchPaths: readonly (readonly (string | number)[])[] = [[]];
  * opened afresh by the next command naming it.
  */
 const addressedResults = new Map<string, Cell<any>>();
+
+/** The share intakes `startShareIntake` started, which `dispose` stops. */
+const shareIntakes: ShareIntake[] = [];
 
 /**
  * Every commit this runtime had refused since the last `clearRejections`,
@@ -404,6 +420,29 @@ function componentBinding(
     ? cellRuntime(props).getCellFromLink(link)
     : prop.resolveAsCell();
 }
+
+/**
+ * The writer `createOwnProfile` writes as, standing in for a profile's own
+ * handlers, which a `represents-principal` claim needs.
+ */
+const OWN_PROFILE_WRITER = "multi-runtime-own-profile";
+
+/**
+ * A profile labeled as representing the principal that writes it, as a Fabric
+ * profile is.
+ */
+const OWN_PROFILE_SCHEMA = {
+  type: "object",
+  properties: { name: { type: "string" } },
+  ifc: {
+    addIntegrity: [{
+      kind: "represents-principal",
+      subject: { __ctCurrentPrincipal: true },
+    }],
+    ownerPrincipal: { __ctCurrentPrincipal: true },
+    writeAuthorizedBy: [OWN_PROFILE_WRITER],
+  },
+} as never;
 
 /** The trusted host gesture used after the test confirms the exact preview. */
 function shareClick() {
@@ -847,6 +886,24 @@ const handlers: Record<
   },
 
   /**
+   * Read the value of the cell reached from the piece result by `path`,
+   * through `schema` alone. The walk starts from the result's raw link, with
+   * no result schema, and nothing above `path` is pulled, so neither shapes
+   * what `schema` reads; links are converted as `read` converts them.
+   */
+  async readAs({ path, schema, piece }) {
+    const { schema: _resultSchema, ...link } = (await resultAt(piece))
+      .getAsNormalizedFullLink();
+    let cell = controller().runtime.getCellFromLink(link);
+    for (const segment of path as (string | number)[]) {
+      cell = cell.key(segment as never);
+    }
+    cell = cell.asSchema(schema as JSONSchema);
+    await cell.pull();
+    return convertCellsToLinks(cell.get(), { doNotConvertCellResults: true });
+  },
+
+  /**
    * Read the RAW stored value of the cell reached from the piece result by
    * `path` (links resolved to the target cell, NO result-schema shaping) —
    * for state the declared schema does not carry, e.g. a query result's
@@ -943,6 +1000,34 @@ const handlers: Record<
   },
 
   /**
+   * Mint a profile of this session's own, holding `name`, in a space created
+   * for it that admits this session's identity alone, and answer with the
+   * link that reaches it. Its label attests this identity with
+   * `represents-principal`, as a Fabric profile's does, so a session the
+   * space refuses can't read whom it attests.
+   */
+  async createOwnProfile({ name }) {
+    const runtime = controller().runtime;
+    const space = await runtime.createSpace();
+    const tx = runtime.edit();
+    setCfcImplementationIdentity(tx, {
+      kind: "builtin",
+      builtinId: OWN_PROFILE_WRITER,
+    });
+    const profile = runtime.getCell(
+      space,
+      "own profile",
+      OWN_PROFILE_SCHEMA,
+      tx,
+    );
+    profile.set({ name } as never);
+    const { error } = await tx.commit().settled;
+    if (error) throw error;
+    await idle();
+    return profile.getAsLink();
+  },
+
+  /**
    * Inspect the normalized link (id, space, scope) of a cell reached from
    * the piece result by `path`, resolving links along the way. Lets tests
    * assert the storage addressing (e.g. scope) of pattern state.
@@ -994,7 +1079,7 @@ const handlers: Record<
    * Has the host give the Home stand-in reached from the piece result by
    * `path` its private inbox, as `PiecesController.ensurePrivateInbox()` gives
    * the identity's Home its own, and answers what the host found, naming an
-   * adopted or refused inbox by its link.
+   * adopted or refused inbox, and the profile that decided it, by its link.
    */
   async ensurePrivateInbox({ path, piece }) {
     const target = await resultAt(piece);
@@ -1014,13 +1099,201 @@ const handlers: Record<
     const inbox = "inbox" in found
       ? found.inbox.getAsNormalizedFullLink()
       : undefined;
+    const profile = "profile" in found
+      ? found.profile?.getAsNormalizedFullLink()
+      : undefined;
     return {
       outcome: found.outcome,
       ...("reason" in found ? { reason: found.reason } : {}),
       ...(inbox === undefined
         ? {}
         : { inbox: { id: inbox.id, space: inbox.space } }),
+      ...(profile === undefined
+        ? {}
+        : { profile: { id: profile.id, space: profile.space } }),
     };
+  },
+
+  /**
+   * Requests, as a loom daemon does, the private inbox of the Home stand-in
+   * reached from the piece result by `path`, naming its profile reached from
+   * that result by `profile`, and answers with Home's answer, naming the inbox
+   * by its link, and the link that profile's pointer holds once Home has
+   * answered, read after a sync.
+   */
+  async requestPrivateInbox({ path, profile, piece }) {
+    const target = await resultAt(piece);
+    await target.pull();
+    const cellAt = async (segments: unknown) => {
+      let cell = target;
+      for (const segment of (segments ?? []) as (string | number)[]) {
+        cell = cell.key(segment as never);
+      }
+      await cell.sync();
+      return cell.resolveAsCell();
+    };
+    const home = await cellAt(path);
+    const named = await cellAt(profile);
+    const answer = await requestPrivateInboxOf(
+      controller().runtime,
+      home,
+      named,
+    );
+    const pointer = await named.key("inbox").asSchema({
+      type: "object",
+      properties: { piece: inboxPieceLinkSchema },
+    }).pull();
+    const addressOf = (cell: Cell<unknown>) => {
+      const { id, space } = cell.getAsNormalizedFullLink();
+      return { id, space };
+    };
+    return {
+      status: answer.status,
+      ...("inbox" in answer ? { inbox: addressOf(answer.inbox) } : {}),
+      ...(isCell(pointer?.piece) ? { pointer: addressOf(pointer.piece) } : {}),
+    };
+  },
+
+  /**
+   * Sends the request `requestPrivateInbox` does, and answers with the
+   * receipt's address and the document and path it holds a link to, as it
+   * stands once the send has completed, or nothing when it holds no link.
+   */
+  async requestReceipt({ path, profile, piece }) {
+    const target = await resultAt(piece);
+    await target.pull();
+    const cellAt = async (segments: unknown) => {
+      let cell = target;
+      for (const segment of (segments ?? []) as (string | number)[]) {
+        cell = cell.key(segment as never);
+      }
+      await cell.sync();
+      return cell.resolveAsCell();
+    };
+    const home = await cellAt(path);
+    const named = await cellAt(profile);
+    const link = await new Promise<NormalizedFullLink>((resolve, reject) =>
+      sendEvent(home.key("requestPrivateInbox"), { from: named }, (tx) => {
+        const receipt = tx.handlingReceiptLink;
+        if (tx.status().status === "error" || receipt === undefined) {
+          reject(new Error("The request's handling wrote no receipt"));
+        } else resolve(receipt);
+      })
+    );
+    const receipt = controller().runtime.getCellFromLink(link);
+    await receipt.sync();
+    const linked = parseLink(receipt.getRaw());
+    return linked === undefined ? undefined : {
+      receipt: { id: link.id, space: link.space },
+      id: linked.id,
+      path: [...linked.path],
+    };
+  },
+
+  /**
+   * Reads the status the receipt at `receipt` holds, following the link it
+   * holds, as a client of `requestPrivateInbox` reads it.
+   */
+  async readReceiptStatus({ receipt }) {
+    const { id, space } = receipt as { id: string; space: MemorySpace };
+    const cell = controller().runtime.getCellFromLink({
+      id: id as `${string}:${string}`,
+      space,
+      path: [],
+      type: "application/json",
+    } as never, {
+      type: "object",
+      properties: { status: { type: "string" } },
+    });
+    const answer = await cell.pull() as { status?: string } | undefined;
+    return answer?.status;
+  },
+
+  /**
+   * Starts the host's share intake over the Home stand-in reached from the
+   * piece result by `path`, as `PiecesController.startShareIntake()` starts
+   * the identity's own Home's, following it until the session is disposed.
+   * Answers whether it started.
+   */
+  async startShareIntake({ path, piece }) {
+    const target = await resultAt(piece);
+    await target.pull();
+    let cell = target;
+    for (const segment of (path ?? []) as (string | number)[]) {
+      cell = cell.key(segment as never);
+    }
+    await cell.sync();
+    const runtime = controller().runtime;
+    const intake = startShareIntakeOf(
+      runtime,
+      cell.resolveAsCell(),
+      runtime.userIdentityDID,
+    );
+    if (intake !== undefined) shareIntakes.push(intake);
+    return { started: intake !== undefined };
+  },
+
+  /**
+   * Answers what the share intakes `startShareIntake` started last decided
+   * about each row naming `from` and `id`, once each has taken up the changes
+   * it was told of.
+   */
+  async shareIntakeDecisions({ from, id }) {
+    const decisions: string[] = [];
+    for (const intake of shareIntakes) {
+      await intake.idle();
+      for (
+        const decision of intake.accessForTestingOnly.decisionsFor(
+          from as string,
+          id as string,
+        )
+      ) decisions.push(decision);
+    }
+    return { decisions };
+  },
+
+  /**
+   * Links the root of this session's home space to the result of the piece at
+   * `piece`, or of the session's own piece when absent, so that the piece
+   * stands in for the identity's Home: a home target such as `#chatManager`
+   * resolves to its fields.
+   */
+  async linkHomeRoot({ piece }) {
+    const runtime = controller().runtime;
+    const target = await resultAt(piece);
+    const { error } = await runtime.editWithRetry((tx) => {
+      runtime.getHomeSpaceCell(tx).withTx(tx).key("defaultPattern").set(
+        target as never,
+      );
+    });
+    if (error) {
+      throw new Error(`linkHomeRoot failed: ${error.message}`);
+    }
+    await idle();
+    return {};
+  },
+
+  /**
+   * Links the root of `space` to a fresh document in it, in place of the root
+   * it had, as any member with `WRITE` there can.
+   */
+  async repointSpaceRoot({ space }) {
+    const runtime = controller().runtime;
+    const elsewhere = runtime.getCell<FabricValue>(
+      space as MemorySpace,
+      crypto.randomUUID(),
+    );
+    const { error } = await runtime.editWithRetry((tx) => {
+      elsewhere.withTx(tx).set({ elsewhere: true });
+      runtime.getSpaceCell(space as MemorySpace).withTx(tx).key(
+        "defaultPattern",
+      ).set(elsewhere as never);
+    });
+    if (error) {
+      throw new Error(`repointSpaceRoot failed: ${error.message}`);
+    }
+    await idle();
+    return {};
   },
 
   /** Reads an explicit held address with the same stored-label gate as any Cell. */
@@ -1173,6 +1446,7 @@ const handlers: Record<
   },
 
   async dispose() {
+    for (const intake of shareIntakes.splice(0)) intake.stop();
     resultSinkCancel?.();
     resultSinkCancel = undefined;
     piece = undefined;

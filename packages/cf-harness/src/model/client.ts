@@ -62,6 +62,20 @@ export interface HarnessModelAttemptDiagnostic {
   providerError?: HarnessProviderError;
 
   /**
+   * The `status` of the provider's terminal response, when a streamed
+   * exchange reached one. Beside `outputItemTypes`, it says what a turn that
+   * came back blank was made of: a `completed` response holding a message
+   * item, a reasoning item alone, or no item at all.
+   */
+  terminalStatus?: string;
+
+  /**
+   * The `type` of every output item of that terminal response, in order; the
+   * streamed items stand in where the terminal response echoes none.
+   */
+  outputItemTypes?: string[];
+
+  /**
    * Present when this attempt failed transiently and the client issued
    * another: what was transient, and the backoff before the next attempt.
    * Absent on the attempt that ended the exchange, however it ended.

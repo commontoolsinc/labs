@@ -1,9 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { CiJobs, Job } from "../ci-jobs-page.ts";
-import { RECENT_DISPLAY, REPOS_PATH } from "../config.ts";
+import { RECENT_DISPLAY } from "../config.ts";
 import { faviconHref } from "../favicon.ts";
 import { type Board, repoPageResponse, repoPagesRoute } from "../repo-page.ts";
+import { REPOS_PATH } from "../repo-page-href.ts";
 import {
   type Run,
   runSource,
@@ -292,6 +293,36 @@ describe("repo-page", () => {
       expect(html).not.toContain("12.0%");
     });
 
+    it("does not link a tile that links to this page back to it", async () => {
+      const view = (status: "good" | "bad") => ({
+        status,
+        value: "90.0%",
+        extra: `<div class="cells"><a class="cell" href="https://github.com/commonfabric/labs/actions/runs/7"></a></div>`,
+        href: "/repos?name=labs",
+        hint: "repository ↗",
+      });
+      for (const status of ["good", "bad"] as const) {
+        const own = await page(
+          board([TRUST], { "labs ci trust": view(status) }),
+          collection(),
+          "?name=labs",
+        );
+        expect(own.html).toContain(`<div class="card ${status}" data-focus-key="labs ci trust">`);
+        expect(own.html).not.toContain(`href="/repos?name=labs"`);
+        // The strip's own links stay.
+        expect(own.html).toContain(`<a class="cell" href="https://github.com/commonfabric/labs/actions/runs/7"></a>`);
+      }
+      // The same link reaches another page, so it stays a link there.
+      const elsewhere = await page(
+        board([tile("labs ci trust", { repo: "commonfabric/loom" })], {
+          "labs ci trust": view("bad"),
+        }),
+        collection(),
+        "?name=loom",
+      );
+      expect(elsewhere.html).toContain(`<div class="card bad" data-focus-key="labs ci trust"><a class="tile-head" href="/repos?name=labs" aria-description="repository ↗" title="repository ↗"><div class="texture"></div>`);
+    });
+
     it("links to its code, pull requests, and actions on GitHub", async () => {
       const { html } = await page(board([]), collection(), "?name=labs");
       expect(html).toContain(`<a href="https://github.com/commonfabric/labs" target="_blank" rel="noopener">commonfabric/labs ↗</a>`);
@@ -536,7 +567,7 @@ describe("repo-page", () => {
       expect(weaver).not.toContain("/ci-gantt");
     });
 
-    it("charts as many of a source's newest runs as the recent-runs tile shows", async () => {
+    it("charts a source's newest `RECENT_DISPLAY` runs", async () => {
       const runs = Array.from(
         { length: RECENT_DISPLAY + 10 },
         (_, index) => run({ id: 100 + index, html_url: `https://example.test/runs/${100 + index}` }),

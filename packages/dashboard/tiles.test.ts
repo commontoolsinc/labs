@@ -26,7 +26,7 @@ import {
   loomCiDuration,
   weaverCiDuration,
 } from "./tiles/ci-duration.ts";
-import { commitGanttHref, recentRuns } from "./tiles/recent-runs.ts";
+import { recentCommits } from "./tiles/recent-commits.ts";
 import { dau, foldSeries, parseExcludes } from "./tiles/dau.ts";
 import { githubMembers } from "./tiles/github-members.ts";
 import { buildSnapshot, discordOnline } from "./tiles/discord-online.ts";
@@ -40,6 +40,7 @@ import { projectMonthly, settled } from "./spend.ts";
 import { modelSpend } from "./tiles/model-spend.ts";
 import { benchmark, trendPct, trendStatus } from "./tiles/benchmark.ts";
 import { TILES } from "./registry.ts";
+import { REPOS_PATH } from "./repo-page-href.ts";
 import {
   byUrl,
   collectFromWorkingRuns,
@@ -121,6 +122,21 @@ Deno.test("labs ci trust: only first-attempt success counts as green", async () 
       assertEquals(v.sub, "first-try green · last 4 runs");
     },
   );
+});
+
+Deno.test("ci trust: each tile links to its repository's page, and each cell to its run", async () => {
+  const cases = [
+    { tile: labsCiTrust, page: "/repos?name=labs" },
+    { tile: loomCiTrust, page: "/repos?name=loom" },
+    { tile: weaverCiTrust, page: "/repos?name=commonfabric-weaver" },
+  ];
+  for (const { tile, page } of cases) {
+    const passed = run({ html_url: `https://github.com/${tile.repo}/actions/runs/1` });
+    const v = await tile.collect(ctx([passed]));
+    assertEquals(v.href, page);
+    assertEquals(v.hint, "repository ↗");
+    assertStringIncludes(v.extra ?? "", `href="${passed.html_url}"`);
+  }
 });
 
 Deno.test("labs and loom ci trust: a cancelled run that never started is left out of the share", async () => {
@@ -692,112 +708,6 @@ Deno.test("ci-duration: a run's job counts are forgotten once it leaves the snap
   );
 });
 
-Deno.test("recent-runs: wide, failure tip -> bad, rows link to the landing PR", async () => {
-  const v = await recentRuns.collect(
-    ctx([
-      run({ conclusion: "failure", head_commit: { message: "oops (#42)" } }),
-    ]),
-  );
-  assertEquals(recentRuns.wide, true);
-  assertEquals(v.status, "bad");
-  assertStringIncludes(v.extra ?? "", "/pull/42");
-});
-
-Deno.test("recent runs: timestamps have a UTC fallback and a viewer-local marker", async () => {
-  const startedAt = "2024-01-02T17:05:00Z";
-  const runsByRepo = (repo: string) =>
-    repo === REPO ? [run({ run_started_at: startedAt })] : [];
-  const v = await recentRuns.collect(ctx([], {}, runsByRepo));
-  assertStringIncludes(
-    v.extra ?? "",
-    `<time class="t" datetime="${startedAt}" data-viewer-time>17:05 UTC</time>`,
-  );
-});
-
-Deno.test("recent runs: duration opens every successful run for the commit", async () => {
-  const sha = "a".repeat(40);
-  const start = Date.parse("2026-07-21T18:00:00Z");
-  const first = run({
-    id: 41,
-    head_sha: sha,
-    run_started_at: new Date(start).toISOString(),
-    updated_at: new Date(start + 185_000).toISOString(),
-  });
-  const second = run({
-    id: 42,
-    head_sha: sha,
-    run_attempt: 2,
-    run_started_at: new Date(start - 60_000).toISOString(),
-    updated_at: new Date(start + 120_000).toISOString(),
-  });
-  const failed = run({ id: 43, head_sha: sha, conclusion: "failure" });
-  const loom = run({ id: 44, repo: LOOM_REPO, head_sha: sha });
-  const dispatched = run({
-    id: 45,
-    event: "workflow_dispatch",
-    head_sha: sha,
-  });
-  const running = run({
-    id: 46,
-    status: "in_progress",
-    conclusion: null,
-    head_sha: "b".repeat(40),
-    run_started_at: new Date(start - 120_000).toISOString(),
-  });
-  const untimed = run({
-    id: 47,
-    head_sha: "c".repeat(40),
-    run_started_at: new Date(start - 180_000).toISOString(),
-    updated_at: "not-a-timestamp",
-  });
-  const brief = run({
-    id: 48,
-    head_sha: "d".repeat(40),
-    run_started_at: new Date(start - 240_000).toISOString(),
-    updated_at: new Date(start - 198_000).toISOString(),
-  });
-
-  const href = commitGanttHref(first, [
-    first,
-    second,
-    failed,
-    loom,
-    dispatched,
-  ]);
-  assert(href);
-  const target = new URL(href, "http://dashboard");
-  assertEquals(target.pathname, "/ci-gantt");
-  assertEquals(target.searchParams.get("repo"), "labs");
-  assertEquals(target.searchParams.get("sha"), sha);
-  assertEquals(target.searchParams.getAll("run"), ["41:1", "42:2"]);
-  assertEquals(commitGanttHref({ ...first, head_sha: "" }, [first]), null);
-  assertEquals(commitGanttHref(failed, [first, failed]), null);
-  const tooMany = Array.from(
-    { length: 151 },
-    (_, index) => run({ id: 1_000 + index, head_sha: sha }),
-  );
-  assertEquals(commitGanttHref(tooMany[0], tooMany), null);
-
-  const runsByRepo = (repo: string) =>
-    repo === REPO
-      ? [first, second, failed, dispatched, running, untimed, brief]
-      : [loom];
-  const html = (await recentRuns.collect(ctx([], {}, runsByRepo))).extra ?? "";
-  assertStringIncludes(
-    html,
-    `class="evdur" data-focus-key="gantt-41" href="${
-      href.replaceAll("&", "&amp;")
-    }"`,
-  );
-  assertStringIncludes(
-    html,
-    '>3m 05s</a><a class="evarrow" data-focus-key="pr-arrow-41"',
-  );
-  assertStringIncludes(html, '<span class="evdur">running</span>');
-  assertStringIncludes(html, '<span class="evdur">—</span>');
-  assertStringIncludes(html, '>42s</a><a class="evarrow"');
-});
-
 Deno.test("ci trust: every repository keeps its strip at the tile bottom", async () => {
   const one = ctx([run({ conclusion: "success" })]);
   for (const tile of [labsCiTrust, loomCiTrust, weaverCiTrust]) {
@@ -837,50 +747,11 @@ Deno.test("CI tiles declare the workflow snapshots that drive them", () => {
     weaverCiDuration.runSources,
     pulls(WEAVER_REPO, WEAVER_CI_WORKFLOW),
   );
-  assertEquals(recentRuns.runSources, [
+  assertEquals(recentCommits.runSources, [
     ...main(REPO, CI_WORKFLOW),
     ...main(LOOM_REPO, LOOM_CI_WORKFLOW),
+    ...main(WEAVER_REPO, WEAVER_CI_WORKFLOW),
   ]);
-});
-
-Deno.test("recent runs: labs and loom runs interleave chronologically, each tagged", async () => {
-  const now = Date.now();
-  const mk = (repo: string, minsAgo: number, msg: string) =>
-    run({
-      repo,
-      run_started_at: new Date(now - minsAgo * 60_000).toISOString(),
-      head_commit: { message: msg },
-      id: minsAgo,
-      html_url: `https://github.com/${repo}/actions/runs/${minsAgo}`,
-    });
-  const byRepo = (repo: string) =>
-    repo === LOOM_REPO
-      ? [mk(LOOM_REPO, 10, "loom c (#7)"), mk(LOOM_REPO, 30, "loom b (#6)")]
-      : [mk(REPO, 5, "labs c (#3)"), mk(REPO, 20, "labs a (#2)")];
-  const v = await recentRuns.collect(ctx([], {}, byRepo));
-  // Newest-first interleave across repos: labs 5m, loom 10m, labs 20m, loom 30m.
-  const order = [
-    ...(v.extra ?? "").matchAll(
-      /<a class="pr" data-focus-key="title-\d+-1" href="[^"]*\/pull\/(\d+)"/g,
-    ),
-  ]
-    .map((match) => match[1]);
-  assertEquals(order, ["3", "7", "2", "6"]);
-  // The row's text links to its run, its pull request number to the pull
-  // request, and its arrow to the pull request that landed the commit.
-  assertStringIncludes(
-    v.extra ?? "",
-    `<span class="evtxt"><a data-focus-key="title-5-0" href="https://github.com/${REPO}/actions/runs/5" target="_blank" rel="noopener">labs · green · labs c </a><a class="pr" data-focus-key="title-5-1" href="https://github.com/${REPO}/pull/3" target="_blank" rel="noopener">(#3)</a></span>`,
-  );
-  assertStringIncludes(
-    v.extra ?? "",
-    `href="https://github.com/${REPO}/pull/3" target="_blank" rel="noopener" aria-label="Open landed change on GitHub"`,
-  );
-  assertStringIncludes(v.extra ?? "", "labs · ");
-  assertStringIncludes(v.extra ?? "", "loom · ");
-  assertStringIncludes(v.aside ?? "", ">4 in window</span>");
-  // The list's scroll position carries over live updates.
-  assertStringIncludes(v.extra ?? "", '<div class="evscroll" data-focus-key="runs">');
 });
 
 Deno.test("dau: distinct identities per UTC day, excluding the DIDs we name", () => {
@@ -1102,9 +973,11 @@ Deno.test("registry: unique labels and positive intervals", () => {
 Deno.test("every tile's drill-down link reaches a route the dashboard serves", () => {
   // An unrecognized path falls through to the dashboard itself, so a tile
   // linking at a page nobody serves lands the viewer back where they started.
-  const served = new Set(
-    TILES.flatMap((tile) => tile.routes ?? []).map((route) => route.path),
-  );
+  // The server serves the repository pages beside the tiles' own routes.
+  const served = new Set([
+    ...TILES.flatMap((tile) => tile.routes ?? []).map((route) => route.path),
+    REPOS_PATH,
+  ]);
   for (const { label, view } of TILE_LAYOUT_FIXTURES) {
     if (view.href === undefined || /^https?:/.test(view.href)) continue;
     const path = new URL(view.href, "http://dashboard").pathname;

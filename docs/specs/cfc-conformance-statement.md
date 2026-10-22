@@ -67,7 +67,11 @@ minted metadata and `cid:` documents. `storedCfcMetadataAppliesToPath` in
 reason: `schema.ts` on a read through an `ifc`-bearing schema
 (`schema-ifc-read`); `cell.ts` on a write through one (`schema-ifc-write`) and
 on a SQLite row label (`sqlite-row-label`); `data-updating.ts` on a link write
-(`link-write`); `schema-ifc.ts` on a link crossing an `ifc`-bearing hop
+whose link schema declares policy, whose handle carries a restriction, or
+whose slot carries stored or arriving policy (`link-write`; a bare pointer is
+recorded as a policy input without forcing relevance, and the flow-label probe
+marks the transaction when the attempt read labeled data); `schema-ifc.ts` on
+a link crossing an `ifc`-bearing hop
 (`schema-ifc-hop`); `cfc/external-ingest.ts` on external ingest; and, inside
 `extended-storage-transaction.ts`, the unprivileged writes to label metadata
 and its siblings, label-metadata and external-content observations, runtime
@@ -184,6 +188,47 @@ class-less confidentiality of every entry resolving at the slot, wildcard
 templates included, and the render path reads them through
 `cfcLabelViewForResolvedTarget` in `packages/html/src/worker/reconciler.ts`.
 
+**What a link write persists.** `linkSlotLabel` in `cfc/prepare.ts` persists
+at the receiving slot the reference's own label as §8.2.3 and §8.12.8 state
+it: the link schema's declarations, the restriction the written handle
+carries at its root, and, where flow labels persist, the creating attempt's
+flow join, stamped at the slot as a pointer-class `structure` entry beside
+the link entry, or carried to the slot by the `*` template of a container the
+transaction stamps as a whole. No evidence atom is minted for the reference:
+§15.4 retires `LinkReference`. The atom stays non-authorable, and one in a
+label stored before the retirement stays what it was, provenance that
+endorses nothing. A writer's stamp at a slot describes the reference the
+committed document holds there in an envelope that says so, with
+`stampPlacement: "committed"`: the runtime re-derives an attempt's labels
+against the committed placement (§8.10.2.2,
+`SpaceReplica.#commitReadActivities`), and writes the member when the
+envelope's stamps at reference slots were all placed that way. A stamp at a
+reference slot of an envelope that does not say it is not an input witness
+(§18.7, `slotStampPlacementUnknown`). The member is beside the ones the
+envelope's version defines, so a reader that predates it reads the envelope
+all the same. Nothing of the source's labels is copied to the slot,
+and the write takes no dependency on the source's envelope. A write floor on
+the slot, including a floor declared under a wildcard on every element of a
+list, resolves the source's current evidence through `linkedSourceEvidence`,
+as §8.2.6 requires, and persists none of it. A stamp the writer's schema mints
+at the slot's path credits no reference written there, since the store keeps
+no stamp at a position holding a reference; a stamp at a container the write
+persists covers the references beneath it. In that evidence the source's
+stored integrity stands as stored, and only the link schema's integrity and
+a schema the transaction writes the source under are gated against
+runtime-minted atoms. A refusal the floor reaches from documents the
+transaction holds is terminal, and the refused run then depends on what the
+floor read there, the source's envelope among it, so a writer runs again when
+that evidence changes. A handle's carried view is the reference restrictions
+of the slots its resolution left (`cfcAcquisitionViewForDereferenceTraces`
+in `cfc/label-view-state.ts`, `referenceRestrictionsOf` for the schema
+traversal's crossings), confidentiality alone, and nothing of the document
+it names, whose labels are read from that document when the handle is
+followed; the resolution reads those labels all the same, so that a
+subscription depends on them. The reading attempt's own join reaches a
+written reference through the slot stamp of the writing transaction rather
+than through the handle.
+
 **This runtime does not claim the precise reference profile.** No labs
 document claims it, and the following is not established:
 
@@ -231,11 +276,30 @@ statement.
 - The hereditary meet is empty until every input carries the certified atom,
   an under-claim stated in `cfc-observation-classes.md` §5 as the fail-safe
   direction.
-- One guard matched on a consumed read releases another writer's value in
-  the same document at the release gate, stated in
-  `cfc-transformed-by-input-witnesses.md` under "What this does not cover" as
-  a release under a witnessed guard; it is not phrased there in taint terms,
-  and whether it under-taints is not established.
+- `atomPropagationClass` classes `ExternalIngest` as provenance where §15.4
+  registers it value-bound, so a verified projection does not carry a scoped
+  form of it: an under-claim of integrity, which §15.1.1 holds sound.
+- The release gates (`verifyInputRequirements` and
+  `verifySinkRequestCeilings` in `cfc/prepare.ts`, `readRefusal` in
+  `packages/html/src/worker/display-fit.ts`) evaluate the value-intrinsic
+  rules at each location an access consumed and the other rules over the
+  join (`evaluateAccessExchange`, and `exchangeEachObservation` in
+  `cfc/access-integrity.ts`), per §5.3, §4.6.3 and §8.10.1.1. An observation
+  that consumed no label, a document with no CFC metadata or a location no
+  entry labels, never enters the join, so a hereditary atom every labeled
+  location carries survives where §3.1.6.2 would empty the join: an
+  over-claim of integrity, an under-taint. A cell's stored label at the
+  display, which `cellLabelRefusal` fits on its root's integrity, is not
+  resolved location by location: a root stamp's evidence can release a clause
+  a child entry carries, an under-taint.
+- Within one location, `labelForEntriesAtPath` in `cfc/prepare.ts` unions
+  integrity across the label components resolving there, where §8.12.8 asks
+  for the class-aware join of §3.1.6.2. Where two components carry integrity
+  that over-claims, an under-taint. Read with every applicable component an
+  input of the join, §8.12.8 drops each per-value claim wherever a component
+  carries none, and against that reading the runtime over-claims wherever any
+  does. Which reading holds is open in
+  [commonfabric/specs#60](https://github.com/commonfabric/specs/pull/60).
 
 ## 5. Position in the §18.6.3 matrix and the auxiliary dials
 
@@ -329,7 +393,11 @@ causes to `ExtendedStorageTransaction.addCfcTriggerReads`, which drops `cid:`
 and document-member paths and invalidates a prepared transaction;
 `forEachFlowObservation` in `cfc/prepare.ts` consumes them as recursive value
 reads, with a shape read of a `length` parent, at prepare-time metadata, which
-is their current labels, whatever the gating dial says. With
+is their current labels, whatever the gating dial says. A trigger at the
+sub-path where a link exposes its recognizable form is the invalidation of a
+link probe, and is read as a shallow read of the slot the probe asked about,
+since that sub-path's segments are not child segments (§4.6.3)
+(`triggerReadAt`). With
 `cfcTriggerReadGating` on, the shipped default, `triggerReadSources` adds them
 to the egress and sink consumed set and to the `requiredIntegrity` input gate
 as well. `cfc-enforcement-matrix.md` §2, item 4, records that multi-hop closure

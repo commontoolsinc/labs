@@ -145,6 +145,7 @@ describe("cf agent runner", () => {
       deps.selectSandboxRuntime = () =>
         selectHarnessJobSandboxRuntime({
           platform: "darwin",
+          arch: "aarch64",
           env: { HOME: home },
         });
 
@@ -158,7 +159,7 @@ describe("cf agent runner", () => {
         expect(refusal).toMatchObject({
           exitCode: 1,
           message: expect.stringMatching(
-            /^No sandbox runtime is named, so the default applies, which on macOS is the native `runsc` runtime, and it is not set up at `.*`: .*\. Set it up there, or select Docker with `CF_HARNESS_SANDBOX_RUNTIME=docker`\.$/,
+            /^No sandbox runtime is named, so the default applies, which on macOS is the native `runsc` runtime, and it is not set up at `.*`: .*\. Set it up there\.$/,
           ),
         });
         expect(started).toEqual([]);
@@ -206,22 +207,27 @@ describe("cf agent runner", () => {
         await Deno.remove(home, { recursive: true });
       }
 
-      if (Deno.build.os === "darwin") {
-        expect(selected).toBeInstanceOf(HarnessControlError);
-        expect(selected).toMatchObject({
-          message: expect.stringMatching(
-            /^No sandbox runtime is named, so the default applies, which on macOS is the native `runsc` runtime, and .* select Docker with `CF_HARNESS_SANDBOX_RUNTIME=docker`\.$/,
-          ),
-        });
-      } else {
-        expect(selected).toEqual({
-          sandboxRuntimeChoice: {
-            runtime: "docker",
-            source: "default",
-            platform: Deno.build.os,
-          },
-        });
-      }
+      // A Mac, and Linux, default to the native runtime, which this home has
+      // no store for; every other platform has no default.
+      const native = Deno.build.os === "darwin"
+        ? "macOS"
+        : Deno.build.os === "linux"
+        ? "Linux"
+        : undefined;
+      expect(selected).toBeInstanceOf(HarnessControlError);
+      expect(selected).toMatchObject({
+        message: expect.stringMatching(
+          native !== undefined
+            ? new RegExp(
+              "^No sandbox runtime is named, so the default applies, which " +
+                `on ${native} is the native \`runsc\` runtime, and .*\\.$`,
+            )
+            : new RegExp(
+              "^No sandbox runtime is named, and " +
+                `\`${Deno.build.os}\` has no default`,
+            ),
+        ),
+      });
     });
   });
 
@@ -242,7 +248,7 @@ describe("cf agent runner", () => {
       maxConcurrent: 1,
       leaseMs: 300_000,
       workRoot: "/home/me/.cf-harness/agent-runs",
-      tools: ["describe_handle", "web_fetch"],
+      tools: ["web_fetch", "describe_handle", "read_value"],
     });
     expect(started[0].loomRetrievalConfigPath).toBeUndefined();
     expect(started[0].model).toBeUndefined();
@@ -323,7 +329,11 @@ describe("cf agent runner", () => {
       "/var/agent-runs",
     ]);
 
-    expect(started[0].tools).toEqual(["loom_search", "describe_handle"]);
+    expect(started[0].tools).toEqual([
+      "loom_search",
+      "describe_handle",
+      "read_value",
+    ]);
     expect(started[0].workRoot).toBe("/var/agent-runs");
   });
 

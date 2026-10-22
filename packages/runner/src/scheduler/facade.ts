@@ -9,7 +9,6 @@ import type { Cancel } from "../cancel.ts";
 import { waveRunContextOf, waveSettlementOf } from "../executor/wave.ts";
 import { ConsoleEvent } from "../harness/console.ts";
 import {
-  areNormalizedLinksSame,
   type NormalizedFullLink,
   toMemorySpaceAddress,
 } from "../link-utils.ts";
@@ -30,7 +29,10 @@ import type {
   MemorySpace,
   StorageNotification,
 } from "../storage/interface.ts";
-import { ReplicaLoadFailureError } from "../storage/interface.ts";
+import {
+  hasSessionReportStorageCapability,
+  ReplicaLoadFailureError,
+} from "../storage/interface.ts";
 import {
   recordLocalReadWake,
   requireLocalReadCondition,
@@ -98,13 +100,17 @@ import {
 import {
   addSchedulerEventHandler,
   dropQueuedEvent,
+  endPatternChangeWaits,
+  endPieceStartWaits,
   eventHandlerImplementations,
+  EventHandlerRegistry,
   isHeadEventParked as isHeadEventParkedState,
   processPullQueuedEventDuringExecute,
   queueSchedulerEvent,
   type SchedulerEventExecutionState,
   type SchedulerEventQueueState,
   selectEventImplementation,
+  wakePieceStartWaits,
 } from "./events.ts";
 import {
   buildPullInitialSeeds,
@@ -145,6 +151,14 @@ import {
 } from "./registration.ts";
 import { runSchedulerAction, type SchedulerActionRunState } from "./run.ts";
 import {
+  captureEchoRun,
+  computeEchoSteps,
+  type EchoBreakerEvent,
+  type EchoBreakerStats,
+  type EchoRun,
+  RemoteEchoBreaker,
+} from "./echo-breaker.ts";
+import {
   readsOverlapWrites,
   SchedulerWriteIndex,
 } from "./scheduling-writes.ts";
@@ -169,6 +183,7 @@ import type {
   QueuedEvent,
   ReactivityLog,
   SchedulerObservationIdentity,
+  SchedulerSizes,
   ServedEventDispatch,
   ServedEventFailureOutcome,
   SettleStats,
@@ -246,6 +261,12 @@ function isReactivityLog(value: unknown): value is ReactivityLog {
     Array.isArray(candidate.writes);
 }
 
+/** Whether `error` reports a load its principal is not authorized to read. */
+function isAuthorizationLoadFailure(error: unknown): boolean {
+  return error instanceof ReplicaLoadFailureError &&
+    error.failure.failureClass === "authorization";
+}
+
 function normalizeRegistrationArgs(
   dependenciesOrOptions?: SchedulerRegistrationInput | SchedulerRegisterOptions,
   options: SchedulerRegisterOptions = {},
@@ -299,7 +320,7 @@ export {
 
 export class Scheduler {
   readonly #eventQueue: QueuedEvent[] = [];
-  #eventHandlers: [NormalizedFullLink, EventHandler][] = [];
+  #eventHandlers = new EventHandlerRegistry();
   readonly #lineage = new SpeculationLineage({
     dropQueuedEvent: (event, reason, quiet) =>
       this.#dropEvent(event, reason, { quiet }),
@@ -461,6 +482,17 @@ export class Scheduler {
   /** Called with each action {@link unsubscribe} is given. */
   #unsubscribeObservers = new Set<(action: Action) => void>();
 
+  /**
+   * Bounds the remote-echo write loop
+   * (docs/plans/scheduler-remote-echo-breaker.md). Fed a committed reactive
+   * run's echo steps on success, it backs an action off through the gate once
+   * its re-runs sustain against a remote writer, and reports each trip and
+   * clear to the memory server holding the document's space.
+   */
+  readonly #echoBreaker = new RemoteEchoBreaker({
+    onEvent: (event) => this.#reportEchoBreakerEvent(event),
+  });
+
   #currentActionId?: string;
   #dependencyGraphState!: DependencyGraphState;
   #dependencyUpdateState!: DependencyUpdateState;
@@ -480,6 +512,19 @@ export class Scheduler {
   #idlePromises: (() => void)[] = [];
   #backgroundTasks = new Set<Promise<unknown>>();
 
+  /** Loading event-queue heads waiting for a piece that could not be started
+   * yet (`queueSchedulerEvent()`). */
+  #pieceStartWaits = new Set<QueuedEvent>();
+
+  /** Set once `endPieceStartWaits()` has run; no new wait begins after it. */
+  #pieceStartWaitsEnded = false;
+
+  /** The heads held for their piece's pattern change. */
+  readonly #patternChangeWaits = new Set<QueuedEvent>();
+
+  /** Set once `endPatternChangeWaits()` has run; no head is held after it. */
+  #patternChangeWaitsEnded = false;
+
   /**
    * The single wake-shaping choke point: holds renderer-originated input events
    * out of the event queue and shapable cell-flip wakes out of the
@@ -492,9 +537,11 @@ export class Scheduler {
   #wakeShaper = new WakeShaper();
 
   /**
-   * Head event parked on in-flight document loads. Keyed by event id; released
-   * by `loadsSettled()`, which either re-queues execution on success or drops
-   * the at-most-once event on an explicit load failure.
+   * Head event parked on in-flight document loads, keyed by event id. The
+   * park ends once every load it waits on has settled: with no failure among
+   * them — or, for a client event, none but `authorization`-class failures —
+   * execution is re-queued, and otherwise `#failHeadEventLoadPark()` drops a
+   * client event and defers a served one.
    */
   #headEventLoadPark: {
     eventId: string;
@@ -594,6 +641,7 @@ export class Scheduler {
   get accessForTestingOnly(): {
     readonly actionStats: BoundedKeyMap<string, ActionStats>;
     readonly dependencyUpdateState: DependencyUpdateState;
+    readonly echoBreaker: RemoteEchoBreaker;
     readonly eventExecutionState: SchedulerEventExecutionState;
     readonly eventQueue: QueuedEvent[];
     readonly eventQueueState: SchedulerEventQueueState;
@@ -623,6 +671,7 @@ export class Scheduler {
       get dependencyUpdateState() {
         return outerThis.#dependencyUpdateState;
       },
+      echoBreaker: this.#echoBreaker,
       get eventExecutionState() {
         return outerThis.#eventExecutionState;
       },
@@ -944,7 +993,17 @@ export class Scheduler {
   ): void {
     unsubscribeSchedulerAction(this.#unsubscribeState, action, options);
     this.#materializers.clearAction(action);
+    // The node record outlives the registration, so its echo gate would
+    // otherwise defer a later registration of the same action.
+    this.#echoBreaker.forget(this.#getActionId(action), performance.now());
+    this.#gates.clearEchoBackoff(action);
     for (const observer of [...this.#unsubscribeObservers]) observer(action);
+  }
+
+  /** Whether a registered action's last run read the document `entity` names. */
+  readsEntity(entity: SpaceScopeAndURI): boolean {
+    return this.#triggerIndex.triggers.has(entity) ||
+      this.#triggerIndex.nonRecursiveTriggers.has(entity);
   }
 
   /**
@@ -1735,16 +1794,13 @@ export class Scheduler {
   #pieceIdForEventLink(
     eventLink: NormalizedFullLink,
   ): string | undefined {
-    for (const [link, handler] of this.#eventHandlers) {
-      if (areNormalizedLinksSame(link, eventLink)) {
-        return shaperInstanceGroupKey(
-          (handler as {
-            schedulerObservationIdentity?: SchedulerObservationIdentity;
-          }).schedulerObservationIdentity,
-        );
-      }
-    }
-    return undefined;
+    const handler = this.#eventHandlers.get(eventLink);
+    if (handler === undefined) return undefined;
+    return shaperInstanceGroupKey(
+      (handler as {
+        schedulerObservationIdentity?: SchedulerObservationIdentity;
+      }).schedulerObservationIdentity,
+    );
   }
 
   /**
@@ -1803,13 +1859,39 @@ export class Scheduler {
       event: any,
     ) => void,
   ): Cancel {
-    return addSchedulerEventHandler({
+    const cancel = addSchedulerEventHandler({
       eventHandlers: this.#eventHandlers,
     }, {
       handler,
       ref,
       populateDependencies,
     });
+    wakePieceStartWaits(this.#eventQueueState, ref);
+    return cancel;
+  }
+
+  /**
+   * Ends the wait of every queued event whose piece could not be started
+   * yet, settling each with an error. A runtime being disposed calls this
+   * before it waits for the scheduler to go idle: such a wait is held open
+   * by another participant's commit, which a closing runtime has no reason
+   * to wait for.
+   */
+  endPieceStartWaits(): void {
+    this.#pieceStartWaitsEnded = true;
+    endPieceStartWaits(this.#eventQueueState);
+  }
+
+  /**
+   * Ends the wait of every queued event held for its piece's pattern change,
+   * each then dispatching as it would have without the wait. A runtime being
+   * disposed calls this before it waits for the scheduler to go idle: such a
+   * wait can be held by a pattern load that only the disposal's later
+   * cancellation of the piece would release.
+   */
+  endPatternChangeWaits(): void {
+    this.#patternChangeWaitsEnded = true;
+    endPatternChangeWaits({ patternChangeWaits: this.#patternChangeWaits });
   }
 
   onConsole(fn: ConsoleHandler): void {
@@ -1945,6 +2027,30 @@ export class Scheduler {
       computations: this.#nodes.computations.size,
       pending: this.#pending.size,
     };
+  }
+
+  /**
+   * Whether an action registered here other than `except` declares a write to
+   * some instance of `address`'s document, at any scope.
+   *
+   * The lookup spans every scope because the write index keys a derivation by
+   * its declared scope, while a JavaScript derivation writes its output at the
+   * scope its reads narrowed to: a user instance of an output declared at
+   * space scope has a writer indexed only at space scope.
+   */
+  hasOtherWriterOf(
+    address: Pick<IMemorySpaceAddress, "space" | "id">,
+    except: object,
+  ): boolean {
+    for (const scope of ["space", "user", "session"] as const) {
+      const writers = this.#writeIndex.writersByEntity.get(
+        entityNameKey({ ...address, scope }),
+      );
+      for (const writer of writers ?? []) {
+        if (writer !== except) return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -2348,6 +2454,18 @@ export class Scheduler {
     return buildSchedulerGraphSnapshot(this.#graphSnapshotState);
   }
 
+  /** The sizes of the scheduler's live tables, read without walking them. */
+  getSizes(): SchedulerSizes {
+    return {
+      nodes: this.#nodes.activeCount,
+      invalidNodes: this.#nodes.invalidCount,
+      eventQueue: this.#eventQueue.length,
+      pendingActions: this.#pending.size,
+      backgroundTasks: this.#backgroundTasks.size,
+      actionStats: this.#actionStats.size,
+    };
+  }
+
   //
   // Push-triggered filtering
   //
@@ -2556,6 +2674,8 @@ export class Scheduler {
     // `unsubscribe` is optional on the capability, so a manager without one is
     // left as it was rather than crashing a disposal.
     this.runtime.storageManager.unsubscribe?.(this.#storageSubscription);
+    this.endPieceStartWaits();
+    this.endPatternChangeWaits();
     this.#headEventLoadPark = null;
     this.#headEventLoadParkHistory = null;
     this.#disposed = true;
@@ -2606,7 +2726,7 @@ export class Scheduler {
   // Execution orchestration
   //
 
-  #handleError(error: Error, action: any) {
+  #handleError(error: Error, action: any, eventId?: string) {
     handleSchedulerError(
       {
         errorHandlers: this.#errorHandlers,
@@ -2614,6 +2734,7 @@ export class Scheduler {
       },
       error,
       action,
+      eventId,
     );
   }
 
@@ -3086,7 +3207,7 @@ export class Scheduler {
   }
 
   #resetConvergenceHoldPasses(): void {
-    for (const record of this.#nodes.nodes()) {
+    for (const record of this.#nodes.getBackedOffNodes()) {
       record.gate.convergenceHoldPasses = 0;
     }
   }
@@ -3253,6 +3374,9 @@ export class Scheduler {
       releaseLineageEvent: (originTx, queuedEvent) => {
         this.#lineage.release(originTx, queuedEvent);
       },
+      pieceStartWaits: this.#pieceStartWaits,
+      pieceStartWaitsEnded: () => this.#pieceStartWaitsEnded,
+      handleError: (error, target) => this.#handleError(error, target),
     };
   }
 
@@ -3261,7 +3385,11 @@ export class Scheduler {
       this.#eventPreflightTelemetryEnabled;
     return {
       runtime: this.runtime,
+      eventHandlers: this.#eventHandlers,
       eventQueue: this.#eventQueue,
+      trackBackgroundTask: (work) => this.trackBackgroundTask(work),
+      patternChangeWaits: this.#patternChangeWaits,
+      patternChangeWaitsEnded: () => this.#patternChangeWaitsEnded,
       backpressure: this.runtime.commitBackpressure,
       collectPendingLoadParkKeys: (event, deps) =>
         this.#collectPendingLoadParkKeys(event, deps),
@@ -3281,7 +3409,8 @@ export class Scheduler {
       getActionId: (target) => this.#getActionId(target),
       getActionTelemetryInfo: (target) =>
         getSchedulerActionTelemetryInfo(target),
-      handleError: (error, target) => this.#handleError(error, target),
+      handleError: (error, target, eventId) =>
+        this.#handleError(error, target, eventId),
       queueExecution: () => this.queueExecution(),
       setEventPreflightTraceContext: (trace) => {
         this.#eventPreflightTraceContext = trace;
@@ -3314,8 +3443,8 @@ export class Scheduler {
       releaseLineageEvent: (originTx, queuedEvent) => {
         this.#lineage.release(originTx, queuedEvent);
       },
-      dropEvent: (queuedEvent, reason) => {
-        this.#dropEvent(queuedEvent, reason);
+      dropEvent: (queuedEvent, reason, options) => {
+        this.#dropEvent(queuedEvent, reason, options);
       },
       recordLineageEvent: (originTx, queuedEvent) => {
         this.#lineage.recordEvent(originTx, queuedEvent);
@@ -3323,6 +3452,7 @@ export class Scheduler {
       noteLineageRerun: (originTx) => {
         this.#lineage.noteRerun(originTx);
       },
+      lineageRunsAgain: (originTx) => this.#lineage.runsAgain(originTx),
       getOriginLocalSeq: (originTx, targetSpace) =>
         getCommitLocalSeq(originTx.tx, targetSpace),
       snapshotEventPreflightTraceContext: (trace) =>
@@ -3419,7 +3549,82 @@ export class Scheduler {
         this.#executingAction = null;
         this.#currentActionId = undefined;
       },
+      captureRemoteEcho: (tx, log, invalidCauses) =>
+        captureEchoRun(
+          tx,
+          log,
+          invalidCauses,
+          tx.tx.scopeKeyIdentity ?? this.runtime.scopeKeyIdentity,
+        ),
+      observeRemoteEcho: (action, actionId, run) =>
+        this.#observeRemoteEcho(action, actionId, run),
     };
+  }
+
+  /**
+   * Classify a successful reactive commit's run, captured at kickoff, against
+   * the pairs the remote-echo breaker holds as the commit lands, feed its echo
+   * steps to the breaker, and apply its verdict to the action's gate: a
+   * positive deadline defers the action's re-runs (a tripped loop), `0` lifts
+   * the deferral (a convergence that ended the loop), and `undefined` leaves
+   * the gate untouched.
+   */
+  #observeRemoteEcho(action: Action, actionId: string, run: EchoRun): void {
+    const steps = computeEchoSteps(run, {
+      tracked: this.#echoBreaker.tracks(actionId),
+    });
+    if (steps.length === 0) return;
+    const deadline = this.#echoBreaker.observe(
+      actionId,
+      steps,
+      performance.now(),
+    );
+    if (deadline === undefined) return;
+    if (deadline > 0) this.#gates.setEchoBackoff(action, deadline);
+    else this.#gates.clearEchoBackoff(action);
+  }
+
+  /**
+   * Reports a breaker trip or clear to the memory server serving the
+   * document's space, on that space's session (memory-v2 `04-protocol.md`
+   * §4.14), where it lands beside the session's commit rates. Best-effort and
+   * fire-and-forget: a disposed scheduler, a runtime tearing its writes down,
+   * and a provider or server without the capability all report nothing.
+   */
+  #reportEchoBreakerEvent(event: EchoBreakerEvent): void {
+    if (this.#disposed || this.runtime.writeTeardownSignal.aborted) return;
+    try {
+      const provider = this.runtime.storageManager.open(event.document.space);
+      if (!hasSessionReportStorageCapability(provider)) return;
+      const named = {
+        kind: "echo-breaker" as const,
+        document: { id: event.document.id, scopeKey: event.document.scopeKey },
+        action: event.actionId,
+      };
+      provider.sendReport(
+        event.event === "trip" ? { ...named, event: "trip" } : {
+          ...named,
+          event: "clear",
+          reason: event.reason,
+          renewals: event.renewals,
+          trippedMs: event.trippedMs,
+        },
+      );
+    } catch (error) {
+      logger.debug("echo-breaker-report-failed", () => [
+        "could not report a remote-echo breaker event",
+        error,
+      ]);
+    }
+  }
+
+  /**
+   * The remote-echo breaker's visible counts
+   * (docs/plans/scheduler-remote-echo-breaker.md §3): pairs whose backoff is in
+   * force now, the cumulative trip count, and echo cycles counted.
+   */
+  getEchoBreakerStats(): EchoBreakerStats {
+    return this.#echoBreaker.stats(performance.now());
   }
 
   #createGraphSnapshotState(): SchedulerGraphSnapshotState {
@@ -3633,12 +3838,22 @@ export class Scheduler {
       `event ${event.id} parks on ${keys.length} loading document(s)`,
       keys,
     ]);
-    const settled = this.runtime.storageManager.loadsSettled?.(keys) ??
-      Promise.resolve();
-    settled.then(
-      () => this.#releaseHeadEventLoadPark(event.id),
-      (error) => this.#failHeadEventLoadPark(event, error),
-    );
+    // Each key is waited for on its own, so that every failed load is seen,
+    // in the order the failures arrive, once all of them have settled.
+    const manager = this.runtime.storageManager;
+    const loadsSettled = manager.loadsSettled?.bind(manager);
+    const failures: unknown[] = [];
+    const settled = loadsSettled === undefined
+      ? Promise.resolve()
+      : Promise.all(keys.map((key) =>
+        loadsSettled([key]).catch((error: unknown) => {
+          failures.push(error);
+        })
+      ));
+    settled.then(() => {
+      if (failures.length === 0) this.#releaseHeadEventLoadPark(event.id);
+      else this.#failHeadEventLoadPark(event, failures);
+    });
   }
 
   #releaseHeadEventLoadPark(eventId: string): void {
@@ -3654,68 +3869,88 @@ export class Scheduler {
   }
 
   /**
-   * The head event's required replica load FAILED.
+   * Settles the head event whose required replica load failed, the park's
+   * other ending beside `#releaseHeadEventLoadPark()`.
    *
    * events.md §5's T3 drop predicate is "no runnable handler", never
-   * "the run raced" — and a load failure is the second: the doc the
-   * closure reads EXISTS durably, only the read path failed. The live
-   * shape (verification-coverage.md's OW45 residue member, store-proven
-   * on CI run 32929764230) is a serving session revoked by the genesis
-   * ACL landing after activation — `unauthorized` on a cross-space read
-   * of a doc the server itself wrote one second earlier. Sealing §5's
-   * dropped-event notice for that DISCHARGED at-least-once on a healthy
-   * trusted user action and advanced the watermark past it, so nothing
-   * ever re-ran it: the click was silently lost.
-   *
-   * CORRECTED 2026-08-26. This docstring used to add "healing by design
-   * on the next mount", and that was FALSE: nothing remounted. Run
-   * 33021643751 (the same board's shards 2 and 6) measured 350 deferrals
-   * over 5m47s off one revoked session, zero successful loads — the
-   * deferral below waiting for a heal that did not exist, exactly as
-   * `storage/rejection.ts`'s SessionError note had said ("the
-   * convergence argument is sound, only the remount is missing"). The
-   * remount now exists: an admitted commit touching the space's ACL doc
-   * re-arms the session (storage/v2.ts `consumeOwedSessionRemount`,
-   * triggered by executor/host.ts), so the deferral's convergence
-   * argument holds. What has NOT changed is the persistent-failure
-   * posture spelled out below: a load whose ACL never changes — or whose
-   * re-open is denied — defers indefinitely, which is OW54's territory.
+   * "the run raced" — and a load failure is the second: the document the
+   * closure reads exists durably, only the read path failed. The live
+   * shape (verification-coverage.md's OW45 residue member) is a serving
+   * session revoked by the genesis ACL landing after activation —
+   * `unauthorized` on a cross-space read of a document the server itself
+   * wrote a moment earlier. Sealing §5's dropped-event notice for that
+   * discharges at-least-once on a healthy trusted user action and
+   * advances the watermark past it, so nothing ever re-runs it: the click
+   * is silently lost.
    *
    * A SERVED event therefore DEFERS — no consequence written, the
    * durable entry left pending and UNCONSEQUENCED, a later drain
-   * re-delivering it. The deferral carries the drain's arrival-order
-   * BARRIER with it (events.md §2, mirroring the sidecar-sync-failure
-   * arm): every later-arrived durable served entry behind it IN THE
-   * SAME SPACE defers too, or a later arrival's consequence lands ahead
-   * of an earlier one. Two exclusions, both deliberate: cross-space
-   * queue neighbours (§2's order is per-space) and LT1 in-process
-   * copies (`served` with no `streamEntry`), which have no durable
-   * entry to re-drain and are a running event's same-wave cascade
-   * children rather than later arrivals.
+   * re-delivering it. What makes the deferral converge is the session
+   * remount: an admitted commit touching the space's ACL document re-arms
+   * the session (storage/v2.ts `consumeOwedSessionRemount`, triggered by
+   * executor/host.ts). A load whose ACL never changes, or whose re-open
+   * is denied, defers indefinitely, which is OW54's territory. The
+   * deferral carries the drain's arrival-order BARRIER with it (events.md
+   * §2, mirroring the sidecar-sync-failure arm): every later-arrived
+   * durable served entry behind it IN THE SAME SPACE defers too, or a
+   * later arrival's consequence lands ahead of an earlier one. Two
+   * exclusions, both deliberate: cross-space queue neighbors (§2's order
+   * is per-space) and LT1 in-process copies (`served` with no
+   * `streamEntry`), which have no durable entry to re-drain and are a
+   * running event's same-wave cascade children rather than later
+   * arrivals.
    *
    * Client-side (no `served`) there is no durable entry to re-drain, so
-   * the drop keeps today's shape — the same split events.ts makes for a
-   * piece-load failure.
+   * a failed load drops the event — the same split events.ts makes for a
+   * piece-load failure — with one exception: when every failed load
+   * failed with an `authorization`-class failure, the park releases as
+   * completed loads do. The event's principal cannot read those
+   * documents, waiting does not change that, and the closure reads them
+   * as absent whether or not a load of them happened to be in flight
+   * when the event reached the head. So the handler runs, once, against
+   * what this replica holds, exactly as it would have with no load in
+   * flight; the settled generations the release records keep the next
+   * preflight from parking on those loads again. A failure of any other
+   * class among them still drops the event, since that document may yet
+   * hold what the closure reads.
+   *
+   * `errors` holds every failed load's error, in the order they failed. A
+   * served deferral reports the first; a client drop reports the first of
+   * another class than `authorization`, the one that decided it.
    */
-  #failHeadEventLoadPark(event: QueuedEvent, error: unknown): void {
+  #failHeadEventLoadPark(
+    event: QueuedEvent,
+    errors: readonly unknown[],
+  ): void {
     if (this.#headEventLoadPark?.eventId !== event.id) return;
+    if (
+      event.served === undefined && errors.every(isAuthorizationLoadFailure)
+    ) {
+      this.#releaseHeadEventLoadPark(event.id);
+      return;
+    }
+    // Chosen by position, since a rejection may carry no error at all.
+    const error = event.served === undefined
+      ? errors[errors.findIndex((each) => !isAuthorizationLoadFailure(each))]
+      : errors[0];
     const keys = this.#headEventLoadPark.keys.join(", ");
     this.#headEventLoadPark = null;
     this.#headEventLoadParkHistory = null;
     const detail = error instanceof Error ? error.message : String(error);
+    if (event.served === undefined) {
+      this.#dropEvent(
+        event,
+        `Event dropped: required replica load failed before dispatch ` +
+          `(${keys}: ${detail})`,
+      );
+      this.queueExecution();
+      return;
+    }
     const failure = error instanceof ReplicaLoadFailureError ? error.failure : {
       failureClass: "unknown" as const,
       recoveryEpoch: "untyped",
       permanentEvidence: false,
     };
-    if (event.served === undefined) {
-      this.#dropEvent(
-        event,
-        `Event dropped: required replica load failed before dispatch (${detail})`,
-      );
-      this.queueExecution();
-      return;
-    }
     // The head's debug record names the failing doc keys and error;
     // `events.loadParkDeferrals` counts every head and barrier deferral, while
     // the durable checkpoint and terminal attention surface persistent failure.
@@ -3848,7 +4083,9 @@ export class Scheduler {
 
   #clearBackoffForCleanNodes(): void {
     let clearedDeadline = false;
-    for (const record of this.#nodes.nodes()) {
+    // Clearing a node drops it from the set being walked; a `Set` iterator
+    // tolerates deletion of the current entry.
+    for (const record of this.#nodes.getBackedOffNodes()) {
       if (record.status === "clean") {
         clearedDeadline = this.#clearNodeBackoff(record) || clearedDeadline;
       }
