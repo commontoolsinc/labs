@@ -3,8 +3,9 @@
 The **read layer** and **calls**, two of the three concerns in
 [Reading Fabric data](fabric-read-model.md): the shared layer that turns a cell
 into structured output, and what calling a verb adds on top. Read that document
-first — this one uses its vocabulary. The third concern, the command surface, is
-[CLI surface shape](../history/plans/cli-surface-shape.md).
+first — this one uses its vocabulary. The third concern, the command surface,
+was settled by [CLI surface shape](../history/plans/cli-surface-shape.md), an
+executed plan now archived.
 
 ## The shared read layer
 
