@@ -14,6 +14,7 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 import {
   type Cell,
+  type JSONSchema,
   type MemorySpace,
   type NormalizedFullLink,
   Runtime,
@@ -40,6 +41,12 @@ import {
 const signer = await Identity.fromPassphrase("cf-profile-manage");
 const stranger = await Identity.fromPassphrase("cf-profile-manage stranger");
 const space = signer.did();
+
+/** A list of profile links, each read as the link it is. */
+const linkListSchema = {
+  type: "array",
+  items: { type: "unknown", asCell: ["cell"] },
+} as const satisfies JSONSchema;
 
 const CONFIG: SpaceConfig = {
   apiUrl: "http://127.0.0.1:8000",
@@ -187,7 +194,9 @@ describe("profile management", () => {
       await theirs.dispose({ closeStorage: false });
       await storage.close();
     }
-    const list = host.key("profiles").resolveAsCell();
+    const list = host.key("profiles").resolveAsCell().asSchema(
+      linkListSchema,
+    );
     await list.sync();
     const tx = runtime.edit();
     list.withTx(tx).push(runtime.getCellFromLink(link));
@@ -227,10 +236,8 @@ describe("profile management", () => {
     it("leaves out a listed profile that is another identity's", async () => {
       await createProfile({ ...CONFIG, name: "Ada" }, { loadPieces });
       const theirs = await listStrangersProfile("Mallory");
-      const homeLinks = host.key("profiles").asSchema({
-        type: "array",
-        items: { type: "unknown", asCell: ["cell"] },
-      }).get() ?? [];
+      const homeLinks = host.key("profiles").asSchema(linkListSchema).get() ??
+        [];
       expect(homeLinks.map((each) => each.getAsNormalizedFullLink().space))
         .toContain(theirs);
 
@@ -345,10 +352,8 @@ describe("profile management", () => {
         retireProfile({ ...CONFIG, profileSpace: theirs }, { loadPieces }),
       ).rejects.toThrow(/is not one of .* own/);
       expect(
-        (host.key("retiredProfiles").asSchema({
-          type: "array",
-          items: { type: "unknown", asCell: ["cell"] },
-        }).get() ?? []).length,
+        (host.key("retiredProfiles").asSchema(linkListSchema).get() ?? [])
+          .length,
       ).toBe(0);
     });
   });
