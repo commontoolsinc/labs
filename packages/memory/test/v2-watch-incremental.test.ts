@@ -977,8 +977,8 @@ describe("Server", () => {
     describe("watchRemove()", () => {
       // `of:a` links to `of:x` and `of:y`. A `true` schema on `of:a` reaches
       // both, and a schema naming `child` alone reaches `of:x` alone, so the
-      // narrower watch added after the permissive one is recorded as covered
-      // rather than walked.
+      // narrower watch added after the permissive one is covered by the
+      // permissive one's record rather than walked.
 
       const permissive = (id: string): GraphWatchSpec => ({
         id: `${id}:all`,
@@ -1039,25 +1039,6 @@ describe("Server", () => {
         return fixture;
       }
 
-      it("records a watch an earlier watch covers at addition, and forgets it at replacement", async () => {
-        const fixture = await openCoveredFixture();
-        try {
-          expect([...fixture.state.coveredWatchIds]).toEqual(["of:a"]);
-          expect(ids([...fixture.state.entities.values()])).toEqual([
-            "of:a",
-            "of:x",
-            "of:y",
-          ]);
-          await fixture.reader.watchSetSync([
-            permissive("of:a"),
-            narrow("of:a"),
-          ]);
-          expect(fixture.state.coveredWatchIds.size).toBe(0);
-        } finally {
-          await fixture.close();
-        }
-      });
-
       it("leaves the graph as it stands when a covered watch is removed", async () => {
         const fixture = await openCoveredFixture();
         try {
@@ -1074,7 +1055,6 @@ describe("Server", () => {
           expect(fixture.state.watches.map((watch) => watch.id)).toEqual([
             "of:a:all",
           ]);
-          expect(fixture.state.coveredWatchIds.size).toBe(0);
         } finally {
           await fixture.close();
         }
@@ -1093,7 +1073,6 @@ describe("Server", () => {
           expect(fixture.state.watches.map((watch) => watch.id)).toEqual([
             "of:a",
           ]);
-          expect(fixture.state.coveredWatchIds.size).toBe(0);
           expect(fixture.state.trackedIds.has(toDirtyKey("of:x"))).toBe(true);
           expect(fixture.state.trackedIds.has(toDirtyKey("of:y"))).toBe(
             false,
@@ -1119,10 +1098,8 @@ describe("Server", () => {
           });
           await fixture.server.flushSessions();
           await fixture.reader.watchAddSync([permissive("of:b")]);
-          expect([...fixture.state.coveredWatchIds]).toEqual(["of:a"]);
           const first = await fixture.reader.watchRemoveSync(["of:a:all"]);
           expect(first.sync.removes).toEqual([]);
-          expect([...fixture.state.coveredWatchIds]).toEqual(["of:a"]);
           expect(ids([...fixture.state.entities.values()])).toEqual([
             "of:a",
             "of:b",
@@ -1131,7 +1108,6 @@ describe("Server", () => {
           ]);
           const second = await fixture.reader.watchRemoveSync(["of:b:all"]);
           expect(ids(second.sync.removes)).toEqual(["of:b", "of:y"]);
-          expect(fixture.state.coveredWatchIds.size).toBe(0);
           expect(ids([...fixture.state.entities.values()])).toEqual([
             "of:a",
             "of:x",
@@ -1141,10 +1117,10 @@ describe("Server", () => {
         }
       });
 
-      it("walks every watch at a full re-evaluation, so a removal after one retracts what only the removed watch reaches", async () => {
+      it("retracts, at the refresh, a document a link no longer reaches, and keeps one a watch of its own names", async () => {
         // The permissive watch on `of:a` covers a watch on `of:x` while the
-        // link stands. Once the link is gone and the session is evaluated
-        // in full, the watch on `of:x` is what keeps `of:x` delivered.
+        // link stands. Once the link is gone, the watch on `of:x` is what
+        // keeps `of:x` delivered, and nothing keeps `of:y`.
         const fixture = await openFixture(0);
         try {
           await fixture.writer.transact({
@@ -1154,26 +1130,35 @@ describe("Server", () => {
               {
                 op: "set",
                 id: "of:a",
-                value: { value: { child: link(fixture.space, "of:x") } },
+                value: {
+                  value: {
+                    child: link(fixture.space, "of:x"),
+                    second: link(fixture.space, "of:y"),
+                  },
+                },
               },
               { op: "set", id: "of:x", value: { value: { name: "x" } } },
+              { op: "set", id: "of:y", value: { value: { name: "y" } } },
             ],
           });
           await fixture.server.flushSessions();
           await fixture.reader.watchAddSync([permissive("of:a")]);
-          await fixture.reader.watchAddSync([watch("of:x")]);
-          expect([...fixture.state.coveredWatchIds]).toEqual(["of:x"]);
+          const { view } = await fixture.reader.watchAddSync([watch("of:x")]);
+          const frames = view.subscribeSync();
+          const pushed = frames.next();
           await fixture.writer.transact({
             localSeq: 3,
             reads: { confirmed: [], pending: [] },
             operations: [{ op: "set", id: "of:a", value: { value: {} } }],
           });
           await fixture.server.flushSessions();
-          await fixture.server.syncSessionForConnection(
-            fixture.space,
-            fixture.reader.sessionId,
-          );
-          expect(fixture.state.coveredWatchIds.size).toBe(0);
+          const { value: frame } = await pushed;
+          expect(ids(frame!.removes)).toEqual(["of:y"]);
+          expect(ids(frame!.upserts)).toEqual(["of:a"]);
+          expect(ids([...fixture.state.entities.values()])).toEqual([
+            "of:a",
+            "of:x",
+          ]);
           const removal = await fixture.reader.watchRemoveSync(["of:x"]);
           expect(ids(removal.sync.removes)).toEqual(["of:x"]);
           expect(ids([...fixture.state.entities.values()])).toEqual(["of:a"]);

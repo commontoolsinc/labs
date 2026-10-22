@@ -1,6 +1,7 @@
 import type { FabricValue, JSONSchema } from "@commonfabric/api";
 import { getLogger } from "@commonfabric/utils/logger";
 import { StagedMap } from "@commonfabric/utils/staged-map";
+import { hashStringOf } from "@commonfabric/data-model";
 import {
   internPathSelector,
   internSchemaAsTaggedHashString,
@@ -107,6 +108,36 @@ export type TrackedGraphState = {
   /** referrerKey → the crossing keys it attributed, as `missesOf`. */
   crossingsOf: Map<string, Set<string>>;
 
+  /**
+   * The tracker's records by the referrers whose walks needed them, keyed
+   * by `trackedEntryKey`: a document reached through a link attributes to
+   * the document holding the link, a schema document to the document whose
+   * schema or envelope names it, and a watch root to its root key
+   * (`rootReferrerKey`). A record whose last walked referrer lets go
+   * retires; a document with no record left is retired with it and leaves
+   * `entities`, so what nothing reaches any more stops being delivered.
+   * Attribution runs one way along a link, so two documents reached only
+   * through each other keep each other; a sweep from the roots after a
+   * retirement retires those (`sweepUnreachable`).
+   */
+  trackedBy: Map<string, Set<string>>;
+
+  /**
+   * record → the referrers whose own selector the record covers, so they
+   * were not walked: a root naming a selector a permissive record already
+   * covers, or a document whose link target the tracker already covered.
+   * When the record retires, each is walked again under its own selector.
+   */
+  coveredBy: Map<string, Set<string>>;
+
+  /** referrer → the records it attributes, walked or covered: the reverse
+   * index a re-walk and a release clear by. */
+  tracksOf: Map<string, Set<string>>;
+
+  /** The watch roots this graph was walked from, by root key, for walking
+   * a root again on its own when the record covering it retires. */
+  roots: Map<string, TrackedRoot>;
+
   /** The documents this graph delivered, at the version delivered. A
    * document joins only after the assembly delivering it verified its
    * whole schema-document closure, which is what lets a later assembly
@@ -127,6 +158,13 @@ export type TrackedGraphState = {
    * holds, is a schema document this state established, closure and all
    * (see `assembleSchemaDocClosures`). */
   schemaRefs: SchemaRefScans;
+};
+
+/** A watch root as a graph records it (see `TrackedGraphState.roots`). */
+export type TrackedRoot = {
+  docKey: QueryDocKey;
+  address: { id: string; scope?: CellScope; scopeKey?: ScopeKey };
+  selector: SchemaPathSelector;
 };
 
 /** See TrackedGraphState.schemaRefs. */
@@ -948,6 +986,15 @@ export const cloneTrackedGraphState = (
   const crossingsOf = new Map(
     [...state.crossingsOf].map(([key, keys]) => [key, new Set(keys)] as const),
   );
+  const trackedBy = new Map(
+    [...state.trackedBy].map(([key, refs]) => [key, new Set(refs)] as const),
+  );
+  const coveredBy = new Map(
+    [...state.coveredBy].map(([key, refs]) => [key, new Set(refs)] as const),
+  );
+  const tracksOf = new Map(
+    [...state.tracksOf].map(([key, keys]) => [key, new Set(keys)] as const),
+  );
 
   const manager = new EngineObjectManager(
     engine,
@@ -966,6 +1013,10 @@ export const cloneTrackedGraphState = (
     crossings,
     crossedBy,
     crossingsOf,
+    trackedBy,
+    coveredBy,
+    tracksOf,
+    roots: new Map(state.roots),
     entities: new Map(state.entities),
     memo: new Map(state.memo),
     manager,
@@ -996,6 +1047,10 @@ export const stageTrackedGraphState = (
     state.crossingsOf,
     (values) => new Set(values),
   );
+  const trackedBy = new StagedMap(state.trackedBy, (refs) => new Set(refs));
+  const coveredBy = new StagedMap(state.coveredBy, (refs) => new Set(refs));
+  const tracksOf = new StagedMap(state.tracksOf, (keys) => new Set(keys));
+  const roots = new StagedMap(state.roots);
   const entities = new StagedMap(state.entities);
   const memo = new StagedMap(state.memo);
   const manager = state.manager.stage(engine);
@@ -1010,6 +1065,10 @@ export const stageTrackedGraphState = (
       crossings: crossings.value,
       crossedBy,
       crossingsOf,
+      trackedBy,
+      coveredBy,
+      tracksOf,
+      roots,
       entities,
       memo,
       manager: manager.value,
@@ -1023,6 +1082,10 @@ export const stageTrackedGraphState = (
       crossings.commit();
       crossedBy.commit();
       crossingsOf.commit();
+      trackedBy.commit();
+      coveredBy.commit();
+      tracksOf.commit();
+      roots.commit();
       entities.commit();
       memo.commit();
       manager.commit();
@@ -1315,29 +1378,37 @@ const assembleSchemaDocClosures = (
   stats: QueryTraversalStats,
 ): {
   trackerAdds: QueryDocKey[];
+
+  /** The delivered documents whose refs the closure was walked from; every
+   * tracker add attributes to each of them. */
+  closureReferrers: QueryDocKey[];
+
+  /** A schema document a delivered document's new version no longer
+   * refers to, with that document: the attribution to release. */
+  closureDrops: { referrer: QueryDocKey; key: QueryDocKey }[];
+
   additions: Map<QueryDocKey, EntitySnapshot>;
 } => {
-  const roots = new Set<string>();
-  for (const [key, snapshot] of delivered) {
-    const previous = scans.get(key);
-    if (previous !== undefined && previous.seq !== snapshot.seq) {
-      for (const hash of previous.refs) roots.add(hash);
-    }
-    for (
-      const hash of scanSnapshotSchemaRefs(
-        engine,
-        key,
-        snapshot,
-        scans,
-        stats,
-      )
-    ) {
-      roots.add(hash);
-    }
-  }
   const identity = identityOf(manager);
   const schemaDocKey = (hash: string): QueryDocKey =>
     toDocKey(space, `cid:${hash}`, DEFAULT_SCOPE, identity);
+  const roots = new Set<string>();
+  const closureReferrers: QueryDocKey[] = [];
+  const closureDrops: { referrer: QueryDocKey; key: QueryDocKey }[] = [];
+  for (const [key, snapshot] of delivered) {
+    const previous = scans.get(key);
+    const refs = scanSnapshotSchemaRefs(engine, key, snapshot, scans, stats);
+    if (previous !== undefined && previous.seq !== snapshot.seq) {
+      for (const hash of previous.refs) {
+        roots.add(hash);
+        if (!refs.has(hash)) {
+          closureDrops.push({ referrer: key, key: schemaDocKey(hash) });
+        }
+      }
+    }
+    for (const hash of refs) roots.add(hash);
+    if (refs.size > 0) closureReferrers.push(key);
+  }
   const isEstablished = (hash: string, key: QueryDocKey): boolean => {
     if (delivered.has(key)) return false;
     const scan = scans.get(key);
@@ -1424,7 +1495,7 @@ const assembleSchemaDocClosures = (
       }
     },
   });
-  return { trackerAdds, additions };
+  return { trackerAdds, closureReferrers, closureDrops, additions };
 };
 
 /**
@@ -1595,6 +1666,604 @@ const releaseReferrer = (
   }
 };
 
+/** The key a tracker record — one document under one selector — is
+ * attributed by (see `TrackedGraphState.trackedBy`). */
+const trackedEntryKey = (
+  docKey: string,
+  selector: SchemaPathSelector,
+): string => `${docKey}\0${hashStringOf(internPathSelector(selector))}`;
+
+/** The document a record key names. */
+const entryDocKey = (entry: string): QueryDocKey =>
+  entry.slice(0, entry.indexOf("\0")) as QueryDocKey;
+
+const ROOT_REFERRER_PREFIX = "root\0";
+
+/** The referrer key of a watch root: its document key and its selector. */
+export const rootReferrerKey = (
+  docKey: string,
+  selector: SchemaPathSelector,
+): string => `${ROOT_REFERRER_PREFIX}${trackedEntryKey(docKey, selector)}`;
+
+/** The root keys of `roots`, as a graph walked from them records them. */
+export const rootReferrersOf = (
+  space: string,
+  roots: GraphQuery["roots"],
+  identity: ScopeKeyIdentity,
+): string[] =>
+  roots.map((root) =>
+    rootReferrerKey(
+      rootDocKey(space, root, identity),
+      toDocumentSelector(root.selector),
+    )
+  );
+
+/** Whether a schema document's record, which the closure assembly
+ * attributes outside any walk, is what `entry` names. */
+const isSchemaDocEntry = (entry: string): boolean =>
+  fromDocKey(entryDocKey(entry)).id.startsWith("cid:");
+
+/** The tracker attribution of a graph state. */
+type TrackedAttribution = Pick<
+  TrackedGraphState,
+  "trackedBy" | "coveredBy" | "tracksOf"
+>;
+
+/** The walk-side recorder over tracker attribution (see
+ * `GraphQueryWalkOptions.onTrackedDoc`). */
+type TrackedRecorder = (
+  key: string,
+  selector: SchemaPathSelector,
+  referrer: string | undefined,
+  kind: "walked" | "covered",
+) => void;
+
+const addAttribution = (
+  index: Map<string, Set<string>>,
+  key: string,
+  value: string,
+): void => {
+  let values = index.get(key);
+  if (values === undefined) {
+    values = new Set();
+    index.set(key, values);
+  }
+  values.add(value);
+};
+
+/** The recorder over `state`'s tracker attribution. A record attributed
+ * to its own document is left unattributed: a document cannot keep
+ * itself. */
+const trackedRecorderFor =
+  (state: TrackedAttribution): TrackedRecorder =>
+  (key, selector, referrer, kind) => {
+    if (referrer === undefined || referrer === key) return;
+    const entry = trackedEntryKey(key, selector);
+    addAttribution(
+      kind === "walked" ? state.trackedBy : state.coveredBy,
+      entry,
+      referrer,
+    );
+    addAttribution(state.tracksOf, referrer, entry);
+  };
+
+/**
+ * The recorders one incremental evaluation of `state` records with. `fresh`
+ * is what this evaluation's walks attributed, by referrer: a re-walk's
+ * diff reads it rather than the re-walk's own records, because a document
+ * another walk of the same evaluation already traversed is answered from
+ * the shared memo and records nothing itself, while that earlier walk
+ * recorded the document's attributions here as it went.
+ */
+type GraphRecorders = {
+  miss: ReturnType<typeof attributedRecorderFor>;
+  crossing: ReturnType<typeof attributedRecorderFor>;
+  tracked: TrackedRecorder;
+  fresh: Map<string, Set<string>>;
+};
+
+const recordersFor = (
+  state: TrackedGraphState,
+  changedMisses: Set<string>,
+): GraphRecorders => {
+  const fresh = new Map<string, Set<string>>();
+  const tracked = trackedRecorderFor(state);
+  return {
+    miss: attributedRecorderFor(missesView(state), changedMisses),
+    crossing: attributedRecorderFor(crossingsView(state)),
+    tracked: (key, selector, referrer, kind) => {
+      tracked(key, selector, referrer, kind);
+      if (referrer !== undefined && referrer !== key) {
+        addAttribution(fresh, referrer, trackedEntryKey(key, selector));
+      }
+    },
+    fresh,
+  };
+};
+
+/**
+ * What a release leaves to settle: the records that may have lost their
+ * last walked referrer, the referrers whose covered record retired or
+ * whose document lost a record, which are walked again, the documents
+ * left with no record, which retire unless a re-walk gives them one, and
+ * the documents retired.
+ */
+type Retirement = {
+  candidates: Set<string>;
+  rewalkDocs: Set<QueryDocKey>;
+  rewalkRoots: Set<string>;
+  emptied: Set<QueryDocKey>;
+  retired: Set<QueryDocKey>;
+
+  /** Whether a record left the tracker, which is when a cycle of
+   * documents reached only through each other may be holding on. */
+  retiredRecords: boolean;
+};
+
+const createRetirement = (): Retirement => ({
+  candidates: new Set(),
+  rewalkDocs: new Set(),
+  rewalkRoots: new Set(),
+  emptied: new Set(),
+  retired: new Set(),
+  retiredRecords: false,
+});
+
+/** Drops `referrer` from `entry`'s attribution, walked and covered alike,
+ * and queues the record for retirement once no walked referrer is left. */
+const dropAttribution = (
+  state: TrackedAttribution,
+  entry: string,
+  referrer: string,
+  retirement: Retirement,
+): void => {
+  const walked = state.trackedBy.get(entry);
+  if (walked !== undefined) {
+    walked.delete(referrer);
+    if (walked.size === 0) state.trackedBy.delete(entry);
+  }
+  const covered = state.coveredBy.get(entry);
+  if (covered !== undefined) {
+    covered.delete(referrer);
+    if (covered.size === 0) state.coveredBy.delete(entry);
+  }
+  if (!state.trackedBy.has(entry)) retirement.candidates.add(entry);
+};
+
+/** Releases every attribution `referrer` made. */
+const releaseTrackedReferrer = (
+  state: TrackedAttribution,
+  referrer: string,
+  retirement: Retirement,
+): void => {
+  const entries = state.tracksOf.get(referrer);
+  if (entries === undefined) return;
+  state.tracksOf.delete(referrer);
+  for (const entry of entries) {
+    dropAttribution(state, entry, referrer, retirement);
+  }
+};
+
+/** The selector among `docKey`'s tracked ones whose record `entry` names. */
+const selectorOfEntry = (
+  tracker: MapSetStringToPathSelectors,
+  docKey: string,
+  entry: string,
+): SchemaPathSelector | undefined => {
+  for (const selector of tracker.values(docKey)) {
+    if (trackedEntryKey(docKey, selector) === entry) return selector;
+  }
+  return undefined;
+};
+
+/**
+ * Retires every candidate record left with no walked referrer: the record
+ * leaves the tracker, and the referrers it covered are queued to be walked
+ * again, which is what walks a covered root on its own. A document that
+ * keeps other records is queued to be walked again too, so that what only
+ * its retired record's walk reached is released. A document left with no
+ * record is noted as emptied; `retireEmptied()` retires it once the
+ * re-walks have had their chance to give it a record again.
+ */
+const retireOrphans = (
+  state: TrackedGraphState,
+  retirement: Retirement,
+): void => {
+  const { candidates } = retirement;
+  while (candidates.size > 0) {
+    const entry = candidates.values().next().value!;
+    candidates.delete(entry);
+    if (state.trackedBy.has(entry)) continue;
+    const docKey = entryDocKey(entry);
+    const selector = selectorOfEntry(state.tracker, docKey, entry);
+    if (selector !== undefined) {
+      state.tracker.deleteValue(docKey, selector);
+      retirement.retiredRecords = true;
+    }
+    const covered = state.coveredBy.get(entry);
+    state.coveredBy.delete(entry);
+    for (const referrer of covered ?? []) {
+      state.tracksOf.get(referrer)?.delete(entry);
+      if (referrer.startsWith(ROOT_REFERRER_PREFIX)) {
+        retirement.rewalkRoots.add(referrer);
+      } else {
+        retirement.rewalkDocs.add(referrer as QueryDocKey);
+      }
+    }
+    if (state.tracker.has(docKey)) {
+      retirement.rewalkDocs.add(docKey);
+    } else {
+      retirement.emptied.add(docKey);
+    }
+  }
+};
+
+/**
+ * Retires each emptied document the tracker still has no record of: it
+ * leaves `entities`, and what its own walks attributed is released, which
+ * may orphan more records. One a re-walk gave a record again stays, and
+ * stays delivered as it was.
+ */
+const retireEmptied = (
+  state: TrackedGraphState,
+  retirement: Retirement,
+  changedMisses: Set<string>,
+): void => {
+  const emptied = [...retirement.emptied];
+  retirement.emptied.clear();
+  for (const docKey of emptied) {
+    if (state.tracker.has(docKey)) continue;
+    state.entities.delete(docKey);
+    state.schemaRefs.delete(docKey);
+    retirement.retired.add(docKey);
+    retirement.rewalkDocs.delete(docKey);
+    releaseReferrer(missesView(state), docKey, changedMisses);
+    releaseReferrer(crossingsView(state), docKey);
+    releaseTrackedReferrer(state, docKey, retirement);
+  }
+};
+
+/**
+ * Walks `docKey` again under every selector the tracker holds for it, as
+ * the refresh does a dirty document, and releases the attributions this
+ * evaluation's walks did not make again (`GraphRecorders.fresh`). A
+ * schema document's record is attributed by the closure assembly rather
+ * than by a walk, so it is released by the assembly's own account of a
+ * version's dropped refs, never here.
+ */
+const rewalkDocument = (
+  space: string,
+  manager: EngineObjectManager,
+  state: TrackedGraphState,
+  docKey: QueryDocKey,
+  recorders: GraphRecorders,
+  sharedMemo: SchemaMemo,
+  stats: QueryTraversalStats,
+  retirement: Retirement,
+  changedMisses: Set<string>,
+): void => {
+  const previous = new Set(state.tracksOf.get(docKey));
+  const selectors = [...state.tracker.values(docKey)];
+  state.tracker.delete(docKey);
+  // The re-walk below re-records this referrer's still-live misses and
+  // crossings; attributions from its previous walk no longer stand, so a
+  // link edited away retires its miss, or its crossing, instead of
+  // leaving a stale wake.
+  releaseReferrer(missesView(state), docKey, changedMisses);
+  releaseReferrer(crossingsView(state), docKey);
+  const { id, scope, scopeKey } = fromDocKey(docKey);
+  for (const selector of selectors) {
+    evaluateTrackedDocument(
+      space,
+      manager,
+      { id, scope, scopeKey },
+      selector,
+      state.tracker,
+      recorders.miss,
+      recorders.crossing,
+      sharedMemo,
+      stats,
+      undefined,
+      recorders.tracked,
+    );
+  }
+  const restored = recorders.fresh.get(docKey);
+  for (const entry of previous) {
+    if (restored?.has(entry) || isSchemaDocEntry(entry)) continue;
+    state.tracksOf.get(docKey)?.delete(entry);
+    dropAttribution(state, entry, docKey, retirement);
+  }
+};
+
+/**
+ * The documents `retirement` retired that `space` delivers. A link into
+ * another space records its target under that space's key, which this
+ * space never delivers (`snapshotForDocKey`), and that key names the same
+ * document as a key of this space would, so a retired foreign key is not
+ * a retraction of anything delivered.
+ */
+const retiredInSpace = (
+  space: string,
+  retirement: Retirement,
+): ReadonlySet<QueryDocKey> => {
+  const removed = new Set<QueryDocKey>();
+  for (const key of retirement.retired) {
+    if (key.startsWith(`${space}/`)) removed.add(key);
+  }
+  return removed;
+};
+
+/**
+ * Retires every record no root reaches through the attribution. Attribution
+ * alone retires a record when its last referrer lets go, which two
+ * documents reached only through each other never do, so once a pass has
+ * retired a record the records are marked from the roots along `tracksOf`
+ * and the unmarked ones retire together, no re-walk queued for them. A
+ * record nothing attributes is kept, and what its document attributes
+ * counts as reached: the traversal records one where a root's selector
+ * names a path below the document's value.
+ */
+const sweepUnreachable = (
+  state: TrackedGraphState,
+  retirement: Retirement,
+): void => {
+  const marked = new Set<string>();
+  const visited = new Set<string>();
+  const queue: string[] = [...state.roots.keys()];
+  for (const [docKey, selectors] of state.tracker) {
+    for (const selector of selectors) {
+      const entry = trackedEntryKey(docKey, selector);
+      if (!state.trackedBy.has(entry) && !state.coveredBy.has(entry)) {
+        marked.add(entry);
+        if (!visited.has(docKey)) {
+          visited.add(docKey);
+          queue.push(docKey);
+        }
+      }
+    }
+  }
+  while (queue.length > 0) {
+    const referrer = queue.pop()!;
+    for (const entry of state.tracksOf.get(referrer) ?? []) {
+      if (marked.has(entry)) continue;
+      marked.add(entry);
+      const docKey = entryDocKey(entry);
+      if (!visited.has(docKey)) {
+        visited.add(docKey);
+        queue.push(docKey);
+      }
+    }
+  }
+  for (const [docKey, selectors] of state.tracker) {
+    for (const selector of selectors) {
+      const entry = trackedEntryKey(docKey, selector);
+      if (marked.has(entry)) continue;
+      state.tracker.deleteValue(docKey, selector);
+      for (const index of [state.trackedBy, state.coveredBy]) {
+        for (const referrer of index.get(entry) ?? []) {
+          state.tracksOf.get(referrer)?.delete(entry);
+        }
+        index.delete(entry);
+      }
+      if (!state.tracker.has(docKey)) {
+        retirement.emptied.add(entryDocKey(entry));
+      }
+    }
+  }
+};
+
+/**
+ * Settles `retirement`: retires the orphaned records, walks again the
+ * referrers that left uncovered or with a record fewer, retires the
+ * documents those walks gave no record back, sweeps what a cycle alone
+ * kept, and repeats until nothing is left to do. Returns the documents
+ * walked again, whose snapshots the caller delivers.
+ */
+const settleRetirement = (
+  space: string,
+  manager: EngineObjectManager,
+  state: TrackedGraphState,
+  retirement: Retirement,
+  recorders: GraphRecorders,
+  sharedMemo: SchemaMemo,
+  stats: QueryTraversalStats,
+  changedMisses: Set<string>,
+): Set<QueryDocKey> => {
+  const touched = new Set<QueryDocKey>();
+  for (;;) {
+    retireOrphans(state, retirement);
+    if (
+      retirement.rewalkDocs.size === 0 && retirement.rewalkRoots.size === 0
+    ) {
+      retireEmptied(state, retirement, changedMisses);
+      if (retirement.candidates.size > 0) continue;
+      if (!retirement.retiredRecords) return touched;
+      retirement.retiredRecords = false;
+      sweepUnreachable(state, retirement);
+      if (retirement.emptied.size === 0) return touched;
+      continue;
+    }
+    const docs = [...retirement.rewalkDocs];
+    retirement.rewalkDocs.clear();
+    const roots = [...retirement.rewalkRoots];
+    retirement.rewalkRoots.clear();
+    for (const docKey of docs) {
+      if (!state.tracker.has(docKey)) continue;
+      rewalkDocument(
+        space,
+        manager,
+        state,
+        docKey,
+        recorders,
+        sharedMemo,
+        stats,
+        retirement,
+        changedMisses,
+      );
+      touched.add(docKey);
+    }
+    for (const referrer of roots) {
+      const root = state.roots.get(referrer);
+      if (root === undefined) continue;
+      evaluateTrackedDocument(
+        space,
+        manager,
+        root.address,
+        root.selector,
+        state.tracker,
+        recorders.miss,
+        recorders.crossing,
+        sharedMemo,
+        stats,
+        undefined,
+        recorders.tracked,
+        referrer,
+      );
+      touched.add(root.docKey);
+      // The root's own selector may reach less than the retired record
+      // did, so the document is walked again under every record it keeps,
+      // which releases what only the retired record's walk reached.
+      retirement.rewalkDocs.add(root.docKey);
+    }
+  }
+};
+
+/**
+ * Helper for the incremental evaluations, which snapshots the tracked
+ * documents among `touched`, assembles the schema closures the snapshots
+ * need, attributes and releases the closure's records as the assembly
+ * reports, and merges the snapshots into `state.entities`. A document in
+ * `dirty` is delivered whatever its version, as the caller was told it
+ * changed; any other document touched at the version already delivered,
+ * as one walked again for its attribution alone is, is not an update.
+ * Returns the snapshots, and the schema documents a dropped ref retired.
+ */
+const deliverTouched = (
+  space: string,
+  engine: Engine.Engine,
+  manager: EngineObjectManager,
+  state: TrackedGraphState,
+  touched: Iterable<QueryDocKey>,
+  dirty: ReadonlySet<QueryDocKey>,
+  recorders: GraphRecorders,
+  stats: QueryTraversalStats,
+  changedMisses: Set<string>,
+): { updates: Map<QueryDocKey, EntitySnapshot>; retired: Set<QueryDocKey> } => {
+  const updates = new Map<QueryDocKey, EntitySnapshot>();
+  for (const key of touched) {
+    if (!state.tracker.has(key)) continue;
+    const snapshot = snapshotForDocKey(space, manager, state.branch, key);
+    if (snapshot === null) continue;
+    const delivered = state.entities.get(key);
+    if (
+      !dirty.has(key) && delivered !== undefined &&
+      delivered.seq === snapshot.seq &&
+      (delivered.document === null) === (snapshot.document === null)
+    ) {
+      continue;
+    }
+    updates.set(key, snapshot);
+  }
+  const staged = assembleSchemaDocClosures(
+    space,
+    engine,
+    manager,
+    state.branch,
+    state.tracker,
+    updates,
+    state.entities,
+    state.schemaRefs,
+    stats,
+  );
+  for (const key of staged.trackerAdds) {
+    state.tracker.add(key, REJECTING_SELECTOR);
+  }
+  for (const key of staged.trackerAdds) {
+    for (const referrer of staged.closureReferrers) {
+      recorders.tracked(key, REJECTING_SELECTOR, referrer, "walked");
+    }
+  }
+  const retirement = createRetirement();
+  for (const { referrer, key } of staged.closureDrops) {
+    const entry = trackedEntryKey(key, REJECTING_SELECTOR);
+    state.tracksOf.get(referrer)?.delete(entry);
+    dropAttribution(state, entry, referrer, retirement);
+  }
+  // A schema document attributes nothing of its own, so retiring one
+  // uncovers nothing and the cascade ends here.
+  retireOrphans(state, retirement);
+  retireEmptied(state, retirement, changedMisses);
+  for (const [key, snapshot] of staged.additions) {
+    updates.set(key, snapshot);
+  }
+  for (const [key, snapshot] of updates) {
+    state.entities.set(key, snapshot);
+  }
+  return { updates, retired: retirement.retired };
+};
+
+/**
+ * Releases the watch roots `referrers` name from `state`: what no other
+ * root or link keeps retires, and a root a retired record had covered is
+ * walked again on its own. Returns the snapshots of the documents walked
+ * again and the documents retired.
+ */
+export const releaseTrackedRoots = (
+  space: string,
+  engine: Engine.Engine,
+  state: TrackedGraphState,
+  referrers: Iterable<string>,
+): {
+  serverSeq: number;
+  updates: Map<QueryDocKey, EntitySnapshot>;
+  removed: ReadonlySet<QueryDocKey>;
+  changedMisses: ReadonlySet<string>;
+  stats: QueryTraversalStats;
+} => {
+  const manager = state.manager;
+  const stats = createQueryTraversalStats();
+  const readCountBefore = manager.readCount;
+  const changedMisses = new Set<string>();
+  const recorders = recordersFor(state, changedMisses);
+  const retirement = createRetirement();
+  for (const referrer of referrers) {
+    state.roots.delete(referrer);
+    releaseTrackedReferrer(state, referrer, retirement);
+  }
+  // A memo of this release's own, as a refresh takes: the graph's memo
+  // would answer a re-walk from a traversal that recorded nothing here.
+  const touched = settleRetirement(
+    space,
+    manager,
+    state,
+    retirement,
+    recorders,
+    createSchemaMemo(),
+    stats,
+    changedMisses,
+  );
+  const delivered = deliverTouched(
+    space,
+    engine,
+    manager,
+    state,
+    touched,
+    new Set(),
+    recorders,
+    stats,
+    changedMisses,
+  );
+  for (const key of delivered.retired) retirement.retired.add(key);
+  stats.managerReads = manager.readCount - readCountBefore;
+  return {
+    serverSeq: Engine.serverSeq(engine),
+    updates: delivered.updates,
+    removed: retiredInSpace(space, retirement),
+    changedMisses,
+    stats,
+  };
+};
+
 /**
  * The crossings `state`'s walks recorded, in the wire form a session frame
  * carries, each keyed by target and selector so a session delivers each
@@ -1746,16 +2415,22 @@ export const trackGraph = (
     crossings: new MapSetStringToPathSelectors(true),
     crossedBy: new Map<string, Set<string>>(),
     crossingsOf: new Map<string, Set<string>>(),
+    trackedBy: new Map<string, Set<string>>(),
+    coveredBy: new Map<string, Set<string>>(),
+    tracksOf: new Map<string, Set<string>>(),
+    roots: new Map<string, TrackedRoot>(),
   };
   const sharedMemo = createSchemaMemo();
   const stats = createQueryTraversalStats();
   const readCountBefore = manager.readCount;
+  const tracked = trackedRecorderFor(missState);
   const walk = new GraphQueryWalk({
     manager,
     space: space as MemorySpace,
     schemaTracker,
     onMissedDoc: attributedRecorderFor(missesView(missState)),
     onCrossing: attributedRecorderFor(crossingsView(missState)),
+    onTrackedDoc: tracked,
     identity: identityOf(manager),
     memo: sharedMemo,
     stats,
@@ -1781,10 +2456,23 @@ export const trackGraph = (
         type: "application/json",
       });
       const rootKey = rootDocKey(space, root, identityOf(manager));
+      const referrer = rootReferrerKey(rootKey, selector);
+      missState.roots.set(referrer, {
+        docKey: rootKey,
+        address: {
+          id: root.id,
+          scope: rootScope,
+          ...(root.entityScopeKey === undefined
+            ? {}
+            : { scopeKey: root.entityScopeKey }),
+        },
+        selector,
+      });
       if (loaded !== null) {
-        walk.visit(loaded, selector, rootKey);
+        walk.visit(loaded, selector, rootKey, referrer);
       } else {
         schemaTracker.add(rootKey, selector);
+        tracked(rootKey, selector, referrer, "walked");
       }
     });
   }
@@ -1805,6 +2493,9 @@ export const trackGraph = (
   );
   for (const key of staged.trackerAdds) {
     schemaTracker.add(key, REJECTING_SELECTOR);
+    for (const referrer of staged.closureReferrers) {
+      tracked(key, REJECTING_SELECTOR, referrer, "walked");
+    }
   }
   for (const [key, snapshot] of staged.additions) {
     entities.set(key, snapshot);
@@ -1860,6 +2551,8 @@ export const extendTrackedGraph = (
   const stats = createQueryTraversalStats();
   const readCountBefore = manager.readCount;
   const touched = new Set<QueryDocKey>();
+  const changedMisses = new Set<string>();
+  const recorders = recordersFor(state, changedMisses);
 
   const loaded = manager.captureLoads(() => {
     validateSelectorSchemaRefs(space, manager, state.branch, query.roots);
@@ -1868,23 +2561,29 @@ export const extendTrackedGraph = (
         const selector = toDocumentSelector(root.selector);
         const rootScope = root.scope ?? DEFAULT_SCOPE;
         const rootKey = rootDocKey(space, root, identityOf(manager));
+        const referrer = rootReferrerKey(rootKey, selector);
+        const address = {
+          id: root.id,
+          scope: rootScope,
+          ...(root.entityScopeKey === undefined
+            ? {}
+            : { scopeKey: root.entityScopeKey }),
+        };
+        state.roots.set(referrer, { docKey: rootKey, address, selector });
         touched.add(rootKey);
         evaluateTrackedDocument(
           space,
           manager,
-          {
-            id: root.id,
-            scope: rootScope,
-            ...(root.entityScopeKey === undefined
-              ? {}
-              : { scopeKey: root.entityScopeKey }),
-          },
+          address,
           selector,
           state.tracker,
-          attributedRecorderFor(missesView(state)),
-          attributedRecorderFor(crossingsView(state)),
+          recorders.miss,
+          recorders.crossing,
           state.memo,
           stats,
+          undefined,
+          recorders.tracked,
+          referrer,
         );
       });
     }
@@ -1893,46 +2592,20 @@ export const extendTrackedGraph = (
     touched.add(`${space}/${address.scopeKey}/${address.id}`);
   }
 
-  const updates = new Map<QueryDocKey, EntitySnapshot>();
-  for (const key of touched) {
-    if (!state.tracker.has(key)) {
-      continue;
-    }
-    const snapshot = snapshotForDocKey(
-      space,
-      manager,
-      state.branch,
-      key,
-    );
-    if (snapshot === null) {
-      continue;
-    }
-    updates.set(key, snapshot);
-  }
-
   // Assembly validates before anything commits to `state.entities`; the
   // caller stages the whole graph state (`stageTrackedGraphState`), which
   // covers the tracker mutations the traversal above already made.
-  const staged = assembleSchemaDocClosures(
+  const { updates } = deliverTouched(
     space,
     engine,
     manager,
-    state.branch,
-    state.tracker,
-    updates,
-    state.entities,
-    state.schemaRefs,
+    state,
+    touched,
+    touched,
+    recorders,
     stats,
+    changedMisses,
   );
-  for (const key of staged.trackerAdds) {
-    state.tracker.add(key, REJECTING_SELECTOR);
-  }
-  for (const [key, snapshot] of staged.additions) {
-    updates.set(key, snapshot);
-  }
-  for (const [key, snapshot] of updates) {
-    state.entities.set(key, snapshot);
-  }
 
   stats.managerReads = manager.readCount - readCountBefore;
 
@@ -2039,6 +2712,11 @@ export const refreshTrackedGraph = (
 ): {
   serverSeq: number;
   updates: Map<QueryDocKey, EntitySnapshot>;
+
+  /** The documents that left the graph: a re-walk no longer reached them
+   * and nothing else did. Already gone from `state.entities`. */
+  removed: ReadonlySet<QueryDocKey>;
+
   changedMisses: ReadonlySet<string>;
   stats: QueryTraversalStats;
 } | null => {
@@ -2105,33 +2783,20 @@ export const refreshTrackedGraph = (
     const readCountBefore = manager.readCount;
 
     const changedMisses = new Set<string>();
-    const recorder = attributedRecorderFor(missesView(state), changedMisses);
-    const crossingRecorder = attributedRecorderFor(crossingsView(state));
+    const recorders = recordersFor(state, changedMisses);
+    const retirement = createRetirement();
     for (const key of affectedDocs.keys()) {
-      state.tracker.delete(key);
-      // The re-walk below re-records this referrer's still-live misses and
-      // crossings; attributions from its PREVIOUS walk no longer stand, so
-      // a link edited away retires its miss, or its crossing, instead of
-      // leaving a stale wake.
-      releaseReferrer(missesView(state), key, changedMisses);
-      releaseReferrer(crossingsView(state), key);
-    }
-
-    for (const [key, selectors] of affectedDocs) {
-      const { id, scope, scopeKey } = fromDocKey(key);
-      for (const selector of selectors) {
-        evaluateTrackedDocument(
-          space,
-          manager,
-          { id, scope, scopeKey },
-          selector,
-          state.tracker,
-          recorder,
-          crossingRecorder,
-          sharedMemo,
-          stats,
-        );
-      }
+      rewalkDocument(
+        space,
+        manager,
+        state,
+        key,
+        recorders,
+        sharedMemo,
+        stats,
+        retirement,
+        changedMisses,
+      );
     }
     phases.enter("misses");
     // Re-evaluate the dirtied misses. A BORN target is visited — it enters
@@ -2150,11 +2815,12 @@ export const refreshTrackedGraph = (
           { id, scope, scopeKey },
           selector,
           state.tracker,
-          recorder,
-          crossingRecorder,
+          recorders.miss,
+          recorders.crossing,
           sharedMemo,
           stats,
           stillAbsent,
+          recorders.tracked,
         );
       }
       // Retirement is decided by THIS evaluation's own outcome — the
@@ -2164,13 +2830,36 @@ export const refreshTrackedGraph = (
       // retiring the miss on that would lose the link-derived selector's
       // closure when the doc is finally born.
       if (!stillAbsent.has(key)) {
+        // Born: the referrers whose links dead-ended on it are what keep
+        // its record now, as they would had the walk found it.
+        for (const referrer of state.missedBy.get(key) ?? []) {
+          for (const selector of selectors) {
+            recorders.tracked(key, selector, referrer, "walked");
+          }
+        }
         retireAttributed(missesView(state), key, changedMisses);
       }
     }
 
-    phases.enter("loaded");
+    phases.enter("retire");
     const touched = new Set<QueryDocKey>(affectedDocs.keys());
     for (const key of affectedMisses.keys()) touched.add(key);
+    for (
+      const key of settleRetirement(
+        space,
+        manager,
+        state,
+        retirement,
+        recorders,
+        sharedMemo,
+        stats,
+        changedMisses,
+      )
+    ) {
+      touched.add(key);
+    }
+
+    phases.enter("loaded");
     for (const address of manager.loadedAddresses()) {
       const key: QueryDocKey = `${space}/${address.scopeKey}/${address.id}`;
       const previous = state.entities.get(key);
@@ -2184,24 +2873,6 @@ export const refreshTrackedGraph = (
       }
       touched.add(key);
     }
-    phases.enter("snapshot");
-    const updates = new Map<QueryDocKey, EntitySnapshot>();
-    for (const key of touched) {
-      if (!state.tracker.has(key)) {
-        continue;
-      }
-      const snapshot = snapshotForDocKey(
-        space,
-        manager,
-        state.branch,
-        key,
-      );
-      if (snapshot === null) {
-        continue;
-      }
-      updates.set(key, snapshot);
-    }
-
     // Only the closures the updated documents reach are walked, and the
     // walk stops at schema documents this state already established, so a
     // refresh reads no closure document an earlier pass delivered. A throw
@@ -2210,28 +2881,21 @@ export const refreshTrackedGraph = (
     // on the next successful pass rather than trusting increments computed
     // over the failure.
     phases.enter("closure");
-    const staged = assembleSchemaDocClosures(
+    const dirty = new Set<QueryDocKey>(affectedDocs.keys());
+    for (const key of affectedMisses.keys()) dirty.add(key);
+    const delivered = deliverTouched(
       space,
       engine,
       manager,
-      state.branch,
-      state.tracker,
-      updates,
-      state.entities,
-      state.schemaRefs,
+      state,
+      touched,
+      dirty,
+      recorders,
       stats,
+      changedMisses,
     );
     phases.enter("merge");
-    for (const key of staged.trackerAdds) {
-      state.tracker.add(key, REJECTING_SELECTOR);
-    }
-    for (const [key, snapshot] of staged.additions) {
-      updates.set(key, snapshot);
-    }
-
-    for (const [key, snapshot] of updates) {
-      state.entities.set(key, snapshot);
-    }
+    for (const key of delivered.retired) retirement.retired.add(key);
     for (const [scope, ids] of invalidations) {
       state.manager.invalidateIds(ids, scope);
     }
@@ -2241,7 +2905,8 @@ export const refreshTrackedGraph = (
 
     return {
       serverSeq: Engine.serverSeq(engine),
-      updates,
+      updates: delivered.updates,
+      removed: retiredInSpace(space, retirement),
       changedMisses,
       stats,
     };
@@ -2275,6 +2940,15 @@ const evaluateTrackedDocument = (
   // into one batch, say) keeps waiting for a real arrival, so its
   // caller passes a sink the wire never sees.
   absentSink: MapSetStringToPathSelectors = schemaTracker,
+  // The tracker attribution recorder, and the referrer the document's own
+  // record attributes to: a root's root key, or nothing for a document
+  // walked again whose record is already attributed.
+  onTrackedDoc?: TrackedRecorder,
+  referrer?: string,
+  // Whether this is a walk of a document the evaluation may already have
+  // traversed, which the walk then traverses again (see
+  // `GraphQueryWalk.visit()`); every caller but a first evaluation's.
+  rewalk = true,
 ): void => {
   const docKey: QueryDocKey = address.scopeKey !== undefined
     ? `${space}/${address.scopeKey}/${address.id}`
@@ -2286,7 +2960,11 @@ const evaluateTrackedDocument = (
     );
   const loaded = manager.load(address);
   if (loaded === null || loaded.value === undefined) {
-    absentSink.add(docKey, internPathSelector(selector));
+    const interned = internPathSelector(selector);
+    absentSink.add(docKey, interned);
+    if (absentSink === schemaTracker) {
+      onTrackedDoc?.(docKey, interned, referrer, "walked");
+    }
     return;
   }
   // A fresh walk per document, so each starts with an empty pointer-cycle
@@ -2297,11 +2975,12 @@ const evaluateTrackedDocument = (
     schemaTracker,
     onMissedDoc,
     onCrossing,
+    onTrackedDoc,
     identity: identityOf(manager),
     memo: sharedMemo,
     stats,
   });
-  walk.visit(loaded, selector, docKey);
+  walk.visit(loaded, selector, docKey, referrer, rewalk);
 };
 
 export const toDocKey = (
