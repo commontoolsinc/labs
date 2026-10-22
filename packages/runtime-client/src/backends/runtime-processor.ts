@@ -176,6 +176,8 @@ import {
 } from "./worker-client.ts";
 import {
   type ActionRunTraceResponse,
+  type BlobUrlRequest,
+  type BlobUrlResponse,
   BooleanResponse,
   type CellFieldsRequest,
   type CellFieldsResponse,
@@ -3876,6 +3878,30 @@ export class RuntimeProcessor {
     };
   }
 
+  /**
+   * Returns the URL the host of the request's space serves the request's blob
+   * at, which is the URL an upload of it returns, without the suffix.
+   */
+  handleBlobUrl(request: BlobUrlRequest): BlobUrlResponse {
+    if (!isDID(request.space)) {
+      throw new Error("blobUrl requires a space DID");
+    }
+    if (typeof request.id !== "string" || request.id.length === 0) {
+      throw new Error("blobUrl requires a blob id");
+    }
+    const hash = request.id.startsWith("fid1:")
+      ? request.id.slice("fid1:".length)
+      : request.id;
+    const host = this.#runtime.hostForSpace(request.space);
+    return {
+      url: resolveBlobUrl(
+        `blobs/${encodeURIComponent(hash)}`,
+        host,
+        request.space,
+      ),
+    };
+  }
+
   async detectNonIdempotent(
     request: DetectNonIdempotentRequest,
   ): Promise<DetectNonIdempotentResponse> {
@@ -4138,6 +4164,8 @@ export class RuntimeProcessor {
         return this.setBreakpoints(request);
       case RequestType.UploadBlob:
         return await this.handleUploadBlob(request);
+      case RequestType.BlobUrl:
+        return this.handleBlobUrl(request);
       case RequestType.VDomMount:
         return this.handleVDomMount(request, client);
       case RequestType.VDomUnmount:

@@ -1778,6 +1778,19 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     });
   }
 
+  /**
+   * Returns the URL the host of `options.space` serves the blob `options.id`
+   * at, as `uploadBlob()` returns it for a blob it stores.
+   */
+  async blobUrl(options: { space: DID; id: string }): Promise<string> {
+    const response = await this.#conn.request<RequestType.BlobUrl>({
+      type: RequestType.BlobUrl,
+      space: options.space,
+      id: options.id,
+    });
+    return response.url;
+  }
+
   async detectNonIdempotent(
     durationMs?: number,
   ): Promise<SchedulerDiagnosisResult> {

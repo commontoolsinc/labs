@@ -458,6 +458,11 @@ export enum RequestType {
    * otherwise failing as a confusing server 404.
    */
   UploadBlob = "runtime:uploadBlob",
+  /**
+   * Returns the URL the named space's host serves a blob at, so a host can
+   * show or offer a blob it holds a reference to.
+   */
+  BlobUrl = "runtime:blobUrl",
 
   // Piece operations (main -> worker)
 
@@ -2391,6 +2396,26 @@ export type UploadBlobRequest = BaseRequest & {
   suffix?: string;
 };
 
+/**
+ * The {@link RequestType.BlobUrl} request: a blob, named by its space and its
+ * id there.
+ */
+export type BlobUrlRequest = BaseRequest & {
+  type: RequestType.BlobUrl;
+
+  /** The space whose blob store holds the blob. */
+  space: DID;
+
+  /** The blob's id, `fid1:` and the hash of its record. */
+  id: string;
+};
+
+/** Where a blob is served from. */
+export type BlobUrlResponse = {
+  /** The absolute URL the blob's space's host serves it at. */
+  url: string;
+};
+
 /** The stored blob's id, and the URL it is served from. */
 export type UploadBlobResponse = {
   /**
@@ -3477,7 +3502,8 @@ export type IPCClientRequest =
   | DetectNonIdempotentRequest
   | GetPatternSourcesRequest
   | SetBreakpointsRequest
-  | UploadBlobRequest;
+  | UploadBlobRequest
+  | BlobUrlRequest;
 
 /**
  * The requests naming a piece by id, read off {@link IPCClientRequest} rather
@@ -4336,6 +4362,7 @@ export type RemoteResponse =
   | DetectNonIdempotentResponse
   | PatternSourcesResponse
   | UploadBlobResponse
+  | BlobUrlResponse
   | OperationCapabilitiesResponse
   | OperationFieldResponse
   | OperationApplyResponse
@@ -4731,6 +4758,10 @@ export type Commands = {
   [RequestType.UploadBlob]: {
     request: UploadBlobRequest;
     response: UploadBlobResponse;
+  };
+  [RequestType.BlobUrl]: {
+    request: BlobUrlRequest;
+    response: BlobUrlResponse;
   };
   // VDOM requests
   [RequestType.VDomMount]: {
