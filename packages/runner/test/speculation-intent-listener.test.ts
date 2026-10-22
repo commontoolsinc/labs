@@ -1329,6 +1329,50 @@ describe("intent listener — W2.1 cascade-echo retirement (scripted; the jobles
     });
   });
 
+  describe("an echo of an event that was never fired", () => {
+    // The transaction that sent the event failed or was aborted, so nothing
+    // will answer the event, and an attempt run again can fire it under the
+    // same id.
+
+    it("retires the echo and its cascade, and signals no outcome", async () => {
+      const { destination, echoOf, verdictOf } = cascadeDestination();
+      const outcomes: unknown[] = [];
+      destination.subscribeIntentOutcomes((outcome) => {
+        outcomes.push(outcome);
+      });
+      await destination.seal(echoOf("evt-attempt", { writes: ["of:own"] }))
+        .settled;
+      await destination.seal(echoOf("evt:c:0:attempt-child", {
+        parentEventId: "evt-attempt",
+        writes: ["of:child"],
+      })).settled;
+      expect(destination.entryCount(SPACE)).toBe(2);
+
+      destination.retireUnfiredEcho(SPACE, "evt-attempt");
+
+      expect(destination.entryCount(SPACE)).toBe(0);
+      const verdict = await verdictOf(10) as {
+        withdrawn?: { superseded?: boolean };
+      };
+      expect(verdict?.withdrawn?.superseded).toBe(true);
+      expect(outcomes).toEqual([]);
+      destination.close();
+    });
+
+    it("leaves the echo of a later fire of the same event standing", async () => {
+      const { destination, echoOf } = cascadeDestination();
+      await destination.seal(echoOf("evt-attempt", { writes: ["of:own"] }))
+        .settled;
+      destination.retireUnfiredEcho(SPACE, "evt-attempt");
+
+      await destination.seal(echoOf("evt-attempt", { writes: ["of:own"] }))
+        .settled;
+
+      expect(destination.entryCount(SPACE)).toBe(1);
+      destination.close();
+    });
+  });
+
   it("W2.1-6: the post-sealInto re-check walks the thread too (combined review 2026-08-19, F1) — P's mark landing while a SILENT child's grandchild is MID-SEAL withdraws the collected entry at the re-check instead of registering it (mutation: the re-check one level deep → the grandchild registers and strands)", async () => {
     const { destination, echoOf, seedAppend, markConsequenced } =
       cascadeDestination();

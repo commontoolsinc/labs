@@ -6,7 +6,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { handler } from "../src/builder/module.ts";
 import { pattern } from "../src/builder/pattern.ts";
-import type { Cell } from "../src/cell.ts";
+import { type Cell, sendEvent } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 
 const signer = await Identity.fromPassphrase("stream send origin transaction");
@@ -128,5 +128,51 @@ describe("stream-send-origin-transaction", () => {
     stream.withTx(tx).send({ n: 7 });
     await runtime.idle();
     expect(appended).toEqual([]);
+  });
+
+  it("leaves no intent outstanding and signals no outcome for a fire whose transaction is aborted", async () => {
+    const outcomes: unknown[] = [];
+    const stop = runtime.subscribeEventIntentOutcomes((outcome) => {
+      outcomes.push(outcome);
+    });
+    const tx = runtime.edit();
+    stream.withTx(tx).send({ n: 8 });
+    tx.abort("the attempt runs again");
+    await runtime.idle();
+    stop();
+    expect(outcomes).toEqual([]);
+    expect(runtime.speculationOverlay?.pendingIntentCount).toBe(0);
+  });
+
+  it("appends a caller's event once, and signals no outcome, when an attempt aborted under its id runs again", async () => {
+    // Stands in for `PieceController.edit()`, whose every attempt sends under
+    // one caller event id.
+    const outcomes: unknown[] = [];
+    const stop = runtime.subscribeEventIntentOutcomes((outcome) => {
+      outcomes.push(outcome);
+    });
+    const sendOptions = {
+      eventId: "edit-attempt",
+      session: "stream-send-origin-transaction",
+    };
+    for (const commit of [false, true]) {
+      const tx = runtime.edit();
+      sendEvent(stream.withTx(tx), { n: 9 }, undefined, sendOptions);
+      if (commit) await tx.commit().settled;
+      else tx.abort("absent documents are present; the action re-runs");
+    }
+    await runtime.idle();
+    stop();
+    expect(appended).toEqual([{ n: 9 }]);
+    expect(outcomes).toEqual([]);
+    expect(runtime.speculationOverlay?.pendingIntentCount).toBe(1);
+  });
+
+  it("adds no pending commit while the sending transaction is open", async () => {
+    const tx = runtime.edit();
+    stream.withTx(tx).send({ n: 10 });
+    expect(storageManager.hasPendingCommits()).toBe(false);
+    await tx.commit().settled;
+    expect(appended).toEqual([{ n: 10 }]);
   });
 });

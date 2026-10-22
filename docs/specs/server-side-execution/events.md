@@ -111,13 +111,16 @@ handler fires
 
 - A client fire made inside a writable transaction (an imperative
   `send` within `editWithRetry`, say) is work that transaction launched
-  (scheduler-v2 I10): its event append waits for the transaction to
-  commit, and a transaction that fails or is aborted drops it, so an
-  attempt run again fires its event once, under the id that attempt
-  minted. A fire through a transaction that has already committed
-  appends at once, and one through a transaction that has already failed
-  is refused. A fire with no transaction, or through a read-only one,
-  appends at once.
+  (scheduler-v2 I10), and it happens when the transaction commits: the
+  intent is tracked and the event appended then. A transaction that
+  fails or is aborted fired nothing: no intent is outstanding for it, no
+  outcome is signaled, and the echo its local run left on the overlay is
+  retired. So an attempt run again fires its event once, under the id
+  that attempt minted, or under the caller's own id, which every attempt
+  shares. A fire through a transaction that has already committed
+  happens at once, and one through a transaction that has already failed
+  does not happen. A fire with no transaction, or through a read-only
+  one, happens at once.
 - Server-originated events (`stream.send()` from a handler cascade
   or a served computation, piece-to-piece) enter at "enqueue" and
   are otherwise identical — one path, two producers — but their

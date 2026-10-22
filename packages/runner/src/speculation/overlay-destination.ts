@@ -1691,6 +1691,43 @@ export class SpeculationOverlayDestination
     eventId: string,
     witness?: { markSidecarId: string },
   ): void {
+    this.#retireEchoes(space, eventId, {
+      own: "event echo retired: the authoritative consequences " +
+        "(or the dropped-event notice) arrived (speculation.md §4)",
+      cascade: "cascade echo retired: its ancestor intent's authoritative " +
+        "consequences (or notice) arrived (speculation.md §4 step 2)",
+    }, witness);
+  }
+
+  /**
+   * Retire the echo of an event that was never fired, and its client
+   * cascade, as {@link retireIntent} retires those of an answered intent:
+   * the transaction that sent the event failed or was aborted, so no append
+   * carries the event and nothing will ever answer it. The event's intent
+   * was never tracked, so nothing is settled or signaled, and the event's
+   * own id does not join the jobless set: an attempt run again under the
+   * same id fires the event after all, and that attempt's echo stands.
+   */
+  retireUnfiredEcho(space: MemorySpace, eventId: string): void {
+    this.#retireEchoes(space, eventId, {
+      own: "event echo retired: the transaction that sent the event did " +
+        "not commit, so the event was never fired",
+      cascade: "cascade echo retired: the transaction that sent its " +
+        "ancestor event did not commit, so that event was never fired",
+    });
+  }
+
+  /**
+   * The walk both retirements share. `withdrawals` holds the message an
+   * entry of the event's own is withdrawn with, and the one a cascade
+   * descendant's is.
+   */
+  #retireEchoes(
+    space: MemorySpace,
+    eventId: string,
+    withdrawals: { own: string; cascade: string },
+    witness?: { markSidecarId: string },
+  ): void {
     let view:
       | ((
         id: URI,
@@ -1713,15 +1750,14 @@ export class SpeculationOverlayDestination
         if (!own && !this.#cascadeReaches(entry, eventId)) continue;
         entries.delete(entry.localSeq);
         if (!own) {
-          // A cascade descendant: jobless by its ancestor's consequence.
+          // A cascade descendant: jobless with its ancestor.
           this.#cascadeEchoRetirements += 1;
           if (entry.eventId !== undefined) {
             this.#noteJoblessIntent(entry.eventId);
           }
           logger.debug("cascade-echo-retired", () => [
-            `cascade echo ${entry.eventId} retired: its ancestor intent ` +
-            `${eventId} reached a terminal consequence (speculation.md §4 ` +
-            "step 2, the jobless-cascade consequence)",
+            `cascade echo ${entry.eventId} retired with its ancestor ` +
+            `intent ${eventId}: ${withdrawals.cascade}`,
           ]);
           // The witness compares seqs, and a seq orders commits within one
           // space, so it reads only an echo in the mark's own space.
@@ -1776,11 +1812,7 @@ export class SpeculationOverlayDestination
         }
         entry.resolveVerdict({
           withdrawn: {
-            message: own
-              ? "event echo retired: the authoritative consequences " +
-                "(or the dropped-event notice) arrived (speculation.md §4)"
-              : "cascade echo retired: its ancestor intent's authoritative " +
-                "consequences (or notice) arrived (speculation.md §4 step 2)",
+            message: own ? withdrawals.own : withdrawals.cascade,
             superseded: true,
           },
         });

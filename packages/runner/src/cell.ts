@@ -2371,13 +2371,13 @@ export class CellImpl<T extends FabricValue>
           );
         }
         {
-          this.#runtime.trackEventIntent(space, sidecarId, firedEventId);
-          // Read after the tracking call, which installs the overlay when
-          // this fire is the first thing the runtime does.
-          const overlay = this.#runtime.speculationOverlay;
           const eventId = firedEventId;
-          const append = () =>
-            replica.enqueueEventAppend!({
+          const fire = (): Promise<EventAppendDeliveryOutcome> => {
+            this.#runtime.trackEventIntent(space, sidecarId, eventId);
+            // Read after the tracking call, which installs the overlay when
+            // this fire is the first thing the runtime does.
+            const overlay = this.#runtime.speculationOverlay;
+            const appended = replica.enqueueEventAppend!({
               sidecarId,
               stream,
               eventId,
@@ -2396,63 +2396,75 @@ export class CellImpl<T extends FabricValue>
               ...(isRendererTrustedEvent(event)
                 ? { rendererTrusted: true }
                 : {}),
+            }).then((delivery) => {
+              if (!delivery.delivered) {
+                // Deterministic admission refusal: the intent is dead —
+                // un-render the echo and signal (events.md §5).
+                overlay?.resolveIntent(space, sidecarId, eventId, {
+                  kind: "refused",
+                  reason: delivery.refused,
+                });
+              }
+              return delivery;
             });
+            // The durability barrier (`synced()`) covers undischarged
+            // intents: an event queued offline is an unacked write.
+            this.#runtime.storageManager.trackPendingCommit(
+              appended as Promise<unknown>,
+              () => ({ kind: "event-intent", spaces: [space] }),
+            );
+            return appended;
+          };
           // A fire made inside a transaction is work that transaction
-          // launched (scheduler-v2 I10): its append waits for the
-          // transaction to commit, and one that fails or is aborted, as
-          // `editWithRetry` aborts an attempt it runs again, drops it. So
-          // an attempt run again fires its event once, under its own id,
-          // rather than once per attempt. The local echo below follows the
-          // same transaction through its speculation lineage, which reads
-          // the transaction's state the same way: a fire through one that
-          // already committed appends at once, and one through one that
-          // already failed is refused. A read-only transaction commits
-          // nothing and so launches nothing: a fire through one appends at
-          // once, as one with none does.
-          const refusal = (
+          // launched (scheduler-v2 I10), and it happens when the
+          // transaction commits: the intent is tracked and the event
+          // appended then. A transaction that fails or is aborted, as
+          // `editWithRetry` aborts an attempt it runs again, fired nothing:
+          // no intent is outstanding for it, no outcome is signaled, and
+          // what its local run left in the overlay is retired. So an
+          // attempt run again fires its event once, and one run again under
+          // the caller's own event id, as `PieceController.edit()` runs it,
+          // is not reported refused before it fires. The local echo below
+          // follows the same transaction through its speculation lineage,
+          // which reads the transaction's state the same way: a fire
+          // through one that already committed happens at once, and one
+          // through one that already failed does not happen. A read-only
+          // transaction commits nothing and so launches nothing: a fire
+          // through one happens at once, as one with none does.
+          const unfired = (
             error: { message: string },
-          ): EventAppendDeliveryOutcome => ({
-            delivered: false,
-            refused: "the transaction that sent the event did not " +
-              `commit: ${error.message}`,
-          });
-          const deliver = (): Promise<EventAppendDeliveryOutcome> => {
-            const originTx = this.#tx;
-            if (originTx === undefined || originTx.isReadOnly?.() === true) {
-              return append();
-            }
-            const origin = originTx.status();
-            if (origin.status === "done") {
-              return append();
-            }
-            if (origin.status === "error") {
-              return Promise.resolve(refusal(origin.error));
-            }
-            return new Promise((resolve) => {
+          ): EventAppendDeliveryOutcome => {
+            this.#runtime.speculationOverlay?.retireUnfiredEcho(
+              space,
+              eventId,
+            );
+            return {
+              delivered: false,
+              refused: "the transaction that sent the event did not " +
+                `commit: ${error.message}`,
+            };
+          };
+          const originTx = this.#tx;
+          const origin = originTx?.isReadOnly?.() === true
+            ? undefined
+            : originTx?.status();
+          let outcome: Promise<EventAppendDeliveryOutcome>;
+          if (
+            originTx === undefined || origin === undefined ||
+            origin.status === "done"
+          ) {
+            outcome = fire();
+          } else if (origin.status === "error") {
+            outcome = Promise.resolve(unfired(origin.error));
+          } else {
+            outcome = new Promise((resolve) => {
               originTx.addCommitCallback((_tx, result) => {
                 resolve(
-                  result.error === undefined ? append() : refusal(result.error),
+                  result.error === undefined ? fire() : unfired(result.error),
                 );
               });
             });
-          };
-          const outcome = deliver().then((delivery) => {
-            if (!delivery.delivered) {
-              // Deterministic admission refusal: the intent is dead —
-              // un-render the echo and signal (events.md §5).
-              overlay?.resolveIntent(space, sidecarId, eventId, {
-                kind: "refused",
-                reason: delivery.refused,
-              });
-            }
-            return delivery;
-          });
-          // The durability barrier (`synced()`) covers undischarged
-          // intents: an event queued offline is an unacked write.
-          this.#runtime.storageManager.trackPendingCommit(
-            outcome as Promise<unknown>,
-            () => ({ kind: "event-intent", spaces: [space] }),
-          );
+          }
           // The durable-ack coupling (verdict blocker, 2026-08-12): the
           // caller's settle callback must NEVER settle from the
           // speculative local run — under events-down the local
@@ -2493,6 +2505,9 @@ export class CellImpl<T extends FabricValue>
                   ));
                   return;
                 }
+                // A delivered append was fired, and the fire's tracking
+                // call installed the overlay if the runtime has one.
+                const overlay = this.#runtime.speculationOverlay;
                 const consequence = overlay === undefined
                   ? { kind: "consequenced" as const }
                   : await overlay.waitForIntentConsequence(space, eventId);
