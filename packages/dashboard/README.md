@@ -759,21 +759,26 @@ lifetime, so an unreachable host is then reported as an outage even when every
 host is unreachable together.
 
 GitHub concludes a workflow run as `cancelled` for several reasons, among them a
-newer push replacing the run while it is still queued, a job running past its
-`timeout-minutes`, and someone stopping the run while it runs. Of those, only
-the first says nothing about the commit, and the ci trust tiles recognize it by
-an empty job listing: an attempt cancelled before it started a job is passed
-over, and a cancelled attempt that ran jobs counts as a failure, as every
-conclusion other than success does. The ci tile reads a cancelled run that way
-only when no newer run of its workflow replaced it; a concurrency group that
-cancels in progress replaces a run after its jobs have started as well, which
-the job count would take for a failure. The ci tile's section below says how. The job count misjudges two cases, both
-toward a failure: a run cancelled after its jobs were created but before a
-runner picked any of them up, and a partial rerun (**Re-run failed jobs**)
-replaced while queued, whose listing carries the jobs it reused. The run listing
-does not carry a job count, so each tile requests the count of every cancelled
-attempt it reaches, once, and holds it while the run stays in the tile's window.
-No other conclusion takes that request.
+newer run replacing the run, or one of its jobs, while it is still queued, a job
+running past its `timeout-minutes`, and someone stopping the run while it runs.
+Of those, only the first says nothing about the commit. A run replaced while
+queued lists no jobs at all, except a partial rerun (**Re-run failed jobs**),
+whose listing also carries the jobs it reused from the attempt before. A job
+replaced by a job-level concurrency group is listed as cancelled with an empty
+runner name, and its run is concluded `cancelled` even when the run's other
+jobs passed. Only a job a runner ran says
+anything about the commit, so the ci trust tiles pass over a cancelled attempt
+in which every job a runner ran succeeded. A cancelled attempt with a job a
+runner ran that ended in anything else, a job stopped while it ran among them,
+counts as a failure, as every conclusion other than success does. The ci tile
+reads a cancelled run that way only when no newer run of its workflow replaced
+it; a concurrency group that cancels in progress replaces a run after its jobs
+have started as well, which the job listing would take for a failure. The ci
+tile's section below says how. The run listing does not carry the jobs, so each
+tile requests the job listing of every cancelled attempt it reaches, up to the
+page holding the first job a runner ran that did not succeed, once, and holds
+the answer while the run stays in the tile's window. No other conclusion takes
+that request.
 
 The **ci** tile reads each workflow's runs on the default branch, of any
 status, newest first, and decides the job from the newest completed one
@@ -786,7 +791,7 @@ still going: a concurrency group that cancels in progress stops the older run
 when the newer one starts, whether or not the older one had started its jobs,
 and on gvisor's release workflow, which takes over half an hour, that read as a
 failure for as long as the newer run took. Any other cancelled run is read
-through the same job count the ci trust tiles use, so a run replaced while it
+through the same job listing the ci trust tiles use, so a run replaced while it
 was still queued passes no judgment while one killed by its own
 `timeout-minutes`, or stopped by a person, counts as a failure. The remaining
 conclusions — `skipped`, `neutral`, `stale`, `action_required` — pass no
@@ -885,15 +890,15 @@ the hundred newest default-branch runs to conclude that way came from
 of them, so ending a job's verdict at a skipped run would drop a conditional
 job's real failure the next time it skipped.
 
-The **labs ci trust**, **loom ci trust**, and **weaver ci trust** percentages pass over each attempt
-that was cancelled before it started a job. A run is first-try green when
+The **labs ci trust**, **loom ci trust**, and **weaver ci trust** percentages pass over each cancelled
+attempt in which every job a runner ran succeeded. A run is first-try green when
 exactly one of its attempts is left and it succeeded. It is red when that
 attempt did not succeed, and red when more than one is left, since the run
 needed a rerun, whatever the rerun's result. A run with no attempt left is left
 out of the percentage. The run listing carries only a run's latest attempt, so
 the tile requests a run's earlier attempts from GitHub in order until the run is
 decided, each at most once, and holds them while the run stays in the trust
-window. An earlier attempt or a job count that cannot be read turns the tile
+window. An earlier attempt or a job listing that cannot be read turns the tile
 gray, keeping its last value, until a later collection reads it.
 
 The **labs ci duration**, **loom ci duration**, and **weaver ci duration** tiles
@@ -1783,7 +1788,7 @@ Everything below is a tunable constant in `config.ts`:
 
 - **Status thresholds:** `TRUST_GOOD`/`TRUST_WARN` (first-try-green %), `DUR_GOOD`/`DUR_WARN` (median CI minutes).
 - **Data windows:** The shared fetch returns at most `CI_RUNS_MAX=200` workflow runs and stops at `CI_RUNS_MAX_AGE_DAYS=60` days. CI trust uses the newest `TRUST_RUNS_MAX=160` fetched runs. CI duration uses whichever is larger: `DUR_MIN_RUNS=20` passing runs or `DUR_MAX_AGE_HOURS=6` hours. The benchmark trend uses the same larger-of-the-two idea in days: `BENCH_TREND_MIN_RUNS=20` runs or `BENCH_TREND_MAX_AGE_DAYS=14` days. Recent commits shows `RECENT_DISPLAY=50` commits.
-- **ci-trust cell grid:** The grid has up to `TRUST_RUNS_MAX=160` square cells in rows of `TRUST_COLS=40`. On wide tiles, the squares stop growing and the columns spread out to keep the grid clear of the subheading while preserving its equal left, right, and bottom insets. First-try successes are green. In-progress runs are blue. Completed runs that lower the trust percentage are red, including a run that needed a rerun and a run whose one attempt left was cancelled after it started a job. Ignored runs are gray, including a run cancelled before it started a job on every attempt.
+- **ci-trust cell grid:** The grid has up to `TRUST_RUNS_MAX=160` square cells in rows of `TRUST_COLS=40`. On wide tiles, the squares stop growing and the columns spread out to keep the grid clear of the subheading while preserving its equal left, right, and bottom insets. First-try successes are green. In-progress runs are blue. Completed runs that lower the trust percentage are red, including a run that needed a rerun and a run whose one attempt left was cancelled with a job a runner ran that did not succeed. Ignored runs are gray, including a run every attempt of which was cancelled with every job a runner ran succeeding.
 
 ## Local development
 
