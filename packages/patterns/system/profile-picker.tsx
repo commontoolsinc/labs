@@ -64,7 +64,7 @@ type ProfilePickerInput = {
   // `restoreProfile`.
   // Defaulted, as an input a stored picker's argument may lack; absent, the
   // picker lists no profile as retired.
-  retiredProfiles: Writable<Default<BackwardsCompatibleProfile[], []>>;
+  retiredProfiles?: Writable<Default<BackwardsCompatibleProfile[], []>>;
   // Home's private inbox, which a profile created here is pointed at; see
   // `ProfileCreateInput.privateInbox`.
   privateInbox?: ProfileInbox;
