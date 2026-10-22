@@ -175,8 +175,12 @@ outputs, and the complete transitive producer basis.
 
 This initial state retains server provenance: it does not count as a successful
 local attempt. Plan and coverage changes revalidate clean adopted nodes,
-including evidence for ancestors omitted from the replica. Value changes or a
-failed proof retire adoption and use ordinary guarded execution. Later plans
+including evidence for ancestors omitted from the replica. One revalidation
+proves each producer, matches each basis value, and checks each source once,
+for every adopted node that reaches it, and a node whose proof observes what
+its previous proof did keeps the dependencies and write surface that proof
+installed. Value changes or a failed proof retire adoption and use ordinary
+guarded execution. Later plans
 cannot adopt a node that has already been invalidated or run. Missing or cyclic
 proof uses the same fallback, without requesting more documents solely to enable
 adoption. The existing view-replication flags govern this behavior.
