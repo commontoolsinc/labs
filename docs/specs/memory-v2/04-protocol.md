@@ -1151,9 +1151,11 @@ revisions carry no metadata payload. Revision identifiers, sequence numbers,
 operation indices, patch order and pointers, and application values retain their
 meaning. Each acknowledgment has its own 16 MiB cumulative
 referenced-label/path expansion budget, independent of the request's budget.
-Dictionary labels must be self-contained: reserved schema references are rejected
-even in unused slots. Sync schema tables do not supply schemas to acknowledgment
-label tables. Nonindexed inline CFC metadata is preserved for semantic readers,
+Dictionary labels are self-contained: the sender never interns a label that
+carries a reserved schema reference at a schema position, leaving that label
+inline where schema expansion handles it, and a receiver rejects a dictionary
+that carries one, even in an unused slot. Sync schema tables do not supply
+schemas to acknowledgment label tables. Nonindexed inline CFC metadata is preserved for semantic readers,
 including malformed subtrees and `cfc: null`; the numeric-reference rules above
 apply independently of sibling fields and envelope versions.
 

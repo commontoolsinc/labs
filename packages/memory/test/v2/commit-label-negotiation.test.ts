@@ -3,6 +3,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import type { FabricPlainObject } from "@commonfabric/api";
 import { deepFreeze, taggedHashStringOf } from "@commonfabric/data-model";
+import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import { isPlainObject } from "@commonfabric/utils/types";
 
 import {
@@ -862,6 +863,62 @@ describe("commit-label-negotiation", () => {
       }
     }
   });
+
+  for (const advertised of [false, true]) {
+    it(`answers a commit whose label carries a reserved schema reference with its refusal and keeps acknowledging, capability=${advertised}`, async () => {
+      const server = new CapabilityServer({
+        ...testSessionOpenServerOptions,
+        store: new URL("memory://commit-label-reserved-ref"),
+      });
+      server.advertised = advertised;
+      const wire = transportFor(server);
+      const client = await connect({ transport: wire.transport });
+      try {
+        const session = await client.mount(
+          "did:key:commit-reserved-ref",
+          {},
+          testSessionOpenAuthFactory,
+        );
+        const carrier = document(1);
+        carrier.cfc.labelMap.entries[0] = {
+          path: ["donuts", "origin"],
+          label: {
+            confidentiality: ["origin"],
+            integrity: [],
+            evidence: linkRefFrom({
+              id: "of:policy",
+              path: [],
+              schema: "schema-ref@2:missing",
+            }),
+          } as never,
+        };
+        // Admission refuses persisting the reference, and the refusal is a
+        // response like any other: no revision carries the label, so the
+        // acknowledgment path has nothing to intern and nothing to stall on.
+        await expect(session.transact({
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [
+            { op: "set", id: "of:donuts", value: carrier },
+            schemaOperation(),
+          ],
+        })).rejects.toThrow("reserved wire schema reference");
+        expect(client.isConnected()).toBe(true);
+        await session.transact({
+          localSeq: 2,
+          reads: { confirmed: [], pending: [] },
+          operations: [
+            { op: "set", id: "of:donuts", value: document(1) },
+            schemaOperation(),
+          ],
+        });
+        expect(acknowledgments(wire.messages)).toHaveLength(1);
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    });
+  }
 
   it("leaves stored metadata and commit sequence unchanged after a malformed table", async () => {
     const server = new CapabilityServer({

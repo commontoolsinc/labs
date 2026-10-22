@@ -19,6 +19,7 @@ import {
   FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
 import { taggedHashStringOf } from "@commonfabric/data-model";
+import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 
 const withEngine = async (
@@ -1730,5 +1731,105 @@ Deno.test("refuses a document whose CFC label map holds a numeric whole-field la
       path: "/cfc/labelMap/entries/0/label",
       value: { confidentiality: ["repaired"], integrity: [] },
     }]);
+  });
+});
+
+Deno.test("refuses a document whose CFC label carries a reserved schema reference, however the reference got there", async () => {
+  await withEngine((engine) => {
+    const id = "of:reserved-label-carrier";
+    const reserved = linkRefFrom({
+      id: "of:policy",
+      path: [],
+      schema: "schema-ref@2:missing",
+    });
+    const inline = linkRefFrom({ id: "of:policy", path: [], schema: true });
+    const carrier = (label: unknown, stash: unknown = undefined) =>
+      ({
+        op: "set",
+        id,
+        value: {
+          value: { stash },
+          cfc: {
+            version: 1,
+            labelMap: { version: 1, entries: [{ path: ["stash"], label }] },
+          },
+        },
+      }) as never;
+    // A set carrying the reference in a label is refused outright.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(1, {
+            operations: [carrier({ evidence: reserved })],
+          }),
+        }),
+      ProtocolError,
+      "reserved wire schema reference",
+    );
+    // Nor can one be stashed in application data for a later move: the
+    // reference is refused at every position of the stored document, so no
+    // patch form can relocate one into a label.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(2, {
+            operations: [carrier({ evidence: inline }, { evidence: reserved })],
+          }),
+        }),
+      ProtocolError,
+      "reserved wire schema reference",
+    );
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(3, {
+        operations: [carrier({ evidence: inline })],
+      }),
+    });
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(4, {
+            operations: [{
+              op: "patch",
+              id,
+              patches: [{
+                op: "replace",
+                path: "/cfc/labelMap/entries/0/label",
+                value: { evidence: reserved },
+              }],
+            }],
+          }),
+        }),
+      ProtocolError,
+      "reserved wire schema reference",
+    );
+    assertEquals(
+      (read(engine, { id } as never) as { cfc: unknown }).cfc,
+      {
+        version: 1,
+        labelMap: {
+          version: 1,
+          entries: [{ path: ["stash"], label: { evidence: inline } }],
+        },
+      },
+    );
+    // Rewriting a label with self-contained content stays admitted.
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(5, {
+        operations: [{
+          op: "patch",
+          id,
+          patches: [{
+            op: "replace",
+            path: "/cfc/labelMap/entries/0/label",
+            value: { confidentiality: ["repaired"], integrity: [] },
+          }],
+        }],
+      }),
+    });
   });
 });

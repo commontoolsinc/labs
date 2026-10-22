@@ -112,8 +112,9 @@ interface CompressionTable {
  * is always a valid encoding, when a whole-field label or path already holds a
  * number (a dictionary would make that stored number read as a reference) or
  * when the selected dictionaries would expand past
- * `MAX_LABEL_METADATA_EXPANSION_BYTES`. Throws on an already-compressed envelope
- * or a selected label containing a reserved schema reference. Compress labels
+ * `MAX_LABEL_METADATA_EXPANSION_BYTES`. A label carrying a reserved schema
+ * reference stays inline and gets no slot, so the envelope never throws for
+ * stored data; only an already-compressed envelope throws. Compress labels
  * before schemas when labels contain schema-bearing links.
  */
 export function compressLabelMetadata(
@@ -281,7 +282,10 @@ function selectCandidates(state: CompressionTable): number {
       (candidate.bytes - encodedBytes(reference));
     const memberCost = encodedBytes([candidate.value]) - encodedBytes([]) + 1;
     const net = inlineSavings - memberCost;
-    if (net > 0) {
+    // A label that is not self-contained stays inline, where schema-table
+    // expansion still sees it; it gets no slot. Checked only for a label
+    // that would otherwise be interned, since the check walks the label.
+    if (net > 0 && isSelfContainedLabel(candidate.value, state.spec)) {
       state.selected.set(candidate.hash, reference);
       state.values.push(candidate.value);
       savings += net;
@@ -296,20 +300,18 @@ function selectCandidates(state: CompressionTable): number {
     state.values.length = 0;
     return 0;
   }
-  for (const value of state.values) {
-    requireSelfContainedLabel(value, state.spec);
-  }
   return expandedBytes;
 }
 
 /**
- * Rejects reserved refs at schema positions in dictionary labels. Schema-table
- * expansion visits documents and crossings; dictionary contents are opaque to it.
+ * Whether a dictionary value may be interned: a path always, a label only when
+ * it carries no reserved schema reference at a schema position. Schema-table
+ * expansion visits documents and crossings; dictionary contents are opaque to
+ * it, so a reference inside a dictionary label could never be expanded. The
+ * sender leaves such a label inline; a receiver refuses a dictionary carrying one.
  */
-function requireSelfContainedLabel(value: TableValue, spec: TableSpec): void {
-  if (spec.field === "label" && findSyncSchemaRef(value) !== undefined) {
-    throw new Error("Invalid metadata `labelTable`: reserved schema reference");
-  }
+function isSelfContainedLabel(value: TableValue, spec: TableSpec): boolean {
+  return spec.field !== "label" || findSyncSchemaRef(value) === undefined;
 }
 
 /** Helper for expansion, which validates, weighs, and freezes each table slot. */
@@ -335,7 +337,11 @@ function readTable(sync: Record<string, unknown>, spec: TableSpec): {
       if (!spec.valid(value)) {
         throw new Error(`Invalid metadata \`${spec.name}\` content`);
       }
-      requireSelfContainedLabel(value, spec);
+      if (!isSelfContainedLabel(value, spec)) {
+        throw new Error(
+          "Invalid metadata `labelTable`: reserved schema reference",
+        );
+      }
       values.push(cloneIfNecessary(value));
       costs.push(encodedBytes(value));
     }

@@ -1,8 +1,10 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import { taggedHashStringOf } from "@commonfabric/data-model";
+import type { JSONSchema } from "@commonfabric/api";
+import { type FabricValue, taggedHashStringOf } from "@commonfabric/data-model";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { isPlainObject } from "@commonfabric/utils/types";
 
 import {
@@ -349,6 +351,196 @@ describe("sync-label-negotiation", () => {
   }
 
   for (const clientEnabled of [false, true]) {
+    it(`delivers a stored label carrying a reserved schema reference inline to a client with syncLabelTableV1=${clientEnabled}`, async () => {
+      const server = new Server({
+        ...testSessionOpenServerOptions,
+        store: new URL("memory://sync-label-stored-reserved-ref"),
+      });
+      const frames: Record<string, unknown>[] = [];
+      const transport = loopback(server);
+      const observerTransport: Transport = {
+        ...transport,
+        send(payload) {
+          const message = decodeMemoryBoundary(payload);
+          if (isPlainObject(message) && message.type === "hello") {
+            return transport.send(encodeMemoryBoundary({
+              ...message,
+              flags: {
+                ...getMemoryProtocolFlags(),
+                syncLabelTableV1: clientEnabled,
+              },
+            }));
+          }
+          return transport.send(payload);
+        },
+        setReceiver(receiver) {
+          transport.setReceiver((payload) => {
+            const sync = syncOf(decodeMemoryBoundary(payload));
+            if (sync !== undefined) frames.push(sync);
+            receiver(payload);
+          });
+        },
+      };
+      const writerClient = await connect({ transport: loopback(server) });
+      const observerClient = await connect({ transport: observerTransport });
+      try {
+        const space = "did:key:sync-label-stored-reserved-ref";
+        const writer = await writerClient.mount(
+          space,
+          {},
+          testSessionOpenAuthFactory,
+        );
+        await writer.transact({
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:donuts",
+            value: document(1),
+          }, {
+            op: "set",
+            id: `cid:${taggedHashStringOf(true)}`,
+            value: { value: true },
+          }],
+        });
+        // Admission refuses persisting a reserved schema reference, so the
+        // row is rewritten in place to model a label an older server
+        // interned: its evidence link names the schema the document's other
+        // labels carry inline, by the reference the frame's schema table
+        // will resolve.
+        const schema: JSONSchema = {
+          type: "object",
+          properties: { origin: { type: "string" } },
+        };
+        const interned = internSchema(schema, true);
+        if (interned === undefined) throw new Error("Expected a schema hash");
+        const reference = `schema-ref@2:${interned.taggedHashString}`;
+        const labelWith = (evidence: FabricValue) => ({
+          path: ["flavor", "origin"],
+          label: { confidentiality: ["origin"], integrity: [], evidence },
+        });
+        // Repeated enough that the sender would intern the label if it did
+        // not check for the reference.
+        const repeats = 17;
+        const base = document(1);
+        const entries = base.cfc.labelMap.entries;
+        const stored = {
+          ...base,
+          cfc: {
+            ...base.cfc,
+            labelMap: {
+              version: 1,
+              entries: [
+                ...entries,
+                ...Array.from({ length: repeats }, () =>
+                  labelWith(
+                    linkRefFrom({
+                      id: "of:policy",
+                      path: [],
+                      schema: reference,
+                    }),
+                  )),
+              ],
+            },
+          },
+        };
+        const expected = {
+          ...stored,
+          cfc: {
+            ...stored.cfc,
+            labelMap: {
+              version: 1,
+              entries: [
+                ...entries,
+                ...Array.from(
+                  { length: repeats },
+                  () =>
+                    labelWith(
+                      linkRefFrom({ id: "of:policy", path: [], schema }),
+                    ),
+                ),
+              ],
+            },
+          },
+        };
+        const engine = await server.engineForSpace(space);
+        engine.database.prepare(
+          `UPDATE revision SET data = :data WHERE id = 'of:donuts'`,
+        ).run({ data: encodeMemoryBoundary(stored) });
+        evictDocumentCacheEntries(engine, Number.MAX_SAFE_INTEGER);
+
+        const observer = await observerClient.mount(
+          space,
+          {},
+          testSessionOpenAuthFactory,
+        );
+        const { sync } = await observer.watchAddSync([{
+          id: "donuts",
+          kind: "graph",
+          query: {
+            roots: [{
+              id: "of:donuts",
+              selector: { path: [], schema: true },
+            }],
+          },
+        }]);
+        expect(encodeMemoryBoundary(
+          sync.upserts.find((entry) => entry.id === "of:donuts")?.doc,
+        )).toBe(encodeMemoryBoundary(expected));
+        expect(observerClient.isConnected()).toBe(true);
+        // On the wire the repeated self-contained labels are interned when
+        // negotiated (the document's last entry is a singleton and stays
+        // inline), and the reserved-reference label travels inline either way.
+        const contentFrames = frames.filter((frame) =>
+          Array.isArray(frame.upserts) && frame.upserts.length > 0
+        );
+        expect(contentFrames).toHaveLength(1);
+        const frame = contentFrames[0];
+        expect(Array.isArray(frame.labelTable)).toBe(clientEnabled);
+        const upsert = (frame.upserts as { id: string; doc: unknown }[]).find(
+          (entry) => entry.id === "of:donuts",
+        );
+        const wireEntries =
+          (upsert?.doc as { cfc: { labelMap: { entries: unknown[] } } }).cfc
+            .labelMap.entries;
+        const inlineLabels = wireEntries.filter((entry) =>
+          isPlainObject(entry) && isPlainObject(entry.label)
+        );
+        expect(
+          wireEntries.filter((entry) =>
+            isPlainObject(entry) && typeof entry.label === "number"
+          ),
+        ).toHaveLength(clientEnabled ? entries.length - 1 : 0);
+        expect(inlineLabels).toHaveLength(
+          clientEnabled ? repeats + 1 : entries.length + repeats,
+        );
+        // The stored labels are told apart by their path: with schema tables
+        // negotiated the other labels' inline schemas travel as the same
+        // reference string.
+        // The shared path is interned too when negotiated.
+        const pathOf = (entry: unknown) =>
+          isPlainObject(entry) && typeof entry.path === "number"
+            ? (frame.labelPathTable as unknown[])[entry.path]
+            : isPlainObject(entry)
+            ? entry.path
+            : undefined;
+        const reservedOnWire = inlineLabels.filter((entry) =>
+          JSON.stringify(pathOf(entry)) ===
+            JSON.stringify(["flavor", "origin"])
+        );
+        expect(reservedOnWire).toHaveLength(repeats);
+        expect(
+          reservedOnWire.every((entry) =>
+            JSON.stringify(entry).includes(reference)
+          ),
+        ).toBe(true);
+      } finally {
+        await writerClient.close();
+        await observerClient.close();
+        await server.close();
+      }
+    });
+
     it(`delivers a stored numeric label inline to a client with syncLabelTableV1=${clientEnabled} and keeps delivering`, async () => {
       const server = new Server({
         ...testSessionOpenServerOptions,

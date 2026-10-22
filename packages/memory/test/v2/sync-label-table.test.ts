@@ -417,7 +417,7 @@ describe("sync-label-table", () => {
     }
   });
 
-  it("throws for reserved schema refs nested in label tables before schema expansion can be bypassed", () => {
+  it("refuses reserved schema refs in received label tables and never interns such a label when sending", () => {
     const schema = internSchema({ type: "string" }, true);
     for (const modern of [false, true]) {
       setModernCellRepConfig(modern);
@@ -463,9 +463,24 @@ describe("sync-label-table", () => {
               expect(canonical(message)).toBe(before);
               expect(Object.isFrozen(label)).toBe(false);
             }
-            expect(() =>
-              compressSessionSyncLabels(wireSync(Array(20).fill(label)))
-            ).toThrow("reserved schema reference");
+            // The sender never interns such a label: it stays inline with no
+            // slot, and a frame of nothing else gets no table.
+            const inlineOnly = wireSync(Array(20).fill(label));
+            expect(compressSessionSyncLabels(inlineOnly)).toBe(inlineOnly);
+            const mixed = wireSync([
+              ...Array(20).fill(label),
+              ...Array(20).fill(labelFor(1)),
+            ]);
+            const compact = compressSessionSyncLabels(mixed);
+            assert(isPlainObject(compact) && Array.isArray(compact.labelTable));
+            expect(compact.labelTable).toEqual([labelFor(1)]);
+            expect(labelsOf(compact).slice(0, 20)).toEqual(
+              Array(20).fill(label),
+            );
+            expect(labelsOf(compact).slice(20)).toEqual(Array(20).fill(0));
+            expect(canonical(expandSessionSyncLabels(compact))).toBe(
+              canonical(mixed),
+            );
           }
         }
         const alias = {
