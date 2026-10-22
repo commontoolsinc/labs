@@ -576,6 +576,9 @@ export class Scheduler {
   #running: Promise<unknown> | undefined = undefined;
   #scheduled = false;
   #disposed = false;
+
+  /** Resolves when `dispose()` runs, for a wait a disposal has to end. */
+  #disposal = Promise.withResolvers<void>();
   #actionRunState!: SchedulerActionRunState;
   #graphSnapshotState!: SchedulerGraphSnapshotState;
   #settleLoopState!: SchedulerSettleLoopState;
@@ -2681,6 +2684,7 @@ export class Scheduler {
     this.#headEventLoadPark = null;
     this.#headEventLoadParkHistory = null;
     this.#disposed = true;
+    this.#disposal.resolve();
     for (const record of this.#nodes.nodes()) {
       record.cancelLocalReadWake?.();
       record.cancelLocalReadWake = undefined;
@@ -2808,7 +2812,9 @@ export class Scheduler {
           park?.eventId !== head.id || parkRetries >= 4 || this.#disposed
         ) break;
         parkRetries++;
-        await park.settled;
+        // Disposal ends the wait as well: a load still pending when the
+        // scheduler is torn down would otherwise hold this pass open.
+        await Promise.race([park.settled, this.#disposal.promise]);
         if (this.#disposed || this.#eventQueue[0] !== head) break;
         continue;
       }

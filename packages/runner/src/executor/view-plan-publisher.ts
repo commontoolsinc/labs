@@ -335,7 +335,7 @@ export class ViewPlanPublisher {
           if (known === undefined) {
             this.#fingerprints.set(document, known = new Map());
           }
-          const pathKey = path.join("\0");
+          const pathKey = JSON.stringify(path);
           let fingerprint = known.get(pathKey);
           if (fingerprint === undefined) {
             known.set(

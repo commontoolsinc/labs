@@ -82,7 +82,10 @@ describe("scheduler serving event batch", () => {
         eventId: `serving-event-batch-${servingPosture}-${by}`,
       });
     }
-    await runtime.idle();
+    // `idle()` returns ahead of the handler commits' writeback; a commit
+    // still in flight when the runtime is disposed fails against the closed
+    // store.
+    await runtime.settled();
     // Read through the derivation's own transaction: a read outside one
     // under the serving posture reaches for the store, and a pull left
     // behind would outlive the test.
