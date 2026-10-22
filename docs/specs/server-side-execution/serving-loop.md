@@ -1864,10 +1864,11 @@ escalate.
 
 ## 7. Counters (implement with the loop, not after)
 
-`events.visibilityBarriers` counts ordered publication/response attempts for
-lagging event views. `visibilityRecoveries` counts matching identities after
-those attempts, and `visibilityDeferrals` counts scans that still stop at a
-mismatched identity. `deferredRescansArmed` and `deferredRescansFired` count
+`events.visibilityBarriers` counts attempts to bring a lagging event view
+current: an ordered publication/response, or under the store read-through a read
+of the entries document from the store. `visibilityRecoveries` counts matching
+identities after those attempts, and `visibilityDeferrals` counts scans that
+still stop at a mismatched identity. `deferredRescansArmed` and `deferredRescansFired` count
 the backstops an active tenure scheduled and the callbacks that ran, across all
 transient drain outcomes. Only a serving tenure arms one: a park clears the
 armed backstop, and a deferral reaching a parked tenure arms none, so the

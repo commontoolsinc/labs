@@ -79,12 +79,18 @@ Before queuing a durable event, the drain validates both `eventId` and `seq`
 at the stored index in the replica. On a mismatch, it publishes this space's
 pending subscription frames and awaits an ordered response on the serving
 connection. This barrier consumes published input without waiting for sealed
-wave writes to become durable. A drain pass attempts it at most once.
+wave writes to become durable. A drain pass attempts it at most once. Under the
+store read-through posture the serving connection carries no frames for the
+space: the replica learns of a commit when the feed re-reads the documents it
+wrote, and the drain, which lists pending entries from the store, can run ahead
+of that refresh. There the drain reads the entries document from the store into
+the replica instead, with nothing to wait for, on any mismatch.
 
-After the response, the drain reads the stored entries again, finds the same
-immutable identity, and validates its current index in the replica. A consumed
-or compacted entry needs no dispatch. A failed synchronization or a view still
-hidden by a local write defers that entry and every later arrival across streams.
+After the response or the read, the drain reads the stored entries again, finds
+the same immutable identity, and validates its current index in the replica. A
+consumed or compacted entry needs no dispatch. A failed synchronization or a
+view still hidden by a local write defers that entry and every later arrival
+across streams.
 Scheduler quiescence does not establish completion for these unqueued events:
 the space watermark stays below the earliest deferred sequence until a fresh
 scan can process it. The existing input wake and deferral backstop re-arm that

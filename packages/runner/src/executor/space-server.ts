@@ -4193,6 +4193,7 @@ export class SpaceServer implements TransactionSealDestination {
     this.#eventScanOwed = false;
     this.#eventVisibilityFloor = undefined;
     const { engine, space } = this.#options;
+    const readThrough = this.#options.policy?.storeReadThrough === true;
     const pendingDocs = Engine.selectPendingStreamEventDocs(engine);
     if (pendingDocs.length === 0) {
       // A scan was owed and this is it: the pass ended, having queued
@@ -4309,26 +4310,46 @@ export class SpaceServer implements TransactionSealDestination {
           let viewEntry = readViewEntry();
           const provider = runtime.storageManager.open(space);
           if (
-            !matches(viewEntry) && !visibilityFlushed &&
-            provider.pullToServerHead !== undefined
+            !matches(viewEntry) &&
+            (readThrough ||
+              (!visibilityFlushed && provider.pullToServerHead !== undefined))
           ) {
             visibilityFlushed = true;
             this.#options.stats.events.visibilityBarriers += 1;
-            try {
-              // Admission precedes loopback delivery. Publish this space's
-              // queued frames, then use their ordered response boundary to
-              // await application. Pending wave writes need not promote here.
-              await this.#options.server.flushSessions([space]);
+            if (readThrough) {
+              // Under the store read-through the replica learns of a commit
+              // when the feed's refresh re-reads what it wrote
+              // (`#refreshHeldDocuments`), and the serving connection carries
+              // no frames for this space, so an ordered response would bring
+              // nothing. The store already holds the entry: read the entries
+              // document from it. A view still hidden by a pending local
+              // write defers below, as it does after a response.
+              runtime.storageManager.integrateStoreWrites?.(space, [{
+                id: doc.id,
+                scopeKey: "space",
+              }]);
+            } else {
+              try {
+                // Admission precedes loopback delivery. Publish this space's
+                // queued frames, then use their ordered response boundary to
+                // await application. Pending wave writes need not promote
+                // here.
+                await this.#options.server.flushSessions([space]);
+                if (!this.#active || this.#runtime !== runtime) {
+                  return undefined;
+                }
+                await provider.pullToServerHead!();
+              } catch (error) {
+                if (!this.#active || this.#runtime !== runtime) {
+                  return undefined;
+                }
+                logger.warn("event-visibility-sync-failed", () => [
+                  `Could not synchronize event ${entry.eventId}'s replica view`,
+                  error,
+                ]);
+              }
               if (!this.#active || this.#runtime !== runtime) return undefined;
-              await provider.pullToServerHead();
-            } catch (error) {
-              if (!this.#active || this.#runtime !== runtime) return undefined;
-              logger.warn("event-visibility-sync-failed", () => [
-                `Could not synchronize event ${entry.eventId}'s replica view`,
-                error,
-              ]);
             }
-            if (!this.#active || this.#runtime !== runtime) return undefined;
             // Compaction or another consequence can change the stored index
             // during the response. Re-find the same immutable entry identity.
             stored = ((Engine.read(engine, { id: doc.id })?.value ??

@@ -110,10 +110,15 @@ describe("SpaceServer", () => {
           return result;
         },
       }),
-      createRuntime: async () => {
+      createRuntime: async ({ storeReadThrough }) => {
         const manager = EmulatedStorageManager.connectTo(server, {
           as: service,
         });
+        // Installed ahead of the syncs below, as a serving factory does, so
+        // that they read the store and no session watches the space.
+        if (storeReadThrough !== undefined) {
+          manager.installStoreReadThrough(space, storeReadThrough);
+        }
         runtime = new Runtime({
           apiUrl: new URL(import.meta.url),
           storageManager: manager,
@@ -273,6 +278,33 @@ describe("SpaceServer", () => {
     await clock.tick(250);
     expect(called).toEqual(["A", "B"]);
     expect(storedLog()).toEqual(["A", "B"]);
+  });
+
+  it("reads an entry the feed has not refreshed from the store under the store read-through", async () => {
+    // The drain lists pending entries from the store, and a read-through
+    // replica learns of an append only once the feed re-reads what its
+    // commit wrote. The serving connection carries no frames for the space,
+    // so an ordered response over it brings the replica nothing; an entry
+    // the replica's view does not hold yet is read from the store.
+    const fixture = await openFixture({ storeReadThrough: true });
+    const { notices, serving, called, stats } = fixture;
+    await fixture.admitOne(1, "read-through-held");
+    await fixture.drain();
+    expect(called).toEqual(["B"]);
+    const barriers = stats.events.visibilityBarriers;
+    const recoveries = stats.events.visibilityRecoveries;
+    notices.length = 0;
+
+    await fixture.admitOne(1, "read-through-ahead");
+    // The notice arms the drain without the feed's refresh of the sidecar,
+    // as when the drain runs ahead of the commit's record.
+    serving.enqueueCommit({ ...notices[0], writes: [] });
+    await clock.settle();
+
+    expect(called).toEqual(["B", "B"]);
+    expect(stats.events.visibilityBarriers).toBe(barriers + 1);
+    expect(stats.events.visibilityRecoveries).toBe(recoveries + 1);
+    expect(stats.events.visibilityDeferrals).toBe(0);
   });
 
   for (const failure of ["publication", "response"] as const) {
