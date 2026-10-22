@@ -118,7 +118,12 @@ most-recently-used (MRU) ordering:
   then by list order. Retiring that profile would move `#profile` to another
   profile without the person choosing it, so another default is set first. The
   last live profile is always that profile, so it cannot be retired. The picker
-  offers no Remove on that profile's row.
+  offers no Remove on that profile's row. Retiring a profile does not change
+  any access. The retired profile stays on the roster of every room or space it
+  joined. Its principal, which the person's other profiles share, keeps the
+  access those rosters give it. An offer addressed to it (`toProfile`) still
+  lands in the inbox it points at, which is normally the private inbox all of
+  the person's profiles share.
 
 Each profile lives in its own space, created with the anonymous
 `PatternFactory.inSpace()` — one allocation per creation, each a new space with
