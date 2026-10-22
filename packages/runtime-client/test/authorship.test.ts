@@ -154,6 +154,46 @@ const valueCell = (resolveTo: () => unknown) => {
 };
 
 /**
+ * A cell whose subscription carries its label with every delivery, as a
+ * label-aware subscription the connection opened does, and which counts the
+ * reads of its label the worker is asked for. `deliver()` sends `value` with
+ * the label `label` holds at the time, as an update does.
+ */
+const labelDeliveringCell = (initial: unknown) => {
+  let label = initial;
+  let workerReads = 0;
+  const subscribers = new Set<(value: unknown, cfcLabel?: unknown) => void>();
+  return {
+    getCfcLabel: () => {
+      workerReads++;
+      return Promise.resolve(label);
+    },
+    subscribe(callback: (value: unknown, cfcLabel?: unknown) => void) {
+      subscribers.add(callback);
+      callback({ loaded: true }, label);
+      return () => {
+        subscribers.delete(callback);
+      };
+    },
+
+    /** How many times the worker has been asked for the label. */
+    workerReads: () => workerReads,
+
+    /**
+     * Delivers an update carrying `next` as the label, and settles the reads
+     * it starts.
+     */
+    async deliver(next: unknown) {
+      label = next;
+      for (const callback of [...subscribers]) {
+        callback({ loaded: true }, label);
+      }
+      await settle();
+    },
+  };
+};
+
+/**
  * Observes `value` and `author`, keeping every report the observation makes.
  */
 const observe = (
@@ -397,6 +437,75 @@ describe("authorship", () => {
 
         expect(observation.states()).toEqual(["verified"]);
         expect(resolved.subscriberCount()).toBe(0);
+      } finally {
+        observation.cancel();
+      }
+    });
+
+    it("reads the value's label from the subscription's delivery, asking the worker for none", async () => {
+      const value = labelDeliveringCell(authoredByLabel("alice"));
+      const observation = observe(value, "alice");
+
+      try {
+        await settle();
+
+        expect(observation.states()).toEqual(["verified"]);
+        expect(value.workerReads()).toBe(0);
+      } finally {
+        observation.cancel();
+      }
+    });
+
+    it("reports again from the label a later delivery carries, asking the worker for none", async () => {
+      const value = labelDeliveringCell(authoredByLabel("alice"));
+      const observation = observe(value, "alice");
+
+      try {
+        await settle();
+        await value.deliver(authoredByLabel("bob"));
+
+        expect(observation.states()).toEqual(["verified", "unverified"]);
+        expect(value.workerReads()).toBe(0);
+      } finally {
+        observation.cancel();
+      }
+    });
+
+    it("asks the worker for the value's label when the delivery carries none", async () => {
+      // Only a subscription the connection opened label-aware carries labels,
+      // so a delivery without one does not say the cell has none.
+      const value = labelDeliveringCell(undefined);
+      const observation = observe(value, "alice");
+
+      try {
+        await settle();
+
+        expect(observation.states()).toEqual(["unknown"]);
+        expect(value.workerReads()).toBe(1);
+      } finally {
+        observation.cancel();
+      }
+    });
+
+    it("reads the author's label from the subscription's delivery, asking the worker for none", async () => {
+      const author = labelDeliveringCell(representsLabel("did:key:alice"));
+      const observation = observe(
+        {
+          getCfcLabel: () => Promise.resolve(authoredByLabel("did:key:alice")),
+        },
+        author,
+        { authorName: "Alice" },
+      );
+
+      try {
+        await settle();
+
+        expect(observation.states()).toEqual(["verified"]);
+        expect(observation.authorClaim).toEqual({
+          subject: "did:key:alice",
+          name: "Alice",
+        });
+        expect(author.workerReads()).toBe(0);
       } finally {
         observation.cancel();
       }
