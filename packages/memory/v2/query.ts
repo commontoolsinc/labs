@@ -2404,8 +2404,15 @@ const deliverTouched = (
   for (const [key, snapshot] of staged.additions) {
     updates.set(key, snapshot);
   }
+  // A snapshot taken before the settle is of a document the settle may
+  // have retired: one delivered at the version just read and then left
+  // with no record is a retraction, not an update.
   for (const [key, snapshot] of updates) {
-    state.entities.set(key, snapshot);
+    if (state.tracker.has(key)) {
+      state.entities.set(key, snapshot);
+    } else {
+      updates.delete(key);
+    }
   }
   return { updates, retired: retirement.retired };
 };
