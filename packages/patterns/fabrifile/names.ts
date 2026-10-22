@@ -10,6 +10,12 @@
 export const MAX_NAME_BYTES = 255;
 
 /**
+ * The bytes `freeName()` keeps free for a number and a character before it, as
+ * ` (99999999)a` takes, before it keeps a name's extension apart.
+ */
+const NUMBER_ROOM = 16;
+
+/**
  * The characters no name may hold: `/`, `\`, and every control character,
  * which are what the pattern exists to match.
  */
@@ -51,7 +57,9 @@ export function isValidName(name: unknown): name is string {
  * `name (2)`, `name (3)`, and so on that is, the number going before the
  * name's last extension: `photo.png` becomes `photo (2).png`. Where the number
  * would take the name past {@link MAX_NAME_BYTES}, the part before it is
- * shortened to fit. `name` is a valid name, and so is what is returned.
+ * shortened to fit, and where even the extension leaves no room, the number
+ * goes at the end of the shortened name instead. `name` is a valid name, and
+ * so is what is returned.
  */
 export function freeName(
   name: string,
@@ -59,8 +67,12 @@ export function freeName(
 ): string {
   if (!isTaken(name)) return name;
   const dot = name.lastIndexOf(".");
-  const stem = dot > 0 ? name.slice(0, dot) : name;
-  const extension = dot > 0 ? name.slice(dot) : "";
+  // An extension too long to keep room for a number and one character before
+  // it is numbered as part of the name.
+  const fits = dot > 0 &&
+    utf8Length(name.slice(dot)) + NUMBER_ROOM <= MAX_NAME_BYTES;
+  const stem = fits ? name.slice(0, dot) : name;
+  const extension = fits ? name.slice(dot) : "";
   for (let number = 2;; number++) {
     const suffix = ` (${number})${extension}`;
     const candidate = shortened(stem, MAX_NAME_BYTES - utf8Length(suffix)) +

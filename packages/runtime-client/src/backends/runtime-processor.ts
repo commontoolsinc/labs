@@ -3880,7 +3880,8 @@ export class RuntimeProcessor {
 
   /**
    * Returns the URL the host of the request's space serves the request's blob
-   * at, which is the URL an upload of it returns, without the suffix.
+   * at: the URL an upload of it returns, without the file suffix, and with
+   * `?download` for a request to save it.
    */
   handleBlobUrl(request: BlobUrlRequest): BlobUrlResponse {
     if (!isDID(request.space)) {
@@ -3893,9 +3894,10 @@ export class RuntimeProcessor {
       ? request.id.slice("fid1:".length)
       : request.id;
     const host = this.#runtime.hostForSpace(request.space);
+    const query = request.download === true ? "?download" : "";
     return {
       url: resolveBlobUrl(
-        `blobs/${encodeURIComponent(hash)}`,
+        `blobs/${encodeURIComponent(hash)}${query}`,
         host,
         request.space,
       ),

@@ -220,20 +220,22 @@ export const commitAdd = handler<AddFileEvent, AddState>(
       return;
     }
     const { name, mediaType, blob, size } = event ?? {};
-    if (!isValidName(name)) {
-      refuse(requests, requestId, "invalid-name", "That isn't a file name.");
-      return;
-    }
     if (
-      typeof mediaType !== "string" || typeof size !== "number" ||
-      typeof blob?.id !== "string" || typeof blob?.space !== "string"
+      typeof name !== "string" || typeof mediaType !== "string" ||
+      typeof size !== "number" || typeof blob?.id !== "string" ||
+      blob.id === "" || typeof blob?.space !== "string"
     ) {
       refuse(
         requests,
         requestId,
         "invalid-request",
-        "An add needs a `mediaType`, a `size` and a `blob`.",
+        "An add needs a `name`, a `mediaType`, a `size`, and a `blob` with a " +
+          "`space` and an `id`.",
       );
+      return;
+    }
+    if (!isValidName(name)) {
+      refuse(requests, requestId, "invalid-name", "That isn't a file name.");
       return;
     }
     if (blob.space !== spaceOf(entries)) {
@@ -287,7 +289,11 @@ export const commitRemove = handler<RemoveFileEvent, ChangeState>(
     if (!mayWrite(entries)) return;
     const requestId = event?.requestId ?? eventKey();
     if (requests.key(requestId).get() !== undefined) return;
-    const entry = entryIn(entries, event?.entry);
+    if (event?.entry === undefined) {
+      refuse(requests, requestId, "invalid-request", "This names no `entry`.");
+      return;
+    }
+    const entry = entryIn(entries, event.entry);
     if (entry === undefined) {
       refuse(requests, requestId, "not-found", "That file isn't here.");
       return;
@@ -322,7 +328,11 @@ export const commitRename = handler<RenameFileEvent, ChangeState>(
     if (!mayWrite(entries)) return;
     const requestId = event?.requestId ?? eventKey();
     if (requests.key(requestId).get() !== undefined) return;
-    const entry = entryIn(entries, event?.entry);
+    if (event?.entry === undefined) {
+      refuse(requests, requestId, "invalid-request", "This names no `entry`.");
+      return;
+    }
+    const entry = entryIn(entries, event.entry);
     if (entry === undefined) {
       refuse(requests, requestId, "not-found", "That file isn't here.");
       return;
@@ -337,6 +347,10 @@ export const commitRename = handler<RenameFileEvent, ChangeState>(
       return;
     }
     const name = event?.name;
+    if (typeof name !== "string") {
+      refuse(requests, requestId, "invalid-request", "This names no `name`.");
+      return;
+    }
     if (!isValidName(name)) {
       refuse(requests, requestId, "invalid-name", "That isn't a file name.");
       return;

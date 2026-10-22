@@ -1780,13 +1780,18 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   /**
    * Returns the URL the host of `options.space` serves the blob `options.id`
-   * at, as `uploadBlob()` returns it for a blob it stores.
+   * at: the URL `uploadBlob()` returns for a blob it stores, without the file
+   * suffix it appends. With `options.download`, the URL is one to save the
+   * blob from, which its host serves as an attachment.
    */
-  async blobUrl(options: { space: DID; id: string }): Promise<string> {
+  async blobUrl(
+    options: { space: DID; id: string; download?: boolean },
+  ): Promise<string> {
     const response = await this.#conn.request<RequestType.BlobUrl>({
       type: RequestType.BlobUrl,
       space: options.space,
       id: options.id,
+      ...(options.download === true ? { download: true } : {}),
     });
     return response.url;
   }

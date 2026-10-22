@@ -2408,6 +2408,12 @@ export type BlobUrlRequest = BaseRequest & {
 
   /** The blob's id, `fid1:` and the hash of its record. */
   id: string;
+
+  /**
+   * Whether the URL is one to save the blob from: its host then serves it as
+   * an attachment, which a browser saves from any origin, rather than shows.
+   */
+  download?: boolean;
 };
 
 /** Where a blob is served from. */

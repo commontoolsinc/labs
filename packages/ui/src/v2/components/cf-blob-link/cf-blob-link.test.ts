@@ -8,9 +8,14 @@ import { CFBlobLink } from "./index.ts";
 describe("CFBlobLink", () => {
   const SPACE = "did:key:z6Mk-cf-blob-link";
 
-  /** A runtime whose `blobUrl()` answers with `answer`. */
-  const runtimeAnswering = (answer: Promise<string>) =>
-    ({ blobUrl: () => answer }) as unknown as RuntimeClient;
+  /** A runtime whose `blobUrl()` answers with `answer`, recording each call. */
+  const runtimeAnswering = (answer: Promise<string>, calls: unknown[] = []) =>
+    ({
+      blobUrl: (options: unknown) => {
+        calls.push(options);
+        return answer;
+      },
+    }) as unknown as RuntimeClient;
 
   it("is registered as `cf-blob-link`", () => {
     expect(customElements.get("cf-blob-link")).toBe(CFBlobLink);
@@ -25,9 +30,10 @@ describe("CFBlobLink", () => {
   });
 
   it("renders a link to the blob's URL that saves under its name", async () => {
-    const answer = Promise.resolve("http://host/space/blobs/abc");
+    const answer = Promise.resolve("http://host/space/blobs/abc?download");
+    const calls: unknown[] = [];
     const element = new CFBlobLink();
-    element.runtime = runtimeAnswering(answer);
+    element.runtime = runtimeAnswering(answer, calls);
     element.blob = { space: SPACE, id: "fid1:abc" };
     element.name = "report.pdf";
 
@@ -37,8 +43,9 @@ describe("CFBlobLink", () => {
     const result = element.render() as TemplateResult;
     expect(result.strings.join("")).toContain("<a");
     expect(result.values).toEqual([
-      "http://host/space/blobs/abc",
+      "http://host/space/blobs/abc?download",
       "report.pdf",
     ]);
+    expect(calls).toEqual([{ space: SPACE, id: "fid1:abc", download: true }]);
   });
 });

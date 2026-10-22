@@ -72,6 +72,18 @@ describe("blob-url", () => {
       expect(resolver.url).toBeNull();
     });
 
+    it("asks for the URL to save the blob from when made for downloads", async () => {
+      const answer = Promise.resolve("http://host/space/blobs/abc?download");
+      const { calls, runtime } = runtimeAnswering(answer);
+      const resolver = new BlobUrlResolver(countingHost(), { download: true });
+
+      resolver.resolve(runtime, { space: SPACE, id: "fid1:abc" });
+      await answer;
+
+      expect(calls).toEqual([{ space: SPACE, id: "fid1:abc", download: true }]);
+      expect(resolver.url).toBe("http://host/space/blobs/abc?download");
+    });
+
     it("returns `null` when the runtime cannot give a URL", async () => {
       const answer = Promise.reject(new Error("no host"));
       const { runtime } = runtimeAnswering(answer);

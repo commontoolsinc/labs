@@ -18,10 +18,11 @@ import { type BlobReference, BlobUrlResolver } from "../../utils/blob-url.ts";
  * The `bytes` value may arrive as a `FabricBytes` wrapper, a `Uint8Array`, or a
  * plain `number[]`, so coercion is defensive.
  *
- * Where there are no `bytes`, a `blob` reference, a space's DID and a blob's id
- * there as a FabriFile entry holds them, names the image instead: the
- * component asks the runtime for the URL that space's host serves the blob at,
- * so a pattern shows a stored image without forming a URL itself.
+ * With no `bytes`, the component shows the blob a `blob` reference names
+ * instead. The reference is `{ space, id }`, a space's DID and a blob's id
+ * there, as a FabriFile entry holds it. The component asks the runtime for the
+ * URL the space's host serves the blob at, so a pattern can show a stored
+ * image without forming a URL itself.
  *
  * @element cf-image
  *

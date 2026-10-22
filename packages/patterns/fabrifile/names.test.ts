@@ -95,6 +95,15 @@ describe("names", () => {
       ).toBe("a (4).txt");
     });
 
+    it("returns a valid name when the extension alone leaves no room for the number", () => {
+      const long = "a." + "x".repeat(MAX_NAME_BYTES - 2);
+      const free = freeName(long, takenOf(long));
+
+      expect(free.endsWith(" (2)")).toBe(true);
+      expect(utf8Length(free)).toBeLessThanOrEqual(MAX_NAME_BYTES);
+      expect(isValidName(free)).toBe(true);
+    });
+
     it("returns a valid name when the number would take the name past the most bytes allowed", () => {
       const long = "a".repeat(MAX_NAME_BYTES - 4) + ".png";
       const free = freeName(long, takenOf(long));

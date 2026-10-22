@@ -4077,6 +4077,21 @@ describe("runtime-processor", () => {
       expect(hostForSpaceCalls).toEqual(["did:key:test-space"]);
     });
 
+    it("returns the URL to save a blob from for a request to download it", () => {
+      const processor = buildProcessor({
+        runtime: { hostForSpace: () => new URL("http://toolshed.test/base") },
+      });
+
+      expect(
+        processor.handleBlobUrl({
+          type: RequestType.BlobUrl,
+          space: "did:key:test-space" as never,
+          id: "fid1:abc",
+          download: true,
+        }).url,
+      ).toBe("http://toolshed.test/did:key:test-space/blobs/abc?download");
+    });
+
     it("throws for a blob URL request naming no space or no blob", () => {
       const processor = buildProcessor({
         runtime: { hostForSpace: () => new URL("http://toolshed.test/base") },

@@ -1312,6 +1312,14 @@ describe("RuntimeClient", () => {
         space: "did:key:z6Mk-runtime-client-blob",
         id: "fid1:abc",
       }]);
+
+      await client.blobUrl({
+        space: "did:key:z6Mk-runtime-client-blob" as never,
+        id: "fid1:abc",
+        download: true,
+      });
+
+      expect((requests[1] as { download?: boolean }).download).toBe(true);
     });
 
     it("sends the name of the file the bytes came from", async () => {
