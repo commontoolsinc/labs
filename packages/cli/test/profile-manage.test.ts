@@ -13,6 +13,7 @@ import { stub } from "@std/testing/mock";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 import {
+  ACLManager,
   type Cell,
   type JSONSchema,
   type MemorySpace,
@@ -142,12 +143,15 @@ describe("profile management", () => {
   }
 
   /**
-   * Makes a profile as the stranger, in the stranger's own space, names it
-   * `name` through its `setName`, and links it from the owner's Home
-   * `profiles` list with a write no handler made, which that list takes.
-   * Returns the profile's space.
+   * Makes a profile as the stranger, in `profileSpace`, the stranger's own
+   * space by default, names it `name` through its `setName`, and links it
+   * from the owner's Home `profiles` list with a write no handler made, which
+   * that list takes. Returns the profile's space.
    */
-  async function listStrangersProfile(name: string): Promise<string> {
+  async function listStrangersProfile(
+    name: string,
+    profileSpace: MemorySpace = stranger.did(),
+  ): Promise<string> {
     const storage = EmulatedStorageManager.connectTo(server, { as: stranger });
     const theirs = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -170,11 +174,11 @@ describe("profile management", () => {
       );
       let tx = theirs.edit();
       const pattern = await theirs.patternManager.compilePattern(program, {
-        space: stranger.did(),
+        space: profileSpace,
         tx,
       });
       const cell = theirs.getCell<Record<string, unknown>>(
-        stranger.did(),
+        profileSpace,
         "a stranger's profile",
         undefined,
         tx,
@@ -204,6 +208,37 @@ describe("profile management", () => {
     expect((await tx.commit().settled).error).toBeUndefined();
     await runtime.idle();
     return link.space;
+  }
+
+  /**
+   * Links from the owner's Home `profiles` list, as `listStrangersProfile()`
+   * does, a profile named `name` whose name carries no label, as a name
+   * stored before names were labeled does, in a space of its own owned by
+   * `owner`, the owner by default. Returns the profile's space.
+   */
+  async function listUnlabeledProfile(
+    name: string,
+    owner?: Identity,
+  ): Promise<string> {
+    const profileSpace = await runtime.createSpace({
+      grants: { "*": "WRITE" },
+      ...(owner === undefined ? {} : { owner: owner.did() }),
+    });
+    const profile = runtime.getCell<{ name: string }>(
+      profileSpace,
+      "a profile named before names were labeled",
+    );
+    await runtime.editWithRetry((tx) => profile.withTx(tx).set({ name }));
+    const list = host.key("profiles").resolveAsCell().asSchema(
+      linkListSchema,
+    );
+    await list.sync();
+    const tx = runtime.edit();
+    list.withTx(tx).push(profile);
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit().settled).error).toBeUndefined();
+    await runtime.idle();
+    return profileSpace;
   }
 
   describe("listProfiles()", () => {
@@ -246,6 +281,47 @@ describe("profile management", () => {
       expect(listed.map((each) => [each.name, each.current])).toEqual([
         ["Ada", true],
       ]);
+    });
+
+    it("returns a profile whose name carries no label when the identity owns the profile's space", async () => {
+      await createProfile({ ...CONFIG, name: "Ada" }, { loadPieces });
+      const older = await listUnlabeledProfile("Old Ada");
+
+      const listed = await listProfiles(CONFIG, { loadPieces });
+
+      expect(listed.map((each) => [each.name, each.space])).toEqual([
+        ["Ada", expect.any(String)],
+        ["Old Ada", older],
+      ]);
+    });
+
+    it("leaves out a profile whose name carries no label when the profile's space is another identity's", async () => {
+      await createProfile({ ...CONFIG, name: "Ada" }, { loadPieces });
+      await listUnlabeledProfile("Mallory", stranger);
+
+      expect(await listedNames()).toEqual(["Ada"]);
+    });
+
+    it("leaves out a profile whose name is another identity's, though the identity owns the profile's space", async () => {
+      await createProfile({ ...CONFIG, name: "Ada" }, { loadPieces });
+      const owned = await runtime.createSpace({ grants: { "*": "WRITE" } });
+      await listStrangersProfile("Mallory", owned);
+
+      expect(await listedNames()).toEqual(["Ada"]);
+    });
+
+    it("throws, naming the space, when the access list of the space of a profile whose name carries no label cannot be read", async () => {
+      await createProfile({ ...CONFIG, name: "Ada" }, { loadPieces });
+      const older = await listUnlabeledProfile("Old Ada");
+      using _refused = stub(
+        ACLManager.prototype,
+        "getStored",
+        () => Promise.reject(new Error("access refused")),
+      );
+
+      await expect(listProfiles(CONFIG, { loadPieces })).rejects.toThrow(
+        older,
+      );
     });
 
     it("throws, naming the space, when a profile after the current one cannot be read", async () => {

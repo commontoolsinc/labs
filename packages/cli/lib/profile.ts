@@ -20,6 +20,7 @@
 import type { CellScope, JSONSchema } from "@commonfabric/api";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
+  ACLManager,
   type Cell,
   cellRuntime,
   getMetaLink,
@@ -28,7 +29,10 @@ import {
   orderProfileCandidates,
   sendEvent,
 } from "@commonfabric/runner";
-import { cfcLabelViewForResolvedTargetWithStatus } from "@commonfabric/runner/cfc";
+import {
+  type CfcLabelView,
+  cfcLabelViewForResolvedTargetWithStatus,
+} from "@commonfabric/runner/cfc";
 import { exactPrincipalAttestations } from "@commonfabric/runner/cfc/represents-principal";
 
 import { canonicalAddress } from "./callable.ts";
@@ -406,19 +410,21 @@ function pictureBytes(value: unknown): Uint8Array | undefined {
  * in. The profiles are the ones `#profile` collects
  * (`loadProfileCandidates()`) that are the identity's own: a retired
  * profile, or one whose document is absent, is not listed, and neither is
- * one whose `name` is not attested to the identity (`isOwnProfile()`). Any
- * code that reaches Home can write a link into its `profiles` list, so a
- * profile Home lists may be someone else's. The one `#profile` answers with
- * is marked `current`, which no listed profile is when `#profile` answers
- * with a profile that is not the identity's. A person with no home root yet
- * has no profiles.
+ * one that is not the identity's (`isOwnProfile()`): one whose `name` is
+ * attested to anyone else, or carries no label and lives in a space whose
+ * access list does not name the identity as `OWNER`. Any code that reaches
+ * Home can write a link into its `profiles` list, so a profile Home lists may
+ * be someone else's. The one `#profile` answers with is marked `current`,
+ * which no listed profile is when `#profile` answers with a profile that is
+ * not the identity's. A person with no home root yet has no profiles.
  *
  * `config.space` is the identity's home space. The home root is read and not
  * started, and no profile runs.
  *
  * @throws Error when a listed profile failed to load, or the label on its
- * `name` cannot be read, since leaving it out would report a profile that
- * could not be read as one that is not there or is not the identity's.
+ * `name`, or the access list of its space where that name carries no label,
+ * cannot be read, since leaving it out would report a profile that could not
+ * be read as one that is not there or is not the identity's.
  */
 export async function listProfiles(
   config: SpaceConfig,
@@ -476,46 +482,84 @@ export async function listProfiles(
 }
 
 /**
- * Whether the value at `cell` is attested to `principal`: the label its value
- * cell carries, which the write that stored the value minted, attests
- * `principal` and no one else as the principal it represents, read as
- * `principalOf()` reads one (`exactPrincipalAttestations()`). The label of the
- * document a field sits in says whom the field was installed for, not who
- * wrote the value behind it (spec §3.7.2), so the value cell's label is the
- * one read, as HOME_SPACE.md says a host reads a profile field. A value
- * stored without a label, or attested to anyone else, is not attested to
- * `principal`. Like every claim, it binds honest runtimes only.
+ * Whether the value at `cell` is attested to `principal`, as `attestsOnly()`
+ * reads the label `valueLabel()` returns. A value stored without a label is
+ * not attested to `principal`.
  *
  * @throws Error when the label cannot be read, which is not the same as there
  * being none.
  */
 function ownerAttests(cell: Cell<unknown>, principal: string): boolean {
+  return attestsOnly(valueLabel(cell), principal);
+}
+
+/**
+ * The label the value at `cell` carries, which the write that stored the
+ * value minted, or `undefined` when it carries none. The label of the
+ * document a field sits in says whom the field was installed for, not who
+ * wrote the value behind it (spec §3.7.2), so the value cell's label is the
+ * one read, as HOME_SPACE.md says a host reads a profile field.
+ *
+ * @throws Error when the label cannot be read, which is not the same as there
+ * being none.
+ */
+function valueLabel(cell: Cell<unknown>): CfcLabelView | undefined {
   const { view, readFailed } = cfcLabelViewForResolvedTargetWithStatus(cell);
   if (readFailed) {
     throw new Error(
       `Could not read the label of ${cell.getAsNormalizedFullLink().id}.`,
     );
   }
-  const attested = exactPrincipalAttestations(view, "represents-principal");
+  return view;
+}
+
+/**
+ * Whether `label` attests `principal`, and no one else, as the principal the
+ * value it labels represents, read as `principalOf()` reads one
+ * (`exactPrincipalAttestations()`). Like every claim, it binds honest
+ * runtimes only.
+ */
+function attestsOnly(
+  label: CfcLabelView | undefined,
+  principal: string,
+): boolean {
+  const attested = exactPrincipalAttestations(label, "represents-principal");
   return attested?.length === 1 && attested[0] === principal;
 }
 
 /**
- * Whether `profile`, a profile Home lists, is the identity `owner`'s own: the
- * label on the value of its `name` attests `owner`, and no one else, as the
- * principal it represents (`ownerAttests()`), which a write through the
- * profile's own `setName` mints for whoever made it. A profile whose name
- * carries no such label, or whose name another principal set, is not
- * `owner`'s.
+ * Whether `profile`, a profile Home lists, is the identity `owner`'s own. When
+ * the value of its `name` carries a label, it is `owner`'s when that label
+ * attests `owner`, and no one else, as the principal it represents
+ * (`attestsOnly()`), which a write through the profile's own `setName` mints
+ * for whoever made it. A name stored before names were labeled carries no
+ * label at all, and then the profile is `owner`'s when the access list of its
+ * space, read as `ACLManager` reads one, names `owner` as `OWNER`.
  *
- * @throws Error when the label cannot be read.
+ * @throws Error when the label, or that access list, cannot be read.
  */
 async function isOwnProfile(
   profile: Cell<unknown>,
   owner: string,
 ): Promise<boolean> {
   await profile.asSchema(profileFieldsSchema).sync();
-  return ownerAttests(profile.key("name"), owner);
+  const label = valueLabel(profile.key("name"));
+  if (label !== undefined) return attestsOnly(label, owner);
+  const { space } = profile.getAsNormalizedFullLink();
+  let acl;
+  try {
+    acl = await new ACLManager(cellRuntime(profile), space).get();
+  } catch (error) {
+    throw new Error(`Cannot read the access list of ${space}.`, {
+      cause: error,
+    });
+  }
+  if (acl === null) {
+    throw new Error(`Cannot read the access list of ${space}: it has none.`);
+  }
+  return Object.entries(acl).some(([user, capability]) =>
+    user === owner && capability === "OWNER"
+  );
 }
 
 /** What the profile commands that act on one profile need. */
@@ -531,9 +575,8 @@ export interface ProfileTargetConfig extends SpaceConfig {
  * has not.
  *
  * @throws Error when the home lists no such profile, when the profile it
- * lists there is not the identity's own (`isOwnProfile()`) or the label that
- * says so cannot be read, or when its retirement is not what `retired` asks
- * for.
+ * lists there is not the identity's own (`isOwnProfile()`) or what says so
+ * cannot be read, or when its retirement is not what `retired` asks for.
  */
 async function listedProfile(
   root: Cell<unknown>,
@@ -551,7 +594,7 @@ async function listedProfile(
   if (!await isOwnProfile(profile, config.space)) {
     throw new Error(
       `The profile in ${config.profileSpace} is not one of ` +
-        `${config.space}'s own: its name is not attested to that identity.`,
+        `${config.space}'s own.`,
     );
   }
   if (isRetired(root, config) !== retired) {
