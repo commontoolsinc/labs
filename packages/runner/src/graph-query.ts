@@ -233,18 +233,26 @@ export class GraphQueryWalk {
     this.#onTrackedDoc = onTrackedDoc;
     // A referrer arrives as an address; its attribution key is its tracker
     // key, overridden to the explicit-instance key a root was recorded
-    // under (`#keyOverrides`), as a miss's referrer is.
+    // under (`#keyOverrides`), as a miss's referrer is. A document reports
+    // once per link it holds, so the key is kept per document.
+    const referrerKeys = new Map<string, string>();
     const referrerKeyOf = (
       source: { id: string; scope?: CellScope } | undefined,
     ): string | undefined => {
       if (source === undefined) return undefined;
-      const sourceKey = schemaTrackerKey(
-        space,
-        source.id,
-        source.scope,
-        identity,
-      );
-      return this.#keyOverrides.get(sourceKey) ?? sourceKey;
+      const cacheKey = `${source.scope ?? ""}\0${source.id}`;
+      let key = referrerKeys.get(cacheKey);
+      if (key === undefined) {
+        const sourceKey = schemaTrackerKey(
+          space,
+          source.id,
+          source.scope,
+          identity,
+        );
+        key = this.#keyOverrides.get(sourceKey) ?? sourceKey;
+        referrerKeys.set(cacheKey, key);
+      }
+      return key;
     };
     this.#context = createTraversalContext(
       new CompoundCycleTracker<FabricValue, JSONSchema | undefined>(),

@@ -1159,6 +1159,12 @@ export class MapSet<K, V> {
     return this.#setMap!.get(key);
   }
 
+  /** Iterates the keys, without materializing any key's values. */
+  public *keys(): IterableIterator<K> {
+    if (this.#hashMap) yield* this.#hashMap.keys();
+    else yield* this.#setMap!.keys();
+  }
+
   /**
    * Iterate the values for a key without materializing a `Set` (unlike
    * `get()`, which copies in hash mode). Yields nothing for an absent key.

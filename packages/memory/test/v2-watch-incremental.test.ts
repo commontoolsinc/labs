@@ -3,6 +3,8 @@ import { describe, it } from "@std/testing/bdd";
 
 import { ChangeSet } from "@codemirror/state";
 
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
+
 import {
   decodeMemoryBoundary,
   type GraphWatchSpec,
@@ -1162,6 +1164,71 @@ describe("Server", () => {
           const removal = await fixture.reader.watchRemoveSync(["of:x"]);
           expect(ids(removal.sync.removes)).toEqual(["of:x"]);
           expect(ids([...fixture.state.entities.values()])).toEqual(["of:a"]);
+        } finally {
+          await fixture.close();
+        }
+      });
+
+      it("keeps a schema document delivered while any delivered document refers to it", async () => {
+        // Two roots link under one `$ref` schema. The schema documents are
+        // walked in once, for the first root, and every later document
+        // referring to them is attributed to them too, so they leave only
+        // with the last of those documents.
+        const leafSchema = { type: "string", title: "shared-leaf" } as const;
+        const leafHash = internSchemaAsTaggedHashString(leafSchema);
+        const refSchema = {
+          type: "object",
+          properties: { x: { $ref: `cid:${leafHash}` } },
+        } as const;
+        const refHash = internSchemaAsTaggedHashString(refSchema);
+        const refLink = (id: string) => ({
+          "/": {
+            "link@1": { id, path: [], schema: { $ref: `cid:${refHash}` } },
+          },
+        });
+        const fixture = await openFixture(0);
+        try {
+          await fixture.writer.transact({
+            localSeq: 2,
+            reads: { confirmed: [], pending: [] },
+            operations: [
+              {
+                op: "set",
+                id: `cid:${leafHash}`,
+                value: { value: leafSchema },
+              },
+              { op: "set", id: `cid:${refHash}`, value: { value: refSchema } },
+              { op: "set", id: "of:t", value: { value: { n: 1 } } },
+              {
+                op: "set",
+                id: "of:p",
+                value: { value: { x: refLink("of:t") } },
+              },
+              {
+                op: "set",
+                id: "of:q",
+                value: { value: { x: refLink("of:t") } },
+              },
+            ],
+          });
+          await fixture.server.flushSessions();
+          await fixture.reader.watchAddSync([watch("of:p")]);
+          await fixture.reader.watchAddSync([watch("of:q")]);
+          const schemaIds = [`cid:${leafHash}`, `cid:${refHash}`].toSorted();
+          const delivered = () =>
+            [...fixture.state.entities.values()].map((entry) => entry.id)
+              .filter((id) => id.startsWith("cid:")).toSorted();
+          expect(delivered()).toEqual(schemaIds);
+          const first = await fixture.reader.watchRemoveSync(["of:p"]);
+          expect(first.sync.removes.map((entry) => entry.id)).toEqual([
+            "of:p",
+          ]);
+          expect(delivered()).toEqual(schemaIds);
+          const second = await fixture.reader.watchRemoveSync(["of:q"]);
+          expect(
+            second.sync.removes.map((entry) => entry.id).toSorted(),
+          ).toEqual(["of:q", ...schemaIds].toSorted());
+          expect(delivered()).toEqual([]);
         } finally {
           await fixture.close();
         }
