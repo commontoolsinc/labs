@@ -303,6 +303,17 @@ onSchemaRegistryClear(() => {
   registryDecompositionCache = new WeakMap();
 });
 
+// A refusal the schema's own structure decides — a nested `$defs`, a `$id`,
+// the deprecated `definitions` keyword — holds for the schema whatever any
+// resolver holds, so it is kept and thrown again rather than found again.
+// Every sync of a cell read under such a schema asks, and a renderer's node
+// schema is one, so without this each read rebuilt the same error and its
+// stack trace.
+const structuralRefusalCache = new WeakMap<
+  JSONSchemaObj,
+  SchemaNotDecomposableError
+>();
+
 /**
  * Decomposes a self-contained schema into content-addressed documents.
  *
@@ -342,30 +353,38 @@ export function decomposeSchema(
       ? registryDecompositionCache.get(interned)
       : undefined);
   if (cached !== undefined) return cached;
+  const refused = structuralRefusalCache.get(interned);
+  if (refused !== undefined) throw refused;
 
   const defs = interned.$defs ?? {};
   const defNames = new Set(Object.keys(defs));
 
   const { $defs: _defs, ...rootBody } = interned;
-  if (interned.definitions !== undefined) {
-    throw new SchemaNotDecomposableError(
-      "the deprecated `definitions` keyword is present",
-    );
-  }
-
   const rootRefs = new Set<string>();
-  scanFragment(rootBody, defNames, rootRefs);
   const refsByName = new Map<string, Set<string>>();
-  for (const name of defNames) {
-    const body = defs[name];
-    if (!isSubschema(body)) {
+  try {
+    if (interned.definitions !== undefined) {
       throw new SchemaNotDecomposableError(
-        `definition \`${name}\` is not a schema`,
+        "the deprecated `definitions` keyword is present",
       );
     }
-    const refs = new Set<string>();
-    scanFragment(body, defNames, refs);
-    refsByName.set(name, refs);
+    scanFragment(rootBody, defNames, rootRefs);
+    for (const name of defNames) {
+      const body = defs[name];
+      if (!isSubschema(body)) {
+        throw new SchemaNotDecomposableError(
+          `definition \`${name}\` is not a schema`,
+        );
+      }
+      const refs = new Set<string>();
+      scanFragment(body, defNames, refs);
+      refsByName.set(name, refs);
+    }
+  } catch (error) {
+    if (error instanceof SchemaNotDecomposableError) {
+      structuralRefusalCache.set(interned, error);
+    }
+    throw error;
   }
 
   // Reachability from the root body; unreachable definitions are dropped.

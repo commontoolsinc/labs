@@ -1,6 +1,6 @@
 /** Publishes observed view inputs after a serving wave has settled. */
 
-import { valueEqual } from "@commonfabric/data-model";
+import { valueEqualByWalk } from "@commonfabric/data-model";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type {
   EntityDocument,
@@ -219,7 +219,8 @@ export class ViewPlanPublisher {
           ].join("\0")
         ).join("\n");
         let cone = shared.find((entry) =>
-          entry.signature === signature && valueEqual(entry.render, render)
+          entry.signature === signature &&
+          valueEqualByWalk(entry.render, render)
         );
         if (cone === undefined) {
           const handlers = new Set(
@@ -398,7 +399,7 @@ export class ViewPlanPublisher {
           shallowReads: metadataReads.shallowReads,
         });
         cache.execution = observed.map((node) => ({ ...node }));
-        if (valueEqual(this.#published.get(key), selection)) continue;
+        if (valueEqualByWalk(this.#published.get(key), selection)) continue;
         if (
           await server.setViewSelection(space, handle, {
             ...selection,

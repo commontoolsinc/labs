@@ -63,8 +63,13 @@ the next settlement that reaches quiescence plans every view whose snapshot
 or walk changed, so a burst of cut waves plans each view once, as it ends,
 over the snapshot it left. The cap bounds each cut settle and not the
 deferral: a space under continuous input keeps its plans for as long as the
-input lasts. Within one settlement, views whose snapshots carry the same
-observations and whose walks read the same addresses select their cone once. Ordinary rendered attributes and object props contribute
+input lasts. Before a settlement that reached quiescence plans, the serving
+loop has the memory server send the sessions the documents the wave
+committed: planning walks every viewing session's UI, and on a co-hosted
+server that is time the frames those documents owe would otherwise wait
+behind. Within one settlement, views whose snapshots carry the same
+observations and whose walks read the same addresses select their cone once.
+Ordinary rendered attributes and object props contribute
 their reads. Declared bindings contribute their effective component projection;
 stream targets identify visible handlers, and writable bindings identify direct
 edits.

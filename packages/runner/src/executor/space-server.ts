@@ -7267,6 +7267,16 @@ export class SpaceServer implements TransactionSealDestination {
     }
 
     if (publish && outcome.aborted === undefined) {
+      // The documents this wave committed reach the sessions before the
+      // planner takes the thread: at quiescence the planner walks every
+      // viewing session's UI, which on a co-hosted server is time the
+      // memory server cannot spend sending the frames those documents owe.
+      // A settle the deadline cut plans nothing a session already holds a
+      // selection for, so its frames keep the refresh's own turn.
+      if (!exhausted && this.#active && this.#runtime === runtime) {
+        await this.#options.server.flushSessions([this.#options.space]);
+        if (!this.#active || this.#runtime !== runtime) return;
+      }
       await this.#publishViewPlan(runtime, !exhausted);
     }
 

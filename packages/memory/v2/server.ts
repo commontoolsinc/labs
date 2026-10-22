@@ -6,6 +6,7 @@ import {
   cloneIfNecessary,
   isFabricPlainObject,
   valueEqual,
+  valueEqualByWalk,
 } from "@commonfabric/data-model";
 import { SlotLimitError } from "@commonfabric/data-model/codec-json";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -6579,7 +6580,7 @@ export class Server {
         previous: ReturnType<SessionState["viewSelections"]["get"]>,
       ) =>
         previous !== undefined && previous.revision === handle.revision &&
-        valueEqual(previous.delivery, selection.delivery);
+        valueEqualByWalk(previous.delivery, selection.delivery);
       if (!sameDelivery(session!.viewSelections.get(handle.viewId))) {
         await this.evaluateWatchSet(
           space,
@@ -6599,7 +6600,10 @@ export class Server {
         previous !== undefined && selection.generation <= previous.generation
       ) {
         return selection.generation === previous.generation &&
-          valueEqual(previous, { ...selection, revision: handle.revision });
+          valueEqualByWalk(previous, {
+            ...selection,
+            revision: handle.revision,
+          });
       }
       session!.viewSelections.set(handle.viewId, {
         ...selection,
