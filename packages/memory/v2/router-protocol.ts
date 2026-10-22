@@ -28,6 +28,15 @@ export const ROUTER_CHUNK_COUNT = 512;
 export const ROUTER_HEADER_BYTES = 4096;
 
 /**
+ * Record bytes the toolshed sender passes to its socket ahead of their write
+ * callbacks (256 KiB). The sender keeps writing records while the
+ * unacknowledged bytes are below this window and resumes from the callback
+ * that brings them back under it, so a body drains without one event-loop
+ * turn per record. Local to the toolshed; the router does not read it.
+ */
+export const ROUTER_SEND_WINDOW_BYTES = 256 * 1024;
+
+/**
  * Largest public upload credit window the SDK accepts, in on-wire record
  * bytes. The router offers it in `hello.ok.routerUploadWindow`.
  */
@@ -383,13 +392,19 @@ export interface RouterSenderSnapshot {
   /** Age of the oldest retained body, or null when the queue is empty. */
   readonly oldestQueuedAgeMs: number | null;
 
-  /** Record awaiting a callback, including its routing overhead. */
+  /** Records passed to the socket whose write callbacks have not run. */
+  readonly pendingRecords: number;
+
+  /** Bytes of those records, including their routing overhead. */
   readonly pendingRecordBytes: number;
 
-  /** Routing kind, or null for admission controls and when no write is pending. */
+  /**
+   * Routing kind of the oldest record awaiting a callback, or null for an
+   * admission control and when no write is pending.
+   */
   readonly pendingRecordKind: number | null;
 
-  /** Elapsed monotonic time since dispatch, or null when no write is pending. */
+  /** Elapsed monotonic time since the oldest pending record was passed to the socket, or null. */
   readonly pendingCallbackAgeMs: number | null;
 
   /** Elapsed monotonic time since any callback, or null before the first. */
@@ -404,8 +419,36 @@ export type RouterSenderEvent =
   | "write-error"
   | "close";
 
+/** One logical body: its record cursor and the credit it retains. */
+interface QueuedBody {
+  /** Header, data and end records, yielded as they are passed to the socket. */
+  records: Generator<Uint8Array>;
+
+  /** Payload bytes charged against the output budget until the end record's callback. */
+  bytes: number;
+
+  /** Monotonic time of admission, for the oldest-body age. */
+  enqueuedAt: number;
+
+  /** Payload bytes whose data-record callbacks have run, not bytes passed to the socket. */
+  writtenBytes: number;
+}
+
+/** One record passed to the socket, until its write callback runs. */
+interface PendingRecord {
+  /** Record length including its routing overhead. */
+  bytes: number;
+
+  /** Routing kind, or null for an admission control. */
+  kind: number | null;
+
+  /** Monotonic time the record was passed to the socket. */
+  at: number;
+}
+
 /**
- * Bounded endpoint output. At most one record awaits socket write completion;
+ * Bounded endpoint output. Records are passed to the socket in order while
+ * the bytes awaiting write callbacks stay below `ROUTER_SEND_WINDOW_BYTES`;
  * queued logical bodies remain charged until their final record is written.
  */
 export class RouterSender {
@@ -413,13 +456,12 @@ export class RouterSender {
   #fail: (error: Error) => void;
   #limit: number | null;
   #bytes = 0;
-  #queue: {
-    records: Generator<Uint8Array>;
-    bytes: number;
-    enqueuedAt: number;
-    writtenBytes: number;
-  }[] = [];
-  #writing = false;
+  #queue: QueuedBody[] = [];
+  /** Queue prefix whose records have all been passed to the socket. */
+  #dispatchedBodies = 0;
+  #pending: PendingRecord[] = [];
+  #pendingBytes = 0;
+  #pumping = false;
   #closed = false;
   #now: () => number;
   #observe: ((event: RouterSenderEvent) => void) | undefined;
@@ -432,9 +474,6 @@ export class RouterSender {
   #completedRecords = 0;
   #completedRecordBytes = 0;
   #callbackErrors = 0;
-  #pendingAt: number | undefined;
-  #pendingRecordBytes = 0;
-  #pendingRecordKind: number | null = null;
   #lastCallbackAt: number | undefined;
   #drained: PromiseWithResolvers<boolean> | undefined;
   #admission: {
@@ -442,6 +481,8 @@ export class RouterSender {
     record: Uint8Array;
     /** Enables input only after a successful write. */
     written: () => void;
+    /** Whether the record has been passed to the socket. */
+    dispatched: boolean;
   } | undefined;
 
   /**
@@ -476,8 +517,9 @@ export class RouterSender {
 
   /**
    * Resolves `true` when all bodies finish writing, or `false` on close/error.
-   * Concurrent callers share one notification. This reserves no future capacity;
-   * a producer must recheck output after waking and serialize its own calls.
+   * Concurrent callers share one notification. The host holds request dispatch
+   * on its retained-output marks rather than on this; tests and diagnostics
+   * use it to observe completion.
    */
   drain(): Promise<boolean> {
     if (this.#closed) return Promise.resolve(false);
@@ -496,6 +538,7 @@ export class RouterSender {
     this.#admission = {
       record: encodeRouterAdmission(bytes, requestOrdinal),
       written,
+      dispatched: false,
     };
     this.#pump();
   }
@@ -504,6 +547,7 @@ export class RouterSender {
   snapshot(): RouterSenderSnapshot {
     const now = this.#now();
     const active = this.#queue[0];
+    const oldest = this.#pending[0];
     return {
       retainedBytes: this.#bytes,
       queuedBodies: this.#queue.length,
@@ -519,11 +563,10 @@ export class RouterSender {
       activeBodyBytes: active?.bytes ?? 0,
       activeBodyWrittenBytes: active?.writtenBytes ?? 0,
       oldestQueuedAgeMs: active === undefined ? null : now - active.enqueuedAt,
-      pendingRecordBytes: this.#pendingRecordBytes,
-      pendingRecordKind: this.#pendingRecordKind,
-      pendingCallbackAgeMs: this.#pendingAt === undefined
-        ? null
-        : now - this.#pendingAt,
+      pendingRecords: this.#pending.length,
+      pendingRecordBytes: this.#pendingBytes,
+      pendingRecordKind: oldest === undefined ? null : oldest.kind,
+      pendingCallbackAgeMs: oldest === undefined ? null : now - oldest.at,
       lastCallbackAgeMs: this.#lastCallbackAt === undefined
         ? null
         : now - this.#lastCallbackAt,
@@ -574,11 +617,11 @@ export class RouterSender {
     if (this.#closed) return;
     this.#closed = true;
     this.#queue = [];
+    this.#dispatchedBodies = 0;
     this.#admission = undefined;
     this.#bytes = 0;
-    this.#pendingAt = undefined;
-    this.#pendingRecordBytes = 0;
-    this.#pendingRecordKind = null;
+    this.#pending = [];
+    this.#pendingBytes = 0;
     this.#drained?.resolve(false);
     this.#drained = undefined;
     this.#observe?.("close");
@@ -597,30 +640,54 @@ export class RouterSender {
     yield routerRecord(2);
   }
 
-  /** Writes the next record only after the previous socket callback completes. */
+  /**
+   * Passes records to the socket, in order, while the bytes awaiting callbacks
+   * are below the send window. A waiting admission control goes out before
+   * the next body record. Re-entry from a synchronous callback returns to the
+   * running loop, which sees the released bytes on its next iteration.
+   */
   #pump(): void {
-    if (this.#writing || this.#closed) return;
-    const admission = this.#admission;
-    if (admission !== undefined) {
-      this.#write(admission.record, null, () => {
-        this.#admission = undefined;
-        admission.written();
-      });
-      return;
+    if (this.#pumping) return;
+    this.#pumping = true;
+    try {
+      while (
+        !this.#closed && this.#pendingBytes < ROUTER_SEND_WINDOW_BYTES
+      ) {
+        const admission = this.#admission;
+        if (admission !== undefined && !admission.dispatched) {
+          admission.dispatched = true;
+          this.#write(admission.record, null, undefined, () => {
+            this.#admission = undefined;
+            admission.written();
+          });
+          continue;
+        }
+        const next = this.#queue[this.#dispatchedBodies];
+        if (next === undefined) return;
+        const record = next.records.next();
+        requireRouted(!record.done);
+        const kind = record.value[4];
+        if (kind === 2) this.#dispatchedBodies++;
+        this.#write(record.value, kind, next);
+      }
+    } finally {
+      this.#pumping = false;
     }
-    const next = this.#queue[0];
-    if (next === undefined) return;
-    const record = next.records.next();
-    requireRouted(!record.done);
-    this.#write(record.value, record.value[4]);
   }
 
   /** Releases logical credit on the response end callback, independently of ACKs. */
-  #completeBody(): void {
-    const next = this.#queue.shift()!;
-    this.#bytes -= next.bytes;
+  #completeBody(body: QueuedBody): void {
+    // Write callbacks run in write order, so this is the queue head. Removing
+    // by identity keeps the accounting right regardless, and a completed
+    // body's end record was passed to the socket, so it is in the dispatched
+    // prefix.
+    const index = this.#queue.indexOf(body);
+    requireRouted(index !== -1);
+    this.#queue.splice(index, 1);
+    this.#dispatchedBodies--;
+    this.#bytes -= body.bytes;
     this.#completedBodies++;
-    this.#completedBytes += next.bytes;
+    this.#completedBytes += body.bytes;
     if (this.#queue.length === 0) {
       this.#drained?.resolve(true);
       this.#drained = undefined;
@@ -628,26 +695,32 @@ export class RouterSender {
     this.#observe?.("complete");
   }
 
-  /** Writes either kind of record through the same callback-serialized slot. */
+  /** Passes one record of either kind to the socket and accounts for its callback. */
   #write(
     record: Uint8Array,
     recordKind: number | null,
+    body?: QueuedBody,
     written?: () => void,
   ): void {
-    this.#writing = true;
-    this.#pendingAt = this.#now();
-    this.#pendingRecordBytes = record.length;
-    this.#pendingRecordKind = recordKind;
+    const pending: PendingRecord = {
+      bytes: record.length,
+      kind: recordKind,
+      at: this.#now(),
+    };
+    this.#pending.push(pending);
+    this.#pendingBytes += pending.bytes;
     this.#dispatchedRecords++;
-    this.#dispatchedRecordBytes += record.length;
-    const recordBytes = record.length;
+    this.#dispatchedRecordBytes += pending.bytes;
     let completed = false;
     try {
       this.#send(record, (error) => {
         if (completed) return;
         completed = true;
-        this.#writing = false;
         if (this.#closed) return;
+        const index = this.#pending.indexOf(pending);
+        requireRouted(index !== -1);
+        this.#pending.splice(index, 1);
+        this.#pendingBytes -= pending.bytes;
         this.#lastCallbackAt = this.#now();
         if (error) {
           this.#callbackErrors++;
@@ -656,15 +729,10 @@ export class RouterSender {
           this.#fail(error);
         } else {
           this.#completedRecords++;
-          this.#completedRecordBytes += recordBytes;
-          if (recordKind === 1) {
-            this.#queue[0].writtenBytes += recordBytes - 5;
-          }
-          this.#pendingAt = undefined;
-          this.#pendingRecordBytes = 0;
-          this.#pendingRecordKind = null;
+          this.#completedRecordBytes += pending.bytes;
+          if (recordKind === 1) body!.writtenBytes += pending.bytes - 5;
           this.#observe?.("callback");
-          if (recordKind === 2) this.#completeBody();
+          if (recordKind === 2) this.#completeBody(body!);
           written?.();
           this.#pump();
         }

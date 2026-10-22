@@ -158,15 +158,22 @@ budget. The
 [commit encoding contract](../../docs/specs/memory-v2/04-protocol.md#negotiated-commit-metadata-encoding)
 defines the positions and expansion budget.
 
-The toolshed paces request-driven output by waiting for zero retained logical
-output bytes before decoding and dispatching the next request or producing a
-host refusal. Capacity returns after completion-record write callbacks release
-each body. A cancellable `setImmediate` between request turns gives socket I/O
-an event-loop opportunity. Reads pause at body boundaries while output remains;
-an admitted partial body finishes with its input reservation held. Already
-buffered receiver events remain subject to the hard input queue bound. Closing
-the connection cancels capacity and scheduling waits. Unsolicited effects,
-presence, and revocations retain bounded-close behavior on output exhaustion.
+The toolshed bounds request-driven output with a high mark and a low mark on
+retained logical output. It decodes and dispatches the next request, or produces
+a host refusal, while retained output is below the high mark: half of
+`limits.outputBytesPerSocket` when set, else half the 8 MiB message ceiling. At
+the high mark reads pause at body boundaries and dispatch waits; both resume
+once retained output falls below the low mark, a quarter of the bound, as
+completion-record write callbacks release bodies. Records are passed to the
+socket while the bytes awaiting write callbacks are below a 256 KiB send window
+(`ROUTER_SEND_WINDOW_BYTES`), so a response drains without an event-loop turn
+per record. An admitted partial body finishes with its input reservation held.
+Already buffered receiver events remain subject to the hard input queue bound.
+Closing the connection cancels the wait. Output past the bound is refused as
+`queued-output` as before, so a slow reader is back-pressured first and refused
+only by a message that would take retained output past the bound. Unsolicited
+effects, presence, and revocations retain bounded-close behavior on output
+exhaustion.
 
 The private Mode A host accepts partial `RoutedHostLimits` overrides. Omitted
 fields retain defaults, `null` disables an individual quota, and a positive safe
@@ -198,23 +205,25 @@ no payload or error text.
 
 Structured data refusals also carry `outputLimit.diagnostics`: separate
 `socketBytes` and `sender.retainedBytes`, queued-body counts, lifetime logical
-and record admission/completion counters, active-body written progress, and
-monotonic queue/callback ages. A written prefix remains retained until the
-body's final record completes. These callbacks measure local socket writes, not
-peer receipt. `attemptedSource` identifies the response's originating request
-kind and routing identifiers when it matches the serialized dispatch;
-unsolicited pushes carry their own routing identifiers. Unmatched responses are
-explicitly unattributed. Identifiers are truncated to 256 characters; message
-kinds to 64.
+and record admission/completion counters, active-body written progress, the
+records in flight (passed to the socket, callbacks not yet run) with the oldest
+one's kind, and monotonic queue/callback ages. A written prefix remains retained
+until the body's final record completes. These callbacks measure local socket
+writes, not peer receipt. `attemptedSource` identifies the response's
+originating request kind and routing identifiers when it matches the serialized
+dispatch; unsolicited pushes carry their own routing identifiers. Unmatched
+responses are explicitly unattributed. Identifiers are truncated to 256
+characters; message kinds to 64.
 
 `history` retains sixteen enqueue/high-water/callback/recovery observations. At
 2 MiB retained output, one Node `setImmediate` marker records an event-loop
-opportunity. It is canceled at recovery to 1 MiB or on close. `eventLoop`
-reports whether the marker ran and its delay, or is null outside a high-water
-episode. Recording introduces no waits or admission changes. Only the failure
-audit emits these observations; a low socket counter alone cannot distinguish an
-outstanding blocked write from a callback that has not had an opportunity to
-run.
+opportunity. It is canceled at recovery to 1 MiB or on close. The high-water
+episode is a fixed diagnostic marker, independent of the dispatch high and low
+marks. `eventLoop` reports whether the marker ran and its delay, or is null
+outside a high-water episode. Recording introduces no waits or admission
+changes. Only the failure audit emits these observations; a low socket counter
+alone cannot distinguish an outstanding blocked write from a callback that has
+not had an opportunity to run.
 
 Failure-only `messageSizes` measures result fields and sync
 documents/schema-table entries using the canonical Memory encoder. It keeps

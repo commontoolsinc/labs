@@ -3,7 +3,7 @@
  * proof control; single-use ticketed sockets carry one client's Memory data.
  */
 
-// deno-lint-ignore no-external-import -- Request pacing and diagnostics use Node's immediate queue.
+// deno-lint-ignore no-external-import -- The diagnostics' event-loop markers use Node's immediate queue.
 import { clearImmediate, setImmediate } from "node:timers";
 
 // @ts-types="@types/ws"
@@ -253,10 +253,10 @@ export class RoutedControlDiagnostics {
 
 /** Socket-owned work, independent of the closing handshake's completion. */
 type DataSocketLifecycle = {
-  /** Cancels request pacing and releases the incomplete input reservation. */
+  /** Releases a dispatch held at the high mark and the incomplete input reservation. */
   cancel(): void;
 
-  /** Input bytes reserved by assembly and queued or active request turns. */
+  /** Input bytes reserved by assembly and queued or active requests. */
   readonly pendingBytes: number;
 
   /** Reserved bytes belonging to the incomplete logical input body. */
@@ -271,10 +271,13 @@ type DataSocketLifecycle = {
   /** Logical output bytes retained by the sender. */
   readonly outputBytes: number;
 
-  /** Scheduled request opportunity, when one is waiting to run. */
-  readonly requestTurn: ReturnType<typeof setImmediate> | undefined;
+  /**
+   * Whether retained output reached the high mark and has not yet fallen
+   * below the low mark, holding reads of new requests and their dispatch.
+   */
+  readonly outputPaused: boolean;
 
-  /** Completion of all request turns queued at the time of the read. */
+  /** Completion of all requests queued at the time of the read. */
   readonly settled: Promise<void>;
 };
 
@@ -818,8 +821,13 @@ export interface RoutedHostLimits {
    * being sent. A message sent while nothing is queued is admitted up to
    * `ROUTED_RAW_LIMIT` (8 MiB) regardless, since the router forwards a
    * response of that size and the SDK accepts it; this bound decides what
-   * may queue behind other output. `null` disables the queued-output bound;
-   * the 8 MiB ceiling on one message always holds. At most `ROUTED_RAW_LIMIT`.
+   * may queue behind other output. Retained output at half this bound pauses
+   * reads of new requests and their dispatch, released when retained output
+   * falls below a quarter of it, so a slow reader is back-pressured before a
+   * response can exceed the bound; a message that would take retained output
+   * past the bound is still refused as `queued-output`. `null` disables the
+   * queued-output bound and leaves the 8 MiB ceiling in its place for the
+   * marks; the ceiling on one message always holds. At most `ROUTED_RAW_LIMIT`.
    */
   outputBytesPerSocket: number | null;
 }
@@ -1129,7 +1137,7 @@ export class RoutedMemoryHost {
     this.#options = options;
   }
 
-  /** Quota accounting and socket-owned work for checking cleanup and pacing. */
+  /** Quota accounting and socket-owned work for checking cleanup and output holds. */
   get accessForTestingOnly(): {
     readonly routerTotals: ReadonlyMap<string, Totals>;
     readonly principalTotals: ReadonlyMap<string, Totals>;
@@ -1959,25 +1967,17 @@ export class RoutedMemoryHost {
         : undefined;
     const closes = new Map<string, string>();
     let chain = Promise.resolve();
-    let requestTurn: {
-      /** The single event-loop opportunity held by the active request. */
-      handle: ReturnType<typeof setImmediate>;
-
-      /** Releases the request chain when the opportunity runs or is canceled. */
-      resolve: () => void;
-    } | undefined;
-
-    /** Gives socket callbacks and other contexts a turn between requests. */
-    const yieldRequestTurn = (): Promise<void> =>
-      new Promise((resolve) => {
-        requestTurn = {
-          handle: setImmediate(() => {
-            requestTurn = undefined;
-            resolve();
-          }),
-          resolve,
-        };
-      });
+    // Retained output pauses reads of new requests and their dispatch at the
+    // high mark, half the socket's queued-output bound (half the 8 MiB message
+    // ceiling when that bound is disabled), and releases both below the low
+    // mark, a quarter of it. A slow but live reader is back-pressured first;
+    // the bound's `queued-output` refusal is reached only by a message that
+    // would take retained output past the bound itself.
+    const outputHighMark =
+      (this.#limits.outputBytesPerSocket ?? ROUTED_RAW_LIMIT) / 2;
+    const outputLowMark = outputHighMark / 2;
+    let outputPaused = false;
+    let outputResumed: PromiseWithResolvers<boolean> | undefined;
 
     const nonce = crypto.getRandomValues(new Uint8Array(32));
     const issued = this.#now();
@@ -2004,11 +2004,9 @@ export class RoutedMemoryHost {
       waitingHeader = undefined;
       admissionWriting = false;
       clearTimeout(deadline);
-      if (requestTurn !== undefined) {
-        clearImmediate(requestTurn.handle);
-        requestTurn.resolve();
-        requestTurn = undefined;
-      }
+      outputPaused = false;
+      outputResumed?.resolve(false);
+      outputResumed = undefined;
       incoming.close();
       // Completed frames release their own reservations in the chain finalizer.
       // Only the incomplete body's reservation still belongs to the assembler.
@@ -2049,7 +2047,10 @@ export class RoutedMemoryHost {
             event,
             event === "enqueue" ? enqueueSource : undefined,
           );
-          if (event === "enqueue" || event === "complete") updateReadFlow();
+          if (event === "enqueue" || event === "complete") {
+            updateOutputFlow();
+            updateReadFlow();
+          }
         },
       },
     );
@@ -2059,14 +2060,35 @@ export class RoutedMemoryHost {
     );
     let readsPaused = false;
 
-    /** Pauses at body boundaries while request dispatch waits for drained output. */
+    /** Latches the watermark state from the sender's retained bytes. */
+    const updateOutputFlow = (): void => {
+      const bytes = outgoing.bufferedBytes;
+      if (!outputPaused && bytes >= outputHighMark) {
+        outputPaused = true;
+      } else if (outputPaused && bytes < outputLowMark) {
+        outputPaused = false;
+        outputResumed?.resolve(true);
+        outputResumed = undefined;
+      }
+    };
+
+    /** Holds the request chain while retained output is at the high mark. */
+    const awaitOutputCapacity = async (): Promise<void> => {
+      while (!failed && outputPaused) {
+        outputResumed ??= Promise.withResolvers<boolean>();
+        requireRouted(await outputResumed.promise);
+      }
+    };
+
+    /** Pauses at body boundaries while retained output holds request dispatch. */
     const updateReadFlow = (): void => {
       if (failed || socket.readyState !== WebSocket.OPEN) return;
-      // Any retained output stops the next request; zero bytes releases it.
-      // Finish an admitted input body before pausing, including buffered records
-      // delivered by ws after pause. Its reservation still obeys the hard cap.
+      // Output at the high mark stops the next request until it falls below
+      // the low mark. Finish an admitted input body before pausing, including
+      // buffered records delivered by ws after pause. Its reservation still
+      // obeys the hard cap.
       const pause = waitingHeader !== undefined || admissionWriting ||
-        outgoing.bufferedBytes > 0 && !incoming.receiving;
+        outputPaused && !incoming.receiving;
       if (pause === readsPaused) return;
       readsPaused = pause;
       if (pause) socket.pause();
@@ -2112,8 +2134,8 @@ export class RoutedMemoryHost {
       get outputBytes() {
         return outgoing.bufferedBytes;
       },
-      get requestTurn() {
-        return requestTurn?.handle;
+      get outputPaused() {
+        return outputPaused;
       },
       get settled() {
         return chain;
@@ -2344,9 +2366,7 @@ export class RoutedMemoryHost {
         if (failed) return;
         // Only the active chain entry waits. Queued frames retain their input
         // reservation, and unsolicited pushes retain hard output admission.
-        while (!failed && outgoing.bufferedBytes > 0) {
-          requireRouted(await outgoing.drain());
-        }
+        if (outputPaused) await awaitOutputCapacity();
         requireRouted(
           !failed && socket.readyState === WebSocket.OPEN && !this.#closed,
         );
@@ -2748,9 +2768,7 @@ export class RoutedMemoryHost {
           error.reason,
         );
         try {
-          while (!failed && outgoing.bufferedBytes > 0) {
-            requireRouted(await outgoing.drain());
-          }
+          if (outputPaused) await awaitOutputCapacity();
           requireRouted(!failed && socket.readyState === WebSocket.OPEN);
           send({
             type: "response",
@@ -2769,9 +2787,6 @@ export class RoutedMemoryHost {
         pendingBytes -= frameBytes;
         admitHeader();
         updateReadFlow();
-        if (!failed && socket.readyState === WebSocket.OPEN) {
-          return yieldRequestTurn();
-        }
       });
     });
   }

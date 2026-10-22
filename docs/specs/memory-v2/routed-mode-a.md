@@ -419,11 +419,11 @@ The endpoint sender has one grant slot, holding at most one grant, serialized
 with response-record writes. A grant may appear between private response
 records; the router intercepts it before response assembly and public-output ownership
 checks, never forwarding it to the public client. Sending or completing a grant
-does not release retained logical response-body bytes or complete a response's
-output-drain wait. A response already owning public output can finish while an
-upload waits for admission. A blocked public downstream may delay a grant: the
-router keeps public output owned by one response at a time and does not read
-arbitrarily ahead to find one.
+does not release retained logical response-body bytes or change the retained
+output that holds request dispatch at the high mark. A response already owning
+public output can finish while an upload waits for admission. A blocked public
+downstream may delay a grant: the router keeps public output owned by one
+response at a time and does not read arbitrarily ahead to find one.
 
 A wrong or reused ordinal, duplicate or unsolicited grant, mismatched byte
 count, malformed record, second waiting header, or body/end record received
@@ -444,30 +444,46 @@ bound. A message sent to a socket holding nothing is admitted up to 8 MiB, the
 router's response-header limit and the SDK's frame limit, and written as the
 usual 32 KiB records; no message over 8 MiB is sent on any socket. A refusal
 closes the socket with an `output-limit` verdict classified `single-message`
-(over 8 MiB) or `queued-output`. Toolshed output waits for each record's
-socket write callback. Negotiated public uploads wait for the peer's byte credit
-before each record. Browser output also checks the native `bufferedAmount`
-against a 4 MiB cap when streaming without credit; exhaustion terminates the
-connection rather than polling for drain. Session-open and watch-mutation
-control messages require full router parsing; ordinary streamed requests and
-private responses do not.
+(over 8 MiB) or `queued-output`. Toolshed output passes records to the socket,
+in order, while the record bytes awaiting write callbacks are below a 256 KiB
+send window (`ROUTER_SEND_WINDOW_BYTES`, local to the toolshed), and resumes
+from the callback that brings them back under it; an admission grant may go out
+between any two records. Negotiated public uploads wait for the peer's byte
+credit before each record. Browser output also checks the native
+`bufferedAmount` against a 4 MiB cap when streaming without credit; exhaustion
+terminates the connection rather than polling for drain. Session-open and
+watch-mutation control messages require full router parsing; ordinary streamed
+requests and private responses do not.
 
-Toolshed request dispatch and decoding, including host refusals, wait until the
-sender retains zero logical output bytes. That wait resolves only after
-the completion-record socket callbacks have released the bodies. One cancellable
-Node `setImmediate` separates completed backend request turns so I/O callbacks
-can run. While output is pending, the input socket pauses at body boundaries;
-an already admitted partial body completes with its assembly reservation held.
-Already-buffered receiver events remain subject to the hard input bounds. Close
-cancels both the output wait and the scheduled turn. This pacing covers
-request-driven production. Unsolicited effects, presence and revocation remain
-output producers under the same 4 MiB cap, which close the connection on output
-exhaustion.
+Toolshed request dispatch and decoding, including host refusals, continue while
+the sender's retained logical output is below a high mark: half of
+`limits.outputBytesPerSocket` when set, else half the 8 MiB message ceiling. At
+or above the high mark the input socket pauses at body boundaries and the next
+request is neither decoded nor dispatched; both resume once retained output
+falls below the low mark, a quarter of the bound. Retained output falls only as
+completion-record socket callbacks release bodies. An already admitted partial
+body completes with its assembly reservation held, and already-buffered
+receiver events remain subject to the hard input bounds. Close cancels the
+wait. No event-loop turn separates requests; as on the direct path, the
+requests ws delivers from one receive chunk dispatch back to back when their
+handling is microtask-only. The output bound closes the socket as before,
+whatever the mark state: a message that would exceed
+`limits.outputBytesPerSocket` behind retained output is refused as
+`queued-output`, and one over 8 MiB as `single-message`. A slow but live reader
+is therefore back-pressured first, and the refusal is reached only by a message
+that would take retained output past the bound itself; a reader that stops
+acknowledging sits paused with retained output under the bound (under 1.5 times
+the ceiling with the bound disabled, since the response that crosses the mark
+is already admitted). Either way the toolshed's memory for the socket is
+bounded. Unsolicited effects, presence and
+revocation remain output producers under the same cap, which close the
+connection on output exhaustion.
 
-Whole-envelope forwarding also drains one record at a time. A blocked private
-socket retains one body cursor and pauses public reads and held-request dispatch
-until writable readiness resumes it. This preserves admission at the logical
-message's byte limit while socket buffers grow by one record at a time.
+Whole-envelope forwarding in the router drains one record at a time. A blocked
+private socket retains one body cursor and pauses public reads and held-request
+dispatch until writable readiness resumes it. This preserves admission at the
+logical message's byte limit while the router's socket buffers grow by one
+record at a time.
 
 The router accepts the toolshed's `serverExecution` flag but omits it from
 the client handshake. Execution posture is therefore unknown on a routed
@@ -702,10 +718,13 @@ failed send, before socket accounting can change during close:
   sender; omitted for binary control records and data greetings.
 - `diagnostics`: for structured data output, separate socket and retained-body
   bytes, queue depth, lifetime body/record counters, active-body written progress,
-  queue/callback ages, and source attribution. Its sixteen-entry history
-  records enqueues and high-water progress without payloads. At 2 MiB retained
-  output a single `setImmediate` marker measures event-loop opportunity; recovery
-  to 1 MiB or close cancels it. It changes neither admission nor write scheduling.
+  records passed to the socket whose callbacks have not run, queue/callback
+  ages, and source attribution. Its sixteen-entry history records enqueues and
+  high-water progress without payloads. At 2 MiB retained output a single
+  `setImmediate` marker measures event-loop opportunity; recovery to 1 MiB or
+  close cancels it. The high-water episode is a fixed diagnostic marker,
+  independent of the dispatch high and low marks above. It changes neither
+  admission nor write scheduling.
   Failure-only canonical size measurements retain eight result fields, documents
   and schema-table entries per category, with explicit scan bounds and truncation.
   The [memory package diagnostics reference](../../../packages/memory/README.md#routed-transport-and-quotas)

@@ -58,14 +58,15 @@ import {
 import {
   decodeRouterAdmission,
   decodeRouterHeader,
+  decodeRouterRecord,
   encodeRouterHeader,
   isRouterAdmission,
+  ROUTER_SEND_WINDOW_BYTES,
   RouterAssembler,
   type RouterHeader,
   routerRecord,
   routerRecords,
   routerRoute,
-  RouterSender,
 } from "../v2/router-protocol.ts";
 import { Server } from "../v2/server.ts";
 import { resolveSpaceStoreUrl } from "../v2/storage-path.ts";
@@ -2786,15 +2787,26 @@ Deno.test("a slow private reader exhausts only its bounded output context", asyn
   }
 });
 
+/** A response whose encoded frame is exactly `bytes` long. */
+function sizedResponse(requestId: string, bytes: number): ServerMessage {
+  const base = encodeMemoryBoundary({ type: "response", requestId, ok: "" });
+  return {
+    type: "response",
+    requestId,
+    ok: "x".repeat(bytes - new TextEncoder().encode(base).length),
+  };
+}
+
 /** Creates a routed connection whose request producer is controlled by a test. */
-async function pacingFixture(
+async function routedRequestFixture(
   name: string,
   handle: (
     requestId: string,
     send: (message: ServerMessage) => void,
   ) => void | Promise<void>,
+  limits?: Partial<RoutedHostLimits>,
 ) {
-  const f = await fixture(name);
+  const f = await fixture(name, { limits });
   const disposables = new DisposableStack();
   const handled: string[] = [];
   const connect = f.server.connectRouted.bind(f.server);
@@ -3518,7 +3530,7 @@ describe("private request credits", () => {
     it(`rejects an extra \`${next}\` while a declaration waits for capacity`, async () => {
       const entered = Promise.withResolvers<void>();
       const release = Promise.withResolvers<void>();
-      const f = await pacingFixture(`input-wait-${next}`, async () => {
+      const f = await routedRequestFixture(`input-wait-${next}`, async () => {
         entered.resolve();
         await release.promise;
       });
@@ -3596,7 +3608,7 @@ describe("private request credits", () => {
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
     const second = Promise.withResolvers<void>();
-    const f = await pacingFixture("input-capacity", async (id) => {
+    const f = await routedRequestFixture("input-capacity", async (id) => {
       if (id === "first") {
         entered.resolve();
         await release.promise;
@@ -3649,7 +3661,7 @@ describe("private request credits", () => {
     ] as const
   ) {
     it(`releases the reserved body on \`${ending}\` while its admission write is pending`, async () => {
-      const f = await pacingFixture(`input-${ending}`, () => {});
+      const f = await routedRequestFixture(`input-${ending}`, () => {});
       let done: ((error?: Error) => void) | undefined;
       using _send = stub(
         f.socket,
@@ -3693,7 +3705,10 @@ describe("private request credits", () => {
 
   for (const ordinal of [undefined, 1, 3, Number.MAX_SAFE_INTEGER + 1]) {
     it(`rejects a second equal-sized request with ordinal \`${ordinal}\``, async () => {
-      const f = await pacingFixture(`input-ordinal-${ordinal}`, () => {});
+      const f = await routedRequestFixture(
+        `input-ordinal-${ordinal}`,
+        () => {},
+      );
       try {
         const payload = f.request("first");
         await f.socket.receive(payload);
@@ -3722,7 +3737,7 @@ describe("private request credits", () => {
   it("cancels an unallocated waiting header when the local context closes", async () => {
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
-    const f = await pacingFixture("input-wait-close", async () => {
+    const f = await routedRequestFixture("input-wait-close", async () => {
       entered.resolve();
       await release.promise;
     });
@@ -3761,55 +3776,228 @@ describe("private request credits", () => {
   });
 });
 
-describe("routed request pacing", () => {
-  it("stops backend production until the entire output body completes and resumes reads", async () => {
-    const first = Promise.withResolvers<void>();
+describe("routed output high and low marks", () => {
+  /** The output bound these tests configure; the marks are half and a quarter of it. */
+  const BOUND = 256 * 1024;
+  const HIGH = BOUND / 2;
+  const LOW = HIGH / 2;
+
+  it("decodes and dispatches the next request while a large response to the previous one is still draining", async () => {
     const second = Promise.withResolvers<void>();
-    const produce = Promise.withResolvers<void>();
-    const f = await pacingFixture("paced-drain", async (requestId, send) => {
-      await produce.promise;
+    const f = await routedRequestFixture("flow-duplex", (requestId, send) => {
       send({ type: "response", requestId, ok: "x".repeat(150000) });
-      (requestId === "first" ? first : second).resolve();
+      if (requestId === "second") second.resolve();
+    });
+    const callbacks: (() => void)[] = [];
+    const send = f.socket.send.bind(f.socket);
+    using _send = stubOutput(f.socket, (bytes, done) => {
+      assert(done);
+      // The peer assembles the records but acknowledges none of them.
+      send(bytes);
+      callbacks.push(done);
+    });
+    try {
+      const state = f.host.accessForTestingOnly.dataSocket(
+        f.socket as unknown as WebSocket,
+      )!;
+      f.socket.receive(f.request("first"));
+      f.socket.receive(f.request("second"));
+      await second.promise;
+      expect(f.handled).toEqual(["first", "second"]);
+      expect(f.socket.isPaused).toBe(false);
+      expect(state.outputPaused).toBe(false);
+      expect(state.outputBytes).toBeGreaterThan(2 * 150000);
+      // Both responses exceed the send window together; acknowledging the
+      // records passes the rest on, in order.
+      while (callbacks.length) callbacks.shift()!();
+      expect(state.outputBytes).toBe(0);
+      for (const requestId of ["first", "second"]) {
+        expect(
+          decodeRoutedFrame(await f.socket.take(), true, FRAME_SLOTS).body
+            .requestId,
+        ).toBe(requestId);
+      }
+      expect(f.socket.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("pauses reads and dispatch at the high mark, not below it, and resumes both below the low mark", async () => {
+    const f = await routedRequestFixture(
+      "flow-watermarks",
+      (requestId, send) => {
+        send(sizedResponse(requestId, HIGH / 4));
+      },
+      { outputBytesPerSocket: BOUND },
+    );
+    const callbacks: (() => void)[] = [];
+    using _send = stubOutput(f.socket, (_bytes, done) => {
+      assert(done);
+      callbacks.push(done);
+    });
+    try {
+      const state = f.host.accessForTestingOnly.dataSocket(
+        f.socket as unknown as WebSocket,
+      )!;
+      /** Acknowledges records until one more body has been released. */
+      const completeBody = () => {
+        const before = state.outputBytes;
+        while (state.outputBytes === before) callbacks.shift()!();
+      };
+      for (let i = 0; i < 3; i++) await f.socket.receive(f.request(`r${i}`));
+      await state.settled;
+      expect(f.handled).toEqual(["r0", "r1", "r2"]);
+      expect(state.outputBytes).toBe(3 * HIGH / 4);
+      expect(state.outputPaused).toBe(false);
+      expect(f.socket.isPaused).toBe(false);
+      await f.socket.receive(f.request("r3"));
+      await state.settled;
+      expect(f.handled).toEqual(["r0", "r1", "r2", "r3"]);
+      expect(state.outputBytes).toBe(HIGH);
+      expect(state.outputPaused).toBe(true);
+      expect(f.socket.isPaused).toBe(true);
+      // A request the peer had already sent is read but held.
+      await f.socket.receive(f.request("r4"));
+      await setImmediate();
+      expect(f.handled).toHaveLength(4);
+      completeBody();
+      await setImmediate();
+      expect(state.outputBytes).toBe(3 * HIGH / 4);
+      expect(state.outputPaused).toBe(true);
+      expect(f.socket.isPaused).toBe(true);
+      expect(f.handled).toHaveLength(4);
+      completeBody();
+      await setImmediate();
+      // At the low mark the hold remains; below it both are released.
+      expect(state.outputBytes).toBe(LOW);
+      expect(state.outputPaused).toBe(true);
+      expect(f.socket.isPaused).toBe(true);
+      expect(f.handled).toHaveLength(4);
+      completeBody();
+      await state.settled;
+      expect(state.outputPaused).toBe(false);
+      expect(f.socket.isPaused).toBe(false);
+      expect(f.handled).toEqual(["r0", "r1", "r2", "r3", "r4"]);
+      expect(state.outputBytes).toBe(LOW);
+      while (callbacks.length) callbacks.shift()!();
+      expect(state.outputBytes).toBe(0);
+      expect(f.socket.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("pauses a stalled reader at half the bound and refuses only a message that would take retained output past the bound", async () => {
+    const f = await routedRequestFixture(
+      "flow-slow-reader",
+      (requestId, send) => {
+        send(
+          sizedResponse(requestId, requestId === "r3" ? 220 * 1024 : 48 * 1024),
+        );
+      },
+      { outputBytesPerSocket: BOUND },
+    );
+    const lines: string[] = [];
+    using _info = stub(console, "info", (line: unknown) => {
+      lines.push(String(line));
     });
     const callbacks: (() => void)[] = [];
     using _send = stubOutput(f.socket, (_bytes, done) => {
       assert(done);
       callbacks.push(done);
     });
-    const resume = spy(f.socket, "resume");
     try {
-      // The burst arrives in the receiver's buffered batch despite read pausing.
-      f.socket.receive(f.request("first"));
-      f.socket.receive(f.request("second"));
-      for (let i = 0; i < 30; i++) {
-        await f.socket.receive(f.request(`queued-${i}`));
+      const state = f.host.accessForTestingOnly.dataSocket(
+        f.socket as unknown as WebSocket,
+      )!;
+      /** Acknowledges records until one more body has been released. */
+      const completeBody = () => {
+        const before = state.outputBytes;
+        while (state.outputBytes === before) callbacks.shift()!();
+      };
+      // Three 48 KiB responses reach the 128 KiB high mark while the reader
+      // acknowledges nothing: the fourth request is read but held, nothing is
+      // refused, and the socket stays open with its output bounded.
+      for (let i = 0; i < 4; i++) await f.socket.receive(f.request(`r${i}`));
+      await setImmediate();
+      expect(f.handled).toEqual(["r0", "r1", "r2"]);
+      expect(state.outputBytes).toBe(144 * 1024);
+      expect(state.outputPaused).toBe(true);
+      expect(f.socket.isPaused).toBe(true);
+      expect(f.socket.readyState).toBe(WebSocket.OPEN);
+      // The reader takes two bodies; retained output falls below the low mark
+      // and the held request is dispatched. Its 220 KiB response would take
+      // retained output past the 256 KiB bound, and that is what is refused.
+      completeBody();
+      completeBody();
+      await f.socket.closed.promise;
+      expect(f.handled).toEqual(["r0", "r1", "r2", "r3"]);
+      const closed = lines.map((line) => JSON.parse(line)).filter((entry) =>
+        entry.verdict === "context-closed"
+      );
+      expect(closed).toHaveLength(1);
+      expect(closed[0].reason).toBe("output-limit");
+      expect(closed[0].outputLimit).toMatchObject({
+        frameBytes: 220 * 1024,
+        bufferedBytes: 48 * 1024,
+        limitBytes: BOUND,
+        endpoint: "data",
+        classification: "queued-output",
+      });
+      // The control link, and with it every other connection, goes on.
+      expect(f.link.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("sends the admission grant between the records of a draining response and dispatches the admitted body", async () => {
+    const produced = Promise.withResolvers<void>();
+    const second = Promise.withResolvers<void>();
+    const f = await routedRequestFixture("flow-grant", (requestId, send) => {
+      send({ type: "response", requestId, ok: "x".repeat(1024 * 1024) });
+      (requestId === "first" ? produced : second).resolve();
+    });
+    const order: string[] = [];
+    const callbacks: (() => void)[] = [];
+    const send = f.socket.send.bind(f.socket);
+    using _send = stub(f.socket, "send", (bytes, done) => {
+      assert(bytes instanceof Uint8Array && done);
+      if (isRouterAdmission(bytes)) {
+        order.push("grant");
+        send(bytes, done);
+        return;
       }
-      const resumed = resume.calls.length;
-      produce.resolve();
-      await first.promise;
-      await setImmediate();
-      expect(f.handled).toEqual(["first"]);
-      expect(f.socket.isPaused).toBe(true);
-      expect(callbacks).toHaveLength(1);
-      callbacks.shift()!();
-      await setImmediate();
-      expect(f.handled).toEqual(["first"]);
-      expect(f.socket.isPaused).toBe(true);
-      // Five data records follow the header, then the completion record.
-      for (let i = 0; i < 5; i++) callbacks.shift()!();
-      await setImmediate();
-      expect(f.handled).toEqual(["first"]);
-      expect(resume.calls).toHaveLength(resumed);
-      callbacks.shift()!();
+      order.push(String(decodeRouterRecord(bytes).kind));
+      callbacks.push(done);
+    });
+    try {
+      f.socket.receive(f.request("first"));
+      await produced.promise;
+      // The first request's own grant preceded its response, which fills the
+      // send window; the response's remaining records wait.
+      expect(order.shift()).toBe("grant");
+      const pipelined = callbacks.length;
+      expect(order).toEqual(["0", ...Array<string>(pipelined - 1).fill("1")]);
+      const payload = f.request("second");
+      const route = decodeRoutedFrame(payload, true, FRAME_SLOTS).body;
+      const records = [...routerRecords(routerRoute(route), payload)];
+      const admitted = f.socket.header(decodeRouterHeader(records[0]));
+      expect(order).not.toContain("grant");
+      while (!order.includes("grant")) callbacks.shift()!();
+      // The grant is the first record passed to the socket after the header
+      // arrived, ahead of the response's remaining records.
+      expect(order.indexOf("grant")).toBe(pipelined);
+      await admitted;
+      for (const record of records.slice(1)) f.socket.deliver(record);
       await second.promise;
       expect(f.handled).toEqual(["first", "second"]);
-      expect(resume.calls).toHaveLength(resumed + 1);
-      expect(f.socket.readyState).toBe(WebSocket.OPEN);
+      expect(order.slice(0, pipelined)).not.toContain("2");
       while (callbacks.length) callbacks.shift()!();
-      expect(f.socket.isPaused).toBe(false);
+      expect(order.filter((kind) => kind === "2")).toHaveLength(2);
+      expect(f.socket.readyState).toBe(WebSocket.OPEN);
     } finally {
-      produce.resolve();
-      resume.restore();
       await f.close();
     }
   });
@@ -3818,12 +4006,16 @@ describe("routed request pacing", () => {
     const entered = Promise.withResolvers<void>();
     const produce = Promise.withResolvers<void>();
     const produced = Promise.withResolvers<void>();
-    const f = await pacingFixture("paced-partial", async (requestId, send) => {
-      entered.resolve();
-      await produce.promise;
-      send({ type: "response", requestId, ok: {} });
-      produced.resolve();
-    });
+    const f = await routedRequestFixture(
+      "flow-partial",
+      async (requestId, send) => {
+        entered.resolve();
+        await produce.promise;
+        send(sizedResponse(requestId, HIGH));
+        produced.resolve();
+      },
+      { outputBytesPerSocket: BOUND },
+    );
     using _send = stubOutput(f.socket, () => {});
     try {
       f.socket.receive(f.request("first"));
@@ -3847,21 +4039,26 @@ describe("routed request pacing", () => {
     }
   });
 
-  it("gives an independent immediate a turn between microtask-only backend receives", async () => {
-    const first = Promise.withResolvers<void>();
+  it("dispatches a burst of microtask-only requests without an event-loop turn between them", async () => {
     const last = Promise.withResolvers<void>();
-    const f = await pacingFixture("paced-turn", async (requestId, send) => {
-      await Promise.resolve();
-      send({ type: "response", requestId, ok: {} });
-      if (requestId === "0") first.resolve();
-      if (requestId === "31") last.resolve();
-    });
+    const f = await routedRequestFixture(
+      "flow-burst",
+      async (requestId, send) => {
+        await Promise.resolve();
+        send({ type: "response", requestId, ok: {} });
+        if (requestId === "31") last.resolve();
+      },
+    );
     try {
       for (let i = 0; i < 32; i++) f.socket.receive(f.request(String(i)));
-      await first.promise;
-      await setImmediate();
-      expect(f.handled).toEqual(["0"]);
-      await last.promise;
+      // Every request is admitted, dispatched and answered before the next
+      // event-loop turn; no turn separates them.
+      expect(
+        await Promise.race([
+          last.promise.then(() => true),
+          setImmediate().then(() => false),
+        ]),
+      ).toBe(true);
       expect(f.handled).toHaveLength(32);
       expect(f.socket.readyState).toBe(WebSocket.OPEN);
     } finally {
@@ -3869,15 +4066,16 @@ describe("routed request pacing", () => {
     }
   });
 
-  it("resumes a buffered header arriving after pause and dispatches its body once after output drains", async () => {
+  it("resumes a buffered header arriving after pause and dispatches its body once below the low mark", async () => {
     const first = Promise.withResolvers<void>();
     const second = Promise.withResolvers<void>();
-    const f = await pacingFixture(
-      "paced-buffered-header",
+    const f = await routedRequestFixture(
+      "flow-buffered-header",
       (requestId, send) => {
-        send({ type: "response", requestId, ok: {} });
+        send(sizedResponse(requestId, HIGH));
         (requestId === "first" ? first : second).resolve();
       },
+      { outputBytesPerSocket: BOUND },
     );
     const callbacks: (() => void)[] = [];
     using _send = stubOutput(f.socket, (_bytes, done) => {
@@ -3898,7 +4096,7 @@ describe("routed request pacing", () => {
       const admitted = f.socket.header(decodeRouterHeader(records[0]));
       expect(f.socket.isPaused).toBe(true);
       expect(resume.calls).toHaveLength(resumed);
-      callbacks.shift()!();
+      // The grant needs no response callback: the window has room.
       await admitted;
       expect(resume.calls).toHaveLength(resumed + 1);
       expect(f.socket.isPaused).toBe(false);
@@ -3927,55 +4125,6 @@ describe("routed request pacing", () => {
     }
   });
 
-  it("cancels the actual pending immediate and settles the request chain before a terminal socket event", async () => {
-    const produced = Promise.withResolvers<void>();
-    const f = await pacingFixture("paced-cancel-turn", (requestId, send) => {
-      send({ type: "response", requestId, ok: {} });
-      produced.resolve();
-    });
-    const finishClose = f.socket.close.bind(f.socket);
-    using _close = stub(f.socket, "close", () => {
-      f.socket.readyState = WebSocket.CLOSING;
-    });
-    try {
-      const state = f.host.accessForTestingOnly.dataSocket(
-        f.socket as unknown as WebSocket,
-      );
-      assert(state);
-      f.socket.receive(f.request("first"));
-      f.socket.receive(f.request("second"));
-      await produced.promise;
-      // This immediate is registered before the first request's finalizer
-      // schedules its own. Its continuation can close that still-pending turn.
-      await setImmediate();
-      const handle = state.requestTurn;
-      assert(handle);
-      expect(handle.hasRef()).toBe(true);
-      expect(state.pendingBytes).toBeGreaterThan(0);
-      const settled = state.settled;
-      f.host.close();
-      expect(f.socket.readyState).toBe(WebSocket.CLOSING);
-      expect(handle.hasRef()).toBe(false);
-      expect(state.requestTurn).toBeUndefined();
-      // Cancellation must also resolve the promise owning the queued requests.
-      // A later event-loop opportunity is a progress barrier, not a time bound.
-      expect(
-        await Promise.race([
-          settled.then(() => true),
-          setImmediate().then(() => false),
-        ]),
-      ).toBe(true);
-      expect(state.pendingBytes).toBe(0);
-      expect(state.outputBytes).toBe(0);
-      expect(state.requestTurn).toBeUndefined();
-      expect(f.handled).toEqual(["first"]);
-      expect(f.socket.readyState).toBe(WebSocket.CLOSING);
-    } finally {
-      finishClose();
-      await f.close();
-    }
-  });
-
   for (
     const closing of [
       "shutdown",
@@ -3984,22 +4133,15 @@ describe("routed request pacing", () => {
       "replacement",
     ] as const
   ) {
-    it(`releases drain and input reservations on local \`${closing}\` while the socket remains closing`, async () => {
-      const waiting = Promise.withResolvers<void>();
-      const drain = RouterSender.prototype.drain;
-      let drained: Promise<boolean> | undefined;
-      using _drain = stub(RouterSender.prototype, "drain", function () {
-        drained = drain.call(this);
-        waiting.resolve();
-        return drained;
-      });
+    it(`releases the output hold and input reservations on local \`${closing}\` while the socket remains closing`, async () => {
       const produce = Promise.withResolvers<void>();
-      const f = await pacingFixture(
-        `paced-local-${closing}`,
+      const f = await routedRequestFixture(
+        `flow-local-${closing}`,
         async (requestId, send) => {
           await produce.promise;
-          send({ type: "response", requestId, ok: {} });
+          send(sizedResponse(requestId, HIGH));
         },
+        { outputBytesPerSocket: BOUND },
       );
       let done: (() => void) | undefined;
       using _send = stubOutput(
@@ -4023,8 +4165,10 @@ describe("routed request pacing", () => {
           binary: true,
         });
         produce.resolve();
-        await waiting.promise;
-        expect(state.outputBytes).toBeGreaterThan(0);
+        await setImmediate();
+        expect(f.handled).toEqual(["first"]);
+        expect(state.outputBytes).toBe(HIGH);
+        expect(state.outputPaused).toBe(true);
         const queuedBytes = state.pendingBytes - 100;
         expect(queuedBytes).toBeGreaterThan(0);
         expect(state.assemblingBytes).toBe(100);
@@ -4055,8 +4199,10 @@ describe("routed request pacing", () => {
         expect(f.socket.readyState).toBe(WebSocket.CLOSING);
         expect(state.assemblingBytes).toBe(0);
         expect(state.outputBytes).toBe(0);
-        assert(drained);
-        expect(await drained).toBe(false);
+        expect(state.outputPaused).toBe(false);
+        // Cancellation must also resolve the promise owning the queued
+        // requests. A later event-loop opportunity is a progress barrier,
+        // not a time bound.
         expect(
           await Promise.race([
             settled.then(() => true),
@@ -4064,7 +4210,6 @@ describe("routed request pacing", () => {
           ]),
         ).toBe(true);
         expect(state.pendingBytes).toBe(0);
-        expect(state.requestTurn).toBeUndefined();
         done!();
         expect(state.pendingBytes).toBe(0);
         expect(f.handled).toEqual(["first"]);
@@ -4078,33 +4223,32 @@ describe("routed request pacing", () => {
   }
 
   for (const ending of ["close", "error", "callback-error"] as const) {
-    it(`cancels blocked request dispatch on \`${ending}\``, async () => {
+    it(`cancels request dispatch held at the high mark on \`${ending}\``, async () => {
       const produced = Promise.withResolvers<void>();
       const produce = Promise.withResolvers<void>();
-      const waiting = Promise.withResolvers<void>();
-      const drain = RouterSender.prototype.drain;
-      using _drain = stub(RouterSender.prototype, "drain", function () {
-        waiting.resolve();
-        return drain.call(this);
-      });
-      const f = await pacingFixture(
-        `paced-${ending}`,
+      const f = await routedRequestFixture(
+        `flow-${ending}`,
         async (requestId, send) => {
           await produce.promise;
-          send({ type: "response", requestId, ok: {} });
+          send(sizedResponse(requestId, HIGH));
           produced.resolve();
         },
+        { outputBytesPerSocket: BOUND },
       );
       let callback: ((error?: Error) => void) | undefined;
       using _send = stubOutput(f.socket, (_bytes, done) => callback = done);
       using resume = spy(f.socket, "resume");
       try {
+        const state = f.host.accessForTestingOnly.dataSocket(
+          f.socket as unknown as WebSocket,
+        )!;
         f.socket.receive(f.request("first"));
         await f.socket.receive(f.request("second"));
         const resumed = resume.calls.length;
         produce.resolve();
         await produced.promise;
-        await waiting.promise;
+        await setImmediate();
+        expect(state.outputPaused).toBe(true);
         expect(f.socket.isPaused).toBe(true);
         if (ending === "close") f.socket.close();
         else if (ending === "error") f.socket.dispatchEvent(new Event("error"));
@@ -4121,14 +4265,18 @@ describe("routed request pacing", () => {
     });
   }
 
-  it("holds malformed input decoding behind output capacity", async () => {
+  it("holds malformed input decoding while output is at the high mark", async () => {
     const produced = Promise.withResolvers<void>();
     const produce = Promise.withResolvers<void>();
-    const f = await pacingFixture("paced-decode", async (requestId, send) => {
-      await produce.promise;
-      send({ type: "response", requestId, ok: {} });
-      produced.resolve();
-    });
+    const f = await routedRequestFixture(
+      "flow-decode",
+      async (requestId, send) => {
+        await produce.promise;
+        send(sizedResponse(requestId, HIGH));
+        produced.resolve();
+      },
+      { outputBytesPerSocket: BOUND },
+    );
     const callbacks: (() => void)[] = [];
     using _send = stubOutput(f.socket, (_bytes, done) => {
       assert(done);
@@ -4156,10 +4304,10 @@ describe("routed request pacing", () => {
 
   it("resumes paused reads for the closing handshake without dispatching queued requests", async () => {
     const produced = Promise.withResolvers<void>();
-    const f = await pacingFixture("paced-closing", (requestId, send) => {
-      send({ type: "response", requestId, ok: {} });
+    const f = await routedRequestFixture("flow-closing", (requestId, send) => {
+      send(sizedResponse(requestId, HIGH));
       produced.resolve();
-    });
+    }, { outputBytesPerSocket: BOUND });
     using _send = stubOutput(f.socket, () => {});
     const finishClose = f.socket.close.bind(f.socket);
     using _close = stub(f.socket, "close", () => {
@@ -4169,6 +4317,7 @@ describe("routed request pacing", () => {
       f.socket.receive(f.request("first"));
       f.socket.receive(f.request("second"));
       await produced.promise;
+      await setImmediate();
       expect(f.socket.isPaused).toBe(true);
       f.host.close();
       expect(f.socket.readyState).toBe(WebSocket.CLOSING);
@@ -4182,19 +4331,17 @@ describe("routed request pacing", () => {
     }
   });
 
-  it("waits for output before emitting a host authorization refusal", async () => {
+  it("holds a host authorization refusal while output is at the high mark", async () => {
     const produced = Promise.withResolvers<void>();
-    const f = await pacingFixture("paced-refusal", (requestId, send) => {
-      send({ type: "response", requestId, ok: {} });
+    const f = await routedRequestFixture("flow-refusal", (requestId, send) => {
+      send(sizedResponse(requestId, HIGH));
       produced.resolve();
-    });
+    }, { outputBytesPerSocket: BOUND });
     const callbacks: (() => void)[] = [];
-    let writes = 0;
     let hold = true;
     const send = f.socket.send.bind(f.socket);
     using _send = stubOutput(f.socket, (bytes, done) => {
       assert(done);
-      writes++;
       if (hold) {
         send(bytes);
         callbacks.push(done);
@@ -4211,7 +4358,9 @@ describe("routed request pacing", () => {
       }));
       await produced.promise;
       await setImmediate();
-      expect(writes).toBe(1);
+      // The first response has been passed to the socket whole; the refusal
+      // has not.
+      expect(f.socket.output).toHaveLength(1);
       expect(f.handled).toEqual(["first"]);
       hold = false;
       while (callbacks.length) callbacks.shift()!();
@@ -4230,10 +4379,17 @@ describe("routed request pacing", () => {
 
   it("keeps the hard input reservation bound for callbacks arriving after pause", async () => {
     const produced = Promise.withResolvers<void>();
-    const f = await pacingFixture("paced-input-limit", (requestId, send) => {
-      send({ type: "response", requestId, ok: {} });
-      produced.resolve();
-    });
+    // A lone response at the bound, wider than the send window, reaches the
+    // high mark and keeps the next grant waiting.
+    const bound = 2 * ROUTER_SEND_WINDOW_BYTES;
+    const f = await routedRequestFixture(
+      "flow-input-limit",
+      (requestId, send) => {
+        send(sizedResponse(requestId, bound));
+        produced.resolve();
+      },
+      { outputBytesPerSocket: bound },
+    );
     using _send = stubOutput(f.socket, () => {});
     try {
       f.socket.receive(f.request("first"));
@@ -4499,9 +4655,11 @@ describe("routed close diagnostics", () => {
         const socket = await f.dataSocket(await f.issueTicket());
         await socket.take();
         assert(send);
+        const writes: Uint8Array[] = [];
         const callbacks: ((error?: Error) => void)[] = [];
-        using _send = stubOutput(socket, (_bytes, done) => {
-          assert(done);
+        using _send = stubOutput(socket, (bytes, done) => {
+          assert(bytes instanceof Uint8Array && done);
+          writes.push(bytes);
           callbacks.push(done);
         });
         const secret = "private-diagnostic-payload";
@@ -4517,7 +4675,15 @@ describe("routed close diagnostics", () => {
               .length;
           send(message);
         }
-        expect(callbacks).toHaveLength(1);
+        // Records are in flight up to the send window and no further.
+        const inFlight = writes.reduce(
+          (total, record) => total + record.length,
+          0,
+        );
+        expect(inFlight).toBeGreaterThanOrEqual(ROUTER_SEND_WINDOW_BYTES);
+        expect(inFlight - writes.at(-1)!.length).toBeLessThan(
+          ROUTER_SEND_WINDOW_BYTES,
+        );
         if (opportunity === "recovered") {
           while (callbacks.length) callbacks.shift()!();
           await setImmediate();

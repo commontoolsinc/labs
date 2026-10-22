@@ -8,11 +8,13 @@ import {
   decodeRouterRecord,
   encodeRouterAdmission,
   encodeRouterHeader,
+  isRouterAdmission,
   isRouterControl,
   ROUTER_CHUNK_BYTES,
   ROUTER_CHUNK_COUNT,
   ROUTER_HELLO_FRAME_SLOTS_POLICY,
   ROUTER_MAX_REQUEST_ORDINAL,
+  ROUTER_SEND_WINDOW_BYTES,
   ROUTER_UPLOAD_WINDOW,
   RouterAssembler,
   routerRecord,
@@ -22,6 +24,43 @@ import {
 
 describe("router-protocol", () => {
   const route = { type: "response", requestId: "r" };
+
+  /** A sender whose socket records every write and holds its callbacks. */
+  function heldSender(limit: number | null, now?: () => number) {
+    const writes: Uint8Array[] = [];
+    const callbacks: ((error?: Error | null) => void)[] = [];
+    const errors: Error[] = [];
+    let acknowledged = 0;
+    const sender = new RouterSender(
+      (record, done) => {
+        writes.push(record);
+        callbacks.push(done);
+      },
+      (error) => errors.push(error),
+      limit,
+      now === undefined ? {} : { now },
+    );
+    return {
+      sender,
+      writes,
+      callbacks,
+      errors,
+      /** Runs the oldest held callback successfully. */
+      ack: () => {
+        callbacks.shift()!();
+        acknowledged++;
+      },
+      /** Bytes passed to the socket whose callbacks have not run. */
+      inFlight: () =>
+        writes.slice(acknowledged).reduce(
+          (total, record) => total + record.length,
+          0,
+        ),
+      get acknowledged() {
+        return acknowledged;
+      },
+    };
+  }
 
   describe("isRouterControl()", () => {
     it("identifies authentication, negotiation, and watch-admission controls", () => {
@@ -161,78 +200,74 @@ describe("router-protocol", () => {
     expect(() => decodeRouterAdmission(unsafe)).toThrow();
   });
 
-  it("inserts one admission at a response record boundary without releasing body credit", async () => {
-    const writes: Uint8Array[] = [];
-    const callbacks: ((error?: Error | null) => void)[] = [];
-    const sender = new RouterSender(
-      (record, done) => {
-        writes.push(record);
-        callbacks.push(done);
-      },
-      () => {},
-      4 * 1024 * 1024,
-    );
+  it("inserts one admission after the records already passed to the socket without releasing body credit", async () => {
+    const { sender, writes, callbacks } = heldSender(4 * 1024 * 1024);
     sender.send(route, "body");
     const drained = sender.drain();
+    // A small body is passed to the socket whole; the admission follows its
+    // end record and enables input only on its own callback.
+    expect(writes.map((record) => decodeRouterRecord(record).kind)).toEqual([
+      0,
+      1,
+      2,
+    ]);
     let admitted = false;
     sender.sendAdmission(3, 1, () => admitted = true);
-    expect(writes).toHaveLength(1);
-    expect(() => sender.sendAdmission(3, 2, () => {})).toThrow();
-    callbacks.shift()!();
-    expect(decodeRouterAdmission(writes[1])).toEqual({
+    expect(writes).toHaveLength(4);
+    expect(decodeRouterAdmission(writes[3])).toEqual({
       bytes: 3,
       requestOrdinal: 1,
     });
+    expect(() => sender.sendAdmission(3, 2, () => {})).toThrow();
     expect(sender.bufferedBytes).toBe(4);
+    for (let i = 0; i < 3; i++) callbacks.shift()!();
     expect(admitted).toBe(false);
+    expect(await drained).toBe(true);
+    expect(sender.bufferedBytes).toBe(0);
     callbacks.shift()!();
     expect(admitted).toBe(true);
-    expect(sender.bufferedBytes).toBe(4);
-    expect(decodeRouterRecord(writes[2]).kind).toBe(1);
-    callbacks.shift()!();
-    callbacks.shift()!();
-    expect(await drained).toBe(true);
     const receiver = new RouterAssembler();
     receiver.receive(writes[0]);
-    receiver.receive(writes[2]);
-    expect(receiver.receive(writes[3])?.payload).toBe("body");
+    receiver.receive(writes[1]);
+    expect(receiver.receive(writes[2])?.payload).toBe("body");
     expect(decodeRouterHeader(writes[0]).requestOrdinal).toBeUndefined();
   });
 
-  for (const boundary of [0, 1, 2]) {
-    it(`serializes admission after response record \`${boundary}\` and attributes completion only to the response end`, async () => {
-      const writes: Uint8Array[] = [];
-      const callbacks: (() => void)[] = [];
-      const sender = new RouterSender(
-        (record, done) => {
-          writes.push(record);
-          callbacks.push(done);
-        },
-        () => {},
-        1024,
-      );
-      sender.send(route, "body");
-      for (let i = 0; i < boundary; i++) callbacks.shift()!();
+  for (const acknowledged of [0, 1, 2]) {
+    it(`inserts an admission before the next body record after \`${acknowledged}\` callbacks on a full window, and attributes completion only to the response end`, async () => {
+      const held = heldSender(ROUTED_RAW_LIMIT);
+      const { sender, writes, ack, inFlight } = held;
+      const bytes = 16 * ROUTER_CHUNK_BYTES;
+      sender.send(route, new Uint8Array(bytes));
+      expect(inFlight()).toBeGreaterThanOrEqual(ROUTER_SEND_WINDOW_BYTES);
+      for (let i = 0; i < acknowledged; i++) ack();
+      const pipelined = writes.length;
       const drained = sender.drain();
       let admitted = false;
+      // Each callback refills the window at once, so the admission finds it
+      // full and waits; it is still the next record passed to the socket,
+      // ahead of the body's remaining records.
+      expect(inFlight()).toBeGreaterThanOrEqual(ROUTER_SEND_WINDOW_BYTES);
       sender.sendAdmission(4, 7, () => admitted = true);
-      expect(sender.bufferedBytes).toBe(4);
-      callbacks.shift()!();
-      expect(decodeRouterAdmission(writes.at(-1)!)).toEqual({
+      expect(writes).toHaveLength(pipelined);
+      while (writes.length === pipelined) ack();
+      expect(decodeRouterAdmission(writes[pipelined])).toEqual({
         bytes: 4,
         requestOrdinal: 7,
       });
+      expect(writes.slice(0, pipelined).some(isRouterAdmission)).toBe(false);
+      while (held.acknowledged < pipelined) ack();
       expect(admitted).toBe(false);
-      expect(sender.bufferedBytes).toBe(boundary === 2 ? 0 : 4);
-      const snapshot = sender.snapshot();
-      expect(snapshot.pendingRecordKind).toBeNull();
-      callbacks.shift()!();
+      expect(sender.bufferedBytes).toBe(bytes);
+      ack();
       expect(admitted).toBe(true);
-      expect(sender.bufferedBytes).toBe(boundary === 2 ? 0 : 4);
-      while (callbacks.length) callbacks.shift()!();
+      expect(sender.bufferedBytes).toBe(bytes);
+      expect(sender.snapshot().pendingRecordKind).toBe(1);
+      while (held.callbacks.length) ack();
       expect(await drained).toBe(true);
       expect(sender.snapshot().completedBodies).toBe(1);
-      expect(sender.snapshot().completedBytes).toBe(4);
+      expect(sender.snapshot().completedBytes).toBe(bytes);
+      expect(writes.filter(isRouterAdmission)).toHaveLength(1);
     });
   }
 
@@ -322,52 +357,71 @@ describe("router-protocol", () => {
     expect(() => receiver.receive(records[2])).toThrow();
   });
 
-  it("waits for each socket completion while retaining a bounded output budget", () => {
-    const writes: Uint8Array[] = [];
-    const callbacks: ((error?: Error) => void)[] = [];
-    const errors: Error[] = [];
-    const limit = ROUTER_CHUNK_BYTES * 2;
-    const sender = new RouterSender(
-      (record, done) => {
-        writes.push(record);
-        callbacks.push(done);
-      },
-      (error) => errors.push(error),
-      limit,
-    );
+  it("pipelines records up to the send window and resumes from the callback that brings it under", () => {
+    const limit = 2 * ROUTER_SEND_WINDOW_BYTES;
+    const held = heldSender(limit);
+    const { sender, writes, errors, ack, inFlight } = held;
     sender.send(route, new Uint8Array(limit));
-    expect(writes).toHaveLength(1);
-    expect(sender.bufferedBytes).toBe(limit);
-    callbacks.shift()!();
-    expect(writes).toHaveLength(2);
-    expect(decodeRouterRecord(writes[1]).kind).toBe(1);
-    expect(sender.bufferedBytes).toBe(limit);
-    while (callbacks.length) callbacks.shift()!();
-    expect(writes.map((bytes) => decodeRouterRecord(bytes).kind)).toEqual([
+    // Records go out until the unacknowledged bytes reach the window, and the
+    // record that reaches it is the last one passed to the socket.
+    expect(inFlight()).toBeGreaterThanOrEqual(ROUTER_SEND_WINDOW_BYTES);
+    expect(inFlight() - writes.at(-1)!.length).toBeLessThan(
+      ROUTER_SEND_WINDOW_BYTES,
+    );
+    expect(writes.map((record) => decodeRouterRecord(record).kind)).toEqual([
       0,
-      1,
-      1,
+      ...Array<number>(writes.length - 1).fill(1),
+    ]);
+    expect(sender.bufferedBytes).toBe(limit);
+    expect(sender.snapshot()).toMatchObject({
+      pendingRecords: writes.length,
+      pendingRecordBytes: inFlight(),
+      pendingRecordKind: 0,
+      dispatchedRecords: writes.length,
+      completedRecords: 0,
+    });
+    // Callbacks that leave the window full pass nothing on; the first that
+    // brings it under refills it.
+    const pipelined = writes.length;
+    for (;;) {
+      const remaining = inFlight() - writes[held.acknowledged].length;
+      ack();
+      if (remaining < ROUTER_SEND_WINDOW_BYTES) break;
+      expect(writes).toHaveLength(pipelined);
+    }
+    expect(writes.length).toBeGreaterThan(pipelined);
+    expect(inFlight()).toBeGreaterThanOrEqual(ROUTER_SEND_WINDOW_BYTES);
+    expect(sender.bufferedBytes).toBe(limit);
+    while (held.callbacks.length) ack();
+    expect(writes.map((record) => decodeRouterRecord(record).kind)).toEqual([
+      0,
+      ...Array<number>(limit / ROUTER_CHUNK_BYTES).fill(1),
       2,
     ]);
     expect(sender.bufferedBytes).toBe(0);
     expect(errors).toHaveLength(0);
+    const snapshot = sender.snapshot();
+    expect(snapshot.pendingRecords).toBe(0);
+    expect(snapshot.completedRecords).toBe(snapshot.dispatchedRecords);
   });
 
-  it("abandons queued bodies on a failed socket write", () => {
-    const callbacks: ((error?: Error) => void)[] = [];
-    const errors: Error[] = [];
-    const sender = new RouterSender(
-      (_record, done) => callbacks.push(done),
-      (error) => errors.push(error),
-      1024,
-    );
+  it("abandons queued bodies on a failed socket write and ignores the other pipelined callbacks", () => {
+    const { sender, callbacks, errors } = heldSender(1024);
     sender.send(route, "first");
     sender.send(route, "second");
+    expect(callbacks).toHaveLength(6);
     const error = new Error("closed");
     callbacks.shift()!(error);
     expect(sender.bufferedBytes).toBe(0);
-    expect(callbacks).toHaveLength(0);
     expect(errors).toEqual([error]);
+    while (callbacks.length) callbacks.shift()!();
+    expect(sender.snapshot()).toMatchObject({
+      completedRecords: 0,
+      completedBodies: 0,
+      callbackErrors: 1,
+      pendingRecords: 0,
+      retainedBytes: 0,
+    });
     expect(() => sender.send(route, "third")).toThrow();
   });
 
@@ -421,7 +475,7 @@ describe("router-protocol", () => {
     });
   }
 
-  it("accepts a null socket completion as a successful write", () => {
+  it("accepts a null socket completion as a successful write, through a body wider than the window", () => {
     const writes: Uint8Array[] = [];
     const errors: Error[] = [];
     const sender = new RouterSender(
@@ -430,7 +484,7 @@ describe("router-protocol", () => {
         done(null);
       },
       (error) => errors.push(error),
-      1024,
+      ROUTED_RAW_LIMIT,
     );
     sender.send(route, "body");
     expect(writes.map((record) => decodeRouterRecord(record).kind)).toEqual([
@@ -439,6 +493,19 @@ describe("router-protocol", () => {
       2,
     ]);
     expect(sender.bufferedBytes).toBe(0);
+    // A callback that runs inside the write passes the next record on from
+    // the running loop, not from a nested one.
+    writes.length = 0;
+    sender.send(route, new Uint8Array(2 * ROUTER_SEND_WINDOW_BYTES));
+    expect(writes.map((record) => decodeRouterRecord(record).kind)).toEqual([
+      0,
+      ...Array<number>(2 * ROUTER_SEND_WINDOW_BYTES / ROUTER_CHUNK_BYTES).fill(
+        1,
+      ),
+      2,
+    ]);
+    expect(sender.bufferedBytes).toBe(0);
+    expect(sender.snapshot().pendingRecords).toBe(0);
     expect(errors).toHaveLength(0);
   });
 
@@ -478,22 +545,17 @@ describe("router-protocol", () => {
 
   it("distinguishes retained bodies from successful record writes and measures their ages", () => {
     let now = 10;
-    const writes: Uint8Array[] = [];
-    const callbacks: ((error?: Error | null) => void)[] = [];
-    const sender = new RouterSender(
-      (record, done) => {
-        writes.push(record);
-        callbacks.push(done);
-      },
-      () => {},
+    const { sender, writes, callbacks, inFlight } = heldSender(
       4 * ROUTER_CHUNK_BYTES,
-      { now: () => now },
+      () => now,
     );
     const bytes = 2 * ROUTER_CHUNK_BYTES + 3;
     sender.send(route, new Uint8Array(bytes));
     now = 12;
     sender.send(route, "second");
     now = 15;
+    // Both bodies fit the window: eight records are in flight, and the ages
+    // of the pending records are those of the oldest.
     expect(sender.snapshot()).toMatchObject({
       admittedBodies: 2,
       admittedBytes: bytes + 6,
@@ -501,9 +563,10 @@ describe("router-protocol", () => {
       queuedBodies: 2,
       completedBodies: 0,
       completedRecords: 0,
-      dispatchedRecords: 1,
+      dispatchedRecords: 8,
+      pendingRecords: 8,
       pendingRecordKind: 0,
-      pendingRecordBytes: writes[0].length,
+      pendingRecordBytes: inFlight(),
       pendingCallbackAgeMs: 5,
       oldestQueuedAgeMs: 5,
       lastCallbackAgeMs: null,
@@ -517,9 +580,14 @@ describe("router-protocol", () => {
       activeBodyWrittenBytes: ROUTER_CHUNK_BYTES,
       completedRecords: 2,
       completedRecordBytes: writes[0].length + writes[1].length,
-      dispatchedRecords: 3,
+      dispatchedRecords: 8,
+      pendingRecords: 6,
       pendingRecordKind: 1,
-      pendingCallbackAgeMs: 0,
+      pendingRecordBytes: writes.slice(2).reduce(
+        (total, record) => total + record.length,
+        0,
+      ),
+      pendingCallbackAgeMs: 10,
       oldestQueuedAgeMs: 10,
       lastCallbackAgeMs: 0,
     });
@@ -528,6 +596,7 @@ describe("router-protocol", () => {
     expect(sender.snapshot()).toMatchObject({
       activeBodyWrittenBytes: bytes,
       completedBodies: 0,
+      pendingRecords: 4,
       pendingRecordKind: 2,
       retainedBytes: bytes + 6,
     });
@@ -541,6 +610,9 @@ describe("router-protocol", () => {
       activeBodyBytes: 6,
       activeBodyWrittenBytes: 0,
       oldestQueuedAgeMs: 18,
+      pendingRecords: 3,
+      pendingRecordKind: 0,
+      pendingCallbackAgeMs: 18,
     });
     while (callbacks.length) callbacks.shift()!();
     now = 40;
@@ -553,6 +625,7 @@ describe("router-protocol", () => {
       retainedBytes: 0,
       queuedBodies: 0,
       oldestQueuedAgeMs: null,
+      pendingRecords: 0,
       pendingCallbackAgeMs: null,
       pendingRecordKind: null,
       pendingRecordBytes: 0,
@@ -568,12 +641,12 @@ describe("router-protocol", () => {
 
   it("records failed callbacks without counting a completed body or late writes", () => {
     let now = 10;
-    let done: (error?: Error | null) => void = () => {};
+    const callbacks: ((error?: Error | null) => void)[] = [];
     const events: string[] = [];
     const errors: Error[] = [];
     const sender = new RouterSender(
       (_record, callback) => {
-        done = callback;
+        callbacks.push(callback);
       },
       (error) => errors.push(error),
       10,
@@ -585,20 +658,23 @@ describe("router-protocol", () => {
     sender.send(route, "body");
     now = 20;
     const error = new Error("socket closed");
-    done(error);
+    expect(callbacks).toHaveLength(3);
+    callbacks[0](error);
     const failed = sender.snapshot();
     expect(failed).toMatchObject({
       admittedBodies: 1,
       admittedBytes: 4,
-      dispatchedRecords: 1,
+      dispatchedRecords: 3,
       completedRecords: 0,
       completedBodies: 0,
       callbackErrors: 1,
       retainedBytes: 0,
+      pendingRecords: 0,
       pendingCallbackAgeMs: null,
       lastCallbackAgeMs: 0,
     });
-    done();
+    // The header's own late callback and the other records' callbacks.
+    for (const done of callbacks) done();
     sender.close();
     expect(sender.snapshot()).toEqual(failed);
     expect(events).toEqual(["enqueue", "write-error", "close"]);
