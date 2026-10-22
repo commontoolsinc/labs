@@ -8169,7 +8169,17 @@ export class Server {
               sync.caughtUpLocalSeq = session.caughtUpLocalSeq;
             }
             await this.#attachOperationFields(space, sessionId, sync);
-            if (session.views.length > 0) this.#attachViewPlans(session, sync);
+            // A frame carries the plans when they are owed: a full
+            // evaluation rebuilt the graphs they describe, or a selection
+            // changed what the views may run or adopt. An incremental frame
+            // that owes none carries the documents alone, and the client
+            // keeps the plans it holds.
+            if (
+              session.views.length > 0 &&
+              (dirtyIds === undefined || session.viewPlansPending)
+            ) {
+              this.#attachViewPlans(session, sync);
+            }
             return {
               type: "session/effect",
               space,

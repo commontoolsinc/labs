@@ -84,10 +84,14 @@ const WARMUP = 1;
 const harness = await MultiRuntimeHarness.create({
   programPath: PROGRAM_PATH,
   rootPath: ROOT_PATH,
-  sessions: Array.from(
-    { length: MEMBERS },
-    (_, index) => `fabrichat-send-burst-${index + 1}`,
-  ),
+  // Each member is a web client, as a browser tab is, so that under
+  // `EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION` it opens pieces and runs
+  // locally the way a browser does; the flag is held constant across a
+  // comparison.
+  sessions: Array.from({ length: MEMBERS }, (_, index) => ({
+    label: `fabrichat-send-burst-${index + 1}`,
+    clientClass: "web" as const,
+  })),
   aclMode: "enforce",
 });
 const members = harness.sessions;

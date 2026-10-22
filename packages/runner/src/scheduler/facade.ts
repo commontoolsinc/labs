@@ -2751,7 +2751,7 @@ export class Scheduler {
     if (this.runningPromise) await this.runningPromise;
 
     this.#beginExecuteCycle();
-    const eventBlockingDeps = await this.#processExecuteEventPhase();
+    const eventBlockingDeps = await this.#processExecuteEventPhases();
     const initialSeeds = this.#buildInitialExecuteSeeds(eventBlockingDeps);
 
     const settleResult = await this.#runSettleLoop(initialSeeds);
@@ -2770,6 +2770,38 @@ export class Scheduler {
 
     // Non-settling heuristic: record `#execute()` start
     markExecuteStart(this.#settlingTracker);
+  }
+
+  /**
+   * The pass's event phases. A pass takes one event, the queue's head, and
+   * then settles the derivations it demands. Under the serving posture it
+   * takes every event that is ready behind it as well, running their
+   * handlers back to back before the one settle: the derivations those
+   * handlers invalidate run once over all of them rather than once per
+   * event, which is the batching a wave of several events is for. A
+   * handler's own inputs stay current either way, since the preflight ahead
+   * of each dispatch recomputes an invalid input the handler reads, and an
+   * event the preflight holds for such a dependency ends the phases, so the
+   * settle runs it. The run stops at an event that is not ready, at the
+   * events the pass began with, and at a phase that dispatched nothing.
+   */
+  async #processExecuteEventPhases(): Promise<Set<Action>> {
+    const eventBlockingDeps = new Set<Action>();
+    let remaining = this.#eventQueue.length;
+    while (true) {
+      const head = this.#eventQueue[0];
+      const deps = await this.#processExecuteEventPhase();
+      for (const dep of deps) eventBlockingDeps.add(dep);
+      if (
+        !this.runtime.servingPosture || deps.size > 0 || head === undefined ||
+        this.#eventQueue[0] === head || --remaining <= 0 ||
+        this.#eventQueue.length === 0
+      ) break;
+      // The handler's run has to have landed before the next preflight
+      // reads what it wrote.
+      if (this.runningPromise) await this.runningPromise;
+    }
+    return eventBlockingDeps;
   }
 
   async #processExecuteEventPhase(): Promise<Set<Action>> {

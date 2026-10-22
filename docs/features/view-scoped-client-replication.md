@@ -57,12 +57,14 @@ After a successful serving settlement, including a quiet settlement or a partial
 wave that reaches its flush deadline, the planner checks whether the view
 selection needs updating. Unsettled producers carry no currency basis. It
 traverses a new or changed visible view using renderer semantics and shared
-component schemas. After a wave the flush deadline cut, a view whose UI walk
-a change has invalidated is planned over its last walk, with the current
-execution snapshot and producer bases; the walk is redone at the next
-settlement that reaches quiescence, so a burst of cut waves walks the UI once
-per view, as it ends. The cap bounds each cut settle and not the deferral: a
-space under continuous input defers the walk for as long as the input lasts. Ordinary rendered attributes and object props contribute
+component schemas. After a wave the flush deadline cut, a view that already
+holds a published selection keeps it, and only a view with none is planned;
+the next settlement that reaches quiescence plans every view whose snapshot
+or walk changed, so a burst of cut waves plans each view once, as it ends,
+over the snapshot it left. The cap bounds each cut settle and not the
+deferral: a space under continuous input keeps its plans for as long as the
+input lasts. Within one settlement, views whose snapshots carry the same
+observations and whose walks read the same addresses select their cone once. Ordinary rendered attributes and object props contribute
 their reads. Declared bindings contribute their effective component projection;
 stream targets identify visible handlers, and writable bindings identify direct
 edits.
@@ -137,11 +139,13 @@ replacement or recovery rebuilds the graphs, as does a selection that changes
 what a view is delivered, which then diffs against the session's delivery
 state. A selection that changes only what the view may run or adopt leaves the
 graphs standing: its plans ride the session's next frame, a frame of plans
-alone when nothing dirtied it. Unrelated commits without catch-up
+alone when nothing dirtied it. A frame carries the plans when they are owed, by
+such a selection or by a rebuilt graph; an incremental frame that owes none
+carries documents alone, and the client keeps the plans it holds. Unrelated commits without catch-up
 markers or operation changes produce no view frame. View replacements declare
 the replica's current holdings when the server supports that protocol, allowing
 unchanged documents to be omitted while still delivering missing documents and
-removals. Complete manifests accompany view-aware synchronization frames.
+removals. A frame carries complete manifests whenever it carries plans.
 
 ## Guarded local execution
 

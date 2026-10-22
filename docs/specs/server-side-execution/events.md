@@ -213,13 +213,19 @@ handler fires
   literally in the code; CT-1795's staleness park is an extra gate on
   top) — the common case being not rapid-fire but a lazy computed
   nothing has pulled yet, which the handler must and does see fresh.
-  An earlier proposal to drain all handlers ahead of derivations
-  (handlers reading last-wave state) was REJECTED by the owner: events
-  drain as part of regular execution —
-  the loop is simply not idle until all events are processed. Rapid-
-  fire efficiency falls out of pull-based laziness (superseded
-  intermediates are never demanded, so never computed), with the single
-  derived commit as the only batching.
+  Handlers never read last-wave state: events drain as part of regular
+  execution — the loop is simply not idle until all events are
+  processed — and the preflight ahead of each dispatch makes the inputs
+  a handler reads current. Within that rule the serving scheduler's
+  pass takes every ready event behind the head as well, each through
+  its own preflight, and settles the derivations once behind all of
+  them (`facade.ts`, `#processExecuteEventPhases`): the demanded
+  derivations several events invalidate run once per pass rather than
+  once per event, and an event whose preflight finds an invalid input
+  ends the run, so the settle recomputes that input before the event
+  dispatches. Undemanded intermediates are skipped by pull-based
+  laziness as before; the wave's single derived commit carries every
+  event the pass took.
 - Server enqueue goes through the scheduler facade (`facade.queueEvent`
   — the wake-shaping entry point), never raw `queueSchedulerEvent`, so
   server-enqueued events get the same shaping as client ones.

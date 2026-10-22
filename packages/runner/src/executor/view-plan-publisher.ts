@@ -3,6 +3,7 @@
 import { valueEqual } from "@commonfabric/data-model";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type {
+  EntityDocument,
   ScopeKeyIdentity,
   ViewPlan,
   ViewQuery,
@@ -25,12 +26,13 @@ import type {
   IStorageNotification,
   TransactionReactivityLog,
 } from "../storage/interface.ts";
-import { viewInputBasis } from "../view-input-basis.ts";
+import { viewInputBasis, viewInputFingerprint } from "../view-input-basis.ts";
 import {
   collectViewRenderReads,
   type ViewRenderReads,
 } from "../view-render-reads.ts";
 import {
+  type ViewDataSelection,
   ViewDependencyGraph,
   type ViewExecutionNode,
 } from "../view-replication.ts";
@@ -46,12 +48,23 @@ type Selection = Omit<ViewPlan, "id" | "revision" | "generation"> & {
 /** Independent invalidation of rendered reads and execution-dependent output. */
 type CachedView = {
   render: ViewReadCache<ViewRenderReads>;
-  /** The last UI walk, kept past its invalidation: a wave the flush deadline
-   * cut plans over it rather than walking again, and the walk is redone at
-   * the next settlement that reaches quiescence. */
-  rendered?: ViewRenderReads;
   selection: ViewReadCache<true>;
   execution?: ViewExecutionNode[];
+};
+
+/**
+ * The part of one view's plan that depends on the execution snapshot and the
+ * UI walk alone, and on nothing of the viewing session: two views of one
+ * publish whose snapshots carry the same observations and whose walks read
+ * the same addresses select the same cone, and compute it once. Node
+ * identities are the publish's own, so the result names nodes by id.
+ */
+type SharedSelection = {
+  signature: string;
+  render: ViewRenderReads;
+  selected: ViewDataSelection;
+  producerGraph: ViewDependencyGraph;
+  errorAncestorIds: Set<string>;
 };
 
 /** Keeps unchanged selections stable while expiring every removed view lifetime. */
@@ -59,6 +72,10 @@ export class ViewPlanPublisher {
   #published = new Map<string, Selection>();
   #views = new Map<string, CachedView>();
   #runtime: Runtime | undefined;
+  /** Fingerprints by the document version they were taken over, so that a
+   * document unchanged since the last plan, or shared by several viewing
+   * sessions, is hashed once at each path. A version is a new object. */
+  #fingerprints = new WeakMap<EntityDocument, Map<string, string>>();
   #subscription: IStorageNotification = {
     next: (notification) => {
       for (const view of this.#views.values()) {
@@ -80,10 +97,10 @@ export class ViewPlanPublisher {
   /**
    * Selects actual reads under each viewing identity and publishes complete
    * roots. `quiescent` says whether the settlement this follows reached
-   * quiescence: after one the flush deadline cut, a view whose UI walk a
-   * change invalidated is planned over its last walk, so that a burst of
-   * cut waves re-walks the UI once, at the settlement that ends it; the
-   * execution snapshot and the producer bases are fresh either way.
+   * quiescence: after one the flush deadline cut, a view that already holds
+   * a published selection keeps it, and only a view with none is planned, so
+   * that a burst of cut waves plans each view once, at the settlement that
+   * ends it, over the snapshot that settlement left.
    */
   async publish(
     runtime: Runtime,
@@ -105,6 +122,25 @@ export class ViewPlanPublisher {
         sessionId: interest.handle.sessionId as ScopeKeyIdentity["sessionId"],
       })),
     );
+    const shared: SharedSelection[] = [];
+    // One UI walk serves every session viewing the same roots when it read
+    // no user- or session-scoped document: such a walk resolves nothing by
+    // identity, so it reads the same addresses under any.
+    const sharedRenders = new Map<string, ViewRenderReads>();
+    const identityFree = (render: ViewRenderReads): boolean =>
+      [...render.reads, ...render.shallowReads, ...render.bindings].every((
+        address,
+      ) => address.scope === undefined || address.scope === "space") &&
+      render.streams.every((stream) =>
+        stream.scope === undefined || stream.scope === "space"
+      );
+    const objectIds = new WeakMap<object, number>();
+    let nextObjectId = 0;
+    const objectId = (value: object): number => {
+      let id = objectIds.get(value);
+      if (id === undefined) objectIds.set(value, id = nextObjectId++);
+      return id;
+    };
     for (const interest of interests) {
       const { handle, view, principal } = interest;
       const key = `${handle.sessionEpoch}\0${handle.viewEpoch}`;
@@ -117,6 +153,7 @@ export class ViewPlanPublisher {
         principal === undefined ||
         view.componentContractVersion !== COMPONENT_READ_CONTRACT_VERSION
       ) continue;
+      if (!quiescent && this.#published.has(key)) continue;
       const identity: ScopeKeyIdentity = {
         principal,
         sessionId: handle.sessionId as ScopeKeyIdentity["sessionId"],
@@ -153,35 +190,71 @@ export class ViewPlanPublisher {
         ) continue;
         planStart = performance.now();
         let render = cache.render.value;
-        if (render === undefined && !quiescent) render = cache.rendered;
         if (render === undefined) {
-          const renderStart = performance.now();
-          render = collectViewRenderReads(runtime, space, view, identity);
+          const rootsKey = `${view.mode}\n${JSON.stringify(view.query.roots)}`;
+          render = sharedRenders.get(rootsKey);
+          if (render === undefined) {
+            const renderStart = performance.now();
+            render = collectViewRenderReads(runtime, space, view, identity);
+            logger.time(renderStart, "render");
+            if (identityFree(render)) sharedRenders.set(rootsKey, render);
+          }
           cache.render.set(render, render);
-          cache.rendered = render;
-          logger.time(renderStart, "render");
         }
-        const handlers = new Set(
-          observed.filter((node) =>
-            node.stream !== undefined &&
-            render.streams.some((stream) =>
-              areNormalizedLinksSame(node.stream!, stream)
-            )
-          ).map((node) => node.id),
-        );
         // A cross-space dependency requires its own authorized view subscription.
         const candidates = observed.filter((node) =>
           [...node.log.reads, ...node.log.shallowReads].every((read) =>
             read.space === space
           )
         );
-        const graph = new ViewDependencyGraph(candidates);
-        const selected = graph.select(
-          render.reads,
-          view.mode === "speculate" ? render.bindings : [],
-          view.mode === "speculate" ? handlers : new Set(),
-          render.shallowReads,
+        const signature = `${view.mode}\n` + candidates.map((node) =>
+          [
+            node.id,
+            node.kind,
+            node.current === true ? "c" : "",
+            node.error === undefined ? "" : objectId(node.error),
+            node.stream === undefined ? "" : objectId(node.stream),
+            objectId(node.log),
+            objectId(node.writes),
+          ].join("\0")
+        ).join("\n");
+        let cone = shared.find((entry) =>
+          entry.signature === signature && valueEqual(entry.render, render)
         );
+        if (cone === undefined) {
+          const handlers = new Set(
+            candidates.filter((node) =>
+              node.stream !== undefined &&
+              render.streams.some((stream) =>
+                areNormalizedLinksSame(node.stream!, stream)
+              )
+            ).map((node) => node.id),
+          );
+          const graph = new ViewDependencyGraph(candidates);
+          cone = {
+            signature,
+            render,
+            selected: graph.select(
+              render.reads,
+              view.mode === "speculate" ? render.bindings : [],
+              view.mode === "speculate" ? handlers : new Set(),
+              render.shallowReads,
+            ),
+            producerGraph: new ViewDependencyGraph(
+              candidates.filter((node) => node.kind === "computation"),
+              (node) => [...node.writes, ...node.log.writes],
+            ),
+            errorAncestorIds: new Set(
+              [...graph.ancestors(
+                render.reads,
+                render.shallowReads,
+                (node) => node.kind !== "handler",
+              )].map((node) => node.id),
+            ),
+          };
+          shared.push(cone);
+        }
+        const { selected } = cone;
         const roots = new PathKeyMap<ViewQuery["roots"][number]>();
         const addRoot = (
           id: string,
@@ -231,24 +304,17 @@ export class ViewPlanPublisher {
           id: root.id,
           scope: root.scope ?? "space" as const,
         }));
-        const producers = candidates.filter((node) =>
-          node.kind === "computation"
-        );
-        const producerGraph = new ViewDependencyGraph(
-          producers,
-          (node) => [...node.writes, ...node.log.writes],
-        );
-        const ancestors = producerGraph.ancestors(inputs.map((input) => ({
-          ...input,
-          id: input.id as IMemorySpaceAddress["id"],
-          space,
-          type: "application/json",
-          path: [],
-        })));
-        const errorAncestors = graph.ancestors(
-          render.reads,
-          render.shallowReads,
-          (node) => node.kind !== "handler",
+        // The producer graph is the cone's, built over the first such
+        // snapshot's nodes, so its ancestors are matched to this snapshot's
+        // nodes by id.
+        const ancestorIds = new Set(
+          [...cone.producerGraph.ancestors(inputs.map((input) => ({
+            ...input,
+            id: input.id as IMemorySpaceAddress["id"],
+            space,
+            type: "application/json",
+            path: [],
+          })))].map((node) => node.id),
         );
         const replica = runtime.storageManager.open(space).replica;
         const addressOf = (address: IMemorySpaceAddress) => ({
@@ -258,15 +324,36 @@ export class ViewPlanPublisher {
         });
         const documentAt = (address: IMemorySpaceAddress) =>
           replica.getDocument(address.id, address.scope, identity);
-        const selectedProducers = producers.filter((node) =>
-          ancestors.has(node)
+        const fingerprintOf = (
+          document: EntityDocument | undefined,
+          path: readonly string[],
+        ): string => {
+          if (document === undefined) {
+            return viewInputFingerprint(document, path);
+          }
+          let known = this.#fingerprints.get(document);
+          if (known === undefined) {
+            this.#fingerprints.set(document, known = new Map());
+          }
+          const pathKey = path.join("\0");
+          let fingerprint = known.get(pathKey);
+          if (fingerprint === undefined) {
+            known.set(
+              pathKey,
+              fingerprint = viewInputFingerprint(document, path),
+            );
+          }
+          return fingerprint;
+        };
+        const selectedProducers = candidates.filter((node) =>
+          node.kind === "computation" && ancestorIds.has(node.id)
         );
         const selection: Selection = {
           delivery: [{ roots: [...roots.entries()].map(([, root]) => root) }],
           eligibleActions: view.mode === "speculate" ? selected.actions : [],
           pieces: [...pieces.entries()].map(([, piece]) => piece),
           errors: candidates.flatMap((node) =>
-            errorAncestors.has(node) && node.error !== undefined
+            cone.errorAncestorIds.has(node.id) && node.error !== undefined
               ? [node.error]
               : []
           ),
@@ -283,10 +370,12 @@ export class ViewPlanPublisher {
                   reads: viewInputBasis(
                     [...node.log.reads, ...node.log.shallowReads],
                     documentAt,
+                    fingerprintOf,
                   ),
                   outputs: viewInputBasis(
                     [...node.writes, ...node.log.writes],
                     documentAt,
+                    fingerprintOf,
                   ),
                 },
               }

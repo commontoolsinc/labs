@@ -517,9 +517,14 @@ mid-wave belong to the NEXT wave — natural double-buffering, no timers):
   // recomputes a dirty computed input ON DEMAND before the handler
   // that reads it runs, and only then (anchor:
   // scheduler/event-preflight-dependencies.ts). Pull-based laziness
-  // therefore still skips derived work nothing demands — which is
-  // where rapid-fire coalescing comes from: superseded intermediates
-  // are skipped by laziness, not by an explicit drain phase.
+  // therefore still skips derived work nothing demands. Under the
+  // serving posture a scheduler pass takes every READY event behind
+  // the head as well, each through the same preflight, before the one
+  // settle that follows (anchor: facade.ts #processExecuteEventPhases):
+  // the demanded derivations several events invalidate run once over
+  // all of them, which is where a wave of several events coalesces;
+  // an event the preflight holds for an invalid input ends the run of
+  // handlers, and the settle runs that input first.
   run scheduler to QUIESCENCE — scheduler.idle()
   (Scheduler.idle() in packages/runner/src/scheduler/facade.ts)
   resolves; it
