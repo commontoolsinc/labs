@@ -779,6 +779,103 @@ describe("WebSocketTransport failure signaling", () => {
       });
     }
 
+    it("keeps sending a refused control's remaining body records after the refusal arrives mid-body", async () => {
+      const audience = (await Identity.fromPassphrase("credit-refusal")).did();
+      await withTransport(async (transport, socket) => {
+        const connecting = MemoryClient.connect({ transport });
+        const active = socket();
+        active.openConnection();
+        await active.whenSent(1);
+        active.receive(encodeMemoryBoundary({
+          type: "hello.ok",
+          protocol: MEMORY_PROTOCOL,
+          flags: {
+            ...getMemoryProtocolFlags(),
+            routedAuthV1: true,
+            connectionAuth: true,
+          },
+          sessionOpen: {
+            ...TEST_HELLO_SESSION_OPEN,
+            audience,
+            deployment: "test",
+          },
+          routerTransport: 1,
+          routerUploadWindow: ROUTER_CHUNK_BYTES + 5,
+        }));
+        const client = await connecting;
+        try {
+          await active.whenSent(2);
+          active.trackBuffer = true;
+          // The router refuses an oversized control at its header while the
+          // client is still sending the body, discards and credits every
+          // body record, and must see that body complete before any other
+          // header. The assembler throws on an interleaved header.
+          const receiver = new RouterAssembler();
+          const completed: string[] = [];
+          let records = 0;
+          let settledAfterRecords: number | undefined;
+          active.onSend = (frame) => {
+            const record = requireRecord(frame);
+            records++;
+            const result = receiver.receive(record);
+            if (result !== undefined) {
+              const requestId = result.header.route.requestId;
+              if (typeof requestId !== "string") {
+                throw new Error("Expected a request identifier");
+              }
+              completed.push(requestId);
+              if (requestId === "small") {
+                active.receive(encodeMemoryBoundary({
+                  type: "response",
+                  requestId,
+                  ok: {},
+                }));
+              }
+            }
+            if (records === 1) {
+              active.receive(encodeMemoryBoundary({
+                type: "response",
+                requestId: "big-watch",
+                error: { name: "ProtocolError", message: "frame-limit" },
+              }));
+            }
+            setTimeout(() => grantCredit(active, record.length), 0);
+          };
+          const refused = client.request({
+            type: "session.watch.set",
+            requestId: "big-watch",
+            space: audience,
+            sessionId: "s",
+            watches: Array.from({ length: 2048 }, (_, i) => ({
+              id: `watch-${i}`,
+              select: { document: `${i}-${"x".repeat(2560)}` },
+            })),
+          }).catch((error: Error) => {
+            settledAfterRecords = records;
+            return error;
+          });
+          const answered = client.request({
+            type: "session.watch.add",
+            requestId: "small",
+            space: audience,
+            sessionId: "s",
+            watches: [],
+          });
+          expect(await refused).toMatchObject({ message: "frame-limit" });
+          expect(await answered).toEqual({});
+          expect(completed).toEqual(["big-watch", "small"]);
+          // The refusal arrived after the first record, and the request
+          // settled only once the whole body, completion record included,
+          // had been handed to the socket.
+          const bigWatchRecords = active.sent.length - 2 - 3;
+          expect(bigWatchRecords).toBeGreaterThan(160);
+          expect(settledAfterRecords).toBeGreaterThanOrEqual(bigWatchRecords);
+        } finally {
+          await client.close();
+        }
+      });
+    });
+
     it("fails a blocked upload whose credit never arrives within the wait limit and resets the connection", async () => {
       await withTransport(async (transport, socket) => {
         try {
