@@ -10,6 +10,7 @@ import {
   type PushIo,
   realPushIo,
 } from "../lib/view/push.ts";
+import { dialogBox } from "../lib/view/render.ts";
 import { Session } from "../lib/view/session.ts";
 import { parseDocument } from "./view-helpers.ts";
 
@@ -620,7 +621,7 @@ describe("view-push", () => {
       expect(session.branchPushRequested).toBe(true);
     });
 
-    it("shows the output in a dialog as tall as the screen, a carriage return starting a line over", () => {
+    it("shows the output in a dialog shrunk to fit the screen, a carriage return starting a line over", () => {
       const session = editableSession();
       session.beginBranchPush(() => {});
 
@@ -640,6 +641,61 @@ describe("view-push", () => {
       ]);
     });
 
+    it("sizes the dialog to a typical push on a screen larger than that", () => {
+      const session = editableSession();
+      session.resize(200, 60);
+      session.beginBranchPush(() => {});
+
+      session.appendPushOutput("To origin\n * [new branch] feature\n");
+
+      const view = session.view();
+      const dialog = view.dialog!;
+      expect(dialog.body.length).toBe(16);
+      expect(dialog.body.slice(0, 3)).toEqual([
+        "To origin",
+        " * [new branch] feature",
+        "",
+      ]);
+      const box = dialogBox(view, dialog);
+      expect([box.boxW, box.boxH]).toEqual([86, 22]);
+      expect([box.x, box.y]).toEqual([57, 19]);
+    });
+
+    it("keeps an address no wider than the dialog on one row", () => {
+      const session = editableSession();
+      session.resize(200, 60);
+      session.beginBranchPush(() => {});
+      const url = "https://github.com/commonfabric/labs/pull/new/feature";
+
+      session.appendPushOutput(`remote:      ${url}\n`);
+      session.finishBranchPush(`Pushed feature to origin and opened ${url}`);
+
+      expect(session.view().dialog!.body.slice(0, 5)).toEqual([
+        `remote:      ${url}`,
+        "",
+        "Pushed feature to origin and opened",
+        url,
+        "",
+      ]);
+    });
+
+    it("drops the spaces git pads a server's lines with, which would wrap onto a row of their own", () => {
+      const session = editableSession();
+      session.beginBranchPush(() => {});
+      const offer =
+        "remote:      https://github.com/commonfabric/labs/pull/new/" +
+        "a-branch-name";
+      expect(offer.length).toBe(72);
+
+      session.appendPushOutput(`${offer}        \nTo origin\n`);
+
+      expect(session.view().dialog!.body.slice(0, 3)).toEqual([
+        offer,
+        "To origin",
+        "",
+      ]);
+    });
+
     it("shows the end of output longer than the dialog", () => {
       const session = editableSession();
       session.beginBranchPush(() => {});
@@ -653,7 +709,7 @@ describe("view-push", () => {
       ).toEqual(["line 4", "line 5", "line 6", "line 7", "line 8"]);
     });
 
-    it("wraps a line wider than the dialog, keeping all of it", () => {
+    it("wraps a line wider than the dialog after its last space that fits, breaking a word wider than the dialog", () => {
       const session = editableSession();
       session.beginBranchPush(() => {});
       const url = "https://github.com/commonfabric/labs/pull/new/" +
@@ -661,11 +717,12 @@ describe("view-push", () => {
 
       session.finishBranchPush(`Pushed feature to origin and opened ${url}`);
 
-      const body = session.view().dialog!.body;
-      expect(body.every((line) => line.length <= 74)).toBe(true);
-      expect(body.join("")).toBe(
-        `Pushed feature to origin and opened ${url}`,
-      );
+      expect(session.view().dialog!.body.slice(0, 4)).toEqual([
+        "",
+        "Pushed feature to origin and opened",
+        url.slice(0, 72),
+        url.slice(72),
+      ]);
     });
 
     it("aborts a running push on an interrupt, keeping the dialog up", () => {
@@ -778,7 +835,7 @@ describe("view-push", () => {
       )!;
       expect(runningFrame).toContain(" Abort ");
       expect(runningFrame).toMatch(/╔═{30,} Push ═{30,}╗/);
-      expect(runningFrame).toContain("║ Writing objects: 100%");
+      expect(runningFrame).toContain("║  Writing objects: 100%");
       expect(runningFrame).toContain("Writing objects: 100% (2/2), done.");
       expect(runningFrame).not.toContain("Writing objects:  50%");
       const last = harness.writes.at(-2)!;
