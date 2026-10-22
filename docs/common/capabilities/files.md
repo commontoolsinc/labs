@@ -53,6 +53,12 @@ one naming no file. There the `download` attribute is what names the saved file,
 and browsers honor it only when the link is same-origin with the page, so a
 space served from another host saves the file under its hash instead.
 
+A pattern that holds a blob's reference, its space's DID and its id there, rather
+than its URL, offers it with `cf-blob-link`, as
+`<cf-blob-link blob={file.blob} name={file.name}>`, and shows an image with
+`<cf-image blob={file.blob}>`. Each asks the runtime for the URL the blob's
+space's host serves it at, which a pattern has no way to form itself.
+
 `cf-file-download` is not for stored files. It takes the content as a string
 and builds the download in the browser, so using it means holding the bytes in
 a cell.

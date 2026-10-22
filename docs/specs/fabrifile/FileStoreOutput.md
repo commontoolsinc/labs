@@ -27,6 +27,7 @@ interface FileStoreOutput {
         | "invalid-name"
         | "name-taken"
         | "other-space"
+        | "no-blob"
         | "not-found"
         | "not-permitted";
     }
@@ -156,10 +157,11 @@ clock, and `addedBy` the adder's profile, `wish({ query: "#profile" })`. An
 adder with no profile is refused, with `code: "not-permitted"`, so that no file
 is stored unattributed. The outcome's `entry` links the new entry.
 
-The store takes `blob`, `mediaType` and `size` as the request states them, and
-can't yet check them against the blob store (see
-[prerequisites](README.md#prerequisites)). A client MUST name the blob it
-stored, with the name, media type and size it stored.
+A blob the store's space does not hold is refused, with `code: "no-blob"`.
+Beyond that, the store takes `blob`, `mediaType` and `size` as the request
+states them, and can't yet check the media type or the size against the blob
+store (see [prerequisites](README.md#prerequisites)). A client MUST name the
+blob it stored, with the name, media type and size it stored.
 
 ### `remove`
 
@@ -186,7 +188,8 @@ store.
   entry was given, as for `add`.
 
 Only the entry's adder, or a principal the store's space admits as OWNER, may
-rename it. Anyone else is refused, with `code: "not-permitted"`.
+rename it. Anyone else is refused, with `code: "not-permitted"`, and an entry
+whose blob the space no longer holds with `code: "no-blob"`.
 
 The store stores the entry's bytes and media type again, as a blob under the new
 name, and changes the entry's `name` and `blob` together, in one transaction.

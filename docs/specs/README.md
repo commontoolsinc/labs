@@ -116,6 +116,7 @@ entries; a new gap is filed as a specs pull request.
 
 ### Files
 
-- [FabriFile](fabrifile/README.md) (design; not built): a space's set of
+- [FabriFile](fabrifile/README.md) (implemented, with the departures its README
+  lists; no root names a store yet): a space's set of
   named files, each a record linking a blob, with its rendering in a module of
   its own
