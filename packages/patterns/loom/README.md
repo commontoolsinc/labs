@@ -341,7 +341,7 @@ owner-authorized workflow. A root without `bindMeeting` is unsupported for that
 workflow: a caller must not infer support from an absent key, replace the root,
 or overwrite its contents to adopt it.
 
-Run and attach all fifteen tests when deploying or updating source:
+Run and attach all sixteen tests when deploying or updating source:
 
 ```sh
 deno task cf test packages/patterns/loom/style.test.tsx
@@ -355,6 +355,7 @@ deno task cf test packages/patterns/loom/adder-profile.test.tsx
 deno task cf test packages/patterns/loom/actor-attribution.test.tsx
 deno task cf test packages/patterns/loom/chat-room.test.tsx
 deno task cf test packages/patterns/loom/ensure-chat-room.test.tsx
+deno task cf test packages/patterns/loom/ensure-file-store.test.tsx
 deno task cf test packages/patterns/loom/retitle-retarget.test.tsx
 deno task cf test packages/patterns/loom/overlay.test.tsx
 deno task cf test packages/patterns/loom/private-panels.test.tsx
@@ -373,6 +374,7 @@ deno task cf piece new packages/patterns/loom/main.tsx \
   --test packages/patterns/loom/actor-attribution.test.tsx \
   --test packages/patterns/loom/chat-room.test.tsx \
   --test packages/patterns/loom/ensure-chat-room.test.tsx \
+  --test packages/patterns/loom/ensure-file-store.test.tsx \
   --test packages/patterns/loom/retitle-retarget.test.tsx \
   --test packages/patterns/loom/overlay.test.tsx \
   --test packages/patterns/loom/private-panels.test.tsx \
