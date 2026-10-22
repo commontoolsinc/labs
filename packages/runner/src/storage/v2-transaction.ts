@@ -1,6 +1,8 @@
-import type { FabricValue } from "@commonfabric/api";
+import type { FabricValue, TextChange } from "@commonfabric/api";
 import {
   cloneIfNecessary,
+  cloneWithValueAtPath,
+  debugStr,
   deepFreeze,
   isDeepFrozen,
   isFabricPlainContainer,
@@ -9,15 +11,21 @@ import {
   valueEqualByWalk,
 } from "@commonfabric/data-model";
 import {
+  type ApplyOpOperation,
+  applyTextChanges,
   canResolveScopeKey,
+  CODEMIRROR_CHANGESET_CODEC,
+  codeMirrorTextChangesPayload,
   type CommitPrecondition,
   getCommitPreconditionsConfig,
+  operationBaselineHash,
   type PatchOp,
   resolveScopeKey,
   type ScopeKey,
   type ScopeKeyIdentity,
   type SqliteOperation,
   toDocumentPath,
+  toValuePath,
 } from "@commonfabric/memory/v2";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -215,6 +223,27 @@ type WritableDocumentEntry = {
 };
 
 type DocumentEntry = ReadDocumentEntry | WritableDocumentEntry;
+
+/**
+ * The text changes a transaction recorded at one string field, which its
+ * commit carries as one `apply-op` at the field's head.
+ */
+type TextChangeIntent = {
+  /** The field's document path, `value` first. */
+  path: readonly string[];
+
+  /** The value the transaction read at the field, which the edit is against. */
+  baseline: string;
+
+  /** The recorded batches, each against the value the one before it left. */
+  batches: (readonly TextChange[])[];
+
+  /** The field's value with every batch applied. */
+  expected: string;
+
+  /** The id the `apply-op` is submitted under. */
+  submissionId: string;
+};
 
 type SpaceBranch = {
   space: MemorySpace;
@@ -1119,6 +1148,15 @@ export class V2StorageTransaction implements IStorageTransaction {
    */
   #sqliteOps = new Map<MemorySpace, SqliteOperation[]>();
 
+  /**
+   * Text changes per space, keyed by document and then by the field's
+   * document pointer (`recordTextChanges()`).
+   */
+  #textChanges = new Map<
+    MemorySpace,
+    Map<string, Map<string, TextChangeIntent>>
+  >();
+
   #writeSpace?: MemorySpace;
 
   /**
@@ -1513,6 +1551,71 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
   }
 
+  recordTextChanges(
+    address: IMemorySpaceAddress,
+    changes: readonly TextChange[],
+  ): string {
+    this.#assertWritable("recordTextChanges()");
+    const ready = this.#editable();
+    if (ready.error) throw ready.error;
+    const claimed = this.#claimWriteSpace(address.space);
+    if (claimed.error) throw claimed.error;
+    if (address.path[0] !== "value") {
+      throw new Error(
+        debugStr`text changes need a path under \`value\`, not $quote${address.path}`,
+      );
+    }
+    const { doc } = this.#document(this.#branch(address.space), address);
+    const current = readValueAtPath(
+      (doc.current ?? doc.initial).value,
+      address.path,
+    );
+    if (typeof current !== "string") {
+      throw new TypeError(
+        debugStr`text changes need a string, and the field holds $quote${current}`,
+      );
+    }
+    const docKey = this.#docKey(address);
+    const pathKey = encodePointer(address.path);
+    const intent = this.#textChanges.get(address.space)?.get(docKey)?.get(
+      pathKey,
+    );
+    const unchangedSoFar = intent === undefined
+      ? current === readValueAtPath(doc.initial.value, address.path)
+      : current === intent.expected;
+    if (!unchangedSoFar) {
+      throw new Error(
+        "text changes describe edits to the value this transaction read, and " +
+          "the transaction already wrote the field another way",
+      );
+    }
+    const next = applyTextChanges(current, changes);
+    if (next === current) return next;
+    if (intent !== undefined) {
+      intent.batches.push(changes);
+      intent.expected = next;
+      return next;
+    }
+    let byDocument = this.#textChanges.get(address.space);
+    if (byDocument === undefined) {
+      byDocument = new Map();
+      this.#textChanges.set(address.space, byDocument);
+    }
+    let byPath = byDocument.get(docKey);
+    if (byPath === undefined) {
+      byPath = new Map();
+      byDocument.set(docKey, byPath);
+    }
+    byPath.set(pathKey, {
+      path: address.path,
+      baseline: current,
+      batches: [changes],
+      expected: next,
+      submissionId: crypto.randomUUID(),
+    });
+    return next;
+  }
+
   getNativeCommit(space: MemorySpace): NativeStorageCommit | undefined {
     const branch = this.#branches.get(space);
     const nativePreconditions = this.#commitPreconditionsFor(space);
@@ -1542,6 +1645,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         continue;
       }
       const { id, type, scope } = this.#parseDocKey(key);
+      const textChanges = this.#pendingTextChanges(space, key);
       // Doc-level no-op elision — except for authoritative transactions
       // (markAuthoritativeWrites): `doc.initial` is the transaction-START
       // view, which may extrapolate over a DOOMED sealed overlay, so a
@@ -1604,6 +1708,17 @@ export class V2StorageTransaction implements IStorageTransaction {
       // sent in its place would leave the root write out of the commit.
       const diffed = !this.#emitsWholeDocuments &&
         !this.#writesDocumentRoot(doc);
+      if (textChanges !== undefined && !diffed) {
+        throw new Error(
+          "text changes cannot ride a whole-document write: the document's " +
+            "commit would carry the changed field outside the `apply-op`",
+        );
+      }
+      // The patch leaves every text-changed field to its `apply-op`, and the
+      // operation's `value` keeps the changed text for the local view.
+      const patchedValue = textChanges === undefined
+        ? doc.current.value
+        : this.#valueBeforeTextChanges(doc, textChanges);
       if (diffed) {
         const mergeable = this.#buildMergeableOps(doc);
         // A document with no base goes whole, as a `set`. Mergeable ops that
@@ -1628,6 +1743,7 @@ export class V2StorageTransaction implements IStorageTransaction {
           doc,
           base,
           mergeable.suppress,
+          patchedValue,
         );
         if (mergeable.ops.length > 0) {
           if (hasBase || patch === null) {
@@ -1644,6 +1760,19 @@ export class V2StorageTransaction implements IStorageTransaction {
           this.#abandonMergeableOps(doc);
         } else if (patch) {
           operations.push(patch);
+          continue;
+        } else if (textChanges !== undefined) {
+          // Only text-changed fields moved, so the patch is empty, and the
+          // operation is still what carries the changed text to the local
+          // view.
+          operations.push({
+            op: "patch",
+            id,
+            type,
+            scope,
+            patches: [],
+            value: doc.current.value,
+          });
           continue;
         }
       } else {
@@ -1676,13 +1805,85 @@ export class V2StorageTransaction implements IStorageTransaction {
       for (const redelivery of redeliveries) operations.push(redelivery);
     }
 
+    const applyOps = this.#textChangeOperations(space);
     return {
       operations,
       ...(nativePreconditions.length
         ? { preconditions: nativePreconditions }
         : {}),
       ...(sqliteOps?.length ? { sqliteOps: [...sqliteOps] } : {}),
+      ...(applyOps.length ? { applyOps } : {}),
     };
+  }
+
+  /**
+   * Helper for `getNativeCommit()`, which returns the text changes recorded
+   * against the document at `docKey` in `space` that change its text, or
+   * `undefined` where there are none.
+   */
+  #pendingTextChanges(
+    space: MemorySpace,
+    docKey: string,
+  ): TextChangeIntent[] | undefined {
+    const intents = [
+      ...this.#textChanges.get(space)?.get(docKey)?.values() ?? [],
+    ].filter((intent) => intent.expected !== intent.baseline);
+    return intents.length > 0 ? intents : undefined;
+  }
+
+  /**
+   * Helper for `getNativeCommit()`, which returns `doc`'s working value with
+   * each text-changed field put back to the value the transaction read there:
+   * the value its patch is diffed from, so that the patch leaves those fields
+   * to their `apply-op`s. Throws when a field does not hold what its recorded
+   * changes produced, because something wrote it after them.
+   */
+  #valueBeforeTextChanges(
+    doc: WritableDocumentEntry,
+    intents: readonly TextChangeIntent[],
+  ): FabricValue | undefined {
+    let value = doc.current.value;
+    for (const intent of intents) {
+      if (readValueAtPath(value, intent.path) !== intent.expected) {
+        throw new Error(
+          debugStr`the field at $quote${intent.path} was written after its ` +
+            "text changes, which the commit cannot carry as an edit",
+        );
+      }
+      value = cloneWithValueAtPath(value, intent.path, intent.baseline);
+    }
+    return value;
+  }
+
+  /**
+   * Helper for `getNativeCommit()`, which builds one `apply-op` per field the
+   * transaction changed the text of in `space`. Each lands at the field's head
+   * only while the field holds the value the transaction read, which its
+   * `baselineHash` names, so the server has nothing to merge it over.
+   */
+  #textChangeOperations(space: MemorySpace): ApplyOpOperation[] {
+    const operations: ApplyOpOperation[] = [];
+    for (const docKey of this.#textChanges.get(space)?.keys() ?? []) {
+      const { id, scope } = this.#parseDocKey(docKey);
+      for (const intent of this.#pendingTextChanges(space, docKey) ?? []) {
+        operations.push({
+          op: "apply-op",
+          id,
+          scope,
+          path: toValuePath(intent.path.slice(1)),
+          codec: CODEMIRROR_CHANGESET_CODEC,
+          submissionId: intent.submissionId,
+          base: "head",
+          baselineHash: operationBaselineHash(intent.baseline),
+          payload: codeMirrorTextChangesPayload(
+            intent.baseline,
+            intent.batches,
+            intent.submissionId,
+          ),
+        });
+      }
+    }
+    return operations;
   }
 
   *getWriteDetails(space: MemorySpace): Iterable<TransactionWriteDetail> {
@@ -3661,11 +3862,13 @@ export class V2StorageTransaction implements IStorageTransaction {
   }
 
   /**
-   * Builds the patch operation carrying a document's writes as a diff of its
-   * working value against `base`, leaving out the candidates `suppress` names.
-   * Returns `null` when there is no patch to send: `base` or the working value
-   * is absent, or nothing differs. No patch expresses a write to the document
-   * root, so `doc` must hold none (see `#writesDocumentRoot()`).
+   * Builds the patch operation carrying a document's writes as a diff of
+   * `patchedValue`, its working value unless the caller holds some writes back,
+   * against `base`, leaving out the candidates `suppress` names. The
+   * operation's `value` is the working value either way. Returns `null` when
+   * there is no patch to send: `base` or `patchedValue` is absent, or nothing
+   * differs. No patch expresses a write to the document root, so `doc` must
+   * hold none (see `#writesDocumentRoot()`).
    */
   #buildPatchOperation(
     id: URI,
@@ -3674,8 +3877,9 @@ export class V2StorageTransaction implements IStorageTransaction {
     doc: WritableDocumentEntry,
     base: FabricValue | undefined,
     suppress: readonly OpSuppression[],
+    patchedValue: FabricValue | undefined = doc.current.value,
   ): Extract<NativeStorageCommitOperation, { op: "patch" }> | null {
-    if (base === undefined || doc.current.value === undefined) {
+    if (base === undefined || patchedValue === undefined) {
       return null;
     }
 
@@ -3691,7 +3895,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     const arrayGroups = new Map<string, readonly string[]>();
     for (const detail of details) {
       const value = readValueAtPath(
-        doc.current.value,
+        patchedValue,
         detail.address.path,
         { allowArrayLength: true },
       );
@@ -3704,7 +3908,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       // both read as `undefined`, but transitions between them are real
       // changes (add/remove of an `undefined`-valued slot).
       const valuePresent = hasValueAtPath(
-        doc.current.value,
+        patchedValue,
         detail.address.path,
         { allowArrayLength: true },
       );
@@ -3726,7 +3930,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
       const arrayPatchPath = findArrayPatchPath(
         base,
-        doc.current.value,
+        patchedValue,
         detail.address.path,
       );
       if (arrayPatchPath) {
@@ -3762,7 +3966,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       const beforeValue = readValueAtPath(base, arrayPath, {
         allowArrayLength: true,
       });
-      const afterValue = readValueAtPath(doc.current.value, arrayPath, {
+      const afterValue = readValueAtPath(patchedValue, arrayPath, {
         allowArrayLength: true,
       });
       for (
@@ -3773,7 +3977,7 @@ export class V2StorageTransaction implements IStorageTransaction {
           hasValueAtPath(base, arrayPath, {
             allowArrayLength: true,
           }),
-          hasValueAtPath(doc.current.value, arrayPath, {
+          hasValueAtPath(patchedValue, arrayPath, {
             allowArrayLength: true,
           }),
         )
@@ -3795,7 +3999,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (patches.length === 0) {
       return null;
     }
-    assertNoIndexedArrayStructuralOps(patches, base, doc.current.value);
+    assertNoIndexedArrayStructuralOps(patches, base, patchedValue);
 
     return { op: "patch", id, type, scope, patches, value: doc.current.value };
   }

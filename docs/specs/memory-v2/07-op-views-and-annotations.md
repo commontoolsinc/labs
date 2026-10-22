@@ -198,11 +198,18 @@ request activates the epoch, another null-cursor request with the same codec and
 baseline hash is interpreted as version zero of that epoch and rebased over the
 operations already accepted there. A different codec or baseline is rejected.
 
+An `apply-op` whose base is `head` activates an inactive field the same way,
+with its `baselineHash` naming the current value rather than a value an editor
+opened with.
+
 Within an active epoch:
 
 - the codec id is immutable
 - `apply-op` may use an older version in the same epoch and is rebased over the
   intervening integrated suffix
+- `apply-op` may name `head` instead of a version, and then applies only while
+  the field's value hashes to its `baselineHash`, at the current version with
+  no suffix to rebase over
 - a future version or different epoch is rejected
 - a submission id is unique within the epoch
 
@@ -236,8 +243,8 @@ ApplyOpOperation {
   path: ValuePath
   codec: OpCodecId
   submissionId: string
-  base: OpCursor | null
-  baselineHash?: string       // required exactly when base is null
+  base: OpCursor | null | "head"
+  baselineHash?: string       // required exactly when base is null or "head"
   payload: JSONValue          // codec-defined submitted batch
 }
 
@@ -278,12 +285,26 @@ cursor is the field-specific concurrency precondition, and stale bases are
 mergeable through the codec. Other reads in the commit retain normal Memory
 conflict semantics.
 
+A `head` base is the precondition in another form. In step 4 the engine compares
+the hash of the field's current value with `baselineHash`, rejects a mismatch
+with `OpFieldBaselineMismatchError`, and otherwise takes the current version as
+the base, so step 5 rebases over nothing. A client uses it for a payload
+computed from a value it read rather than from an operation stream it follows:
+pattern code's `applyChanges()` sends one in its handler's commit, beside the
+handler's confirmed read of the field. Reads are validated before operations
+apply, so where the field moved, that read refuses the commit as an ordinary
+`ConflictError` before the `apply-op` is considered, and the handler runs again
+against the new value. Ordinary writes in the same commit may change other
+paths of the document, as §7.6 allows any write to.
+
 ### 7.7.2 Submission idempotency
 
 `submissionId` is durable across session replacement and reconnect:
 
 - repeating an identical submission in the same field epoch returns its
-  original resolution without integrating it again
+  original resolution without integrating it again; a `head` submission is
+  identical when its codec and payload are, since the version it landed at is
+  the one its base resolved to
 - reusing the id with a different codec, base, or payload is a protocol error
 - normal `(sessionId, localSeq)` replay remains the idempotency boundary for the
   complete commit

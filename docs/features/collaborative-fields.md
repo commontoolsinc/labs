@@ -104,6 +104,18 @@ same transaction stores the submitted projection, appends canonical integrated
 operations, advances the field cursor, and writes the ordinary materialized
 revision.
 
+Pattern code edits a collaborative field with `Writable<string>.applyChanges()`,
+which takes changes in the shape of a CodeMirror change spec against the value
+the handler read. The handler's commit carries them as an `apply-op` whose base
+is the field's `head`, with the hash of the value read as its `baselineHash`, so
+the edit lands only while the field holds that value and has nothing to be
+rebased over. The commit also carries the handler's read of the field, which
+refuses it as an ordinary conflict once the field moves, and the scheduler runs
+the handler again against the new text. The document's patch in that commit
+leaves the field to the `apply-op`, while the handler's own view and the
+replica's pending layer show the changed text from the start. An `applyChanges()`
+on a field no editor has opened activates it from the value read.
+
 `cf-code-editor` submits every unconfirmed local update in one apply, and
 edits made while that apply is in flight go out in the next one, until none
 remain. A local update is confirmed by Memory or reported through the editor's

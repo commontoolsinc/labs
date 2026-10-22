@@ -6,6 +6,7 @@ import { toFileUrl } from "@std/path";
 import {
   applyCommit,
   close,
+  ConflictError,
   createBranch,
   OpCodecError,
   OpCursorMismatchError,
@@ -31,6 +32,7 @@ import {
   resetServerExecutionConfig,
   setServerExecutionConfig,
   streamEntriesDocId,
+  toDocumentPath,
   toValuePath,
 } from "../v2.ts";
 
@@ -1746,5 +1748,331 @@ describe("v2-operation-engine", () => {
       if (engine !== undefined) close(engine);
       await Deno.remove(path);
     }
+  });
+
+  describe("a `head` base", () => {
+    // Each case seeds `of:collaborative` with `body: "ac"`, opens a field
+    // epoch on it with `alice` typing a `b`, and has `bob` type a `d` at the
+    // end, so the field holds `abcd` at version 2 and a submission written
+    // against version 1 would need rebasing.
+
+    const seed = (engine: Awaited<ReturnType<typeof open>>): number => {
+      applyCommit(engine, {
+        sessionId: "session:setup",
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:collaborative",
+            value: { value: { body: "ac" } },
+          }],
+        },
+      });
+      applyCommit(engine, {
+        sessionId: "session:alice",
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "apply-op",
+            id: "of:collaborative",
+            path: toValuePath(["body"]),
+            codec: CODEMIRROR_CHANGESET_CODEC,
+            submissionId: "alice:1",
+            base: null,
+            baselineHash: operationBaselineHash("ac"),
+            payload: {
+              updates: [{ clientId: "alice", changes: changes(2, 1, "b") }],
+            },
+          }],
+        },
+      });
+      return applyCommit(engine, {
+        sessionId: "session:bob",
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "apply-op",
+            id: "of:collaborative",
+            path: toValuePath(["body"]),
+            codec: CODEMIRROR_CHANGESET_CODEC,
+            submissionId: "bob:1",
+            base: { epoch: 1, version: 1 },
+            payload: {
+              updates: [{ clientId: "bob", changes: changes(3, 3, "d") }],
+            },
+          }],
+        },
+      }).seq;
+    };
+
+    const atHead = (
+      submissionId: string,
+      computedFrom: string,
+      insert: string,
+    ): ApplyOpOperation => ({
+      op: "apply-op",
+      id: "of:collaborative",
+      path: toValuePath(["body"]),
+      codec: CODEMIRROR_CHANGESET_CODEC,
+      submissionId,
+      base: "head",
+      baselineHash: operationBaselineHash(computedFrom),
+      payload: {
+        updates: [{
+          clientId: "agent",
+          changes: changes(computedFrom.length, computedFrom.length, insert),
+        }],
+      },
+    });
+
+    it("applies a payload computed from the current value at the field's current version", async () => {
+      const { engine, path } = await openTestEngine();
+      try {
+        seed(engine);
+        const applied = applyCommit(engine, {
+          sessionId: "session:agent",
+          commit: {
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            operations: [atHead("agent:1", "abcd", "!")],
+          },
+        });
+
+        expect(applied.operationResolutions?.[0]).toMatchObject({
+          from: { epoch: 1, version: 2 },
+          to: { epoch: 1, version: 3 },
+          duplicate: false,
+        });
+        expect(read(engine, { id: "of:collaborative" })).toEqual({
+          value: { body: "abcd!" },
+        });
+      } finally {
+        close(engine);
+        await Deno.remove(path);
+      }
+    });
+
+    it("throws `OpFieldBaselineMismatchError` for a payload computed from a value the field no longer holds", async () => {
+      const { engine, path } = await openTestEngine();
+      try {
+        seed(engine);
+
+        expect(() =>
+          applyCommit(engine, {
+            sessionId: "session:agent",
+            commit: {
+              localSeq: 1,
+              reads: { confirmed: [], pending: [] },
+              operations: [atHead("agent:1", "abc", "!")],
+            },
+          })
+        ).toThrow(OpFieldBaselineMismatchError);
+        expect(read(engine, { id: "of:collaborative" })).toEqual({
+          value: { body: "abcd" },
+        });
+        expect(
+          queryOperationField(engine, {
+            id: "of:collaborative",
+            path: toValuePath(["body"]),
+          }).cursor,
+        ).toEqual({ epoch: 1, version: 2 });
+      } finally {
+        close(engine);
+        await Deno.remove(path);
+      }
+    });
+
+    it("throws `ConflictError` from a stale confirmed read of the field before the operation is considered", async () => {
+      const { engine, path } = await openTestEngine();
+      try {
+        const seededSeq = seed(engine);
+
+        // The read predates `bob`'s `d`, and so does the payload. The read is
+        // what refuses the commit, which is the refusal a caller retries.
+        let thrown: unknown;
+        try {
+          applyCommit(engine, {
+            sessionId: "session:agent",
+            commit: {
+              localSeq: 1,
+              reads: {
+                confirmed: [{
+                  id: "of:collaborative",
+                  path: toDocumentPath(["value", "body"]),
+                  seq: seededSeq - 1,
+                }],
+                pending: [],
+              },
+              operations: [atHead("agent:1", "abc", "!")],
+            },
+          });
+        } catch (error) {
+          thrown = error;
+        }
+        expect(thrown).toBeInstanceOf(ConflictError);
+        expect(read(engine, { id: "of:collaborative" })).toEqual({
+          value: { body: "abcd" },
+        });
+      } finally {
+        close(engine);
+        await Deno.remove(path);
+      }
+    });
+
+    it("commits beside a current confirmed read of the field", async () => {
+      const { engine, path } = await openTestEngine();
+      try {
+        const seededSeq = seed(engine);
+        applyCommit(engine, {
+          sessionId: "session:agent",
+          commit: {
+            localSeq: 1,
+            reads: {
+              confirmed: [{
+                id: "of:collaborative",
+                path: toDocumentPath(["value", "body"]),
+                seq: seededSeq,
+              }],
+              pending: [],
+            },
+            operations: [atHead("agent:1", "abcd", "!")],
+          },
+        });
+
+        expect(read(engine, { id: "of:collaborative" })).toEqual({
+          value: { body: "abcd!" },
+        });
+      } finally {
+        close(engine);
+        await Deno.remove(path);
+      }
+    });
+
+    it("activates an inactive field from the value it holds", async () => {
+      const { engine, path } = await openTestEngine();
+      try {
+        applyCommit(engine, {
+          sessionId: "session:setup",
+          commit: {
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "set",
+              id: "of:collaborative",
+              value: { value: { body: "abcd" } },
+            }],
+          },
+        });
+        const applied = applyCommit(engine, {
+          sessionId: "session:agent",
+          commit: {
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            operations: [atHead("agent:1", "abcd", "!")],
+          },
+        });
+
+        expect(applied.operationResolutions?.[0]).toMatchObject({
+          from: { epoch: 1, version: 0 },
+          to: { epoch: 1, version: 1 },
+        });
+        expect(
+          queryOperationField(engine, {
+            id: "of:collaborative",
+            path: toValuePath(["body"]),
+          }),
+        ).toMatchObject({
+          active: true,
+          baselineHash: operationBaselineHash("abcd"),
+          materialized: "abcd!",
+        });
+      } finally {
+        close(engine);
+        await Deno.remove(path);
+      }
+    });
+
+    it("returns the original resolution for a replayed submission after the field moved on", async () => {
+      const { engine, path } = await openTestEngine();
+      try {
+        seed(engine);
+        const operation = atHead("agent:1", "abcd", "!");
+        const original = applyCommit(engine, {
+          sessionId: "session:agent",
+          commit: {
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            operations: [operation],
+          },
+        });
+        applyCommit(engine, {
+          sessionId: "session:bob",
+          commit: {
+            localSeq: 2,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "apply-op",
+              id: "of:collaborative",
+              path: toValuePath(["body"]),
+              codec: CODEMIRROR_CHANGESET_CODEC,
+              submissionId: "bob:2",
+              base: { epoch: 1, version: 3 },
+              payload: {
+                updates: [{ clientId: "bob", changes: changes(5, 0, ">") }],
+              },
+            }],
+          },
+        });
+
+        const replayed = applyCommit(engine, {
+          sessionId: "session:agent",
+          commit: {
+            localSeq: 2,
+            reads: { confirmed: [], pending: [] },
+            operations: [operation],
+          },
+        });
+        expect(replayed.operationResolutions?.[0]).toMatchObject({
+          from: original.operationResolutions?.[0].from,
+          to: original.operationResolutions?.[0].to,
+          duplicate: true,
+        });
+        expect(read(engine, { id: "of:collaborative" })).toEqual({
+          value: { body: ">abcd!" },
+        });
+      } finally {
+        close(engine);
+        await Deno.remove(path);
+      }
+    });
+
+    it("throws `OpFieldBaselineMismatchError` without a baseline hash", async () => {
+      const { engine, path } = await openTestEngine();
+      try {
+        seed(engine);
+        const { baselineHash: _omitted, ...unhashed } = atHead(
+          "agent:1",
+          "abcd",
+          "!",
+        );
+
+        expect(() =>
+          applyCommit(engine, {
+            sessionId: "session:agent",
+            commit: {
+              localSeq: 1,
+              reads: { confirmed: [], pending: [] },
+              operations: [unhashed],
+            },
+          })
+        ).toThrow(OpFieldBaselineMismatchError);
+      } finally {
+        close(engine);
+        await Deno.remove(path);
+      }
+    });
   });
 });

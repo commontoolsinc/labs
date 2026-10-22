@@ -1153,6 +1153,30 @@ export type IsThisNumber =
   | AnyBrandedCell<unknown>
   | AnyBrandedCell<any>;
 
+// To constrain methods that only exist on string cells
+export type IsThisString =
+  | AnyBrandedCell<string>
+  | AnyBrandedCell<unknown>
+  | AnyBrandedCell<any>;
+
+/**
+ * One change to a string, in the shape of a CodeMirror change spec: the text
+ * from `from` up to `to` is replaced by `insert`. Positions count UTF-16 code
+ * units, as string indexes do. `to` defaults to `from`, which makes the change
+ * an insertion, and `insert` defaults to the empty string, which makes it a
+ * deletion.
+ */
+export interface TextChange {
+  /** Start of the replaced range. */
+  readonly from: number;
+
+  /** End of the replaced range, exclusive; `from` when absent. */
+  readonly to?: number;
+
+  /** Text that replaces the range; empty when absent. */
+  readonly insert?: string;
+}
+
 /*
  * IAnyCell is an interface that is used by all calls and to which the runner
  * attaches the internal methods..
@@ -1257,6 +1281,21 @@ export interface IWritable<T, C extends AnyBrandedCell<any>> {
    * concurrent increments sum against durable state rather than clobber.
    */
   increment(this: IsThisNumber, by?: number): void;
+
+  /**
+   * Applies `changes` to a string cell. Every position refers to the value
+   * this transaction read, and a list of changes runs in ascending order
+   * without overlap. On a field a collaborative editor has opened, the
+   * changes reach the store as an edit the editors merge with their own, and
+   * land only while the field still holds the value this transaction read; a
+   * field that moved on refuses the commit, and the transaction runs again
+   * against the new value. A `get()` after this call returns the changed
+   * value.
+   */
+  applyChanges(
+    this: IsThisString,
+    changes: TextChange | readonly TextChange[],
+  ): void;
 
   remove(
     this: IsThisArray,

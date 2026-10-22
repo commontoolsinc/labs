@@ -4748,17 +4748,18 @@ const validateApplyOperation = (operation: ApplyOpOperation): void => {
   ) {
     throw new ProtocolError("apply-op identity fields are malformed");
   }
-  if (operation.base !== null && !validateCursor(operation.base)) {
+  const hashedBase = operation.base === null || operation.base === "head";
+  if (!hashedBase && !validateCursor(operation.base)) {
     throw new OpCursorMismatchError("apply-op cursor is malformed");
   }
   if (
-    operation.base === null
+    hashedBase
       ? typeof operation.baselineHash !== "string" ||
         operation.baselineHash.length === 0
       : operation.baselineHash !== undefined
   ) {
     throw new OpFieldBaselineMismatchError(
-      "baselineHash is required exactly when apply-op base is null",
+      "baselineHash is required exactly when apply-op base is `null` or `head`",
     );
   }
   if (
@@ -4860,11 +4861,15 @@ const applyOperation = (
     | OperationSubmissionRow
     | undefined;
   if (duplicate) {
+    // A `head` submission resolved its base to whatever version the field
+    // held when it landed, so the stored base version says nothing a replay
+    // could disagree with.
+    const base = operation.base;
     if (
       duplicate.codec !== operation.codec ||
-      (operation.base !== null && operation.base.epoch !== duplicate.epoch) ||
-      duplicate.base_version !== (operation.base?.version ?? 0) ||
-      (operation.base === null &&
+      (base !== null && base !== "head" && base.epoch !== duplicate.epoch) ||
+      (base !== "head" && duplicate.base_version !== (base?.version ?? 0)) ||
+      (base === null &&
         operation.baselineHash !== priorField?.baseline_hash) ||
       duplicate.submitted_payload !== encodeMemoryBoundary(operation.payload)
     ) {
@@ -4891,12 +4896,13 @@ const applyOperation = (
 
   let epoch: number;
   let currentVersion: number;
+  let baseVersion: number;
   let baselineHash: string;
   let intervening: FabricValue[];
   if (!activeField) {
-    if (operation.base !== null) {
+    if (operation.base !== null && operation.base !== "head") {
       throw new OpCursorMismatchError(
-        "inactive operation fields require a null base",
+        "inactive operation fields require a `null` or `head` base",
       );
     }
     const currentHash = operationBaselineHash(currentMaterialized);
@@ -4907,6 +4913,7 @@ const applyOperation = (
     }
     epoch = (priorField?.epoch ?? 0) + 1;
     currentVersion = 0;
+    baseVersion = 0;
     baselineHash = currentHash;
     intervening = [];
     engine.database.prepare(`
@@ -4927,7 +4934,6 @@ const applyOperation = (
         "operation field codec cannot change within an epoch",
       );
     }
-    let baseVersion: number;
     if (operation.base === null) {
       if (operation.baselineHash !== activeField.baseline_hash) {
         throw new OpFieldBaselineMismatchError(
@@ -4935,6 +4941,17 @@ const applyOperation = (
         );
       }
       baseVersion = 0;
+    } else if (operation.base === "head") {
+      // The hash stands in for a cursor: a payload computed from the value
+      // the field holds now has nothing to be rebased over.
+      if (
+        operation.baselineHash !== operationBaselineHash(currentMaterialized)
+      ) {
+        throw new OpFieldBaselineMismatchError(
+          "operation field value no longer matches the `head` baseline hash",
+        );
+      }
+      baseVersion = activeField.version;
     } else {
       if (operation.base.epoch !== activeField.epoch) {
         throw new OpCursorMismatchError("operation field epoch mismatch");
@@ -5141,7 +5158,7 @@ const applyOperation = (
     epoch,
     submission_id: operation.submissionId,
     codec: operation.codec,
-    base_version: operation.base?.version ?? 0,
+    base_version: baseVersion,
     submitted_payload: encodeMemoryBoundary(operation.payload),
     integrated_from: currentVersion,
     integrated_to: nextVersion,
@@ -5154,7 +5171,7 @@ const applyOperation = (
     epoch,
     submission_id: operation.submissionId,
     codec: operation.codec,
-    base_version: operation.base?.version ?? 0,
+    base_version: baseVersion,
     submitted_payload: encodeMemoryBoundary(operation.payload),
     integrated_from: currentVersion,
     integrated_to: nextVersion,

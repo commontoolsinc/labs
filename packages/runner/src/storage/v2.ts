@@ -1,6 +1,7 @@
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import {
   cloneIfNecessary,
+  debugStr,
   hashStringOf,
   isDeepFrozen,
   isKeyableObjectOrArray,
@@ -551,11 +552,13 @@ const documentOperationsOf = (
 
 /**
  * The operations a commit hands the store: cell operations first, a patch
- * carrying its patches alone, and folded SQLite operations last.
+ * carrying its patches alone, then folded SQLite operations, and the
+ * collaborative-field edits last, after every write to their documents.
  */
 const storeOperationsOf = (
   operations: readonly NativeCommitOperation[],
   sqliteOps: readonly SqliteOperation[],
+  applyOps: readonly ApplyOpOperation[] = [],
 ): ClientCommit["operations"] => [
   ...operations.map((operation) => {
     switch (operation.op) {
@@ -578,7 +581,53 @@ const storeOperationsOf = (
     }
   }),
   ...sqliteOps,
+  ...applyOps,
 ];
+
+/**
+ * `operation` as its document's pending layer holds it: each field that one of
+ * `applyOps` edits is replaced by the text `operation.value` holds there. The
+ * wire patch leaves that field to the edit, and the edit lands only on the
+ * value its transaction read, so the store's result is that text, and the
+ * layer replays to it.
+ */
+const withTextEditsShown = (
+  operation: NativeCommitOperation,
+  applyOps: readonly ApplyOpOperation[],
+): NativeCommitOperation => {
+  if (operation.op !== "patch" || applyOps.length === 0) return operation;
+  const scope = normalizeCellScope(operation.scope);
+  const shown: PatchOp[] = applyOps
+    .filter((edit) =>
+      edit.id === operation.id && normalizeCellScope(edit.scope) === scope
+    )
+    .map((edit) => {
+      const path = ["value", ...edit.path];
+      const text = readValueAtPath(operation.value, path);
+      if (typeof text !== "string") {
+        throw new Error(
+          debugStr`an edited field holds no text at $quote${path}`,
+        );
+      }
+      return { op: "replace", path: encodePointer(path), value: text };
+    });
+  return shown.length === 0
+    ? operation
+    : { ...operation, patches: [...operation.patches, ...shown] };
+};
+
+/**
+ * Throws when `transaction` carries collaborative-field edits, which reach the
+ * store only through `commitNative()`: `what` names the path refusing them.
+ */
+const refuseApplyOps = (transaction: NativeStorageCommit, what: string) => {
+  if (transaction.applyOps?.length) {
+    throw new Error(
+      `${what} cannot carry collaborative-field edits; commit the ` +
+        "transaction instead",
+    );
+  }
+};
 
 type CachedTransactionValue =
   | FabricValue
@@ -7401,11 +7450,13 @@ export class SpaceReplica
     );
 
     const sqliteOps = transaction.sqliteOps ?? [];
+    const applyOps = transaction.applyOps ?? [];
 
     if (
       operations.length === 0 &&
       !preconditions?.length &&
-      sqliteOps.length === 0
+      sqliteOps.length === 0 &&
+      applyOps.length === 0
     ) {
       return { ok: {} };
     }
@@ -7419,6 +7470,7 @@ export class SpaceReplica
           preconditions,
           sqliteOps,
           options,
+          applyOps,
         ),
     );
   }
@@ -7451,6 +7503,7 @@ export class SpaceReplica
       readonly reads?: ClientCommit["reads"];
     },
   ): SealedNativeCommit {
+    refuseApplyOps(transaction, "a sealed commit");
     return this.#sealOperations(
       this.#wholeOverLocalFolds(
         documentOperationsOf(transaction),
@@ -7485,6 +7538,7 @@ export class SpaceReplica
     preconditions: readonly CommitPrecondition[];
     reads: ClientCommit["reads"];
   } {
+    refuseApplyOps(transaction, "a store commit built ahead of its seal");
     const operations = this.#wholeOverLocalFolds(
       documentOperationsOf(transaction),
       identity,
@@ -8204,6 +8258,7 @@ export class SpaceReplica
     preconditions: readonly CommitPrecondition[] = [],
     sqliteOps: readonly SqliteOperation[] = [],
     commitOptions?: NativeCommitOptions,
+    applyOps: readonly ApplyOpOperation[] = [],
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const activePreconditions = activeCommitPreconditions(preconditions);
     for (const pin of activePreconditions) {
@@ -8238,7 +8293,7 @@ export class SpaceReplica
     }
     if (
       operations.length === 0 && sqliteOps.length === 0 &&
-      activePreconditions.length === 0
+      applyOps.length === 0 && activePreconditions.length === 0
     ) {
       return { ok: {} };
     }
@@ -8255,9 +8310,10 @@ export class SpaceReplica
           operations,
           this.#buildReads(source, localSeq, undefined, activePreconditions),
         ),
-        // Cell ops first, folded SQLite ops last (applied in array order by the
-        // engine; sqlite ops are not entity revisions and carry no id/scope).
-        operations: storeOperationsOf(operations, sqliteOps),
+        // Cell ops first, then folded SQLite ops, which are not entity
+        // revisions and carry no id/scope, then the collaborative-field edits,
+        // which the engine applies after the writes to their documents.
+        operations: storeOperationsOf(operations, sqliteOps, applyOps),
         ...(activePreconditions.length > 0
           ? { preconditions: [...activePreconditions] }
           : {}),
@@ -8326,7 +8382,11 @@ export class SpaceReplica
 
     withCommitTiming(["commitOperations", "applyPending"], () => {
       for (const operation of operations) {
-        this.#applyPending(operation, localSeq, commit.reads);
+        this.#applyPending(
+          withTextEditsShown(operation, applyOps),
+          localSeq,
+          commit.reads,
+        );
       }
     });
 
