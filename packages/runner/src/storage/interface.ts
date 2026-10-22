@@ -96,7 +96,9 @@ import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import type {
   PendingCommitContext,
   SpaceStorageDiagnostic,
+  SpaceStorageSizes,
   StorageDiagnostics,
+  StorageSizes,
 } from "./diagnostics.ts";
 
 export type {
@@ -143,11 +145,20 @@ export class ReplicaLoadFailureError extends Error {
     readonly failure: ReplicaLoadFailure,
     cause: unknown,
   ) {
-    super(
-      cause instanceof Error ? cause.message : String(cause),
-      { cause },
-    );
+    super(loadFailureMessage(cause), { cause });
   }
+}
+
+/**
+ * Returns the message a load failure's cause carries. A pull reports its
+ * failure as a plain result object rather than an `Error`, so the message is
+ * read off any object that has one; a cause without one is stringified.
+ */
+function loadFailureMessage(cause: unknown): string {
+  return typeof cause === "object" && cause !== null && "message" in cause &&
+      typeof cause.message === "string"
+    ? cause.message
+    : String(cause);
 }
 
 export const toReplicaLoadFailureError = (
@@ -243,6 +254,17 @@ export type OptStorageValue<T extends FabricValue = FabricValue> =
 export type StoreReadThrough = (
   address: { id: URI; scopeKey: ScopeKey },
 ) => SessionSyncUpsert | undefined;
+
+/**
+ * A stored document: its space and id, and the scope it is read in, with the
+ * scope instance when the read names one.
+ */
+export type StoredDocumentAddress = {
+  space: MemorySpace;
+  id: URI;
+  scope?: CellScope;
+  scopeKey?: ScopeKey;
+};
 
 export interface IStorageManager extends IStorageSubscriptionCapability {
   id: string;
@@ -346,6 +368,13 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * sessions would then be split across the two.
    */
   setSharedMemoryConnection?(enabled: boolean): void;
+
+  /**
+   * Keeps session-scoped documents in the local replica when enabled.
+   * Repeated configuration must agree across runtimes sharing this manager.
+   * @throws If a different policy has already been configured.
+   */
+  setLocalSessionDocuments?(enabled: boolean): void;
 
   /**
    * Record a runtime-learned HTTP or HTTPS host hint for a space
@@ -497,6 +526,12 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    */
   authorizationError?(space: MemorySpace): Error | undefined;
 
+  /**
+   * The terminal error of a space's remote subscription. Ordinary reconnects
+   * and reads supplied by an authoritative local store return `undefined`.
+   */
+  spaceSessionError?(space: MemorySpace): Error | undefined;
+
   /** The latest authoritative access loss for a space, cleared on reopening. */
   spaceAccessError?(space: MemorySpace): Error | undefined;
 
@@ -517,6 +552,31 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   subscribeSpaceAccessChange?(observer: (space: MemorySpace) => void): Cancel;
 
   /**
+   * Observes a space's memory session being replaced on reconnect rather than
+   * resumed: the host no longer held the session, as when its process
+   * restarted, so what it serves may have changed. The initial open and a
+   * resumed reconnect do not emit.
+   */
+  subscribeSpaceSessionReplaced?(
+    observer: (space: MemorySpace) => void,
+  ): Cancel;
+
+  /**
+   * Observes a space's remote subscription ending with an error, which
+   * `spaceSessionError()` reports from then on: for example a takeover, an
+   * authorization denial, or a client that gives up reconnecting. The space's
+   * documents receive no further updates unless a reopen after an access
+   * change (see `subscribeSpaceAccessChange()`) replaces the session, after
+   * which `spaceSessionError()` returns undefined again. An authorization
+   * denial also reaches `subscribeSpaceAccessLoss()` observers. Ordinary
+   * reconnects, normal closure, and spaces whose reads an authoritative local
+   * store supplies do not emit.
+   */
+  subscribeSpaceSessionError?(
+    observer: (space: MemorySpace, error: Error) => void,
+  ): Cancel;
+
+  /**
    * Register an in-flight commit so the durability barrier
    * (`hasPendingCommits` / `pendingCommitsSettled`) covers it. Called by the
    * transaction layer at `commit()` entry, synchronously with the commit
@@ -531,6 +591,9 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
 
   /** Snapshot pending work without waiting for durability or starting I/O. */
   getDiagnostics?(): StorageDiagnostics;
+
+  /** The sizes of the structures held across every open space. */
+  getSizes?(): StorageSizes;
 
   /**
    * Whether any registered commit is still unconfirmed. Every write flows
@@ -604,6 +667,57 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
      * replica seen the doc" check are then per that INSTANCE. */
     identity?: ScopeKeyIdentity,
   ): boolean;
+
+  /**
+   * Returns the token that keeps a document loaded: while anything holds a
+   * strong reference to it, `releaseUnreadDocuments()` keeps the document.
+   * A cell that has loaded its document holds it. Each call for a document
+   * returns the same token while one is held. A read under `identity`, when it
+   * is not the manager's own, holds that identity's instance of a scoped
+   * document.
+   */
+  holdDocument?(
+    address: StoredDocumentAddress,
+    identity?: ScopeKeyIdentity,
+  ): object;
+
+  /**
+   * Adds a way for the manager to learn whether something reads a document;
+   * a document any of them reads keeps its watches through
+   * `releaseUnreadDocuments()` and stays loaded when its watches go. Returns
+   * a cancel that removes it.
+   */
+  addDocumentReader?(
+    reads: (address: StoredDocumentAddress) => boolean,
+  ): Cancel;
+
+  /**
+   * Removes the watches rooted at documents nothing keeps, and drops the
+   * documents those watches alone kept loaded. A document is kept while a
+   * reader (`addDocumentReader()`) reads it, while its hold token
+   * (`holdDocument()`) is reachable, while a sink on the replica names it,
+   * or while a local write to it is pending; a root loaded or read since
+   * the previous call began keeps its watch through this one. A later read
+   * of a dropped document loads it again. A space whose server does not
+   * advertise `watchRemoveV1` keeps every watch. Resolves once every space's
+   * session has answered.
+   */
+  releaseUnreadDocuments?(): Promise<void>;
+
+  /**
+   * How many documents this manager has dropped. A cell loaded before the
+   * count last moved checks on its next read whether its replica still holds
+   * its document, and loads it again only if it does not.
+   */
+  droppedDocuments?(): number;
+
+  /** Calls `observer` with each batch of documents a space's replica drops. */
+  subscribeDocumentsDropped?(
+    observer: (
+      space: MemorySpace,
+      addresses: readonly Omit<StoredDocumentAddress, "space">[],
+    ) => void,
+  ): Cancel;
 
   /**
    * Undo a `shouldPullDoc` reservation after the kicked sync FAILED, so a
@@ -1392,6 +1506,16 @@ export interface IStorageTransaction {
   derivedWrites?: boolean;
 
   /**
+   * The first user- or session-scoped instance, as `<space>/<scope>/<id>`,
+   * that this transaction read through a link while the instance was missing
+   * and another derivation registered in the same runtime writes the
+   * document. Set by link resolution on a serving runtime only, where such an
+   * instance is one the serving loop has not produced yet, and read by the
+   * reactive action's commit, which a run that read one does not make.
+   */
+  unproducedScopedInstance?: string;
+
+  /**
    * The scope INSTANCE identity this transaction's scoped reads and writes
    * resolve against when it is NOT the storage manager's own session
    * (server-execution v2 stage A — OW17's tx→replica identity seam,
@@ -1919,6 +2043,21 @@ export interface TransactionSealDestination {
   ): Promise<Result<Unit, CommitError>> | TransactionCommitReceipt;
 
   /**
+   * Whether `seal` would drop `tx`'s writes rather than accept them, were
+   * `tx` sealed now. A commit asks before its CFC boundary pass and skips the
+   * pass for a transaction this returns `true` for: writes that reach no
+   * store and no reader cross no boundary. Absent, the commit treats no
+   * transaction as discarded, and leaves what becomes of its writes to `seal`.
+   *
+   * The answer is for the moment it is asked and binds nothing: a destination
+   * may answer differently later, in either direction, and `seal` decides for
+   * itself when it runs. A commit therefore asks again right before it seals,
+   * in the same synchronous stretch as the seal's own decision, rather than
+   * trusting what a preparation ahead of it was told.
+   */
+  discards?(tx: IExtendedStorageTransaction): boolean;
+
+  /**
    * The HOME space of the wave this destination seals into (the space
    * the serving loop serves). The send site's LT1-vs-outbox decision
    * reads it: an emission targeting THIS space rides the wave's own
@@ -2199,6 +2338,13 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   runWithAmbientReadMeta<T>(meta: Metadata, fn: () => T): T;
 
   markCfcRelevant(reason?: string): void;
+
+  /**
+   * Invalidates the transaction's CFC preparation, adding `reason` to the
+   * reasons a commit is refused for. The reason is recorded without any verdict
+   * tag at its front, since only a preparation decides that a refusal is
+   * terminal; a refusal for an invalidation alone is retryable.
+   */
   invalidateCfc(reason: string): void;
 
   getNarrowestReadScope(): CellScope;
@@ -2346,8 +2492,8 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
 
   /**
    * Settles whether this transaction is CFC-relevant — the flow-label
-   * relevance probe, then the sink-request ceiling probe — and runs
-   * `prepareCfc()` when it is.
+   * relevance probe, then the sink-request ceiling probe — and runs the
+   * verification `prepareCfc()` runs when it is, without reading the digest.
    *
    * `commit()` runs this itself, so the enforcement ladder always decides on
    * a settled verdict. `Runtime.prepareTxForCommit` runs it earlier for
@@ -2367,11 +2513,12 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   prepareForCommitCooperatively(signal: AbortSignal): Promise<void>;
 
   /**
-   * Runs CFC boundary verification for this transaction and records the
-   * prepared digest. Takes no caller-supplied input: the commit-time digest
-   * recheck only confirms the prepared input matches real activity, so an
-   * external input override would let a caller skip verification while still
-   * passing the recheck (audit S2).
+   * Runs CFC boundary verification for this transaction, seals the activity
+   * it verified as the prepared input, and returns that input's digest, or
+   * the empty string when verification refused. Takes no caller-supplied
+   * input: the commit-time digest recheck only confirms the prepared input
+   * matches real activity, so an external input override would let a caller
+   * skip verification while still passing the recheck (audit S2).
    */
   prepareCfc(): string;
 
@@ -3173,6 +3320,9 @@ export interface ISpaceReplica extends ISpace {
   /** Existing session progress without starting I/O or awaiting commits. */
   getDiagnostics?(): SpaceStorageDiagnostic;
 
+  /** The sizes of the structures this replica holds. */
+  getSizes?(): SpaceStorageSizes;
+
   /**
    * Return a state for the requested entry or returns `undefined` if replica
    * does not have it. The state carries `since`, the commit sequence the
@@ -3281,6 +3431,40 @@ export interface ISpaceReplica extends ISpace {
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
   ): EntityDocument | undefined;
+
+  /**
+   * The commit sequence through which every document this replica watches
+   * holds every change, or `undefined` when it cannot say: before the first
+   * server push applies; after a frame failed to apply or was applied with
+   * entries quarantined, until the replica resets; and while the session's
+   * server runs server execution or does not say whether it does, since its
+   * executor commits waves outside the publication turn a push is complete
+   * under. A document a watch mutation delivered may hold a later state than
+   * this sequence. When `documents` is supplied, returns `undefined` if any
+   * mutable document has no delivered watch: an accepted write alone proves
+   * its stored version, not coverage of subsequent changes.
+   */
+  completeThroughSeq?(
+    documents?: readonly Pick<IMemorySpaceAddress, "id" | "scope">[],
+  ): number | undefined;
+
+  /**
+   * Whether the replica holds a known stored version of the document, with
+   * no pending local write, refused local fold, or incomplete wave promotion.
+   * A watched delivery establishes it, including absence; a newer own write
+   * over that delivery waits for a covering push. An accepted whole-document
+   * set or deletion also establishes a version without a frame delivery, as
+   * does a write the server elided as an identity against the commit's read
+   * of the document, and verified content under its content-addressed id in
+   * space scope. A mutable version without a delivered watch may be stale:
+   * use `completeThroughSeq()` with the read documents to ask about coverage
+   * of later changes.
+   */
+  isConfirmedDocument?(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): boolean;
 
   commitNative?(
     transaction: NativeStorageCommit,
@@ -3441,6 +3625,23 @@ export interface ISpaceReplica extends ISpace {
     coverClass?: CommitClass;
     pendingLocalSeqs: number[];
   };
+
+  /**
+   * Resolves once every client speculation layer standing over the document
+   * now (entries sealed `speculative: true` — speculation.md §1) has settled,
+   * by retirement or withdrawal; `undefined` when none stands. A layer sealed
+   * after the call is not waited for.
+   *
+   * A layer masks the document's durable state, so a change to that state
+   * beneath it changes nothing visible and notifies nothing, and neither does
+   * its retirement over a durable value equal to its own. A reader of the
+   * durable view waits on this to learn of either.
+   */
+  whenSpeculationSettled?(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): Promise<void> | undefined;
 
   /**
    * The store seq a local commit's accept committed at (speculation.md
@@ -3718,7 +3919,7 @@ export interface IStorageTransactionWriteIsolationError extends IStorageError {
 }
 
 /**
- * Error returned when attempting to write to a read-only address (data: URI).
+ * Error returned when attempting to write to a read-only address (`snapshot:` or `data:` URI).
  */
 export interface IReadOnlyAddressError extends IStorageError {
   readonly name: "ReadOnlyAddressError";

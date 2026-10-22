@@ -1171,6 +1171,79 @@ Deno.test("parseCfHarnessCliArgs reads cache and reasoning defaults from the pro
   }
 });
 
+Deno.test("parseCfHarnessCliArgs reads a run depth, leaves an unnamed one to the default, and refuses one it does not know", async () => {
+  const parse = (argv: string[]) =>
+    parseCfHarnessCliArgs(["--prompt", "hi", ...argv], {
+      cwd: "/tmp/project",
+      env: {},
+    });
+
+  const deep = await parse(["--depth", "deep"]);
+  const unnamed = await parse([]);
+
+  if ("help" in deep || "help" in unnamed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(deep.depth, "deep");
+  assertEquals(unnamed.depth, undefined);
+  await assertRejects(
+    () => parse(["--depth", "medium"]),
+    Error,
+    "--depth must be one of quick, standard, deep",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs reads a caller's task tags and domains, none as no domain, and refuses a word it does not know or a shape on resume", async () => {
+  const parse = (argv: string[]) =>
+    parseCfHarnessCliArgs(["--prompt", "hi", ...argv], {
+      cwd: "/tmp/project",
+      env: {},
+    });
+
+  const stated = await parse([
+    "--task-tags",
+    "find, act",
+    "--task-domains",
+    "personal,web",
+  ]);
+  const none = await parse(["--task-domains", "none"]);
+  const unstated = await parse([]);
+
+  if ("help" in stated || "help" in none || "help" in unstated) {
+    throw new Error("expected config result");
+  }
+  assertEquals(stated.taskShape, {
+    tags: ["find", "act"],
+    domains: ["personal", "web"],
+  });
+  assertEquals(none.taskShape, { domains: [] });
+  assertEquals(unstated.taskShape, undefined);
+  await assertRejects(
+    () => parse(["--task-domains", "email"]),
+    Error,
+    "--task-domains names email; it takes fabric, personal, web, or none",
+  );
+  await assertRejects(
+    () => parse(["--task-tags", "research"]),
+    Error,
+    "--task-tags names research",
+  );
+  await assertRejects(
+    () => parse(["--task-tags", "none"]),
+    Error,
+    "--task-tags names none; it takes respond, find, act, pieces, author",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--resume-run", "run-earlier", "--task-domains", "web"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--task-tags and --task-domains are not supported with --resume-run",
+  );
+});
+
 Deno.test("parseCfHarnessCliArgs rejects an empty reasoning effort flag", async () => {
   await assertRejects(
     () =>
@@ -4731,7 +4804,7 @@ Deno.test("buildCfHarnessOperatorSystemPrompt appends user instructions after gu
       systemPrompt: "Use bash and read_file only. Do not modify files.",
     }),
     [
-      buildCfHarnessBaseSystemPrompt(),
+      buildCfHarnessBaseSystemPrompt({ patternIndex: false }),
       "",
       "Operator guidance for cf-harness runs:",
       "- Prefer exploration within /workspace/packages/cf-harness.",
@@ -4758,6 +4831,27 @@ Deno.test("resolveCfHarnessCliSystemPrompt bypasses operator guidance in batch m
       systemPrompt: "You are a Loom batch worker.",
     }),
   );
+});
+
+Deno.test("resolveCfHarnessCliSystemPrompt offers the pattern index only to a run configured with one", () => {
+  const config = {
+    workspace: "/tmp/project",
+    focusRoot: "/tmp/project/packages/cf-harness",
+    outputMode: "batch" as const,
+  };
+  const indexed = resolveCfHarnessCliSystemPrompt({
+    ...config,
+    patternIndex: { baseUrl: "https://index.example" },
+  });
+  const unindexed = resolveCfHarnessCliSystemPrompt(config);
+
+  assertStringIncludes(indexed!, "Search the pattern index");
+  assertStringIncludes(
+    indexed!,
+    "The parent can run an indexed pattern with run_pattern",
+  );
+  assertEquals(unindexed?.includes("pattern index"), false);
+  assertEquals(unindexed?.includes("indexed pattern"), false);
 });
 
 Deno.test("buildCfHarnessBatchSystemPrompt omits submit_result guidance when the tool is not allowed", () => {

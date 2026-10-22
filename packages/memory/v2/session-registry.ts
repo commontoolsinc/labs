@@ -9,6 +9,11 @@ import type {
   ViewQuery,
   WatchSpec,
 } from "../v2.ts";
+import {
+  type DocumentInterestQuery,
+  type DocumentInterestsReport,
+  inspectDocumentInterests,
+} from "./document-interests.ts";
 import type { TrackedGraphState } from "./query.ts";
 import type { SessionCacheEntry } from "./server-sync.ts";
 import { trackedIdsFromEntries } from "./server-sync.ts";
@@ -17,6 +22,15 @@ export type SessionState = {
   id: string;
   space: string;
   sessionToken: SessionToken;
+  /**
+   * The `resumeKey` and `resumeAttempt` the latest open carried, and the
+   * token it presented. A newer attempt under the same key may present that
+   * token instead of `sessionToken`: its client may never have received the
+   * response that carried `sessionToken` (`SessionDescriptor.resumeKey`).
+   */
+  resumeKey?: string;
+  resumeAttempt?: number;
+  presentedToken?: SessionToken;
 
   /** The read ceiling this session declared at its LAST open
    * (`SessionDescriptor.readCeiling`); fresh per open, never inherited. */
@@ -55,6 +69,19 @@ export type SessionState = {
 
   /** Watch declarations by id, updated with the array at publication. */
   watchIndex: Map<string, WatchSpec>;
+
+  /**
+   * The graph watches, by id, that `session.watch.add` left unwalked
+   * because the graph of their branch already covered every root of
+   * theirs. Nothing in a graph is attributable to one of these, so
+   * removing it leaves its branch's graph as it stands, and removing a
+   * walked watch of the same branch evaluates that graph again and walks
+   * each of these that the rebuilt graph no longer covers. Every other
+   * graph watch was walked into its graph. A full evaluation of the watch
+   * set, whether a replacement or a catch-up, walks every watch, so it
+   * empties this set.
+   */
+  coveredWatchIds: Set<string>;
 
   /** Scoped dirty keys owned by operation watches. Rebuilt on replacement. */
   operationTrackedIds: Set<string>;
@@ -116,6 +143,17 @@ export type SessionState = {
    * or scoped-read identity (those key on `principal`, the envelope).
    * Re-resolved on every open; a resume without the marker drops it. */
   actingPrincipal?: string;
+
+  /**
+   * Set when the opening connection's client advertised `elidedVerdicts`:
+   * its replica promotes a layer the verdict elides to the document its
+   * transaction computed rather than folding it, so the engine may elide a
+   * positional write for this session. Set per open
+   * from the opening connection, and a resume by a client without the
+   * capability is refused, since a replayed verdict may carry an elision only
+   * such a replica handles.
+   */
+  elidedVerdicts?: boolean;
 };
 
 type OpenSessionState = {
@@ -163,6 +201,7 @@ export class SessionRegistry {
     principal?: string,
     actingPrincipal?: string,
     routed = false,
+    elidedVerdicts = false,
   ): OpenSessionState {
     this.#prune();
     const sessionId = session.sessionId ?? crypto.randomUUID();
@@ -170,6 +209,16 @@ export class SessionRegistry {
     const existing = this.#sessions.get(key);
     if (existing?.routedAuthority !== undefined && !routed) {
       throw authorizationError("A routed session requires a routed connection");
+    }
+    // A commit this session had accepted under the waived identity proof
+    // may replay as an elided positional write, which only a replica that
+    // promotes elided layers by their computed document handles; a client
+    // that no longer advertises the capability opens a fresh session instead
+    // of resuming this one.
+    if (existing?.elidedVerdicts === true && !elidedVerdicts) {
+      throw authorizationError(
+        "A session opened with elidedVerdicts requires a client that advertises it",
+      );
     }
     if (
       existing?.principal !== undefined &&
@@ -181,7 +230,18 @@ export class SessionRegistry {
     }
     if (
       existing !== undefined &&
-      session.sessionToken !== existing.sessionToken
+      session.sessionToken !== existing.sessionToken &&
+      !(
+        existing.resumeKey !== undefined &&
+        existing.presentedToken !== undefined &&
+        existing.resumeAttempt !== undefined &&
+        session.resumeKey === existing.resumeKey &&
+        session.sessionToken === existing.presentedToken &&
+        // A superseded attempt, still in flight when a newer one restored
+        // the session, must not take it back.
+        session.resumeAttempt !== undefined &&
+        session.resumeAttempt > existing.resumeAttempt
+      )
     ) {
       throw revokedError(
         `session ${sessionId} resume token is no longer valid`,
@@ -201,6 +261,15 @@ export class SessionRegistry {
       id: sessionId,
       space,
       sessionToken,
+      ...(session.resumeKey !== undefined
+        ? { resumeKey: session.resumeKey }
+        : {}),
+      ...(session.resumeAttempt !== undefined
+        ? { resumeAttempt: session.resumeAttempt }
+        : {}),
+      ...(session.sessionToken !== undefined
+        ? { presentedToken: session.sessionToken }
+        : {}),
       seenSeq,
       lastSyncedSeq: existing?.lastSyncedSeq ?? seenSeq,
       watches: existing?.watches ?? [],
@@ -211,6 +280,7 @@ export class SessionRegistry {
       viewDemandGraphs: existing?.viewDemandGraphs ?? new Map(),
       viewDemandEntities: existing?.viewDemandEntities ?? new Map(),
       watchIndex: existing?.watchIndex ?? new Map(),
+      coveredWatchIds: existing?.coveredWatchIds ?? new Set(),
       operationTrackedIds: existing?.operationTrackedIds ?? new Set(),
       operationWatches: existing?.operationWatches ?? [],
       operationCursors: existing?.operationCursors ?? new Map(),
@@ -248,6 +318,7 @@ export class SessionRegistry {
       // open's resolution against the current ACL; an open without the
       // marker carries none (fail-closed toward less authority).
       ...(actingPrincipal !== undefined ? { actingPrincipal } : {}),
+      ...(elidedVerdicts ? { elidedVerdicts: true } : {}),
     });
     return {
       sessionId,
@@ -297,6 +368,11 @@ export class SessionRegistry {
       }
     }
     return sessions;
+  }
+
+  /** Attributes a document to retained sessions without pruning or mutation. */
+  documentInterests(query: DocumentInterestQuery): DocumentInterestsReport {
+    return inspectDocumentInterests(this.#sessions.values(), query);
   }
 
   /** Every live session of one principal across ALL spaces — the

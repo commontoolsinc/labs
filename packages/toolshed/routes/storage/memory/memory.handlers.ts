@@ -33,6 +33,25 @@ type NegotiationOptions = {
 
 const NEGOTIATION_BUFFER_MAX_BYTES = 1_048_576;
 
+/**
+ * Helper for `bufferTextMessagesUntilNegotiated()`, which builds the error to
+ * report for a socket `error` event. Deno states why a socket failed only on
+ * the event: an `ErrorEvent` whose message names the cause, such as
+ * `Unexpected EOF` for a peer that left without a close frame, and whose
+ * `.error` holds that failure as an `Error`. `summary` leads the message
+ * whatever the cause, so a search for it finds every such failure.
+ */
+const socketFailureError = (summary: string, event: Event): Error => {
+  if (!(event instanceof ErrorEvent)) {
+    return new Error(summary);
+  }
+  const message = event.message === ""
+    ? summary
+    : `${summary}: ${event.message}`;
+  const cause = event.error;
+  return new Error(message, cause === undefined ? undefined : { cause });
+};
+
 export const bufferTextMessagesUntilNegotiated = (
   socket: WebSocket,
   options: NegotiationOptions = {},
@@ -116,13 +135,20 @@ export const bufferTextMessagesUntilNegotiated = (
       handlers?.onClose?.();
     };
 
-    const onError = () => {
+    const onError = (event: Event) => {
       cleanup();
       if (!settled) {
-        reject(new Error("Memory websocket failed before negotiation"));
+        reject(
+          socketFailureError(
+            "Memory websocket failed before negotiation",
+            event,
+          ),
+        );
         return;
       }
-      handlers?.onError?.(new Error("Memory websocket receive failure"));
+      handlers?.onError?.(
+        socketFailureError("Memory websocket receive failure", event),
+      );
     };
 
     cleanup = () => {
@@ -232,7 +258,13 @@ export const attachMemorySocketPipeline = (
         socket.send(frame);
       }
     },
-    () => {
+    (error) => {
+      // A close ends every session on the connection, mid-resume or not, and
+      // the client sees only the close; the cause is recorded here.
+      console.error(
+        "memory websocket: closing the connection after a frame failure",
+        error,
+      );
       safeSocketClose(1011, "Memory websocket message failure");
       closeConnection();
     },
@@ -309,7 +341,12 @@ export const attachMemorySocketPipeline = (
             // it is handed over, so the handling is not waited for: waiting
             // would hold every later frame behind this one, whichever
             // spaces they name.
-            connection.receive(payload).catch(() => {
+            connection.receive(payload).catch((error) => {
+              console.error(
+                `memory websocket: closing connection ${connection.id} ` +
+                  "after a frame its server could not handle",
+                error,
+              );
               safeSocketClose(1011, "Memory websocket message failure");
               closeConnection();
             });
@@ -318,6 +355,11 @@ export const attachMemorySocketPipeline = (
         },
         onClose: closeConnection,
         onError(error) {
+          console.error(
+            `memory websocket: closing connection ${connection.id} after ` +
+              "its socket failed",
+            error,
+          );
           safeSocketClose(
             error.message.startsWith("Memory websocket expects") ? 1003 : 1011,
             error.message,
@@ -325,7 +367,12 @@ export const attachMemorySocketPipeline = (
           closeConnection();
         },
       });
-    } catch {
+    } catch (error) {
+      console.error(
+        `memory websocket: closing connection ${connection.id} after its ` +
+          "first frame failed",
+        error,
+      );
       safeSocketClose(1011, "Memory websocket setup failure");
       closeConnection();
     }
@@ -333,6 +380,46 @@ export const attachMemorySocketPipeline = (
 
   return true;
 };
+
+/**
+ * Waits for the first frame on an upgraded `socket`, then attaches the memory
+ * pipeline when that frame is a memory protocol message, and closes the socket
+ * with 1002 when it is not. A setup that fails, a socket failing before its
+ * first frame among them, is logged with its cause and closes the socket with
+ * 1011 if it is still open. A socket closed without an error before its first
+ * frame is not a failure, and is not logged. The returned promise never
+ * rejects.
+ */
+export const setUpMemorySocket = (socket: WebSocket): Promise<void> =>
+  createSpan("memory.socket.setup", async (setupSpan) => {
+    const negotiation = bufferTextMessagesUntilNegotiated(socket);
+    const firstMessage = await negotiation.firstMessage;
+    if (firstMessage === undefined) {
+      negotiation.dispose();
+      setupSpan.setAttribute("socket.setup", "closed-before-message");
+      return;
+    }
+
+    if (attachMemorySocketPipeline(socket, negotiation, firstMessage)) {
+      setupSpan.setAttribute("socket.setup", "memory");
+      return;
+    }
+
+    negotiation.dispose();
+    setupSpan.setAttribute("socket.setup", "unsupported-protocol");
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.close(1002, "Memory websocket expects memory protocol");
+    }
+  }).catch((error) => {
+    console.error("memory websocket: setup failed", error);
+    if (socket.readyState === WebSocket.OPEN) {
+      try {
+        socket.close(1011, "Memory websocket setup failure");
+      } catch {
+        // Ignore close races with the peer.
+      }
+    }
+  });
 
 export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
   return createSpan("memory.subscribe", (span) => {
@@ -348,34 +435,7 @@ export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
       });
       span.setAttribute("websocket.upgrade", "success");
 
-      void createSpan("memory.socket.setup", async (setupSpan) => {
-        const negotiation = bufferTextMessagesUntilNegotiated(socket);
-        const firstMessage = await negotiation.firstMessage;
-        if (firstMessage === undefined) {
-          negotiation.dispose();
-          setupSpan.setAttribute("socket.setup", "closed-before-message");
-          return;
-        }
-
-        if (attachMemorySocketPipeline(socket, negotiation, firstMessage)) {
-          setupSpan.setAttribute("socket.setup", "memory");
-          return;
-        }
-
-        negotiation.dispose();
-        setupSpan.setAttribute("socket.setup", "unsupported-protocol");
-        if (socket.readyState === WebSocket.OPEN) {
-          socket.close(1002, "Memory websocket expects memory protocol");
-        }
-      }).catch(() => {
-        if (socket.readyState === WebSocket.OPEN) {
-          try {
-            socket.close(1011, "Memory websocket setup failure");
-          } catch {
-            // Ignore close races with the peer.
-          }
-        }
-      });
+      void setUpMemorySocket(socket);
 
       return response;
     } catch (error) {

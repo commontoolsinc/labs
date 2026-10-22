@@ -1202,7 +1202,10 @@ type ClickLanding = {
 // replaced, which no amount of further waiting resolves. `remarkSource`, when
 // the caller supplies it, is the mark predicate's own source; running it again
 // re-establishes the mark on whatever control took the old one's place, so a
-// rebuilt surface is clicked rather than reported.
+// rebuilt surface is clicked rather than reported. `revalidateBeforeAim`
+// additionally clears and rebuilds the mark after the box settles. A
+// synchronous predicate then runs in the same page turn as the final
+// measurement, so the page cannot retarget a surviving control between them.
 //
 // Answering also arms the landing interceptor, which decides the trusted click
 // that follows. The interceptor is armed here rather than by the test process
@@ -1214,6 +1217,9 @@ const aimAtMarkedTarget = async (
   remarkSource: string | null,
   remarkArgs: readonly unknown[],
   identityKey: string,
+  revalidateBeforeAim: boolean,
+  targetToken: string,
+  targetAttribute: string,
 ): Promise<ClickAim | false> => {
   type AimDiag = { phase: string; frames: number; lastBox: string };
   const registry = ((globalThis as typeof globalThis & {
@@ -1363,6 +1369,19 @@ const aimAtMarkedTarget = async (
     ...args: readonly unknown[]
   ) => boolean | Promise<boolean>;
 
+  const clearMark = (): void => {
+    for (const element of probe.collect(`[${targetAttribute}]`)) {
+      const tokens = (element.getAttribute(targetAttribute) ?? "")
+        .split(/\s+/)
+        .filter((entry) => entry.length > 0 && entry !== targetToken);
+      if (tokens.length > 0) {
+        element.setAttribute(targetAttribute, tokens.join(" "));
+      } else {
+        element.removeAttribute(targetAttribute);
+      }
+    }
+  };
+
   // One step of page progress, after which the settle looks again.
   //
   // While the document is being rendered that step is a frame, which is what
@@ -1438,7 +1457,9 @@ const aimAtMarkedTarget = async (
         return { missing: true, sawTarget: false };
       }
       diag.phase = "re-marking";
-      if (!await remark(probe, ...remarkArgs)) {
+      const result = remark(probe, ...remarkArgs);
+      const marked = typeof result === "boolean" ? result : await result;
+      if (!marked) {
         diag.phase = "no-target-to-mark";
         return false;
       }
@@ -1472,6 +1493,24 @@ const aimAtMarkedTarget = async (
       continue;
     }
     diag.lastBox = JSON.stringify(current);
+
+    const settledTarget = find();
+    if (revalidateBeforeAim && remark !== null) {
+      clearMark();
+      const result = remark(probe, ...remarkArgs);
+      const marked = typeof result === "boolean" ? result : await result;
+      if (!marked || find() === undefined) {
+        diag.phase = "revalidation-found-no-target";
+        return false;
+      }
+      if (find() !== settledTarget) {
+        // The identity moved to another control. Settle that control before
+        // revalidating it in its own final aiming turn.
+        diag.phase = "revalidation-moved-target";
+        await nextFrame();
+        continue;
+      }
+    }
 
     diag.phase = "aiming";
     const target = find();
@@ -1590,11 +1629,12 @@ const clearClickIdentityState = async (
 /**
  * The mark a click aims at, and how to place it again.
  *
- * A caller passes the predicate it used to mark its target, so a control that
- * the page rebuilds between the mark and the click can be marked again and
- * clicked, rather than reported as vanished. The predicate is the same one the
- * caller ran to place the mark, so re-marking applies the caller's own
- * readiness rules — including its settle — to whatever control took over.
+ * A caller passes a predicate that can mark its target, so a control that the
+ * page rebuilds between the mark and the click can be marked again and clicked,
+ * rather than reported as vanished. The predicate may refine the original
+ * selection with identity learned after its first mark. Re-marking therefore
+ * applies the caller's readiness and identity rules to whatever control took
+ * over.
  */
 export interface ClickMark {
   token: string;
@@ -1605,6 +1645,11 @@ export interface ClickMark {
       ...args: any[]
     ) => boolean | Promise<boolean>;
     args: readonly unknown[];
+    /**
+     * Re-run the predicate in the final aiming turn after the box settles,
+     * even if the mark remains.
+     */
+    revalidateBeforeClick?: boolean;
   };
 }
 
@@ -1660,6 +1705,9 @@ export async function clickMarked(
             remark ? remark.predicate.toString() : null,
             remark ? remark.args : [],
             identityKey,
+            remark?.revalidateBeforeClick ?? false,
+            token,
+            CLICK_TARGET_ATTR,
           ],
         });
       } catch (cause) {
@@ -1711,6 +1759,11 @@ export async function clickMarked(
       let dispatched = { x: aim.x, y: aim.y };
       await page.clickPoint({ x: aim.x, y: aim.y }, {
         refreshPoint: async () => {
+          if (remark?.revalidateBeforeClick) {
+            const settled = await measureAim();
+            dispatched = { x: settled.x, y: settled.y };
+            return dispatched;
+          }
           const current = await readMarkedClickPoint(
             page,
             markSelector,

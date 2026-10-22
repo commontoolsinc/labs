@@ -72,6 +72,15 @@ These string-level steps run in `transformCfDirective()`
 (`src/core/cf-helpers.ts`) before any AST transformer, because symbol binding
 happens before the transformer pipeline runs.
 
+A caller may also pass a rewrite of the authored text (`AuthoredSourceRewrite`),
+which is handed the parse the scan and the guard read and whose result takes
+the authored text's place between the prepended import and the trailer. The
+rewrite runs after the guard and the shim choice, so it must leave the module
+binding the names it bound. The runner splits imports that take a default
+export beside or inside a named-import list this way
+(`normalizeMixedModuleImports`, `packages/runner/src/harness/pretransform.ts`),
+so the pretransform parses each authored module once.
+
 TypeScript's subsequent JSX emit uses `__cfHelpers.h` for elements and
 `__cfHelpers.h.fragment` for fragment tags
 (`packages/js-compiler/typescript/options.ts`). Both resolve through the
@@ -182,7 +191,10 @@ present; no stage handles a missing one.
      data it returns under a writer policy is data its result document holds:
      a literal, an object or array literal (spreads and computed keys
      included, a member its type does not name read against the type's index
-     signature), a constant, a plain call's result, at any depth. That result
+     signature), a constant, a plain call's result, at any depth. A cell or a
+     stream such data holds is a link: a writer policy inside the type it
+     links to is that document's, so it does not make the data the result
+     document's own. That result
      is rebuilt from the returned object, and each such member's type node
      carries the `definesDocument` schema hint, which the generator reads the
      same way for that member alone. A returned value the rebuild cannot read
@@ -444,24 +456,54 @@ A verb's event parameter (handler/action first parameter) with an AUTHORED
 type — an explicit parameter annotation, or the builder call's own event
 type argument, which the action strategy now carries into the lowered
 `handler` call — is applied in `contract` mode
-(`CapabilitySummaryApplicationMode` in `type-shrinking.ts`). The authored
-TypeNode serves VERBATIM in structure — objects, unions, intersections,
-arrays, and primitives alike, `$defs` identities and prose intact — and
-`overlayContractCapabilities` (`type-shrinking.ts`) rewrites only
-capability-bearing positions: a cell-like wrapper takes the capability the
-body's usage earns (writable where it writes, read-only where it reads,
-comparable where it only compares, OPAQUE where it never touches the
-position), and an identity-only comparison of a plain-declared position adds
-the comparable marker the runtime materializes it through. A reference to a
-type alias that takes no type parameters is walked as the node the alias
-names, so a cell declared through an alias takes its capability the way the
-wrapper the alias names does; an alias met again inside its own expansion — a
-recursive event type — stays the reference it is. A named reference whose
-subtree holds no cell-like position passes through untouched; one
-expands only when a capability inside it must change, and a self-referential
-type ends that expansion at the cycle with the node kept as authored — the
-accepted residual, since a literal cannot spell its own recursion. Observed
-paths still validate against the authored type via `validateShrinkCoverage`.
+(`CapabilitySummaryApplicationMode` in `type-shrinking.ts`). The authored type
+is not rewritten: schema injection hands the schema generator the authored
+node, inside parentheses of its own that carry the handler body's capability
+summary (`SchemaHint.contractCapabilities`), and the schema is generated from
+it as from any authored type, so the authored structure, `$defs` identities,
+prose, CFC labels, writer policies and scopes all serve as written.
+`SchemaGeneratorTransformer` then narrows the generated schema
+(`narrowEventCapabilities()`, `contract-capabilities.ts`): each cell takes the
+capability the body earns at its data path — writable where it writes,
+read-only where it reads, comparable where it only compares, OPAQUE where it
+never touches the position — and never more than the kind its author wrote,
+so a `WriteonlyCell` the body writes stays `writeonly`. A stream and a SQLite
+handle keep their kind, and a scoped cell keeps its scope.
+
+A data path is read from the schema's structure: a property's key, compared as
+written, any key the object does not declare for `additionalProperties`, `*`
+for `items`, which matches any index the body uses, and the same path for each
+member of `anyOf`, `oneOf` and `allOf`. A use at a path reaches every position
+above it, the event itself among them, so an event that is a cell earns the
+capability of every use the body makes. A cell's value is not read: its
+capabilities are its own reads'. A plain position the body only compares by
+identity, using nothing at or below it otherwise, takes the `comparable` marker
+the runtime materializes it through, and such a position whose schema is
+`true`, which admits any value, becomes a `comparable` cell. A position where
+uses meet, as an index signature's is for every key it types, gathers them all,
+so comparing one key and reading or writing below another leaves it as
+written. Uses are kept apart by their whole paths, so a key holding any
+character is never taken for two segments. A cell the body uses in a way its summary does not record
+one path at a time keeps the capability written for it, since no narrower one
+can be shown to suffice: one at or below a value that escaped whole
+(`escapedPaths`), a cell's handle passed to a helper with no summary among
+them, and one strictly below a wildcard's prefix (`wildcardPaths`), as a
+destructuring of an array, an object's rest element, or a key that can name any
+element reaches. Where the body uses a cell in a way the summary cannot verify
+at all (`hasUnverifiedCellUse`), as a mutator called by a name the body
+computes, every cell of the event keeps the capability written for it. The
+prefix's own cell keeps the capability its recorded use earns: a `.get()`
+before `JSON.stringify()` reads it, and a write through such a key writes it.
+
+A definition a `$ref` names is narrowed for the uses at the position that
+refers to it: kept as the reference where narrowing changes nothing, written
+out in place where it does, and, where the narrowing refers to itself, as a
+recursion does, kept as a definition of its own, under the definition's name
+where nothing else refers to that, and as `<name>_narrowed` where a cell's
+value, which is not narrowed, still does. Narrowings are told apart by the
+uses relative to their position, which are finitely many, so a recursion,
+however it instantiates its declaration, needs no cut. Observed paths still
+validate against the authored type via `validateShrinkCoverage`.
 
 A SYNTHETIC event node — JSX handler events among them — has no authored
 structure to serve and keeps the `full` usage shrink, as does a handler with
@@ -1045,8 +1087,11 @@ bindings through the checker rather than by scanning the rewritten file. It
 resolves through type aliases and interfaces wherever they are declared (this
 file, an import, or a declaration file; the schema generator resolves a
 reference the same way, so a policy any alias carries must be validated too)
-and type-parameter substitution
-(`findWriteAuthorizedByReferences`). For each reference it emits
+and type-parameter substitution, a parameter the reference leaves out read as
+its default (`findWriteAuthorizedByReferences`). A CFC carrier's tag,
+`CfcTag<T, Meta>` in the body of the `Cfc` alias declared beside it, holds its
+payload again beside the metadata, so only its metadata is walked there, and
+each policy in the payload is reported once. For each reference it emits
 **`cfc-write-authorized-by`** when usage is malformed:
 
 - the second type argument is not a `typeof` binding (`TypeQueryNode`)
@@ -2391,8 +2436,10 @@ each operand of a fallback, wherever on the member spine it sits, a call on
   on the value rather than on the recording helper's untyped result
   (`unwrapAssertCapture` in `utils/expression.ts`;
   `test/assert-diagnostics.test.ts`). A known identity call's arguments are
-  read through the same way, so `equals(refusal.inbox, x)` in an `assert` body
-  records `inbox` as a comparable use, as it does in a `computed`. Beyond
+  read through the same way, so a member or a captured cell an `assert` body
+  compares, as in `equals(refusal.inbox, x)`, `equals(holder.get().inbox, x)`
+  or `equals(first, second)`, is a comparable use, as it is in a `computed`.
+  Beyond
   those two, a recording in argument position still hides what it wraps from
   the callee's capability contract, so `assert(() => helper(count))` charges
   `count` whatever its own use in the body says, while
@@ -2470,12 +2517,18 @@ each operand of a fallback, wherever on the member spine it sits, a call on
 - a capture leaf printed from its type is read as the annotation of the member
   or binding it holds the value of, where that annotation denotes the type at
   hand and names a value binding, as `PolicyOf<typeof rules>` does
-  (`namesValueBinding` in `ast/type-building.ts`). The print spells the binding
+  (`readBindingAnnotation` and `namesValueBinding` in the schema generator's
+  `src/typescript/value-annotation.ts`). The print spells the binding
   as the structural type of the value it names, from which schema generation
   could not tell the binding. The leaf records the annotation as its `spelledBy`
   schema hint, and a print of the same type that a later pass rebuilds it into
-  keeps the hint; schema generation reads the node as the annotation spells the
-  type at hand (the schema-generator mapping spec's §13). A value captured whole
+  keeps the hint. A leaf that keeps its declaration's own node instead, as a
+  scope wrapper's does (`getPreservedTypeForBindingElement`), records no hint,
+  and a print a later pass rebuilds it into, of the whole value that node
+  spells, takes that node as its hint where the node names a value binding
+  (`carryNarrowing` in `transformers/type-shrinking.ts`). Schema generation
+  reads the node as the annotation spells the type at hand (the
+  schema-generator mapping spec's §13). A value captured whole
   thus keeps a label that names a binding, as a part of it does
   (`buildTypeElementsFromCaptureTree` in `ast/type-building.ts`;
   `carryNarrowing` in `transformers/type-shrinking.ts`;
@@ -2486,13 +2539,47 @@ each operand of a fallback, wherever on the member spine it sits, a call on
   captures, with or without a nullable member (the schema-generator mapping
   spec's §8; `test/narrowed-capture-labels.test.ts` and the runner's
   `test/cfc-narrowed-capture-floor.test.ts`)
+- a lift-applied callback whose result is inferred, and which returns the value
+  of one binding or member, as its expression body or as the one statement of
+  its block, inside any parentheses, records that binding's annotation as its printed result's
+  `spelledBy` hint, by the same rule (`returnedValue` in
+  `closures/strategies/lift-applied-strategy.ts`), where every `typeof` the
+  annotation names is a `PolicyOf`'s rules. One that names a writer leaves the
+  result read from its type, as the result views the document that stores the
+  writer's policy, and reads that policy in part. A callback with several
+  returns may return the values of several bindings whose types are one type,
+  so it records none. One that returns an array literal, inside any
+  parentheses, whose every element reads a binding declared with an
+  annotation spelling one value and denoting the element type, records that
+  annotation as the hint of the print's element, by the same rule
+  (`returnedElementAnnotation` there; `spellSameValue` in the schema
+  generator's `src/typescript/value-annotation.ts`, which holds two
+  annotations to one type and the same value bindings, since two policies'
+  rules may share a type). A result written as an object literal
+  is read member by member at the authored type each member's value has: a
+  constructed cell's, a binding's declaration's, an array literal's as the
+  array of its elements' where every element's spells one value, or, for a lift
+  applied as the member, the value its callback returns, where that names only
+  policies (`getExplicitValueTypeNode` in `transformers/schema-injection.ts`;
+  the schema-generator mapping spec's §13; the runner's
+  `test/cfc-result-policy-binding.test.ts`). What these rules do not reach
+  keeps the print as the type spells it, with the policy's brand as an atom no
+  exchange rule matches, `{}`, and the `cfc-label:unread` warning, so the
+  position stays closed to every reader: an array literal whose elements read
+  bindings declared apart, one labelled by `readers` beside one by `writers`;
+  an alias beside the same type written out, which denote a type apart; a
+  spread, a hole, or an element that reads no binding, such as a member
+  access; a tuple print, as `as const` gives one; and an `AnyOf` whose only
+  alternative is such a `PolicyOf`. Each is a shape to recover should a
+  pattern write it
 - a pass that reads the structure of a node printed from a type reads the
   print's unfolding in its place: a node of the print's own kind built from the
   type it was printed from, each type node below it printed afresh from its own
   type (`unfoldPrint` in `transformers/type-shrinking.ts`). Node-driven
   shrinking and the application of identity-only paths unfold a literal, a union
   (into one print for each of its members), an array (`T[]` or `readonly T[]`,
-  as the printer writes one), and a cell reference. The narrowing of cells to
+  as the printer writes one), and a cell reference, and so does the contract
+  overlay of an event (§6.3a). The narrowing of cells to
   their observed capability unfolds a literal, and reads the value of a printed
   cell, or of each cell in a printed nullable union, printed from the type
   arguments its wrapper was given. A union carrying a `Default` brand, and an
@@ -2550,7 +2637,15 @@ computation's input schema:
   checker is available (`policy/capability-analysis.ts`,
   `isKnownIdentityArgumentCall`). An argument is an identity use whether it is
   a binding or a member access (`equals(state.selected, x)`), and is not
-  charged a read (fixture `handler-schema/identity-member-argument`).
+  charged a read (fixture `handler-schema/identity-member-argument`). The call
+  decides which of its arguments it compares when it is visited, from the
+  arguments it resolved a source for, before the arguments themselves are
+  visited. The member-access visit skips its read only for a member the call
+  recorded, so a member the call could not resolve is read rather than shrunk
+  out, and the identifier visit records a binding as compared only when the
+  call recorded it. An argument a later stage rebuilt or wrapped is judged by
+  the tree being analyzed rather than by where its parent pointer points
+  (`identityArgumentUses`; `test/assert-diagnostics.test.ts`).
 - A whole-root identity use records path `[]` and passthrough. `identityOnly` is
   true only when that root identity path survives normalization and the root has
   no non-identity use, ordinary reads/writes, or wildcard. Nested uses populate
@@ -2563,7 +2658,10 @@ computation's input schema:
   opaque access at or below that path. Comparable and cell-like subsets are
   pruned with the surviving identity paths. Since #4714, a wildcard records the
   unknown access's static prefix and erases identity/comparable paths that
-  overlap it in either direction; disjoint paths survive. A root wildcard still
+  overlap it in either direction; disjoint paths survive. The summary carries
+  those prefixes as `wildcardPaths`, which an event's capability narrowing reads (§6.3a),
+  and a caller takes on a helper's at the path it handed the helper, as it
+  does the helper's reads, writes, and escapes. A root wildcard still
   suppresses `identityOnly`. This matters because closure captures share one
   synthetic root: blanket erasure degraded disjoint `equals()`-only captures
   into unsatisfiable full-value self-demands
@@ -2610,7 +2708,11 @@ Imported cell-wrapper parameter types act as a **capability contract** at call
 boundaries (#4486): when a handler passes a cell to a callee whose body lives
 in another file, the callee's declared Common Fabric wrapper parameter type
 (`Writable<T>` → read+write, `ReadonlyCell<T>` → read, `WriteonlyCell<T>` →
-write, etc.) is what capability analysis charges to that argument. Spread
+write, etc.) is what capability analysis charges to that argument. A
+parameter spelled bare `Cell<T>` declares no capability, write intent being
+spelled `Writable<T>`: its argument is charged the whole read of a value that
+leaves the analysis, and no write (`getExplicitCellKindFromTypeNode`;
+`test/policy/capability-analysis.test.ts`). Spread
 arguments of fixed-length tuple type expand positionally against the callee's
 parameter list before matching (#4578). Two write-tracking hardenings
 (#4554): `send` is a WRITER_METHOD (`Stream.send()` delegates to `set()` at
@@ -3825,9 +3927,12 @@ the transformer (`src/transformers/module-scope-cf-data.ts` imports) and the
 verifier (`packages/runner/src/sandbox/policy.ts` re-exports) consume. On the
 verifier side (`packages/runner/src/sandbox/compiled-bundle-verifier.ts`):
 
-- raw mutable initializers — normalized text starting `{`, `[`, `/`, or `new`
+- raw mutable initializers — normalized text starting `{`, `[`, or `/`, or a
+  first token that is the `new` keyword, `new.target` included
   (`isRawMutableExpression`) — are rejected with "Mutable top-level data must
-  be wrapped in __cf_data() in SES mode";
+  be wrapped in __cf_data() in SES mode". An identifier that merely begins
+  with `new`, such as `newShape`, is not a `new` expression and is classified
+  like any other reference;
 - calls to local functions or untrusted imports are rejected with "Top-level
   call results must be wrapped in __cf_data() in SES mode"
   (`TOP_LEVEL_CALL_RESULT_ERROR`, `policy.ts`); IIFEs are likewise rejected

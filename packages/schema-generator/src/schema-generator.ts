@@ -47,7 +47,13 @@ import {
   typeParameterOfType,
   unwrapTypeParentheses,
 } from "./typescript/type-node.ts";
+import { unionNodeMembersInOrder } from "./typescript/source-order.ts";
 import { resolveWriterBinding } from "./typescript/writer-binding.ts";
+import {
+  cutsExpansion,
+  exhaustsBudget,
+  isDeferredReference,
+} from "./typescript/expanding-recursion.ts";
 import { getCellWrapperInfo } from "./typescript/cell-brand.ts";
 import {
   bindWrittenArgument,
@@ -62,8 +68,6 @@ import {
   instantiatedPropertyType,
   instantiatedValueType,
   resolveWrapperNode,
-  safeGetIndexTypeOfType,
-  safeGetTypeOfSymbolAtLocation,
   soleNonNullishMember,
   type TypeWithInternals,
 } from "./type-utils.ts";
@@ -1292,10 +1296,15 @@ export class SchemaGenerator {
       options?.printedFrom,
     );
     if (readInPlace) {
+      // A print whose annotation names a value binding is read as that
+      // annotation spells it, as a member's is (`formatChildType()`).
+      const spelledBy = typeNode && schemaHints?.get(typeNode)?.spelledBy;
+      const spelling = spelledBy &&
+        this.#spelling(readInPlace, spelledBy, checker);
       return this.#generateSchemaInternal(
         readInPlace,
         checker,
-        undefined,
+        spelling,
         typeRegistry,
         options,
         schemaHints,
@@ -1304,18 +1313,14 @@ export class SchemaGenerator {
       );
     }
 
-    // Create unified context with all state
-    const cycles = this.#getCycles(type, checker);
-
     // A guess a wrapper recovers never reaches this list, so what arrives here
     // is what the finished schema accepts without having read it.
     const unread: ts.TypeNode[] = [];
 
+    // Create unified context with all state
     let context: GenerationContext = {
       // Immutable context
       typeChecker: checker,
-      cyclicTypes: cycles.types,
-      cyclicNames: cycles.names,
 
       // Accumulating state
       definitions: {},
@@ -1325,6 +1330,8 @@ export class SchemaGenerator {
 
       // Stack state
       definitionStack: new Set(),
+      expandingPath: [],
+      expansionBudget: { readingsInside: 0 },
       inProgressNames: new Set(),
 
       // Optional context
@@ -1354,6 +1361,11 @@ export class SchemaGenerator {
       ...(schemaHints && { schemaHints }),
     };
     context = this.#withGenericBindings(type, context);
+    // A print read as the annotation that spells it keeps the print's own
+    // hints, as a member does (`formatChildType()`).
+    const hintContext = typeNode && hintsNode
+      ? { ...context, typeNode: hintsNode }
+      : context;
 
     // Auto-detect: Should we use node-based or type-based analysis?
     let schema: MutableJSONSchema;
@@ -1365,13 +1377,13 @@ export class SchemaGenerator {
         checker,
         context,
       );
-      schema = this.#applyNodeSchemaHints(schema, context);
+      schema = this.#applyNodeSchemaHints(schema, hintContext);
       // Build final schema with $schema and $defs
       result = this.#buildFinalSchemaForSynthetic(schema, context);
     } else {
       // Use type-based analysis (normal path)
       schema = this.#formatType(type, context, true);
-      schema = this.#applyNodeSchemaHints(schema, context);
+      schema = this.#applyNodeSchemaHints(schema, hintContext);
 
       // Attach root-level description from JSDoc if available
       schema = this.#attachRootDescription(schema, type, context);
@@ -2234,15 +2246,25 @@ export class SchemaGenerator {
   }
 
   /**
-   * The name a reading of a type named `name` is stored under in
-   * `$defs`. A reading that defines a document inside a schema that views
-   * others (`GenerationContext.documentWithinView`) stores its own, since the
-   * view's reading of the same type leaves out a writer it cannot read. Its
-   * name holds a `:`, which no TypeScript name does, so no type's name can
-   * take it.
+   * The name a reading of a type named `name` is stored under in `$defs`: the
+   * name with the reading's variant (`#readingVariant()`), whose `:` no
+   * TypeScript name holds, so no type's name can take it.
    */
   #definitionKey(name: string, context: GenerationContext): string {
-    return context.documentWithinView ? `${name}:document` : name;
+    return `${name}${this.#readingVariant(context)}`;
+  }
+
+  /**
+   * What sets a reading apart from other readings of the same type, as a
+   * suffix of the names it stores definitions under (`#definitionKey()`) and
+   * of its cycle identity (`#formatType()`), or `""`: a reading that defines a
+   * document inside a schema that views others
+   * (`GenerationContext.documentWithinView`), since the view's reading of the
+   * same type leaves out a writer it cannot read. Neither reading is the
+   * other's, so one met inside the other is no cycle of it.
+   */
+  #readingVariant(context: GenerationContext): string {
+    return context.documentWithinView ? ":document" : "";
   }
 
   /**
@@ -2650,13 +2672,15 @@ export class SchemaGenerator {
     // found at the wrapper's value instead, where it can be. A type read under
     // type parameter bindings is that type together with them, as its
     // definition's name is (`#bindingKey()`), so the same declared type read
-    // under other bindings inside it is no cycle.
+    // under other bindings inside it is no cycle, and so is a reading of
+    // another variant (`#readingVariant()`).
     const bound = context.boundTypeParameters;
     const bindingKey = this.#bindingKey(context);
     const bindingType = this.#bindingType(type, context);
+    const variant = this.#readingVariant(context);
     const stackKey = bindingKey === undefined
-      ? type
-      : `${this.#bindingId(bindingType)}|${bindingKey}`;
+      ? variant === "" ? type : `${variant}|${this.#bindingId(type)}`
+      : `${variant}${this.#bindingId(bindingType)}|${bindingKey}`;
     // `never`, `null` and `undefined` hold no type, and `unknown` and `any`
     // hold any, so none is met inside itself, and none is a cycle's entry. A
     // wrapper the checker reduces to one, as it reduces `PerUser<never>`
@@ -2720,11 +2744,57 @@ export class SchemaGenerator {
         : { "$ref": `#/$defs/${syntheticKey}`, scope: aliasScope };
     }
 
+    // Where the shape does not end a recursion that instantiates its
+    // declaration without end, the types the reading is within do
+    // (`cutsExpansion()`), and cut it as the shape cuts one. A reading
+    // under no bindings has no shape, as `Nest<T>` read at a type parameter no
+    // binding names has none. An alias that recurses through the tuple or
+    // array it writes, `type Tup<T> = [T, Tup<T[]>?]`, is read under bindings
+    // by its instantiation, whose arguments differ at each level, so its shape
+    // never repeats (`isDeferredReference()`). A reading inside its own shape
+    // spends the budget an expanding one spends (`exhaustsBudget()`): a
+    // declaration that recurses through more than one of its members reaches
+    // the shape's bound along every path, which is exponentially many
+    // readings.
+    const expands = tracksCycle &&
+      (bound === undefined || isDeferredReference(type));
+    const withinOwnShape = shapeKey !== undefined && shapeKey !== `${shape}|0`;
+    if (
+      expands
+        ? cutsExpansion(
+          type,
+          context.expandingPath,
+          context.expansionBudget,
+          context.typeChecker,
+        )
+        : tracksCycle && withinOwnShape &&
+          exhaustsBudget(context.expansionBudget)
+    ) {
+      const unread = context.uninterpretedTypeNodes;
+      // `IgnoreErrors` prints any type, as `readAliasChain()` prints one.
+      const node = context.typeNode ??
+        (expands
+          ? context.typeChecker.typeToTypeNode(
+            type,
+            undefined,
+            ts.NodeBuilderFlags.IgnoreErrors,
+          )
+          : bound?.declaredNode);
+      if (unread && node && !unread.includes(node)) unread.push(node);
+      return {};
+    }
+
     // Push current type onto the stack
     if (tracksCycle) context.definitionStack.add(stackKey);
     const pushedShape = tracksCycle ? shapeKey : undefined;
     if (pushedShape !== undefined) context.definitionStack.add(pushedShape);
+    let pushedExpanding = expands;
+    if (pushedExpanding) context.expandingPath.push(type);
     const pop = () => {
+      if (pushedExpanding) {
+        context.expandingPath.pop();
+        pushedExpanding = false;
+      }
       if (tracksCycle) context.definitionStack.delete(stackKey);
       if (pushedShape !== undefined) {
         context.definitionStack.delete(pushedShape);
@@ -2929,6 +2999,8 @@ export class SchemaGenerator {
       definitions: {},
       emittedRefs: new Set(),
       definitionStack: new Set(),
+      expandingPath: [],
+      expansionBudget: { readingsInside: 0 },
       inProgressNames: new Set(),
     });
   }
@@ -3083,81 +3155,6 @@ export class SchemaGenerator {
   }
 
   /**
-   * Detect cycles in the type graph
-   */
-  #getCycles(
-    type: ts.Type,
-    checker?: ts.TypeChecker,
-  ): { types: Set<ts.Type>; names: Set<string> } {
-    // Identity and name-based DFS cycle detection
-    const visiting = new Set<ts.Type>();
-    const stack: ts.Type[] = [];
-    const cycles = new Set<ts.Type>();
-    const cycleNames = new Set<string>();
-
-    const visit = (t: ts.Type) => {
-      if (visiting.has(t)) {
-        // Mark all nodes from the first occurrence of t on the stack to the end
-        const idx = stack.lastIndexOf(t);
-        if (idx >= 0) {
-          for (let i = idx; i < stack.length; i++) {
-            const tt = stack[i]!;
-            cycles.add(tt);
-            const nk = getNamedTypeKey(tt);
-            if (nk) cycleNames.add(nk);
-          }
-        } else {
-          cycles.add(t);
-          const nk = getNamedTypeKey(t);
-          if (nk) cycleNames.add(nk);
-        }
-        return;
-      }
-      visiting.add(t);
-      stack.push(t);
-
-      const flags = t.flags;
-      try {
-        if (flags & ts.TypeFlags.Union) {
-          const ut = t as ts.UnionType;
-          for (const mt of ut.types) {
-            visit(mt);
-          }
-        } else if (flags & ts.TypeFlags.Object) {
-          // Traverse properties
-          if (checker) {
-            for (const prop of checker.getPropertiesOfType(t)) {
-              const location: ts.Node = prop.valueDeclaration ??
-                (prop.declarations?.[0] as ts.Declaration);
-              const pt = safeGetTypeOfSymbolAtLocation(
-                checker,
-                prop,
-                location,
-                "cycle detection property",
-              );
-              if (pt) visit(pt);
-            }
-            // Traverse numeric index (arrays/tuples)
-            const idx = safeGetIndexTypeOfType(
-              checker,
-              t,
-              ts.IndexKind.Number,
-              "cycle detection numeric index",
-            );
-            if (idx) visit(idx);
-          }
-        }
-      } finally {
-        stack.pop();
-        visiting.delete(t);
-      }
-    };
-
-    if (checker) visit(type);
-    return { types: cycles, names: cycleNames };
-  }
-
-  /**
    * Attach a root-level description from JSDoc when the root schema does not
    * already supply one.
    */
@@ -3276,7 +3273,7 @@ export class SchemaGenerator {
       for (const member of typeNode.members) {
         if (ts.isPropertySignature(member) && member.name && member.type) {
           const propName = getPropertyNameText(member.name, checker);
-          if (!propName) {
+          if (propName === undefined) {
             // A computed brand such as `[DEFAULT_MARKER]` can carry metadata
             // that only the resolved type retains. A wrapper with that type
             // must know this node's members were not fully interpreted.
@@ -3415,13 +3412,20 @@ export class SchemaGenerator {
     // (tuple-emission.test.ts pins that choice). A rest element contributes
     // its array's items; an optional one admits `undefined` as well, so a
     // tuple of `unknown` — reference-only slots — reads as that and not as a
-    // request for everything.
-    if (ts.isTupleTypeNode(typeNode)) {
+    // request for everything. A reference to a non-generic alias whose tuple
+    // names a writer reads as the tuple it declares (`#tupleBehind()`), as
+    // `#readsBySyntax()` sends it here to be.
+    const behind = this.#tupleBehind(typeNode, context);
+    const tuple = ts.isTupleTypeNode(typeNode) ||
+        (behind && this.#holdsWriterQuery(behind, context))
+      ? behind
+      : undefined;
+    if (tuple) {
       return {
         type: "array",
         items: tupleItems(
           this.#slotsOfTupleNode(
-            typeNode,
+            tuple,
             checker,
             context,
             new Set(),
@@ -3489,7 +3493,8 @@ export class SchemaGenerator {
       // The one member that is neither `null` nor `undefined` is read at the
       // union's instantiation less those; any other member has none.
       const { instantiatedAs, ...unplaced } = context;
-      const valued = typeNode.types.filter((member) => {
+      const members = unionNodeMembersInOrder(typeNode);
+      const valued = members.filter((member) => {
         const kind = unwrapTypeParentheses(member);
         return kind.kind !== ts.SyntaxKind.UndefinedKeyword &&
           !(ts.isLiteralTypeNode(kind) &&
@@ -3498,7 +3503,7 @@ export class SchemaGenerator {
       const soleInstantiated = valued.length === 1 && instantiatedAs
         ? soleNonNullishMember(instantiatedAs)
         : undefined;
-      const memberSchemas = typeNode.types.map((member) =>
+      const memberSchemas = members.map((member) =>
         this.#analyzeTypeNodeStructure(
           member,
           checker,
@@ -4096,7 +4101,11 @@ export class SchemaGenerator {
    * the whole, so read by type, a CFC alias over a union as a member would lose
    * its boundary and its labels; its written reference keeps both. Any other
    * node is read by its type, a bound parameter in it read as its argument
-   * wherever the walk reaches it.
+   * wherever the walk reaches it. A tuple whose syntax writes a policy's
+   * writer as a `typeof` query is read by its syntax under no bindings too,
+   * written out or declared by a non-generic alias a reference names
+   * (`#tupleBehind()`): the checker's element types hold no declaration to
+   * name that writer by.
    */
   #readsBySyntax(
     typeNode: ts.TypeNode | undefined,
@@ -4105,9 +4114,8 @@ export class SchemaGenerator {
     const bound = context.boundTypeParameters;
     if (!typeNode) return false;
     const written = unwrapTypeParentheses(typeNode);
-    if (
-      ts.isTupleTypeNode(written) && this.#holdsWriterQuery(written, context)
-    ) return true;
+    const tuple = this.#tupleBehind(written, context);
+    if (tuple && this.#holdsWriterQuery(tuple, context)) return true;
     if (!bound) return false;
     const structural = ts.isUnionTypeNode(written) ||
       ts.isIntersectionTypeNode(written) || ts.isTypeLiteralNode(written) ||
@@ -4139,6 +4147,22 @@ export class SchemaGenerator {
         context.typeChecker,
         context,
       );
+  }
+
+  /**
+   * The tuple `typeNode` is, written out or declared by a non-generic alias a
+   * reference names, followed as `#openTypeNode()` follows one; `undefined`
+   * where it is no tuple.
+   */
+  #tupleBehind(
+    typeNode: ts.TypeNode,
+    context: GenerationContext,
+  ): ts.TupleTypeNode | undefined {
+    const behind = ts.isTypeReferenceNode(typeNode)
+      ? this.#openTypeNode(typeNode, context.typeChecker, context, new Set())
+        .node
+      : typeNode;
+    return ts.isTupleTypeNode(behind) ? behind : undefined;
   }
 
   /**

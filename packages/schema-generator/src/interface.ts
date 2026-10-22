@@ -5,6 +5,7 @@ import type {
   MutableJSONSchemaObj,
 } from "@commonfabric/api";
 import { type Mutable } from "@commonfabric/utils/types";
+import type { ExpansionBudget } from "./typescript/expanding-recursion.ts";
 
 /**
  * JSON Schema object type - mutable version of the Common Fabric JSONSchema interface
@@ -161,12 +162,6 @@ export interface GenerationContext {
   /** TypeScript type checker */
   readonly typeChecker: ts.TypeChecker;
 
-  /** Pre-computed cyclic type set */
-  readonly cyclicTypes: ReadonlySet<ts.Type>;
-
-  /** Pre-computed cyclic name set */
-  readonly cyclicNames: ReadonlySet<string>;
-
   // Accumulating state (grows during generation)
 
   /** Named type definitions for $refs */
@@ -195,10 +190,32 @@ export interface GenerationContext {
   /** Current recursion path for cycle detection */
   definitionStack: Set<string | ts.Type>;
 
+  /**
+   * The types the current reading is read within, outermost first, where its
+   * nesting bound does not end a recursion (`cutsExpansion()`).
+   */
+  expandingPath: ts.Type[];
+
+  /**
+   * The readings this generation has made inside a recursion of their own
+   * declaration, across every path (`exhaustsBudget()`).
+   */
+  expansionBudget: ExpansionBudget;
+
   /** Currently building these named types */
   inProgressNames: Set<string>;
 
   // Optional context
+
+  /**
+   * The element types of the tuple whose items `items` is, the union of
+   * them the checker builds, in the order the tuple lists them: the order the
+   * union's members are emitted in (`sourceOrderOfMembers()`).
+   */
+  tupleItems?: {
+    readonly items: ts.Type;
+    readonly elements: readonly ts.Type[];
+  };
 
   /** Type node for additional context */
   typeNode?: ts.TypeNode;

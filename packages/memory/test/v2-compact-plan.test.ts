@@ -8,7 +8,13 @@ import { expect } from "@std/expect";
 import { toFileUrl } from "@std/path";
 import { Database } from "@db/sqlite";
 
-import { applyCommit, close, type Engine, open } from "../v2/engine.ts";
+import {
+  applyCommit,
+  close,
+  COMPACTION_SESSION_PREFIX,
+  type Engine,
+  open,
+} from "../v2/engine.ts";
 import {
   type CompactionReport,
   formatCompactionReport,
@@ -242,8 +248,9 @@ describe("planCompaction", () => {
         selection: { prefixes: ["computed:"] },
         keepPayloadsMs: 0,
       });
-      // Every commit was created in the same second, so a window of zero puts
-      // all of them outside it; commit 1 is the genesis and stays.
+      // A window of zero ends at the newest commit's `created_at`, which no
+      // commit is later than, so all of them are outside it; commit 1 is the
+      // genesis and stays.
       expect(everything.payloads.commits).toBe(commits);
       expect(everything.payloads.insideWindow).toBe(0);
       expect(everything.payloads.exemptGenesis).toBe(1);
@@ -275,6 +282,57 @@ describe("planCompaction", () => {
         nothing.payloads.hollowed.owningHead.commits +
           nothing.payloads.hollowed.headless.commits,
       ).toBe(0);
+    });
+  });
+
+  it("counts an earlier run's compaction commit as exempt whichever side of the cutoff it was created on", async () => {
+    await withStore((db) => {
+      const clients =
+        db.prepare(`SELECT count(*) AS n FROM "commit"`).get<{ n: number }>()!
+          .n;
+      const newest =
+        db.prepare(`SELECT MAX(created_at) AS at FROM "commit"`).get<
+          { at: string }
+        >()!.at;
+      // Two earlier runs' commits, their `created_at` written out: one in the
+      // newest client commit's own second, one an hour after it.
+      const insert = db.prepare(
+        `INSERT INTO "commit" (seq, branch, session_id, local_seq, original, resolution, class, created_at)
+         VALUES (?, '', ?, 1, '{}', '{}', 'system', datetime(?, ?))`,
+      );
+      insert.run(
+        clients + 1,
+        `${COMPACTION_SESSION_PREFIX}same-second`,
+        newest,
+        "+0 seconds",
+      );
+      insert.run(
+        clients + 2,
+        `${COMPACTION_SESSION_PREFIX}later`,
+        newest,
+        "+1 hour",
+      );
+
+      const zero = planCompaction(db, {
+        selection: { prefixes: ["computed:"] },
+        keepPayloadsMs: 0,
+      });
+      expect(zero.payloads.cutoffAt).toBe(newest);
+      expect(zero.payloads.commits).toBe(clients + 2);
+      expect(zero.payloads.exemptCompaction).toBe(2);
+      expect(zero.payloads.insideWindow).toBe(0);
+      const text = formatCompactionReport(zero);
+      expect(text).toContain("window keeps 0 (created after");
+      expect(text).toContain("earlier runs' commits keep 2");
+
+      // A window reaching back past every commit keeps the client commits,
+      // and counts no compaction commit among them.
+      const wide = planCompaction(db, {
+        selection: { prefixes: ["computed:"] },
+        keepPayloadsMs: 60 * 60 * 1000,
+      });
+      expect(wide.payloads.exemptCompaction).toBe(2);
+      expect(wide.payloads.insideWindow).toBe(clients);
     });
   });
 

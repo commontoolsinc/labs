@@ -15,8 +15,15 @@
  * them twice.
  */
 
+import type { HarnessRunDepth } from "@commonfabric/cf-harness/contracts/run-depth";
+import type {
+  HarnessTaskDomain,
+  HarnessTaskTag,
+} from "@commonfabric/cf-harness/task-classification";
 import { hashStringOf } from "@commonfabric/data-model";
 import { Database } from "@db/sqlite";
+
+import type { ReasoningEffort } from "./profiles.ts";
 
 /** A job's state. */
 export type LocalJobState =
@@ -47,11 +54,40 @@ export interface LocalJobRequest {
   tools?: string[];
   maxModelTurns?: number;
 
+  /** How far the caller wants the job taken; the harness's default when absent. */
+  depth?: HarnessRunDepth;
+
+  /** The task's kinds of work, in place of the harness's classification. */
+  tags?: HarnessTaskTag[];
+
+  /** Where the task's work happens, in place of the harness's; `[]` is none. */
+  domains?: HarnessTaskDomain[];
+
+  /**
+   * The reasoning effort the job runs at, no more than its profile's; the
+   * profile's when absent.
+   */
+  reasoningEffort?: ReasoningEffort;
+
   /**
    * The caller can host the job's browser. Its contents are not read yet;
    * declaring it is what counts, as on the console's task route.
    */
   browserHost?: Record<string, unknown>;
+
+  /**
+   * Pieces the job holds from its first turn, by the name the model sees:
+   * each address becomes an input cell, and the model a handle to it. Only a
+   * profile with a fabric session holds them, and only pieces in its space.
+   */
+  inputs?: Record<string, string>;
+
+  /**
+   * Where each space an input names outside the profile's own is served: a
+   * space DID mapped to its toolshed's origin. The job is routed there for
+   * that space and nowhere else.
+   */
+  foreignSpaces?: Record<string, string>;
 }
 
 /** One event of a job, in `seq` order. */

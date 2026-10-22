@@ -1,18 +1,18 @@
 /**
- * The action shared by the builtins that select one of their inputs by the
- * truthiness of a condition and forward a reference to it: `ifElse`, `when`
- * and `unless`.
+ * The implementation shared by the builtins that select one of their inputs
+ * by the truthiness of a condition and forward a reference to it: `ifElse`,
+ * `when` and `unless`.
  */
 
 import { type Cell } from "../cell.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { parseLink } from "../link-utils.ts";
-import { type RawNodeCause } from "../module.ts";
+import { type RawBuiltinResult, type RawNodeCause } from "../module.ts";
 import { type Runtime } from "../runtime.ts";
 import { type Action } from "../scheduler.ts";
 import { readsTruthyAtRoot } from "../schema.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { ownedCell } from "./runtime-owned-store.ts";
+import { ownedCell, ownedStoreLinks } from "./runtime-owned-store.ts";
 import { ownedResultCause } from "./scope-policy.ts";
 
 /** What a forwarding builtin's action is built from. */
@@ -43,10 +43,10 @@ export interface ForwardReferenceOptions {
 }
 
 /**
- * Builds the action of a forwarding builtin. The action reads the condition's
- * truthiness from its root alone, so nothing below the root of a condition
- * that is a record or an array is read, and writes into the result cell a
- * reference to the selected input's resolved target.
+ * Builds a forwarding builtin. Its action reads the condition's truthiness
+ * from its root alone, so nothing below the root of a condition that is a
+ * record or an array is read, and writes into the result cell a reference to
+ * the selected input's resolved target.
  *
  * The reference carries the schema that target resolved to. That schema is
  * what says what the position is — a stream, which holds no value, or a value
@@ -57,12 +57,12 @@ export interface ForwardReferenceOptions {
  * the result without the result's schema declaring one. A schema that
  * constrains nothing is left out of the reference.
  */
-export function forwardReferenceAction(
+export function forwardReference(
   options: ForwardReferenceOptions,
-): Action {
+): RawBuiltinResult {
   const { name, inputsCell, sendResult, cause, parentCell, runtime, select } =
     options;
-  return (tx: IExtendedStorageTransaction) => {
+  const action: Action = (tx: IExtendedStorageTransaction) => {
     // The condition is read at the link it resolves to, which carries the
     // schema a stored link to it declares, so its truthiness is decided under
     // that schema: a default stands in for an absent value, and a stored value
@@ -98,5 +98,16 @@ export function forwardReferenceAction(
     // condition changing between two truthy values does not re-trigger
     // downstream work.
     result.withTx(tx).setRawUntyped(serializedRef, true);
+  };
+  return {
+    action,
+    // The result store is keyed by the output spot alone, so the action
+    // declares it when it is set up. A node with no output spot has none: its
+    // action refuses to run.
+    storeWrites: cause.outputSpot
+      ? ownedStoreLinks(runtime, parentCell, [
+        ownedResultCause(name, cause, parentCell),
+      ])
+      : [],
   };
 }

@@ -30,6 +30,7 @@ export * from "./components/cf-autostart/index.ts";
 export * from "./components/cf-aspect-ratio/index.ts";
 export * from "./components/cf-audio-visualizer/index.ts";
 export * from "./components/cf-avatar/index.ts";
+export * from "./components/cf-avatar-input/index.ts";
 export * from "./components/cf-badge/index.ts";
 export * from "./components/cf-button/index.ts";
 export * from "./components/cf-calendar/index.ts";

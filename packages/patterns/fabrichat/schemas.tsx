@@ -8,8 +8,9 @@
  * the records a room stores, and `room.tsx` the room's own output types over
  * them.
  *
- * Every recorded time is a `FabricEpochNsec`, unique in its room. Times are
- * compared through `nsecOf()`.
+ * Every recorded time is a `FabricEpochNsec`, the handler clock's reading when
+ * the room made the record, which two records can share. Times are compared
+ * through `nsecOf()`.
  */
 import {
   type Cell,
@@ -73,6 +74,12 @@ export const CHAT_ADD_MEMBER_SURFACE = "ChatAddMemberSurface";
 /** The reviewed action adding a member is, on `CHAT_ADD_MEMBER_SURFACE`. */
 export const CHAT_ADD_MEMBER_ACTION = "ChatAddMember";
 
+/** The reviewed surface a room is retitled from. */
+export const CHAT_RETITLE_SURFACE = "ChatRetitleSurface";
+
+/** The reviewed action retitling a room is, on `CHAT_RETITLE_SURFACE`. */
+export const CHAT_RETITLE_ACTION = "ChatRetitle";
+
 //
 // Principals
 //
@@ -95,13 +102,6 @@ export const isPrincipalDID = (value: unknown): value is DID =>
 
 /** Nanoseconds in one millisecond, the handler clock's unit. */
 export const NSEC_PER_MSEC = 1_000_000n;
-
-/**
- * Nanoseconds in one tick of the handler clock. A handler's clock reads to the
- * second, so a reading `t` stands for every time from `t` up to, but not
- * including, `t + CLOCK_TICK_NSEC`.
- */
-export const CLOCK_TICK_NSEC = 1_000_000_000n;
 
 /** The nanoseconds a recorded time holds. */
 export const nsecOf = (time: FabricEpochNsec): bigint => time.value;
@@ -164,18 +164,6 @@ export type ManagerProfileCell = Cell<ChatManagerProfile>;
 // Room records
 //
 
-/** One version of a message: its body, and when the room recorded it. */
-export interface ChatMessageVersion {
-  /** The version's text. */
-  body: string;
-
-  /**
-   * When the room recorded this version; in a send or an edit, the time the
-   * sender proposes.
-   */
-  sentAt: FabricEpochNsec;
-}
-
 /** The body of a deleted or obliterated message. */
 export interface ChatDeletedBody {
   /** Always `true`: the marker of a deleted message. */
@@ -202,11 +190,11 @@ export interface ChatReaction {
   /** A single emoji. */
   emoji: string;
 
-  /** When the room recorded the reaction. Unique in the room. */
+  /** The room's handler clock when it recorded the reaction. */
   sentAt: FabricEpochNsec;
 }
 
-/** One message in a room, with its reactions and its edit history. */
+/** One message in a room, with its reactions. */
 export interface ChatMessage {
   /** The profile the sender sent under; absent once obliterated. */
   authorProfile?: ProfileCell;
@@ -214,23 +202,23 @@ export interface ChatMessage {
   /** The current text, or the marker of a deleted message. */
   body: string | ChatDeletedBody;
 
-  /** When the room recorded the message's first version. Unique in the room. */
+  /** The room's handler clock when it recorded the message. */
   sentAt: FabricEpochNsec;
 
   /**
-   * When the room recorded the current version, if it isn't the first: the
-   * latest edit or deletion. Unique in the room.
+   * The room's handler clock at the latest edit or deletion; absent until
+   * the message is first edited or deleted.
    */
   editedAt?: FabricEpochNsec;
-
-  /** The versions before the current one, oldest first. */
-  earlierVersions: ChatMessageVersion[];
 
   /** What this message replies to, and where it is shown; absent for none. */
   replyTo?: ChatReply;
 
-  /** Everyone's reactions to this message, in no particular order. */
-  reactions: ChatReaction[];
+  /**
+   * Everyone's reactions to this message, in the order they were added;
+   * absent once the message is deleted.
+   */
+  reactions?: ChatReaction[];
 }
 
 /** A room's policy, stated correctly, with every key present. */
@@ -238,25 +226,25 @@ export interface ChatRoomPolicy {
   /** Whether an OWNER may obliterate messages. */
   ownersMayObliterate: boolean;
 
-  /** Whether an edit or a plain deletion keeps the version it replaces. */
+  /** Stated for the policy's shape, and read by nothing: a message keeps no history. */
   keepsHistory: boolean;
 
   /** Whether a sender's deletion of their own message obliterates it. */
   deletionIsObliteration: boolean;
 
-  /** How far before the room's clock a proposed time is accepted, in ns. */
+  /** Stated for the policy's shape, and read by nothing: a sender proposes no time. */
   proposedTimeMaxAgeNsec: FabricDurationNsec;
 
-  /** How far after the room's clock a proposed time is accepted, in ns. */
+  /** Stated for the policy's shape, and read by nothing: a sender proposes no time. */
   proposedTimeMaxLeadNsec: FabricDurationNsec;
 
-  /** How long an entry stays in `recentActivity`, in ns. */
+  /** Stated for the policy's shape, and read by nothing: the room keeps no activity log. */
   recentActivityWindowNsec: FabricDurationNsec;
 
-  /** The most messages a message window holds. */
+  /** How many of the newest messages `messages.latest` holds. */
   maxWindowCount: number;
 
-  /** The most message windows a session can have open. */
+  /** Stated for the policy's shape, and read by nothing: the room offers no windows. */
   maxOpenWindows: number;
 }
 
@@ -272,19 +260,32 @@ export interface AboutRecord {
   /** How the room was created. */
   kind: ChatRoomKind;
 
-  /** A group room's title. */
+  /** The title a group room was created with. */
   title?: string;
 
   /** When the room was created. */
   createdAt?: FabricEpochNsec;
 }
 
-/** What a room says about itself, set once when it is created. */
+/**
+ * A room's title as a member last set it, through `setTitle`. The room stores
+ * it labeled `authored-by` that member.
+ */
+export interface TitleRecord {
+  /** The title. */
+  title: string;
+}
+
+/** What a room says about itself. */
 export interface ChatRoomAbout {
   /** `"direct"` if created as a direct room; `"group"` otherwise. */
   kind: ChatRoomKind;
 
-  /** A group room's title. A direct room, and a space's own chat, have none. */
+  /**
+   * The room's title, which every member shares: the one a member last set,
+   * or else the one the room was created with. A direct room has none until a
+   * member sets one, and a space's own chat has none.
+   */
   title?: string;
 
   /** When the room was created; absent for a space's own chat. */
@@ -298,48 +299,6 @@ export interface ChatRoomAbout {
    * space's own chat, which no one created as a room.
    */
   record?: Cell<AboutRecord>;
-}
-
-/** One entry in a room's log of recent activity. */
-export interface ChatRoomActivity {
-  /** The entry's place in the room's activity: 1, 2, 3, … with no gaps. */
-  seq: number;
-
-  /** When the room recorded it. Unique in the room. */
-  at: FabricEpochNsec;
-
-  /** The `requestId` of the event it records. */
-  requestId: string;
-
-  /** The message the event changed or added. */
-  what: Cell<ChatMessage>;
-}
-
-/** Where a window of messages sits in its view. */
-export type ChatWindowAnchor =
-  | { before: FabricEpochNsec | "end" }
-  | { after: FabricEpochNsec | "start" }
-  | { around: FabricEpochNsec };
-
-/**
- * A request that opens, moves, or closes a window. Opening names where the
- * window sits and how many messages it holds; closing names only the window.
- */
-export interface WindowEvent {
-  /** Chosen by the client; shown in the window once an open is fulfilled. */
-  requestId: string;
-
-  /** The window to set or close, chosen by the client. */
-  windowId: string;
-
-  /** The root of the thread to show; absent for the main conversation. */
-  root?: Cell<ChatMessage>;
-
-  /** Where the window sits; required to open one. */
-  from?: ChatWindowAnchor;
-
-  /** The most messages to show, capped by the room's `maxWindowCount`. */
-  count?: number;
 }
 
 //
@@ -379,13 +338,22 @@ export const reactionTalliesOf = (
     [],
   );
   return emoji.map((each) => {
-    const onThis = ordered.filter((reaction) => reaction.emoji === each);
+    // One reactor counts once, however many of their reactions with this
+    // emoji the message holds.
+    const reactors = ordered.filter((reaction) => reaction.emoji === each)
+      .reduce<ProfileCell[]>(
+        (found, reaction) =>
+          found.some((known) => equals(known, reaction.reactorProfile))
+            ? found
+            : [...found, reaction.reactorProfile],
+        [],
+      );
     return {
       emoji: each,
-      count: onThis.length,
+      count: reactors.length,
       mine: viewer !== undefined &&
-        onThis.some((reaction) => equals(reaction.reactorProfile, viewer)),
-      reactors: onThis.map((reaction) => reaction.reactorProfile),
+        reactors.some((reactor) => equals(reactor, viewer)),
+      reactors,
     };
   });
 };
@@ -437,6 +405,12 @@ export interface ChatRoomLink {
   roster?: ManagerProfileCell[];
 }
 
+/** A container's explicit declaration of the conversation it holds. */
+export interface ChatContainer {
+  /** The declared conversation, wherever its room lives. */
+  chatRoom?: Cell<ChatRoomLink>;
+}
+
 /** One room in a user's chat manager. */
 export interface ChatIndexEntry {
   /** The room. */
@@ -448,13 +422,13 @@ export interface ChatIndexEntry {
   /** A direct room's other member, by principal. */
   counterpart?: string;
 
-  /** When this user's catalog admitted it. */
+  /** When first listed for this user, using catalog admission for discovery. */
   since: FabricEpochNsec;
 
   /**
-   * The revision of the room's entry in the user's catalog, as listed, which a
-   * request to forget the room names; absent where the entry is not one the
-   * catalog keeps revisions of.
+   * The opaque revision supplied by `rooms` for its membership or discovery
+   * source. A request to forget uses that view's revision; direct mappings
+   * and act outcomes may omit it.
    */
   revision?: string;
 }
@@ -469,8 +443,11 @@ export type ChatRequestOutcome =
     /** The request finished. */
     status: "done";
 
-    /** The entry it produced; absent for `forget`. */
+    /** The entry it produced; absent for `forget` and `offerRoom`. */
     entry?: ChatIndexEntry;
+
+    /** How `offerRoom` told the member of the room; absent for the others. */
+    delivery?: ChatOfferDelivery;
   }
   | {
     /** The request was refused. */
@@ -488,16 +465,45 @@ export type ChatRequestOutcome =
 
 /**
  * A refusal a client can act on, which stays the same whatever its `reason`
- * says. `space-own-chat`: `accept` named a social space's own chat, which a
- * user's chats don't list, since the catalog lists rooms by their own spaces.
+ * says. `space-own-chat`: `accept` or `joinRoom` named a container's chat
+ * without supplying the matching root `chatRoom` declaration it needs.
+ * `shared-inbox`: `createGroup` named profiles of two people that point at
+ * the same share inbox, so an offer meant for one would reach the other.
  */
-export type ChatRefusalCode = "space-own-chat";
+export type ChatRefusalCode = "space-own-chat" | "shared-inbox";
+
+/**
+ * How a manager told a member of a room it offered them: `offered`, sent to
+ * at least one share inbox a profile of theirs points at, which says nothing
+ * of whether it arrived; `noticed`, queued as a notice for a client to
+ * deliver, since no profile of theirs it knows points at an inbox.
+ */
+export type ChatOfferDelivery = "offered" | "noticed";
+
+/**
+ * How an added member was told of the room: as their adder's manager told
+ * them, or `access-only`, not told at all, because the adder had no manager to
+ * tell them when they added them, or theirs refused to.
+ */
+export type AddMemberDelivery = ChatOfferDelivery | "access-only";
 
 /** The outcome of an add to a room's space, by its `requestId`. */
 export type AddMemberOutcome =
   | {
     /** The person was admitted, or held the access already. */
     status: "done";
+
+    /**
+     * How they were told of the room; absent until the adder's manager has
+     * decided.
+     */
+    delivery?: AddMemberDelivery;
+
+    /**
+     * Why the adder's manager refused to tell them of the room, where it did,
+     * which makes `delivery` `access-only`.
+     */
+    deliveryRefusal?: string;
   }
   | {
     /** The add was refused, and nothing was granted. */
@@ -519,6 +525,45 @@ export type AddMemberOutcome =
  * its two members.
  */
 export type AddMemberRefusalCode = "direct-room";
+
+/** The outcome of a retitle of a room, by its `requestId`. */
+export type SetTitleOutcome =
+  | {
+    /** The request set the room's title. */
+    status: "done";
+  }
+  | {
+    /** The retitle was refused, and the title is as it was. */
+    status: "refused";
+
+    /** Why, for a person to read. */
+    reason: string;
+
+    /** Which refusal it is, for a client to act on. */
+    code: SetTitleRefusalCode;
+  };
+
+/**
+ * Why a room refused a retitle, which stays the same whatever its `reason`
+ * says. `not-member`: the sender can't write in the room, or isn't signed in.
+ * `invalid-title`: the title is not a string with some text in it.
+ * `fixed-title`: the room's title is not one its members set, as for a
+ * space's own chat, which is shown by its space's name.
+ */
+export type SetTitleRefusalCode =
+  | "not-member"
+  | "invalid-title"
+  | "fixed-title";
+
+/**
+ * The `requestId` under which an add to the room in `space` asks the adder's
+ * manager to offer the room, given the add's own `requestId`, which the offer
+ * carries as its `id`. It names the room as well as the add, so adds to two
+ * rooms under one `requestId` neither share an outcome in the manager nor
+ * replace each other's offer in a share inbox.
+ */
+export const addMemberOfferId = (space: string, requestId: string): string =>
+  JSON.stringify(["addMember", space, requestId]);
 
 /**
  * The `kind` of a room's own space, as the space declares it, and as an offer

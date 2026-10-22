@@ -14,6 +14,7 @@ import {
 } from "../v2.ts";
 import {
   connect,
+  isPushedSync,
   loopback,
   type SessionOpenAuthContext,
   type Transport,
@@ -1038,6 +1039,61 @@ Deno.test("memory v2 client watch views expose incremental sync effects", async 
       }],
       removes: [],
     });
+  } finally {
+    await writerClient.close();
+    await observerClient.close();
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 client marks a pushed frame as a push, and a watch reply as not one", async () => {
+  const server = new Server({
+    ...testSessionOpenServerOptions,
+    store: new URL("memory://memory-v2-client-pushed-sync"),
+  });
+  const writerClient = await connect({ transport: loopback(server) });
+  const observerClient = await connect({ transport: loopback(server) });
+  const space = "did:key:z6Mk-memory-v2-client-pushed-sync";
+  const writer = await writerClient.mount(
+    space,
+    {},
+    testSessionOpenAuthFactory,
+  );
+  const observer = await observerClient.mount(
+    space,
+    {},
+    testSessionOpenAuthFactory,
+  );
+
+  try {
+    const write = (localSeq: number, version: number) =>
+      writer.transact({
+        localSeq,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:pushed",
+          value: { value: { version } },
+        }],
+      });
+    await write(1, 1);
+    const { view, sync } = await observer.watchAddSync([{
+      id: "root",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: "of:doc:pushed",
+          selector: { path: [], schema: false },
+        }],
+      },
+    }]);
+    const updates = view.subscribeSync();
+    await write(2, 2);
+    const pushed = await updates.next();
+
+    assertEquals(pushed.done, false);
+    assertEquals(isPushedSync(pushed.value as SessionSync), true);
+    assertEquals(isPushedSync(sync), false);
   } finally {
     await writerClient.close();
     await observerClient.close();

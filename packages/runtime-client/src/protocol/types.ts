@@ -11,6 +11,7 @@ import type {
 } from "@commonfabric/data-model/fabric-primitives";
 import type { DID } from "@commonfabric/identity";
 import { type Program } from "@commonfabric/js-compiler/interface";
+import type { JoinVisitDecision } from "@commonfabric/piece/ops";
 import type {
   ApplyOpResolution,
   DeliveryAttention,
@@ -20,7 +21,7 @@ import type {
   PresenceFacets,
   PresenceRecord,
 } from "@commonfabric/memory/v2";
-import type { MetaField } from "@commonfabric/runner";
+import type { MetaField, RuntimeSizes } from "@commonfabric/runner";
 import type {
   CfcConfClause,
   CfcTrustConfigInput,
@@ -66,6 +67,15 @@ export type CellRef = NormalizedFullLink & {
    * this ref asked for one.
    */
   cfcLabelView?: CfcLabelView;
+  /**
+   * The schema of the ancestor this cell was keyed from, on a ref that has no
+   * schema of its own. `schema` describes the cell at `path.slice(0, depth)`,
+   * and the worker reads this cell as that ancestor's `key()` along the rest
+   * of the path, under the schema the runtime narrows to there. The main
+   * thread holds no schema narrowing of its own, which is why the ancestor's
+   * schema crosses rather than the child's.
+   */
+  keyedFrom?: { depth: number; schema: JSONSchema };
 };
 
 /** A piece as this connection names it, by the cell that holds it. */
@@ -272,6 +282,13 @@ export enum RequestType {
    * directly would skip that repair, and nothing else performs it.
    */
   EnsureHomePatternRunning = "runtime:ensureHomePatternRunning",
+
+  /**
+   * Tells the user's chat manager that the user has joined the FabriChat room
+   * whose space the request names, once the space passes vetting, answering
+   * with what was decided. Home is never created for it.
+   */
+  JoinVisitedRoom = "runtime:joinVisitedRoom",
 
   /**
    * Waits for reactive quiescence *and* for every issued commit to be durable.
@@ -849,6 +866,12 @@ export type InitializationData = {
      * answer.
      */
     serverExecution?: boolean;
+
+    /**
+     * Keep session documents local when server execution is disabled.
+     * Defaults to off.
+     */
+    localSessionDocuments?: boolean;
 
     /** Global default for server-selected view replication. */
     viewScopedReplication?: boolean;
@@ -1867,12 +1890,25 @@ export type GetHomeSpaceCellRequest = BaseRequest & {
   type: RequestType.GetHomeSpaceCell;
 };
 
-/**
- * The {@link RequestType.EnsureHomePatternRunning} request, which carries no
- * payload.
- */
+/** The {@link RequestType.EnsureHomePatternRunning} request. */
 export type EnsureHomePatternRunningRequest = BaseRequest & {
   type: RequestType.EnsureHomePatternRunning;
+
+  /**
+   * Whether to bring Home up only where it already exists: where Home's root
+   * records the pattern it runs. Where it does not, the request creates
+   * nothing and starts nothing. Defaults to `false`, which creates Home where
+   * it has no root.
+   */
+  existingOnly?: boolean;
+};
+
+/** The {@link RequestType.JoinVisitedRoom} request. */
+export type JoinVisitedRoomRequest = BaseRequest & {
+  type: RequestType.JoinVisitedRoom;
+
+  /** The visited space declaring a room through its kind or root. */
+  space: DID;
 };
 
 /** The {@link RequestType.Idle} request, which carries no payload. */
@@ -2341,8 +2377,16 @@ export type UploadBlobRequest = BaseRequest & {
   body: FabricBytes;
 
   /**
-   * The extension the stored blob is served under, defaulting to `bin`.
-   * A leading dot is stripped.
+   * The name of the file the bytes came from, if they have one. The stored blob
+   * keeps it, hashed into the blob's id with the media type and the bytes, and
+   * a download of the blob is offered under it.
+   */
+  name?: string;
+
+  /**
+   * The extension the stored blob is served under. A leading dot is stripped.
+   * With none, the store chooses one: the extension of `name`, or else one for
+   * the media type, or else `bin`.
    */
   suffix?: string;
 };
@@ -2452,6 +2496,34 @@ export type CDFPoint = {
 };
 
 /**
+ * One of the slowest measurements of a timed operation. Mirrors the shape
+ * `@commonfabric/utils/logger` uses.
+ */
+export type SlowTiming = {
+  /**
+   * How long it took, in milliseconds.
+   */
+  elapsed: number;
+
+  /**
+   * When it ended, on the worker's `performance.now()` clock.
+   */
+  at: number;
+
+  /**
+   * When it ended, in milliseconds since the epoch.
+   */
+  epochMs: number;
+
+  /**
+   * What the worker named this one measurement with, when it named it: the
+   * label its caller chose, such as the cell a resume loaded or the action a
+   * run executed.
+   */
+  detail?: string;
+};
+
+/**
  * What one timed operation's samples add up to. Two distributions are kept:
  * `cdf` over every sample since the worker started, and `cdfSinceBaseline`
  * over those since the last baseline reset, which is `null` until one has
@@ -2502,6 +2574,11 @@ export type TimingStats = {
    * When that measurement was taken.
    */
   lastTimestamp: number;
+
+  /**
+   * The slowest measurements, longest first, at most five of them.
+   */
+  slowest: SlowTiming[];
 
   /**
    * The distribution over every sample since the worker started.
@@ -3348,6 +3425,7 @@ export type IPCClientRequest =
   | GetCellRequest
   | GetHomeSpaceCellRequest
   | EnsureHomePatternRunningRequest
+  | JoinVisitedRoomRequest
   | ListEventAttentionRequest
   | ResolveEventAttentionRequest
   | GetGraphSnapshotRequest
@@ -3611,6 +3689,27 @@ export type CellResponse = {
 };
 
 /**
+ * A reference to the user's Home, which a request that brings Home up only
+ * where it exists lacks where it does not.
+ */
+export type HomePatternResponse = {
+  /**
+   * Home's root, absent where the request brought nothing up.
+   */
+  cell?: CellRef;
+};
+
+/**
+ * What a {@link RequestType.JoinVisitedRoom} request came to, absent where the
+ * user has no Home: `sent` to the chat manager, `no-chat-manager` for a Home
+ * whose chat manager has no `joinRoom`, or the reason vetting refused the
+ * space or its declared chat.
+ */
+export type JoinVisitedRoomResponse = {
+  decision?: JoinVisitDecision;
+};
+
+/**
  * A cell's display label. `undefined` means the cell carries none, which is
  * distinct from the request having failed.
  */
@@ -3723,8 +3822,10 @@ export type GraphSnapshotResponse = {
 
 /**
  * Everything the logger diagnostics read returns: counts, per-logger
- * metadata, timings, and active flags, gathered in one round trip because a
- * client comparing them wants them from the same moment.
+ * metadata, timings, active flags, the runtime's CFC counters, the pattern
+ * manager's compile-cache counters, and the sizes of the runtime's live
+ * structures, gathered in one round trip because a client comparing them
+ * wants them from the same moment.
  */
 export type LoggerCountsResponse = {
   /**
@@ -3759,6 +3860,102 @@ export type LoggerCountsResponse = {
    * no index signature does not satisfy, and every counter there is a number.
    */
   cfc: Record<string, number>;
+
+  /**
+   * The pattern manager's compile-cache counters: `hits`, `misses` and
+   * `byIdentityHits`, as `PatternManager.getCompileCacheStats()` reports
+   * them. A capture reading them beside the `compile-cache` timing rows can
+   * tell a worker that recompiled once from one that never hits.
+   */
+  compileCache: Record<string, number>;
+
+  /**
+   * How large the runtime's live structures are at this moment, and what its
+   * channels have carried: the scheduler's tables, storage's documents and
+   * subscriptions with each space's share and the approximate size of its
+   * documents, the compiled code caches, the worker's own subscription and
+   * mount tables, and the traffic of the memory connections and the worker's
+   * ports. The counts are each a collection's own; the sizes are estimates
+   * that say so where they are declared. `storage` is `null`, not zeros, for
+   * a storage manager that reports no sizes, and its per-space view names
+   * the largest spaces up to a cap with the rest added together under
+   * `bySpaceOmitted`, as `StorageSizes` says.
+   */
+  sizes: RuntimeSizes & { worker: WorkerSizes; ipc: WorkerIpcSizes | null };
+};
+
+/**
+ * What one of the worker's outbound channels has carried: every message is
+ * counted, and one in `IPC_SAMPLE_STRIDE` of them is measured, so the bytes
+ * are an estimate from a sample rather than a sum.
+ */
+export type IpcChannelSizes = {
+  /** Messages handed to the channel's `postMessage`. */
+  messages: number;
+
+  /** Messages measured, the first of the channel and every stride after. */
+  sampledMessages: number;
+
+  /**
+   * The approximate JSON length of the measured messages' encodings, in
+   * UTF-16 code units, as `approximateJsonSize()` measures one: a stand-in
+   * for what structured clone copied, which the clone's own per-object
+   * overhead puts above it and text outside ASCII puts below its UTF-8 size.
+   */
+  sampledBytes: number;
+
+  /**
+   * `sampledBytes` scaled from the measured messages to all of them. A
+   * channel whose messages vary widely in size is estimated loosely while
+   * its sample is small; `messages` and `sampledMessages` say how small.
+   */
+  approxBytes: number;
+};
+
+/**
+ * What the worker's ports have carried and how many it holds, for a read
+ * that attributes serialization traffic to the port it crossed.
+ */
+export type WorkerIpcSizes = {
+  /**
+   * The `MessagePort`s of attached clients the worker holds now, and how
+   * many it has closed. The owner speaks over the worker's own global, which
+   * is not a port and is in neither count.
+   */
+  openPorts: { open: number; closed: number };
+
+  /** Each outbound channel's traffic since the worker started. */
+  bytesSerialized: {
+    /** The worker's own global, over which the owner is reached. */
+    owner: IpcChannelSizes;
+
+    /** Each attached client's port, by client id. */
+    clients: Record<string, IpcChannelSizes>;
+
+    /** The ports of clients that have departed, added together. */
+    departedClients: IpcChannelSizes;
+  };
+};
+
+/** Sizes of the tables the worker keeps on its clients' behalf. */
+export type WorkerSizes = {
+  /** Cell subscriptions, one per client per cell. */
+  cellSubscriptions: number;
+
+  /** Operation subscriptions. */
+  operationSubscriptions: number;
+
+  /** Operation sessions open. */
+  operationSessions: number;
+
+  /** Presence room memberships. */
+  presenceMemberships: number;
+
+  /** VDOM mounts. */
+  vdomMounts: number;
+
+  /** Spaces with a pieces controller. */
+  spaces: number;
 };
 
 /** The worker's pattern coverage, where this worker collects any. */
@@ -4107,6 +4304,8 @@ export type RemoteResponse =
   | CellValueResponse
   | CellGetResponse
   | CellResponse
+  | HomePatternResponse
+  | JoinVisitedRoomResponse
   | CfcLabelViewResponse
   | CellFieldsResponse
   | SnapshotSharePreview
@@ -4196,7 +4395,11 @@ export type Commands = {
   };
   [RequestType.EnsureHomePatternRunning]: {
     request: EnsureHomePatternRunningRequest;
-    response: CellResponse;
+    response: HomePatternResponse;
+  };
+  [RequestType.JoinVisitedRoom]: {
+    request: JoinVisitedRoomRequest;
+    response: JoinVisitedRoomResponse;
   };
   [RequestType.Idle]: {
     request: IdleRequest;

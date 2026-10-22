@@ -147,6 +147,42 @@ describe("local-jobs/api", () => {
       expect(kicked).toEqual(["kick"]);
     });
 
+    it("keeps the depth a request names on its job, and refuses a reasoning effort its profile does not set", async () => {
+      const { post } = apiWith();
+
+      const deep = await post("/jobs", { ...BODY, depth: "deep" });
+      const effort = await post("/jobs", {
+        ...BODY,
+        idempotencyKey: "weaver-ask:2",
+        reasoningEffort: "high",
+      });
+
+      expect(deep.status).toBe(201);
+      expect((await deep.json()).job.request.depth).toBe("deep");
+      expect(effort.status).toBe(400);
+      expect(await effort.json()).toMatchObject({
+        code: "beyond_profile",
+        error:
+          "The profile sets no reasoning effort, so a request may not name one.",
+      });
+    });
+
+    it("keeps the tags and domains a request names on its job, an empty list of domains among them", async () => {
+      const { post } = apiWith();
+
+      const response = await post("/jobs", {
+        ...BODY,
+        tags: ["find", "find"],
+        domains: [],
+      });
+
+      expect(response.status).toBe(201);
+      expect((await response.json()).job.request).toMatchObject({
+        tags: ["find"],
+        domains: [],
+      });
+    });
+
     it("returns 409 for a key that names a different request", async () => {
       const { post } = apiWith();
       await post("/jobs", BODY);
@@ -184,6 +220,21 @@ describe("local-jobs/api", () => {
       ["tools that are not names", { ...BODY, tools: [1] }],
       ["a turn count below one", { ...BODY, maxModelTurns: 0 }],
       ["a fractional turn count", { ...BODY, maxModelTurns: 1.5 }],
+      ["a depth it does not know", { ...BODY, depth: "medium" }],
+      ["tags that are not a list", { ...BODY, tags: "find" }],
+      ["a tag it does not know", { ...BODY, tags: ["research"] }],
+      ["an empty list of tags", { ...BODY, tags: [] }],
+      ["a domain it does not know", { ...BODY, domains: ["email"] }],
+      [
+        "a reasoning effort it does not know",
+        { ...BODY, reasoningEffort: "extreme" },
+      ],
+      ["inputs that are not an object", { ...BODY, inputs: ["/of:x"] }],
+      ["an input that is not an address", { ...BODY, inputs: { focus: 1 } }],
+      [
+        "foreign spaces that are not a map of hosts",
+        { ...BODY, foreignSpaces: { "did:key:z6Mk": 1 } },
+      ],
     ];
     for (const [what, body] of invalid) {
       it(`returns 400 for ${what}`, async () => {
@@ -193,6 +244,19 @@ describe("local-jobs/api", () => {
         expect((await response.json()).code).toBe("invalid_request");
       });
     }
+
+    it("returns 400 for inputs under a profile with no fabric session", async () => {
+      const response = await apiWith().post("/jobs", {
+        ...BODY,
+        inputs: { focus: `/of:fid1:${"A".repeat(43)}` },
+      });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        code: "beyond_profile",
+        error: "The profile has no fabric session, so it can hold no inputs.",
+      });
+    });
 
     it("accepts a boolean result schema and a request that narrows nothing", async () => {
       const response = await apiWith().post("/jobs", {

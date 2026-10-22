@@ -28,25 +28,33 @@
 // snapshot across operators).
 
 import { Command, ValidationError } from "@cliffy/command";
+import { basename, dirname, toFileUrl } from "@std/path";
 import { configuredStorePath } from "@commonfabric/memory/v2/storage-path";
 import {
+  CompactionRefused,
+  compactStore,
   formatCompactionReport,
+  formatCompactionRun,
   planCompaction,
+  storeSchemaRefusals,
 } from "@commonfabric/memory/v2/compact";
 import type { CellScope } from "@commonfabric/memory/v2";
 import {
   clonePaths,
   contentFingerprint,
   createClone,
+  formatCompactionVerification,
   openSpace,
   resetClone,
   resolveSpace,
   verifyClone,
+  verifyCompaction,
   type VerifyResult,
 } from "@commonfabric/state-inspector";
 
 import { buildSpaceInviteCommand } from "./space-invites.ts";
 import { hasJsonArgument } from "../lib/json-output.ts";
+import { shellQuote } from "../lib/shell-quote.ts";
 import {
   buildCreateSpaceCommand,
   buildRecreateRootCommand,
@@ -73,6 +81,62 @@ function liveStoreDirs(): string[] {
   // its working directory; a clone landing there would be served unintentionally.
   dirs.push(`${Deno.cwd()}/cache/memory`);
   return dirs;
+}
+
+/**
+ * Refuse a store path inside a directory a local server serves: the same rail
+ * `cf space clone` applies to its destination, for the one `cf space` command
+ * that rewrites a store's rows. A laptop mistake, not a host one; on the host
+ * the rule is that the owning instance is stopped first.
+ */
+function assertNotLiveStore(path: string, role: "store" | "result"): void {
+  // The result must not exist yet — not as a file, not as a symlink whose
+  // target does not exist either, which `VACUUM INTO` would write through —
+  // so it is placed by its directory, resolved through symlinks as the
+  // server would. The store is resolved by itself.
+  let real: string;
+  if (role === "result") {
+    let present = false;
+    try {
+      Deno.lstatSync(path);
+      present = true;
+    } catch {
+      // Nothing there, which is what a result path must be.
+    }
+    if (present) {
+      throw new ValidationError(
+        `${path} exists; the result is never overwritten.`,
+      );
+    }
+  }
+  try {
+    real = role === "store"
+      ? Deno.realPathSync(path)
+      : `${Deno.realPathSync(dirname(path))}/${basename(path)}`;
+  } catch {
+    throw new ValidationError(
+      role === "store"
+        ? `no store at ${path}`
+        : `the directory of ${path} does not exist`,
+    );
+  }
+  for (const dir of liveStoreDirs()) {
+    let liveDir: string;
+    try {
+      liveDir = Deno.realPathSync(dir);
+    } catch {
+      continue;
+    }
+    if (real === liveDir || real.startsWith(`${liveDir}/`)) {
+      throw new ValidationError(
+        `refusing to ${
+          role === "store" ? "compact" : "write the result to"
+        } ${path}: it is inside ${dir}, which a local server serves. ` +
+          `Compact a copy of the backup, never a served file, and write the ` +
+          `result beside it.`,
+      );
+    }
+  }
 }
 
 /**
@@ -368,12 +432,14 @@ export const space = new Command()
           // the network. The port offset separates it from a local production
           // server; only the host binding keeps it off the network entirely.
           `serve it (NOT the live store — note the host and port):\n` +
-          `  HOST=127.0.0.1 MEMORY_DIR="file://${targetDir}/" ` +
+          `  HOST=127.0.0.1 MEMORY_DIR=${
+            shellQuote(toFileUrl(`${targetDir}/`).href)
+          } ` +
           `./scripts/start-local-dev.sh --port-offset 10\n\n` +
           `then, per attempt (stop the server before resetting — a reset ` +
           `cannot reach a process that already holds the store open):\n` +
-          `  cf space verify ${targetDir}\n` +
-          `  cf space reset  ${targetDir}`,
+          `  cf space verify ${shellQuote(targetDir)}\n` +
+          `  cf space reset  ${shellQuote(targetDir)}`,
       );
     });
   })
@@ -531,9 +597,12 @@ export const space = new Command()
   /* space compact */
   .command(
     "compact <store:string>",
-    "Plan the compaction of a space store's history: the rows and payloads a " +
-      "run would remove, computed without writing. Only --dry-run exists " +
-      "until the write path lands (docs/plans/compact-space.md, stage 4).",
+    "Compact a space store's history: materialize each selected instance's " +
+      "base at the cut, delete the rows behind it, hollow old commit payloads, " +
+      "and write the result with VACUUM INTO. The one `cf space` command that " +
+      "rewrites a store's rows. --dry-run reports without writing; --verify " +
+      "checks a result against the backup it came from " +
+      "(docs/plans/compact-space.md).",
   )
   .option(
     "--documents <prefix:string>",
@@ -561,17 +630,63 @@ export const space = new Command()
   )
   .option(
     "--keep-payloads <duration:string>",
-    "Commits created within this window of the newest commit keep their " +
-      "payload: a number and a unit, such as 24h, 7d or 30m.",
+    "Commits created within this window of the newest client commit keep " +
+      "their payload: a number and a unit, such as 24h, 7d or 30m. Outside " +
+      "it a payload is hollowed unless its seq is 1, an op_* row references " +
+      "it, or it is a compaction commit.",
     { default: "24h" },
   )
-  .option("--dry-run", "Compute and report; write nothing. Required for now.")
-  .action((options, store) => {
-    if (!options.dryRun) {
-      throw new ValidationError(
-        "cf space compact writes nothing yet: pass --dry-run for the report. " +
-          "The write path is stage 4 of docs/plans/compact-space.md.",
-      );
+  .option("--dry-run", "Compute and report; write nothing.")
+  .option(
+    "--out <path:string>",
+    "Where VACUUM INTO writes the result; <store>.compacted.sqlite beside " +
+      "the source by default. Never overwritten.",
+  )
+  .option(
+    "--verify",
+    "Verify <store>, a compacted result, against the backup named by " +
+      "--against: integrity, heads, rows, every document through the " +
+      "inspector's replay, the fingerprint, the hollowed payloads, the " +
+      "genesis receipt. Exits nonzero when a check fails.",
+  )
+  .option(
+    "--against <backup:string>",
+    "With --verify: the store the result was compacted from.",
+  )
+  .option(
+    "--verify-sample <n:integer>",
+    "With --verify: reconstruct every n-th document and check every n-th " +
+      "hollowed payload only, and skip the fingerprint: a quick pass during " +
+      "rehearsal, and a weaker claim.",
+  )
+  .action(async (options, store) => {
+    if (options.verify) {
+      if (!options.against) {
+        throw new ValidationError(
+          "--verify needs --against <backup>: the store the result was compacted from.",
+        );
+      }
+      for (const path of [store, options.against]) {
+        try {
+          Deno.statSync(path);
+        } catch {
+          throw new ValidationError(`no store at ${path}`);
+        }
+      }
+      const verification = verifyCompaction({
+        result: store,
+        against: options.against,
+        ...(options.verifySample === undefined
+          ? {}
+          : { sample: options.verifySample }),
+      });
+      out(!!options.json, verification, () => {
+        console.log(formatCompactionVerification(verification));
+      });
+      // A failed verification is a RESULT, not a usage error, as with
+      // `cf space verify`: the report is what the operator reads.
+      if (!verification.ok) Deno.exit(1);
+      return;
     }
     const prefixes = options.documents ?? [];
     if (prefixes.length === 0) {
@@ -587,39 +702,89 @@ export const space = new Command()
     } catch {
       throw new ValidationError(`no store at ${store}`);
     }
-    // The inspector's read-only opener, which also shims `scope_key` onto a
-    // store from before that column existed, so the planner's reads of it
-    // hold on every store the server ever wrote.
-    const space = openSpace(store);
-    try {
-      let report;
+    const selection = { prefixes, ...(scope === undefined ? {} : { scope }) };
+    const cut = {
+      ...(options.beforeSeq === undefined
+        ? {}
+        : { beforeSeq: options.beforeSeq }),
+      ...(options.before === undefined ? {} : { before: options.before }),
+      ...(options.keepLast === undefined ? {} : { keepLast: options.keepLast }),
+    };
+    if (options.dryRun) {
+      // The inspector's read-only opener, which also shims `scope_key` onto
+      // a store from before that column existed, so the planner's reads of
+      // it hold on every store the server ever wrote.
+      const space = openSpace(store);
       try {
-        report = planCompaction(space.db, {
-          selection: { prefixes, ...(scope === undefined ? {} : { scope }) },
-          cut: {
-            ...(options.beforeSeq === undefined
-              ? {}
-              : { beforeSeq: options.beforeSeq }),
-            ...(options.before === undefined ? {} : { before: options.before }),
-            ...(options.keepLast === undefined
-              ? {}
-              : { keepLast: options.keepLast }),
-          },
-          keepPayloadsMs,
-        });
-      } catch (error) {
-        // The planner refuses an option it cannot read as intended, by name;
-        // that is a usage error here.
-        if (error instanceof TypeError) {
-          throw new ValidationError(error.message);
+        let report;
+        try {
+          report = planCompaction(space.db, { selection, cut, keepPayloadsMs });
+        } catch (error) {
+          // The planner refuses an option it cannot read as intended, by
+          // name; that is a usage error here.
+          if (error instanceof TypeError) {
+            throw new ValidationError(error.message);
+          }
+          throw error;
         }
-        throw error;
+        // The schema preflight a run makes, so the dry run says whether the
+        // store is one a run would write at all.
+        const schema = await storeSchemaRefusals(space.db);
+        const schemaLine = schema.length === 0
+          ? "schema     current; a run would open this store without migrating it"
+          : `schema     REFUSED: ${schema.join("; ")}`;
+        out(!!options.json, { ...report, schema }, () => {
+          console.log(formatCompactionReport(report));
+          console.log(schemaLine);
+        });
+      } finally {
+        space.close();
       }
-      out(!!options.json, report, () => {
-        console.log(formatCompactionReport(report));
+      return;
+    }
+    assertNotLiveStore(store, "store");
+    assertNotLiveStore(options.out ?? `${store}.compacted.sqlite`, "result");
+    try {
+      let planned = false;
+      const run = await compactStore({
+        store,
+        ...(options.out === undefined ? {} : { out: options.out }),
+        selection,
+        cut,
+        keepPayloadsMs,
+        onProgress: (progress) => {
+          // The plan is printed before the first write, as the dry run
+          // prints it; progress goes to stderr so --json stays one document.
+          if (progress.phase === "planned" && !options.json) {
+            console.log(formatCompactionReport(progress.report));
+            console.log("");
+            planned = true;
+          } else if (
+            progress.phase === "instance" &&
+            (progress.completed % 10_000 === 0 ||
+              progress.completed === progress.of)
+          ) {
+            console.error(
+              `  compacted ${progress.completed} of ${progress.of} instances`,
+            );
+          } else if (progress.phase === "hollowing") {
+            console.error(
+              `  hollowed through seq ${progress.completed} of ${progress.of}`,
+            );
+          } else if (progress.phase === "vacuum") {
+            console.error(`  writing ${progress.out}`);
+          }
+        },
       });
-    } finally {
-      space.close();
+      out(!!options.json, run, () => {
+        if (planned) console.log("");
+        console.log(formatCompactionRun(run));
+      });
+    } catch (error) {
+      if (error instanceof CompactionRefused || error instanceof TypeError) {
+        throw new ValidationError(error.message);
+      }
+      throw error;
     }
   })
   /* space create */

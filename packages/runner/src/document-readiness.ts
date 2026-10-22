@@ -76,17 +76,29 @@ type Confirmation =
   | { status: "failed"; error: DocumentLoadError };
 
 /**
+ * The outcome of work an action waits on through `requireSettled()`: still
+ * running, finished, or failed with the reason it rejected.
+ */
+type Settlement =
+  | { status: "pending" }
+  | { status: "settled" }
+  | { status: "failed"; error: unknown };
+
+/**
  * Holds missing-document reads until synchronization establishes presence or
- * absence. Completion re-arms the registered action even when storage writes
- * nothing; cancellation and replica reset retire outstanding confirmations.
- * On a fanned-out action, completion re-arms only the instances whose reads
- * waited on the document, so their siblings stay current.
+ * absence, and holds an action on work that brings a document into being until
+ * that work settles. Completion re-arms the registered action even when storage
+ * writes nothing; cancellation and replica reset retire outstanding
+ * confirmations, and cancellation retires outstanding settlements. On a
+ * fanned-out action, a load's completion re-arms only the instances whose
+ * reads waited on the document, so their siblings stay current.
  */
 export function createDocumentReadiness(
   runtime: Runtime,
   addCancel: (cancel: () => void) => void,
 ) {
   const confirmations = new Map<string, Confirmation>();
+  const settlements = new Map<string, Settlement>();
   let active = true;
   let subscribed = false;
   let action: Action | undefined;
@@ -105,6 +117,7 @@ export function createDocumentReadiness(
   addCancel(() => {
     active = false;
     confirmations.clear();
+    settlements.clear();
     if (subscribed) runtime.storageManager.unsubscribe?.(subscription);
   });
 
@@ -220,6 +233,35 @@ export function createDocumentReadiness(
             () => finish({ status: "confirmed" }),
             (error: DocumentLoadError) => finish({ status: "failed", error }),
           ),
+        );
+      }
+      throw new DocumentPending();
+    },
+    /**
+     * Holds the action on the work `start` begins, which `key` names: the first
+     * call starts it, and every call throws `DocumentPending` until it settles.
+     * Settling re-arms the action, as a finished load does. Returns once the
+     * work has resolved, and throws the reason it rejected once it has
+     * rejected, on every later call with the same `key`, so a failure is
+     * reported rather than started again.
+     */
+    requireSettled(key: string, start: () => Promise<unknown>): void {
+      const prior = settlements.get(key);
+      if (prior?.status === "settled") return;
+      if (prior?.status === "failed") throw prior.error;
+      if (prior === undefined) {
+        const settlement: Settlement = { status: "pending" };
+        settlements.set(key, settlement);
+        const finish = (next: Settlement): void => {
+          if (!active || settlements.get(key) !== settlement) return;
+          settlements.set(key, next);
+          if (action) {
+            runtime.scheduler.invalidateAction(action, { retry: true });
+          }
+        };
+        start().then(
+          () => finish({ status: "settled" }),
+          (error: unknown) => finish({ status: "failed", error }),
         );
       }
       throw new DocumentPending();

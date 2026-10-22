@@ -112,6 +112,7 @@ import {
   type ViewQuery,
   type WatchAddRequest,
   type WatchAddResult,
+  type WatchRemoveRequest,
   type WatchSetRequest,
   type WatchSetResult,
   type WatchSpec,
@@ -124,6 +125,10 @@ import {
   commitStormThresholds,
 } from "./commit-rates.ts";
 import { classifyCommitTelemetry } from "./commit-telemetry.ts";
+import type {
+  DocumentInterestQuery,
+  DocumentInterestsReport,
+} from "./document-interests.ts";
 import {
   parseSessionReport,
   SessionReportLog,
@@ -162,7 +167,6 @@ import {
   extendTrackedGraph,
   fromDirtyKey,
   fromDocKey,
-  isGraphQueryCoveredByState,
   type QueryDocKey,
   type QueryEvaluationCache,
   type QueryEvaluationCacheDiagnostics,
@@ -183,10 +187,12 @@ import {
   buildFullSync,
   cacheKeyForEntity,
   compareSyncAddress,
+  graphWatchesByBranch,
   groupedQueries,
   holdingsToCacheEntries,
   isEmptySync,
   mergeWatchesById,
+  partitionWatchesByCoverage,
   sameSnapshot,
   sameWatchSpec,
   type SessionCacheEntry,
@@ -194,6 +200,7 @@ import {
   toWireRemove,
   toWireUpsert,
   trackedIdsFromEntries,
+  unionQuery,
 } from "./server-sync.ts";
 import { authorizationError } from "./session-open-auth.ts";
 import { SessionRegistry, type SessionState } from "./session-registry.ts";
@@ -222,6 +229,7 @@ import {
   viewWatches,
 } from "./view-interest.ts";
 
+export { MAX_DOCUMENT_INTEREST_SESSIONS } from "./document-interests.ts";
 export { SessionRegistry } from "./session-registry.ts";
 
 /**
@@ -395,9 +403,10 @@ export type SlowQuery = {
   /** transact only: the commit's pending read count. */
   readsPending?: number;
 
-  /** transact only: "ok", the response error's name (a rejected commit
-   * that took this long is at least as interesting as an applied one), or
-   * "threw" when evaluation raised instead of responding. */
+  /** transact and sqlite.query: "ok", or the error's name (a rejected
+   * commit or a failed read that took this long is at least as interesting
+   * as one that succeeded). A transact reports "threw" when evaluation raised
+   * instead of responding. */
   outcome?: string;
 
   /** Query and watch operations: how many roots the request's evaluations
@@ -444,6 +453,12 @@ export type SlowQuery = {
    * {@link SlowestQueryRoot} for why overlapping closures charge whichever
    * root ran first, and what to check before calling one the cause. */
   slowestRoot?: SlowestQueryRoot;
+
+  /** sqlite.query only: the id of the database handle the read named. */
+  db?: string;
+
+  /** sqlite.query only: the rows a read that succeeded returned. */
+  rows?: number;
 };
 
 /** The root attribution accumulated across one request's branch groups. */
@@ -519,8 +534,8 @@ const recordSlowQueryDuration = (
   });
 };
 
-/** Returns the last N slow query, watch, and commit operations — those over
- * `CF_SLOW_QUERY_THRESHOLD_MS`, 100 ms unless set. */
+/** Returns the last N slow query, watch, commit, and SQLite read operations —
+ * those over `CF_SLOW_QUERY_THRESHOLD_MS`, 100 ms unless set. */
 export const getSlowQueries = (): readonly SlowQuery[] => slowQueries;
 
 /**
@@ -616,6 +631,16 @@ const sessionReportsProviders: (() => SessionReportsReport)[] = [];
  * most recently constructed server still open; undefined when none is. */
 export const getSessionReports = (): SessionReportsReport | undefined =>
   sessionReportsProviders.at(-1)?.();
+
+/** Live servers' document-interest providers, newest live server last. */
+const documentInterestsProviders:
+  ((query: DocumentInterestQuery) => DocumentInterestsReport)[] = [];
+
+/** Reads the co-hosted server's session metadata; undefined without a server. */
+export const getDocumentInterests = (
+  query: DocumentInterestQuery,
+): DocumentInterestsReport | undefined =>
+  documentInterestsProviders.at(-1)?.(query);
 
 const randomHex = (bytes: number): string => {
   const data = crypto.getRandomValues(new Uint8Array(bytes));
@@ -1067,6 +1092,7 @@ class Connection {
   #syncSchemaTable = false;
   #stableExpressionResultIds = false;
   #admissionNotice = false;
+  #elidedVerdicts = false;
   #sessions = new Map<string, SessionHandle>();
   #sessionOpenChallenge: SessionOpenChallengeState | null = null;
   #routedOwns: ((space: string) => boolean) | undefined;
@@ -1144,8 +1170,24 @@ class Connection {
     return this.#admissionNotice;
   }
 
+  /** Whether both peers advertised `elidedVerdicts`. */
+  get elidedVerdicts(): boolean {
+    return this.#elidedVerdicts;
+  }
+
   hasSession(space: string, sessionId: string): boolean {
     return this.#sessions.has(sessionKey(space, sessionId));
+  }
+
+  /**
+   * Ends a session this connection holds: its handle and presence memberships
+   * leave the connection, and the registry detaches it for its resume grace
+   * period. Routed sessions release their retained interests immediately.
+   */
+  closeSession(space: string, sessionId: string): void {
+    this.#sessions.delete(sessionKey(space, sessionId));
+    this.#server.endPresenceForSession(space, sessionId, this.id);
+    this.#server.detachSession(space, sessionId, this.id);
   }
 
   #shouldSuppressSessionSend(
@@ -1260,6 +1302,11 @@ class Connection {
   releasePrincipal(principal: string): void {
     this.#principals.delete(principal);
     this.#server.forgetAdmissionWaits(this.id, principal);
+  }
+
+  /** Whether this connection has closed. */
+  get closed(): boolean {
+    return this.#closed;
   }
 
   /** Whether this connection is bound to a verified Mode A context. */
@@ -1390,12 +1437,15 @@ class Connection {
     this.#challenges.get(challenge.value)?.acceptedFor.add(issuer);
     this.#principals.set(principal, { leaseEnd });
     // The sessions opened as the principal take the renewed lease, and one
-    // whose lease had run out is evaluated again for whatever it missed.
+    // whose lease had run out is evaluated again for whatever it missed. An
+    // empty dirty batch schedules that pass: the lapsed session runs the
+    // full evaluation it is marked for, and every other session of the
+    // space evaluates as untouched.
     for (const handle of this.#sessions.values()) {
       if (handle.principal !== principal) continue;
       if (this.#leaseExpired(handle)) {
         this.#server.markSessionForFullResync(handle.space, handle.sessionId);
-        this.#server.markSpaceDirty(handle.space);
+        this.#server.markSpaceDirty(handle.space, []);
       }
       handle.leaseEnd = leaseEnd;
     }
@@ -1696,18 +1746,6 @@ class Connection {
     });
   }
 
-  /**
-   * Helper for `#receiveOrdered()`, which ends a session this connection
-   * holds the way closing the connection ends it: the session leaves the
-   * connection, its presence memberships end, and the registry keeps it
-   * detached, resumable until its grace runs out.
-   */
-  #closeSession(space: string, sessionId: string): void {
-    this.#sessions.delete(sessionKey(space, sessionId));
-    this.#server.endPresenceForSession(space, sessionId, this.id);
-    this.#server.detachSession(space, sessionId, this.id);
-  }
-
   #receiveImmediate(message: ImmediateClientMessage): void {
     if (this.#closed) return;
     if (!this.#ready) {
@@ -1787,6 +1825,8 @@ class Connection {
         clientFlags?.stableExpressionResultIds === true;
       this.#admissionNotice = clientFlags?.admissionNotice === true &&
         serverFlags?.admissionNotice === true;
+      this.#elidedVerdicts = clientFlags?.elidedVerdicts === true &&
+        serverFlags?.elidedVerdicts === true;
       this.#syncSchemaTable = clientFlags?.syncSchemaTableV2 === true &&
         serverFlags?.syncSchemaTableV2 === true;
       this.#ready = true;
@@ -1845,13 +1885,6 @@ class Connection {
           return;
         }
         const response = await this.#server.openSession(parsed, this);
-        if (response.ok?.sessionId && !this.routed) {
-          this.addSession(
-            parsed.space,
-            response.ok.sessionId,
-            parsed.principal,
-          );
-        }
         this.#send(response);
         return;
       }
@@ -2052,6 +2085,26 @@ class Connection {
           );
         }
         return;
+      case "session.watch.remove":
+        if (
+          !this.#requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
+        {
+          const response = await this.#server.watchRemove(parsed);
+          this.#sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            response,
+          );
+        }
+        return;
       case "session.ack":
         if (
           !this.#requireSession(
@@ -2082,7 +2135,7 @@ class Connection {
         ) {
           return;
         }
-        this.#closeSession(parsed.space, parsed.sessionId);
+        this.closeSession(parsed.space, parsed.sessionId);
         this.#send({ type: "response", requestId: parsed.requestId, ok: {} });
         return;
       case "event.attention.resolve":
@@ -2651,6 +2704,7 @@ export class Server {
     );
     commitRatesProviders.push(this.#commitRatesProvider);
     sessionReportsProviders.push(this.#sessionReportsProvider);
+    documentInterestsProviders.push(this.#documentInterestsProvider);
   }
 
   /**
@@ -2700,6 +2754,8 @@ export class Server {
   #documentCachesDiagnosticsProvider = () => this.documentCachesDiagnostics();
   #commitRatesProvider = () => this.commitRates();
   #sessionReportsProvider = () => this.sessionReports();
+  #documentInterestsProvider = (query: DocumentInterestQuery) =>
+    this.#sessions.documentInterests(query);
 
   /** Every open engine's document-cache counters, keyed by space. A peek:
    * nothing is opened by asking. */
@@ -3700,6 +3756,10 @@ export class Server {
     );
     withdrawProvider(commitRatesProviders, this.#commitRatesProvider);
     withdrawProvider(sessionReportsProviders, this.#sessionReportsProvider);
+    withdrawProvider(
+      documentInterestsProviders,
+      this.#documentInterestsProvider,
+    );
     this.#cancelScheduledRefresh();
     for (const connection of [...this.#connections.values()]) {
       connection.close();
@@ -3778,6 +3838,28 @@ export class Server {
         });
       }
       return result;
+    });
+  }
+
+  /**
+   * Flushes a space's WAL before a separate durable store records completion.
+   * Refuses a missing store without creating one. Throws when a reader
+   * prevents the full checkpoint.
+   */
+  async flushSpace(space: string): Promise<void> {
+    await this.#withSpacePublicationLock(space, async () => {
+      if (!(await this.#spaceStoreExists(space))) {
+        throw new Error("Cannot flush an unavailable space");
+      }
+      const engine = await this.#openEngine(space);
+      if (Engine.serverSeq(engine) === 0) {
+        throw new Error("Cannot flush a space without history");
+      }
+      const checkpoint = engine.database.prepare("PRAGMA wal_checkpoint(FULL)")
+        .get<{ busy: number }>();
+      if (checkpoint?.busy !== 0) {
+        throw new Error("Space durability checkpoint could not complete");
+      }
     });
   }
 
@@ -4647,30 +4729,46 @@ export class Server {
         );
       }
       const disk = this.#diskSources.get(message.space, message.db.id);
-      const result = disk
-        ? (wantColumns
-          ? this.#readPool.queryWithOrigins(
-            disk.path,
+      // A read past the slow-operation threshold is recorded with what its
+      // caller is told: its rows, the error it failed with, or the refusal of
+      // the access check that follows it.
+      const readStartedAt = performance.now();
+      const recordRead = (outcome: string, rows?: number) =>
+        recordSlowQueryDuration("sqlite.query", message.space, readStartedAt, {
+          db: message.db.id,
+          outcome,
+          ...(rows === undefined ? {} : { rows }),
+        });
+      let result: { rows: SqliteNativeRow[]; columns?: SqliteResultColumn[] };
+      try {
+        result = disk
+          ? (wantColumns
+            ? this.#readPool.queryWithOrigins(
+              disk.path,
+              message.sql,
+              queryParams,
+            )
+            : {
+              rows: this.#readPool.query(disk.path, message.sql, queryParams),
+            })
+          : await this.#readCellDb(
+            message.space,
+            message.db,
             message.sql,
             queryParams,
-          )
-          : {
-            rows: this.#readPool.query(disk.path, message.sql, queryParams),
-          })
-        : await this.#readCellDb(
-          message.space,
-          message.db,
-          message.sql,
-          queryParams,
-          Engine.resolveScopeKey(
-            message.db.scope,
-            message.reader ?? {
-              principal: session.principal,
-              sessionId: message.sessionId,
-            },
-          ),
-          wantColumns,
-        );
+            Engine.resolveScopeKey(
+              message.db.scope,
+              message.reader ?? {
+                principal: session.principal,
+                sessionId: message.sessionId,
+              },
+            ),
+            wantColumns,
+          );
+      } catch (error) {
+        recordRead(error instanceof Error ? error.name : "SqliteError");
+        throw error;
+      }
       // SQLite reads necessarily await filesystem work. Re-check both the
       // session identity and its current ACL immediately before exposing the
       // rows, so a revoke during that I/O cannot leak a late result.
@@ -4690,9 +4788,11 @@ export class Server {
             "READ",
           ));
         if (deny) {
+          recordRead(deny.name);
           return respondTypedError<never>(message.requestId, deny);
         }
       }
+      recordRead("ok", result.rows.length);
       return {
         type: "response",
         requestId: message.requestId,
@@ -4863,6 +4963,9 @@ export class Server {
     message: SessionOpenRequest,
     connection: Connection,
   ): Promise<ResponseMessage<SessionOpenResult>> {
+    let opened: ReturnType<SessionRegistry["open"]> | undefined;
+    let catchup: SessionEffectMessage | null = null;
+    let completed = false;
     try {
       if (
         this.options.ownsSpace !== undefined &&
@@ -5009,19 +5112,46 @@ export class Server {
           ),
         );
       }
+      // Admission awaited, and the connection may have closed meanwhile: its
+      // sessions were detached at the close, so one opened now would be held
+      // by a connection that is gone, and never expire.
+      if (connection.closed) {
+        return respondTypedError<SessionOpenResult>(
+          message.requestId,
+          toError("SessionError", "The connection closed during admission"),
+        );
+      }
       const priorOwner = message.session.sessionId === undefined
         ? undefined
         : this.#sessions.get(message.space, message.session.sessionId)
           ?.ownerConnectionId;
-      const opened = this.#sessions.open(
-        message.space,
-        message.session,
-        Engine.serverSeq(engine),
-        connection.id,
-        principal,
-        actingPrincipal,
-        connection.routed,
-      );
+      try {
+        opened = this.#sessions.open(
+          message.space,
+          message.session,
+          Engine.serverSeq(engine),
+          connection.id,
+          principal,
+          actingPrincipal,
+          connection.routed,
+          connection.elidedVerdicts,
+        );
+      } catch (error) {
+        // The client ends a session refused here as taken over, and logs
+        // nothing that says which resume was refused.
+        if (error instanceof Error && error.name === "SessionRevokedError") {
+          // Quoted: the id, the space and the message (which repeats the id)
+          // are the peer's text, and a line break in one would read as a log
+          // record of its own.
+          console.warn(
+            `[memory-session] refused to resume session ` +
+              `${JSON.stringify(message.session.sessionId)} on ` +
+              `${JSON.stringify(message.space)} for connection ` +
+              `${connection.id}: ${JSON.stringify(error.message)}`,
+          );
+        }
+        throw error;
+      }
       if (connection.routed) {
         if (priorOwner !== connection.id) {
           this.#sessions.clearRoutedInterests(message.space, opened.sessionId);
@@ -5029,9 +5159,19 @@ export class Server {
         connection.addSession(message.space, opened.sessionId, principal);
         const admitted = this.#sessions.get(message.space, opened.sessionId)!;
         admitted.routedAuthority = () =>
-          connection.allowsRoutedSession(message.space, opened.sessionId);
+          connection.allowsRoutedSession(message.space, admitted.id);
+      } else {
+        // Catch-up awaits below. The connection must already track its
+        // session so closing it detaches this owner during that wait.
+        connection.addSession(message.space, opened.sessionId, named);
       }
       if (opened.revokedConnectionId !== undefined) {
+        console.warn(
+          `[memory-session] session ${JSON.stringify(opened.sessionId)} on ` +
+            `${JSON.stringify(message.space)} moved from connection ` +
+            `${opened.revokedConnectionId} to ${connection.id}, which ` +
+            "revokes it there as taken over",
+        );
         this.#connections.get(opened.revokedConnectionId)?.revokeSession(
           message.space,
           opened.sessionId,
@@ -5070,18 +5210,22 @@ export class Server {
       // instances instead, KEYED (the session's wire vocabulary is
       // sticky), so the retraction names exactly them and never the
       // session's own instance.
-      const catchup = opened.resumed === true
+      catchup = opened.resumed === true
         ? await this.syncSessionForConnection(
           message.space,
           opened.sessionId,
         )
         : null;
+      if (connection.closed) {
+        return respondTypedError<SessionOpenResult>(
+          message.requestId,
+          toError("SessionError", "The connection closed during catch-up"),
+        );
+      }
       // A resumed session is registered before catch-up, and catch-up awaits
       // graph evaluation. An ACL commit (or takeover) can remove or replace it
-      // during that await, before Connection.#receiveOrdered has added its
-      // local handle. In active ACL modes, never return catch-up data or let
-      // the connection add a ghost handle unless this exact token is still
-      // owned by this connection. Off mode preserves the legacy session timing.
+      // during that await. In active ACL modes, only the connection that
+      // still owns this exact token may receive its catch-up data.
       const current = this.#sessions.get(message.space, opened.sessionId);
       if (
         (connection.routed &&
@@ -5105,6 +5249,7 @@ export class Server {
       // Activation trigger (serving-loop.md §1): session open makes the
       // space ACTIVE-eligible; notify the host after the open succeeded.
       this.#notifySessionOpened(message.space);
+      completed = true;
       return {
         type: "response",
         requestId: message.requestId,
@@ -5139,6 +5284,26 @@ export class Server {
         wireError.retriable = true;
       }
       return respondTypedError<SessionOpenResult>(message.requestId, wireError);
+    } finally {
+      if (!completed && opened !== undefined) {
+        const current = this.#sessions.get(message.space, opened.sessionId);
+        // A takeover rotates the token. Cleanup belongs to this exact open;
+        // an older catch-up must leave a newer owner's delivery state intact.
+        if (current === null || current.sessionToken === opened.sessionToken) {
+          if (current !== null) {
+            if (catchup !== null) {
+              this.rollbackUndeliveredSync(
+                message.space,
+                opened.sessionId,
+                catchup,
+              );
+            } else {
+              this.markSessionForFullResync(message.space, opened.sessionId);
+            }
+          }
+          connection.closeSession(message.space, opened.sessionId);
+        }
+      }
     }
   }
 
@@ -5724,6 +5889,9 @@ export class Server {
                     principal: session.principal,
                     commit: message.commit,
                     sqliteAttachments,
+                    ...(session.elidedVerdicts === true
+                      ? { elidedVerdicts: true }
+                      : {}),
                     // Session-facing transact admission: `authored`, always.
                     // The class is determined HERE, by the admission path —
                     // never read from the client payload (protocol.md §1).
@@ -5793,9 +5961,11 @@ export class Server {
           } else {
             // Every operation elided: nothing was written, so no document
             // turns dirty — but the accept still owes this session its
-            // catch-up marker, and the marker rides the batched flush.
-            // Schedule the pass without dirtying anything.
-            this.markSpaceDirty(message.space);
+            // catch-up marker, and the marker rides the batched flush. An
+            // empty dirty batch schedules that pass: every session of the
+            // space evaluates as untouched, and the writer's otherwise-empty
+            // frame carries the marker.
+            this.markSpaceDirty(message.space, []);
           }
           // Plane (b): the admission-side activation hook — synchronous
           // with the dirty marking, observer errors shielded. An
@@ -6490,11 +6660,278 @@ export class Server {
     return await this.#watchSet(message);
   }
 
-  /** Helper for watchSet(), which stages and installs one watch union. */
+  /**
+   * Removes the named watches from a session and answers with the difference
+   * between what the session was delivered and the union that remains.
+   */
+  async watchRemove(
+    message: WatchRemoveRequest,
+  ): Promise<ResponseMessage<WatchSetResult>> {
+    const startedAt = performance.now();
+    try {
+      return await this.#watchRemove(message);
+    } finally {
+      timing.time(startedAt, "memory", "watchRemove", "total");
+    }
+  }
+
+  /**
+   * Helper for watchRemove(), which shrinks the session's graphs by the
+   * removed watches. A watch the session recorded as covered
+   * (`SessionState.coveredWatchIds`) has nothing in its branch's graph, so
+   * removing it leaves the graph as it stands. Removing a walked watch
+   * evaluates its branch again from the branch's remaining walked watches,
+   * and then walks each remaining covered watch of the branch that the
+   * rebuilt graph no longer covers. Branches the removal does not touch keep
+   * their graphs. A session that holds views, or one marked for a full
+   * re-evaluation, replaces its watch set with the remaining watches
+   * instead, which walks every one of them.
+   */
+  async #watchRemove(
+    message: WatchRemoveRequest,
+  ): Promise<ResponseMessage<WatchSetResult>> {
+    // Read when the request runs, which for a session with views is once the
+    // publication lock is held.
+    const remaining = (): WatchSetRequest => {
+      const removed = new Set(message.watchIds);
+      return {
+        type: "session.watch.set",
+        requestId: message.requestId,
+        space: message.space,
+        sessionId: message.sessionId,
+        watches: (this.#sessions.get(message.space, message.sessionId)
+          ?.watches ?? []).filter((watch) => !removed.has(watch.id)),
+      };
+    };
+    const session = this.#sessions.get(message.space, message.sessionId);
+    if (session !== null && session.views.length > 0) {
+      return await this.#withSpacePublicationLock(
+        message.space,
+        () => this.#watchSet(remaining(), "remove"),
+      );
+    }
+    if (session === null || session.forceFullResync) {
+      return await this.#watchSet(remaining(), "remove");
+    }
+    return await this.#removeWatchesByCoverage(message, session);
+  }
+
+  /**
+   * Helper for `#watchRemove()`, which removes the named watches from
+   * `session` and re-evaluates only the branches that lose a walked watch.
+   */
+  async #removeWatchesByCoverage(
+    message: WatchRemoveRequest,
+    session: SessionState,
+  ): Promise<ResponseMessage<WatchSetResult>> {
+    const aclEngine = this.#aclMode() === "off"
+      ? undefined
+      : await this.#openEngine(message.space);
+    {
+      const deny = aclEngine === undefined
+        ? await this.#authorizeMessage(
+          message.space,
+          session.principal,
+          "READ",
+        )
+        : this.#authorizeCurrentSessionWithEngine(
+          aclEngine,
+          message.space,
+          message.sessionId,
+          session,
+          "READ",
+        );
+      if (deny) {
+        return respondTypedError<WatchSetResult>(message.requestId, deny);
+      }
+    }
+    try {
+      const startedAt = performance.now();
+      const engine = aclEngine ?? await this.#openEngine(message.space);
+      this.#assertRoutedAuthority(session);
+      // Resume can share watch containers with an older registry object. Only
+      // the current registry object may publish into those containers.
+      if (this.#sessions.get(message.space, message.sessionId) !== session) {
+        return respondTypedError<WatchSetResult>(
+          message.requestId,
+          toError("SessionError", "Unknown session for space"),
+        );
+      }
+      const removedIds = new Set(message.watchIds);
+      const removedWatches = session.watches.filter((watch) =>
+        removedIds.has(watch.id)
+      );
+      if (removedWatches.length === 0) {
+        const serverSeq = Engine.serverSeq(engine);
+        return {
+          type: "response",
+          requestId: message.requestId,
+          ok: {
+            serverSeq,
+            sync: {
+              type: "sync",
+              fromSeq: session.lastSyncedSeq,
+              toSeq: serverSeq,
+              upserts: [],
+              removes: [],
+            },
+          },
+        };
+      }
+      const remaining = session.watches.filter((watch) =>
+        !removedIds.has(watch.id)
+      );
+      const remainingByBranch = graphWatchesByBranch(remaining);
+      const coveredWatchIds = new Set(session.coveredWatchIds);
+      for (const id of removedIds) coveredWatchIds.delete(id);
+      const graphs = new StagedMap(session.graphs);
+      const attribution = createRootAttribution();
+      // The graphs the removal evaluated again, whose crossings the session
+      // may not have been told of.
+      const touchedGraphs: TrackedGraphState[] = [];
+      const options = {
+        principal: session.principal,
+        sessionId: session.id,
+        evaluationCache: this.#evaluationCacheFor(message.space),
+      };
+      for (
+        const [branch, removedGroup] of graphWatchesByBranch(removedWatches)
+      ) {
+        const group = remainingByBranch.get(branch) ?? [];
+        if (group.length === 0) {
+          graphs.delete(branch);
+          continue;
+        }
+        if (
+          removedGroup.every((watch) => session.coveredWatchIds.has(watch.id))
+        ) {
+          continue;
+        }
+        const walked = group.filter((watch) => !coveredWatchIds.has(watch.id));
+        const covered = group.filter((watch) => coveredWatchIds.has(watch.id));
+        // The branch is walked again from its remaining walked watches, or
+        // from its covered ones when no walked watch remains, every one of
+        // which is then walked.
+        const seed = walked.length > 0 ? walked : covered;
+        const tracked = trackGraph(
+          message.space,
+          engine,
+          unionQuery(branch, seed),
+          undefined,
+          options,
+        );
+        foldRootAttribution(attribution, tracked.stats);
+        // Enforced per evaluation, not per request: a later branch's
+        // failure must not leave an already-inserted entry over budget.
+        this.#enforceEvaluationCacheBudget();
+        const state = tracked.state;
+        const uncovered = walked.length > 0
+          ? partitionWatchesByCoverage(message.space, state, covered).uncovered
+          : covered;
+        if (walked.length > 0 && uncovered.length > 0) {
+          const extended = extendTrackedGraph(
+            message.space,
+            engine,
+            state,
+            unionQuery(branch, uncovered),
+          );
+          foldRootAttribution(attribution, extended.stats);
+        }
+        for (const watch of uncovered) coveredWatchIds.delete(watch.id);
+        graphs.set(branch, state);
+        touchedGraphs.push(state);
+      }
+      const identity = this.#sessionScopeIdentity(session);
+      const entities = this.#entriesFromGraphs(graphs.values(), identity);
+      // Stage A (OW17's wire leg): a lease-holder session's frames carry
+      // instance keys (see `#watchSet()`).
+      const keyed = session.leaseHolderReads === true;
+      const serverSeq = Engine.serverSeq(engine);
+      const sync = buildDiffSync(
+        session.entities,
+        entities,
+        session.lastSyncedSeq,
+        serverSeq,
+        undefined,
+        keyed,
+      );
+      const newCrossings = this.#undeliveredCrossings(session, touchedGraphs);
+      if (newCrossings.crossings.length > 0) {
+        sync.crossings = newCrossings.crossings;
+      }
+      const response: ResponseMessage<WatchSetResult> = {
+        type: "response",
+        requestId: message.requestId,
+        ok: { serverSeq, sync },
+      };
+      // There is no await between graph evaluation and publication.
+      graphs.commit();
+      this.#markCrossingsDelivered(session, newCrossings.keys);
+      this.#forgetUnfollowedCrossings(session, session.graphs.values());
+      const watchIdentity = {
+        principal: session.principal,
+        sessionId: session.id,
+      };
+      session.watches = remaining;
+      session.watchIndex = new Map(
+        remaining.map((watch) => [watch.id, watch]),
+      );
+      session.coveredWatchIds = coveredWatchIds;
+      session.operationWatches = remaining.filter((watch) =>
+        watch.kind === "operation"
+      );
+      for (const id of removedIds) session.operationCursors.delete(id);
+      session.operationTrackedIds = addOperationWatchTrackedIds(
+        new Set(),
+        remaining,
+        watchIdentity,
+      );
+      session.entities = entities;
+      session.trackedIds = addOperationWatchTrackedIds(
+        trackedIdsFromEntries(entities.values()),
+        remaining,
+        watchIdentity,
+      );
+      this.#addMissedToTrackedIds(session.trackedIds, session.graphs.values());
+      this.#touchDemand(session);
+      session.lastSyncedSeq = serverSeq;
+      this.#notifyDemandChanged(message.space, "watch", session.principal);
+      recordSlowQueryDuration(
+        "session.watch.remove",
+        message.space,
+        startedAt,
+        {
+          watches: message.watchIds.length,
+          ...attribution,
+        },
+      );
+      return response;
+    } catch (error) {
+      // Evaluation state is staged (the session's graphs and watches are
+      // assigned only on success), so a failure answers the requester.
+      return respondTypedError<WatchSetResult>(
+        message.requestId,
+        toError(
+          "QueryError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
+  }
+
+  /**
+   * Helper for watchSet(), watchAdd() and watchRemove(), which stages and
+   * installs one watch union. A `replace` delivers against the request's
+   * holdings, or in full; an `add` merges the request's watches into the
+   * session's and keeps the session's operation cursors; a `remove` keeps the
+   * cursors of the watches that remain. Both an `add` and a `remove` deliver
+   * against what the session was delivered.
+   */
   async #watchSet(
     message: WatchSetRequest,
-    incremental = false,
+    mode: "replace" | "add" | "remove" = "replace",
   ): Promise<ResponseMessage<WatchSetResult>> {
+    const incremental = mode === "add";
     const session = this.#sessions.get(message.space, message.sessionId);
     if (session === null) {
       return respondTypedError<WatchSetResult>(
@@ -6605,9 +7042,15 @@ export class Server {
 
     try {
       this.#assertRoutedAuthority(session);
-      const nextOperationCursors = incremental
-        ? new Map(session.operationCursors)
-        : new Map<string, OpCursor>();
+      const nextOperationCursors = mode === "replace"
+        ? new Map<string, OpCursor>()
+        : new Map(session.operationCursors);
+      if (mode === "remove") {
+        const kept = new Set(message.watches.map((watch) => watch.id));
+        for (const id of nextOperationCursors.keys()) {
+          if (!kept.has(id)) nextOperationCursors.delete(id);
+        }
+      }
       const evaluated: Awaited<ReturnType<Server["evaluateWatchSet"]>> & {
         demandGraphs?: typeof session.graphs;
         demandEntities?: typeof session.entities;
@@ -6639,11 +7082,12 @@ export class Server {
       // scope name alone cannot distinguish. Every other session's
       // frames are byte-identical to before.
       const keyed = session.leaseHolderReads === true;
-      // Additions diff against this session's delivery state. Replacements
-      // use the client's declared holdings, or supply the full union when
-      // it declares none. A re-established session can therefore recover
-      // missing documents without assuming that its client holds them.
-      const sync = incremental
+      // Additions and removals diff against this session's delivery state.
+      // Replacements use the client's declared holdings, or supply the full
+      // union when it declares none. A re-established session can therefore
+      // recover missing documents without assuming that its client holds
+      // them.
+      const sync = mode !== "replace"
         ? buildDiffSync(
           session.entities,
           entities,
@@ -6674,7 +7118,7 @@ export class Server {
       // A replacement that declares no holdings, or holding nothing, tells
       // the client every crossing again; any other frame tells it only the
       // new ones.
-      const resetCrossings = !incremental &&
+      const resetCrossings = mode === "replace" &&
         (message.holdings === undefined || message.holdings.length === 0);
       const newCrossings = this.#undeliveredCrossings(
         session,
@@ -6735,6 +7179,7 @@ export class Server {
       session.watchIndex = new Map(
         message.watches.map((watch) => [watch.id, watch]),
       );
+      session.coveredWatchIds = new Set();
       session.operationTrackedIds = addOperationWatchTrackedIds(
         new Set(),
         message.watches,
@@ -6748,6 +7193,12 @@ export class Server {
         newCrossings.keys,
         resetCrossings,
       );
+      if (mode === "remove") {
+        this.#forgetUnfollowedCrossings(session, [
+          ...graphs.values(),
+          ...demandGraphs.values(),
+        ]);
+      }
       session.trackedIds = addOperationWatchTrackedIds(
         trackedIdsFromEntries(entities.values()),
         message.watches,
@@ -6807,13 +7258,13 @@ export class Server {
       );
     };
     const attribution = createRootAttribution();
-    for (const [branch, query] of groupedQueries(watches)) {
+    for (const [branch, group] of graphWatchesByBranch(watches)) {
       const existing = graphs.get(branch);
       if (existing === undefined) {
         const tracked = trackGraph(
           session.space,
           engine,
-          query,
+          unionQuery(branch, group),
           undefined,
           {
             principal: session.principal,
@@ -6833,7 +7284,12 @@ export class Server {
         continue;
       }
 
-      if (isGraphQueryCoveredByState(session.space, existing, query)) {
+      const { uncovered } = partitionWatchesByCoverage(
+        session.space,
+        existing,
+        group,
+      );
+      if (uncovered.length === 0) {
         continue;
       }
 
@@ -6843,7 +7299,7 @@ export class Server {
         session.space,
         engine,
         staged,
-        query,
+        unionQuery(branch, uncovered),
       );
       foldRootAttribution(attribution, extended.stats);
       for (const [docKey, entity] of extended.updates) {
@@ -6884,7 +7340,7 @@ export class Server {
           this.#watchSet({
             ...message,
             type: "session.watch.set",
-          }, true),
+          }, "add"),
       );
     }
     const aclEngine = this.#aclMode() === "off"
@@ -7031,13 +7487,16 @@ export class Server {
       // a new graph's state, or an extended graph's STAGED state, which is
       // where the extension's crossings sit until it commits.
       const touchedGraphs: TrackedGraphState[] = [];
-      for (const [branch, query] of groupedQueries(newWatches)) {
+      // The added watches left unwalked because their branch's graph
+      // already covered them, recorded on the session at publication.
+      const coveredWatchIds: string[] = [];
+      for (const [branch, group] of graphWatchesByBranch(newWatches)) {
         const existing = graphs.get(branch);
         if (existing === undefined) {
           const tracked = trackGraph(
             message.space,
             engine,
-            query,
+            unionQuery(branch, group),
             undefined,
             {
               principal: session.principal,
@@ -7059,7 +7518,13 @@ export class Server {
           continue;
         }
 
-        if (isGraphQueryCoveredByState(message.space, existing, query)) {
+        const { covered, uncovered } = partitionWatchesByCoverage(
+          message.space,
+          existing,
+          group,
+        );
+        for (const watch of covered) coveredWatchIds.push(watch.id);
+        if (uncovered.length === 0) {
           continue;
         }
 
@@ -7070,7 +7535,7 @@ export class Server {
           message.space,
           engine,
           staged.value,
-          query,
+          unionQuery(branch, uncovered),
         );
         foldRootAttribution(attribution, extended.stats);
         for (const [docKey, entity] of extended.updates) {
@@ -7143,6 +7608,7 @@ export class Server {
       existingById.commit();
       for (const watch of addedWatches) nextWatches.push(watch);
       session.watches = nextWatches;
+      for (const id of coveredWatchIds) session.coveredWatchIds.add(id);
       for (const watch of addedOperationWatches) {
         nextOperationWatches.push(watch);
       }
@@ -7694,6 +8160,24 @@ export class Server {
   ): void {
     if (reset) session.deliveredCrossings.clear();
     for (const key of keys) session.deliveredCrossings.add(key);
+  }
+
+  /**
+   * Forgets the delivered crossings that none of `graphs` follows, so that
+   * a crossing a removed watch followed is told again when a later watch
+   * follows it, and the client loads its target.
+   */
+  #forgetUnfollowedCrossings(
+    session: SessionState,
+    graphs: Iterable<TrackedGraphState>,
+  ): void {
+    const followed = new Set<string>();
+    for (const graph of graphs) {
+      for (const key of syncCrossingsOf(graph).keys()) followed.add(key);
+    }
+    for (const key of session.deliveredCrossings) {
+      if (!followed.has(key)) session.deliveredCrossings.delete(key);
+    }
   }
 
   #addMissedToTrackedIds(
@@ -8367,6 +8851,8 @@ export class Server {
             session.viewDemandGraphs = demandGraphs;
             session.viewDemandEntities = demandEntities;
             session.graphs = graphs;
+            // The full evaluation walked every watch.
+            session.coveredWatchIds = new Set();
             session.entities = entities;
             this.#markCrossingsDelivered(session, newCrossings.keys);
             session.trackedIds = evaluatedTrackedIds;
@@ -8479,6 +8965,16 @@ export class Server {
     });
   }
 
+  /**
+   * Marks `space` for the next batched flush. `dirtyIds` names the dirty keys
+   * whose watchers that flush re-evaluates incrementally. An empty iterable
+   * schedules the pass with every session of the space evaluating as
+   * untouched, and a session then sends a frame only for what it is otherwise
+   * owed, such as a catch-up marker or a forced full resync. Leaving
+   * `dirtyIds` out has the flush evaluate every session of the space in full
+   * from its watch roots, which replaces each session's tracked graphs and is
+   * the costly path.
+   */
   markSpaceDirty(
     space: string,
     dirtyIds?: Iterable<string>,
@@ -10027,6 +10523,12 @@ export const parseClientMessage = (
         sessionToken: typeof parsed.session.sessionToken === "string"
           ? parsed.session.sessionToken
           : undefined,
+        ...(typeof parsed.session.resumeKey === "string"
+          ? { resumeKey: parsed.session.resumeKey }
+          : {}),
+        ...(Number.isSafeInteger(parsed.session.resumeAttempt)
+          ? { resumeAttempt: parsed.session.resumeAttempt as number }
+          : {}),
         // The delegated READ binding (OW31): parsed as the LITERAL
         // marker only — any other string reaches openSession's
         // unknown-value refusal rather than being silently dropped.
@@ -10272,6 +10774,26 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       watches: parsed.watches as WatchSpec[],
+    };
+  }
+
+  if (
+    parsed.type === "session.watch.remove" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    Array.isArray(parsed.watchIds)
+  ) {
+    const watchIds = parsed.watchIds.filter((id: unknown): id is string =>
+      typeof id === "string"
+    );
+    if (watchIds.length !== parsed.watchIds.length) return null;
+    return {
+      type: "session.watch.remove",
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      watchIds,
     };
   }
 

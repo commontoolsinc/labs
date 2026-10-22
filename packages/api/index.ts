@@ -12,6 +12,7 @@ import type {
   FabricBytes,
   FabricHash,
   FabricPlainObjectPlus,
+  FabricPrimitive,
   FabricPrimitiveSchemaType,
   FabricValue,
   FabricValuePlus,
@@ -240,13 +241,18 @@ export declare const SCOPE_BRAND: unique symbol;
 /**
  * The brand `Scoped` intersects `T` with: the scope, beside the `null` and
  * `undefined` `T` holds, which an intersection with the brand alone would
- * reduce to `never`. It distributes over `T`'s members, so the intersection
- * keeps them, and while `T` holds a type parameter it stays one deferred type,
- * which leaves `Scoped<T, Scope>` one intersection rather than a union of them.
+ * reduce to `never`. The intersection distributes over `T`'s members, so
+ * `string | null` keeps its `null`. While `T` holds a type parameter the tag is
+ * a conditional the checker defers, so `Scoped<T, Scope>` around a bare type
+ * parameter is one intersection; around `T | null` it is a union, as around
+ * any other union. The conditional checks `[T]`, and both its branches are the
+ * same type, so where `T`'s constraint excludes `null` and `undefined`
+ * (`T extends {}`), a value of the payload's type is assignable to the deferred
+ * tag, and to `Scoped<T, Scope>`, as it is once `T` is known.
  */
-type ScopeTag<T, Scope extends SchemaScope> = T extends unknown
+type ScopeTag<T, Scope extends SchemaScope> = [T] extends [unknown]
   ? { readonly [SCOPE_BRAND]?: Scope } | Extract<T, null | undefined>
-  : never;
+  : { readonly [SCOPE_BRAND]?: Scope } | Extract<T, null | undefined>;
 /**
  * `T` in the scope `Scope`: `T` branded with the scope, except for `null` and
  * `undefined`, which it holds as they are. So `PerUser<string | null>` is
@@ -2688,13 +2694,16 @@ export interface LiftFunction {
   ): ModuleFactory<StripCell<Parameters<T>[0]>, ReturnType<T>>;
 }
 
-// Helper type to make non-Cell and non-Stream properties readonly in handler state.
-// Cell/Stream/SqliteDb are passed through whole (they are handle interfaces with
-// methods — `.get()/.set()`, `.send()`, `.exec()/.query()` — not data containers
-// to map over).
-export type HandlerState<T> = T extends Cell<any> ? T
+// Helper type to make the plain data in handler state readonly. A cell of every
+// kind, a stream, and a SqliteDb are passed through whole: they are handle
+// interfaces with methods — `.get()/.set()`, `.send()`, `.exec()/.query()` —
+// not data containers to map over. A fabric primitive, such as a
+// `FabricBytes`, is passed through whole too: it is an immutable value read
+// through its methods.
+export type HandlerState<T> = T extends AnyBrandedCell<any> ? T
   : T extends AnyStream ? T
   : T extends SqliteDb<any> ? T
+  : T extends FabricPrimitive ? T
   : T extends Array<infer U> ? ReadonlyArray<HandlerState<U>>
   : T extends object ? { readonly [K in keyof T]: HandlerState<T[K]> }
   : T;
@@ -4250,11 +4259,15 @@ export type UIRenderable = {
 /**
  * JSX element type - the result of a JSX expression.
  * Can be a VNode, or a cell containing something with a [UI] property.
+ *
+ * A generated schema lists the members in the order they are written here,
+ * and nearly every pattern's schema holds one, so reordering them changes
+ * every such schema.
  */
 export type JSXElement =
   | VNode
-  | AnyBrandedCell<UIRenderable>
-  | Reactive<UIRenderable>;
+  | Reactive<UIRenderable>
+  | AnyBrandedCell<UIRenderable>;
 
 /** A "virtual view node", e.g. a virtual DOM element */
 export type VNode = {

@@ -8,6 +8,7 @@ import {
   CrossStageState,
   TransformationContext,
 } from "../src/core/mod.ts";
+import type { TransformationDiagnostic } from "../src/mod.ts";
 import {
   applyCapabilityDefaultsToTypeNode,
   applyShrinkAndWrap,
@@ -15,12 +16,13 @@ import {
   isCellLikeTypeNode,
   isSqliteTypeNode,
   isStreamTypeNode,
-  overlayContractCapabilities,
   preservedWrapperFor,
   printTypeNode,
   wrapTypeNodeWithCapability,
 } from "../src/transformers/type-shrinking.ts";
-import { collect, parseModule } from "./transformed-ast.ts";
+import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
+import { callSchemas, collect, parseModule } from "./transformed-ast.ts";
+import { transformFiles } from "./utils.ts";
 
 //
 // Structural inspection of printed type nodes.
@@ -228,31 +230,109 @@ function createParamSummary(
   };
 }
 
-describe("overlayContractCapabilities()", () => {
-  it("returns a reference to an alias whose type holds no cell as written", () => {
-    const { sourceFile, checker } = createProgram(`
-      type Profile = { name: string };
-      type Event = { x: Profile };
-    `);
-    const alias = findTypeAlias(sourceFile, "Event");
-
-    const result = overlayContractCapabilities(
-      alias.type,
-      checker.getTypeAtLocation(alias.type),
-      createParamSummary({
-        capability: "readonly",
-        readPaths: [["x", "name"]],
-      }),
-      checker,
-      ts.factory,
-      sourceFile,
-    );
-
-    expect(result).toBe(alias.type);
-  });
-});
-
 describe("applyShrinkAndWrap()", () => {
+  describe("a member named by the empty string", () => {
+    // A path through the member `""` narrows the shape and the cell it reaches
+    // as a path through any other name does, and is held to the type as any
+    // other path is.
+
+    /**
+     * The input schema of the one `lift()` in a module holding `source`, and
+     * the types of the diagnostics compiling it reports.
+     */
+    async function liftInput(
+      source: string,
+    ): Promise<{ schema: unknown; reported: string[] }> {
+      const diagnostics: TransformationDiagnostic[] = [];
+      const files = await transformFiles({
+        "/main.tsx": `/// <cts-enable />
+import { Default, equals, lift, pattern, Writable } from "commonfabric";
+${source}
+export default pattern<{ v: any }>(({ v }) => ({ m: l(v) }));`,
+      }, { types: COMMONFABRIC_TYPES, pipelineDiagnostics: diagnostics });
+      return {
+        schema: callSchemas(parseModule(files["/main.tsx"]!), "lift")[0],
+        reported: diagnostics.map(({ type }) => type),
+      };
+    }
+
+    const onlyEmpty = (value: Record<string, unknown>) => ({
+      type: "object",
+      properties: { "": value },
+      required: [""],
+    });
+    for (
+      const [shape, source, expected] of [
+        [
+          "an object",
+          'const l = lift((r: { "": string; other: number }) => r[""].length);',
+          onlyEmpty({ type: "string" }),
+        ],
+        [
+          "a nested object",
+          'const l = lift((r: { inner: { "": string; other: number } }) => r.inner[""].length);',
+          {
+            type: "object",
+            properties: { inner: onlyEmpty({ type: "string" }) },
+            required: ["inner"],
+          },
+        ],
+        [
+          "an array's element",
+          'const l = lift((r: { "": string; other: number }[]) => r[0]![""].length);',
+          { type: "array", items: onlyEmpty({ type: "string" }) },
+        ],
+        [
+          "an object, keeping its default",
+          'const l = lift((r: { "": Default<string, "x">; other: number }) => r[""].length);',
+          onlyEmpty({ type: "string", default: "x" }),
+        ],
+      ] as const
+    ) {
+      it(`keeps only the member a read through it names in ${shape}`, async () => {
+        const { schema, reported } = await liftInput(source);
+
+        expect(schema).toEqual(expected);
+        expect(reported).toEqual([]);
+      });
+    }
+
+    it("gives the cell under it the capability its read earns", async () => {
+      const { schema } = await liftInput(
+        'const l = lift((r: { "": Writable<number>; other: Writable<number> }) => r[""].get());',
+      );
+
+      expect(schema).toEqual(
+        onlyEmpty({ type: "number", asCell: ["readonly"] }),
+      );
+    });
+
+    it("gives the cell under it the comparable capability where it is only compared", async () => {
+      const { schema } = await liftInput(
+        'const l = lift((r: { "": Writable<number>; other: Writable<number> }) => equals(r[""], r[""]));',
+      );
+
+      expect(schema).toEqual(
+        onlyEmpty({ type: "unknown", asCell: ["comparable"] }),
+      );
+    });
+
+    for (
+      const [shape, parameter] of [
+        ["an object", "{ other: number }"],
+        ["an array", "number[]"],
+      ] as const
+    ) {
+      it(`reports a read through it that ${shape} does not hold`, async () => {
+        const { reported } = await liftInput(
+          `const l = lift((r: ${parameter}) => (r as any)[""].length);`,
+        );
+
+        expect(reported).toContain("schema:path-not-in-type");
+      });
+    }
+  });
+
   it("records a node printed for a value read whole as printed from its type", () => {
     // A synthetic base node sends the shrink to the value's type, and a value
     // read whole is that type's print.

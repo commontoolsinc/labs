@@ -10,11 +10,11 @@ import {
   TESTS,
   Writable,
 } from "commonfabric";
-import { seedProfileName } from "./profile-create.tsx";
-import ProfileHome, {
-  type BackwardsCompatibleProfile,
-  type ProfileInbox,
-} from "./profile-home.tsx";
+import {
+  seedProfileName,
+  type SeedProfileNameEvent,
+} from "./profile-create.tsx";
+import ProfileHome, { type ProfileInbox } from "./profile-home.tsx";
 import PrivateInbox, {
   ensurePrivateInbox,
   type EnsurePrivateInboxEvent,
@@ -30,7 +30,10 @@ import PrivateInbox, {
   type PrivateInboxHolder,
   type PrivateInboxPiece,
   type PrivateInboxRefusalHolder,
+  type PrivateInboxReplacementRecord,
   REFUSAL_REASON_MAX_LENGTH,
+  replaceRefusedPrivateInbox,
+  repointProfilesFromReplacedInbox,
   type RetainedPrivateInboxes,
 } from "./private-inbox.tsx";
 
@@ -130,11 +133,10 @@ const MalformedPointerProfile = pattern<
  * embedder gives it or leaves it out.
  */
 const Seeder = pattern<
-  { profiles: BackwardsCompatibleProfile[]; privateInbox?: ProfileInbox },
-  { seed: Stream<{ name?: string; index?: number }> }
->(({ profiles, privateInbox }) => ({
-  // deno-lint-ignore no-explicit-any
-  seed: seedProfileName({ profiles: profiles as any, privateInbox }),
+  { privateInbox?: ProfileInbox },
+  { seed: Stream<SeedProfileNameEvent> }
+>(({ privateInbox }) => ({
+  seed: seedProfileName({ privateInbox }),
 }));
 
 /**
@@ -186,6 +188,42 @@ const SeededEnsuringHome = pattern<
     pointProfiles: pointProfilesAtPrivateInbox({ privateInbox, profiles }),
   }),
 }));
+
+/**
+ * Stands in for Home's replacement of a refused inbox: Home's
+ * `replaceRefusedPrivateInbox` over a holder, a refusal holder and a profile
+ * list, with its re-pointing step, which `repoint` returns, and a replacement
+ * record of its own, which `replacement` returns.
+ */
+const ReplacingHome = pattern<
+  {
+    privateInbox: Writable<PrivateInboxHolder>;
+    privateInboxRefusal: Writable<PrivateInboxRefusalHolder>;
+    profiles: PointTarget[];
+  },
+  {
+    replace: Stream<void>;
+    repoint: Stream<void>;
+    replacement: PrivateInboxReplacementRecord;
+  }
+>(({ privateInbox, privateInboxRefusal, profiles }) => {
+  const replacement = new Writable<PrivateInboxReplacementRecord>({});
+  const repoint = repointProfilesFromReplacedInbox({
+    privateInbox,
+    privateInboxReplacement: replacement,
+    profiles,
+  });
+  return {
+    replace: replaceRefusedPrivateInbox({
+      privateInbox,
+      privateInboxRefusal,
+      privateInboxReplacement: replacement,
+      repointProfiles: repoint,
+    }),
+    repoint,
+    replacement,
+  };
+});
 
 /** Whether `retained` holds exactly the inboxes `expected` holds, in order. */
 function retainsExactly(
@@ -473,28 +511,13 @@ export default pattern(() => {
   const freshForInbox = ProfileHome({ initialName: "" });
   const freshWithoutInbox = ProfileHome({ initialName: "" });
   const freshPointedElsewhere = ProfileHome({ initialName: "" });
-  // deno-lint-ignore no-explicit-any
-  const seederWithInbox = Seeder({
-    profiles: [freshForInbox] as any,
-    privateInbox: home,
-  });
-  // deno-lint-ignore no-explicit-any
-  const seederWithoutInbox = Seeder({ profiles: [freshWithoutInbox] as any });
-  const seederOverPointed = Seeder({
-    // deno-lint-ignore no-explicit-any
-    profiles: [freshPointedElsewhere] as any,
-    privateInbox: home,
-  });
-  // An existing, named profile at the index the seed step is handed, as when
-  // the create read its index from a list it had not loaded: left alone.
-  const namedAtIndex = ProfileHome({ initialName: "" });
-  const seederOverNamed = Seeder({
-    // deno-lint-ignore no-explicit-any
-    profiles: [namedAtIndex] as any,
-    privateInbox: home,
-  });
+  const seederWithInbox = Seeder({ privateInbox: home });
+  const seederWithoutInbox = Seeder({});
+  // A profile whose name is stored already, as when the seed event is
+  // delivered again: left alone.
+  const alreadyNamed = ProfileHome({ initialName: "" });
   const action_name_the_existing_profile = action(() => {
-    namedAtIndex.setName.send({ name: "Ada" });
+    alreadyNamed.setName.send({ name: "Ada" });
   });
   const action_point_fresh_elsewhere = action(() => {
     freshPointedElsewhere.setInbox.send({
@@ -502,10 +525,13 @@ export default pattern(() => {
     });
   });
   const action_seed_fresh_profiles = action(() => {
-    seederWithInbox.seed.send({ name: "Fresh", index: 0 });
-    seederWithoutInbox.seed.send({ name: "Fresh", index: 0 });
-    seederOverPointed.seed.send({ name: "Fresh", index: 0 });
-    seederOverNamed.seed.send({ name: "Fresh", index: 0 });
+    seederWithInbox.seed.send({ name: "Fresh", profile: freshForInbox });
+    seederWithoutInbox.seed.send({ name: "Fresh", profile: freshWithoutInbox });
+    seederWithInbox.seed.send({
+      name: "Fresh",
+      profile: freshPointedElsewhere,
+    });
+    seederWithInbox.seed.send({ name: "Fresh", profile: alreadyNamed });
   });
   const assert_only_the_unpointed_fresh_profile_is_pointed = assert(() =>
     equals(freshForInbox.inbox?.piece, home.get().piece) &&
@@ -515,7 +541,7 @@ export default pattern(() => {
     equals(freshPointedElsewhere.inbox?.piece, elsewhere.get().piece)
   );
   const assert_existing_named_profile_left_alone = assert(() =>
-    namedAtIndex.inbox?.piece === undefined && namedAtIndex.name === "Ada"
+    alreadyNamed.inbox?.piece === undefined && alreadyNamed.name === "Ada"
   );
 
   // Ensuring Home's inbox. Which inbox Home should hold is the host's decision
@@ -624,11 +650,7 @@ export default pattern(() => {
     profiles: [unnamedAdvertising] as any,
   });
   const freshAfterAdoption = ProfileHome({ initialName: "" });
-  const seederAfterAdoption = Seeder({
-    // deno-lint-ignore no-explicit-any
-    profiles: [freshAfterAdoption] as any,
-    privateInbox: adoptingOne,
-  });
+  const seederAfterAdoption = Seeder({ privateInbox: adoptingOne });
 
   // Homes holding Home's inbox.
   const readoptingAdvertising = ProfileHome({
@@ -907,7 +929,10 @@ export default pattern(() => {
       aliasKeepingRetained.get().length === 0,
   );
   const action_seed_after_adoption = action(() => {
-    seederAfterAdoption.seed.send({ name: "Fresh", index: 0 });
+    seederAfterAdoption.seed.send({
+      name: "Fresh",
+      profile: freshAfterAdoption,
+    });
   });
   const assert_a_new_profile_is_pointed_at_the_adopted_inbox = assert(() =>
     equals(freshAfterAdoption.inbox?.piece, elsewhere.get().piece)
@@ -1329,6 +1354,94 @@ export default pattern(() => {
     equals(cured.get().piece, elsewhere.get().piece)
   );
 
+  // Replacing the refused inbox, for the owner. Home keeps the inbox it holds,
+  // clears the refusal and records it as replaced, and points the profiles
+  // that point at the refused inbox at its own; profiles pointing at another
+  // inbox, or at none, are left alone. With no refusal recorded it does
+  // nothing. The re-pointing step reads the refused inbox from the record, so
+  // sending it again re-points a pointer moved back to the refused inbox, and
+  // with no record it does nothing. Replacing while Home holds no inbox, which
+  // creates one, is covered by
+  // `integration/private-inbox-multi-runtime.test.ts`.
+  const replacedFirst = ProfileHome({ initialName: "Replaced first" });
+  const replacedSecond = ProfileHome({ initialName: "Replaced second" });
+  const replacedOther = ProfileHome({ initialName: "Replaced other" });
+  const replacedUnpointed = ProfileHome({ initialName: "Replaced unpointed" });
+  const replacing = new Writable<PrivateInboxHolder>({});
+  const replacingRefusal = new Writable<PrivateInboxRefusalHolder>({});
+  const replaceRefused = ReplacingHome({
+    privateInbox: replacing,
+    privateInboxRefusal: replacingRefusal,
+    profiles: [
+      replacedFirst,
+      replacedSecond,
+      replacedOther,
+      replacedUnpointed,
+      // deno-lint-ignore no-explicit-any
+    ] as any,
+  });
+  const unrefusedAdvertising = ProfileHome({
+    initialName: "Unrefused advertising",
+  });
+  const unrefused = new Writable<PrivateInboxHolder>({});
+  const replaceUnrefused = ReplacingHome({
+    privateInbox: unrefused,
+    privateInboxRefusal: new Writable<PrivateInboxRefusalHolder>({}),
+    // deno-lint-ignore no-explicit-any
+    profiles: [unrefusedAdvertising] as any,
+  });
+  const action_advertise_the_inbox_to_replace = action(() => {
+    const refused = elsewhere.get().piece?.resolveAsCell();
+    const homeInbox = home.get().piece?.resolveAsCell();
+    if (refused === undefined || homeInbox === undefined) return;
+    replacedFirst.setInbox.send({ inbox: refused });
+    replacedSecond.setInbox.send({ inbox: refused });
+    replacedOther.setInbox.send({ inbox: third.get().piece?.resolveAsCell() });
+    unrefusedAdvertising.setInbox.send({ inbox: refused });
+    replacing.set({ piece: homeInbox });
+    unrefused.set({ piece: homeInbox });
+    replacingRefusal.set({
+      refusal: { reason: REFUSED, inbox: refused, refusedAt: EARLIER },
+    });
+  });
+  const action_replace_the_refused_inbox = action(() => {
+    replaceRefused.replace.send();
+    replaceUnrefused.replace.send();
+  });
+  const assert_the_profiles_pointing_at_the_refused_inbox_point_at_home_inbox =
+    assert(() =>
+      equals(replacedFirst.inbox?.piece, home.get().piece) &&
+      equals(replacedSecond.inbox?.piece, home.get().piece) &&
+      equals(replacing.get().piece, home.get().piece)
+    );
+  const assert_replacing_leaves_profiles_pointing_elsewhere_or_nowhere = assert(
+    () =>
+      equals(replacedOther.inbox?.piece, third.get().piece) &&
+      replacedUnpointed.inbox?.piece === undefined,
+  );
+  const assert_replacing_clears_the_refusal_and_records_it = assert(() => {
+    const replacement = replaceRefused.replacement.replacement;
+    return replacingRefusal.get().refusal === undefined &&
+      replacement?.reason === REFUSED &&
+      replacement.refusedAt === EARLIER &&
+      equals(replacement.inbox, elsewhere.get().piece) &&
+      replacement.replacedAt >= refusalsStartedBy(inbox.offers);
+  });
+  const assert_replacing_with_no_refusal_does_nothing = assert(() =>
+    replaceUnrefused.replacement.replacement === undefined &&
+    equals(unrefusedAdvertising.inbox?.piece, elsewhere.get().piece) &&
+    equals(unrefused.get().piece, home.get().piece)
+  );
+  const action_point_back_at_the_replaced_inbox = action(() => {
+    replacedSecond.setInbox.send({
+      inbox: elsewhere.get().piece?.resolveAsCell(),
+    });
+  });
+  const action_repoint_again = action(() => {
+    replaceRefused.repoint.send();
+    replaceUnrefused.repoint.send();
+  });
+
   return {
     [TESTS]: [
       { action: action_introduce },
@@ -1477,6 +1590,25 @@ export default pattern(() => {
       },
       { action: action_refuse_the_held_inbox },
       { assertion: assert_a_refusal_of_the_held_inbox_is_not_recorded },
+      { action: action_advertise_the_inbox_to_replace },
+      { action: action_replace_the_refused_inbox },
+      {
+        assertion:
+          assert_the_profiles_pointing_at_the_refused_inbox_point_at_home_inbox,
+      },
+      {
+        assertion:
+          assert_replacing_leaves_profiles_pointing_elsewhere_or_nowhere,
+      },
+      { assertion: assert_replacing_clears_the_refusal_and_records_it },
+      { assertion: assert_replacing_with_no_refusal_does_nothing },
+      { action: action_point_back_at_the_replaced_inbox },
+      { action: action_repoint_again },
+      {
+        assertion:
+          assert_the_profiles_pointing_at_the_refused_inbox_point_at_home_inbox,
+      },
+      { assertion: assert_replacing_with_no_refusal_does_nothing },
     ],
   };
 });

@@ -166,8 +166,10 @@ describe("memory v2 flags", () => {
       sessionClose: true,
       connectionAuth: true,
       admissionNotice: true,
+      elidedVerdicts: true,
       routedAuthV1: false,
       syncCrossingsV1: true,
+      watchRemoveV1: true,
       syncSchemaTableV2: false,
     });
 
@@ -200,8 +202,10 @@ describe("memory v2 flags", () => {
       sessionClose: true,
       connectionAuth: true,
       admissionNotice: true,
+      elidedVerdicts: true,
       routedAuthV1: false,
       syncCrossingsV1: true,
+      watchRemoveV1: true,
       syncSchemaTableV2: true,
     });
 
@@ -236,8 +240,10 @@ describe("memory v2 flags", () => {
         sessionClose: true,
         connectionAuth: true,
         admissionNotice: true,
+        elidedVerdicts: true,
         routedAuthV1: false,
         syncCrossingsV1: false,
+        watchRemoveV1: false,
       },
       {
         modernCellRep: true,
@@ -266,8 +272,10 @@ describe("memory v2 flags", () => {
         sessionClose: false,
         connectionAuth: false,
         admissionNotice: false,
+        elidedVerdicts: false,
         routedAuthV1: false,
         syncCrossingsV1: false,
+        watchRemoveV1: false,
       },
     ));
   });
@@ -374,8 +382,10 @@ describe("parseMemoryProtocolFlags", () => {
       sessionClose: false,
       connectionAuth: false,
       admissionNotice: false,
+      elidedVerdicts: false,
       routedAuthV1: false,
       syncCrossingsV1: false,
+      watchRemoveV1: false,
     });
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: false }), {
       genesisRoot: false,
@@ -401,8 +411,10 @@ describe("parseMemoryProtocolFlags", () => {
       sessionClose: false,
       connectionAuth: false,
       admissionNotice: false,
+      elidedVerdicts: false,
       routedAuthV1: false,
       syncCrossingsV1: false,
+      watchRemoveV1: false,
     });
   });
 
@@ -435,8 +447,10 @@ describe("parseMemoryProtocolFlags", () => {
         sessionClose: false,
         connectionAuth: false,
         admissionNotice: false,
+        elidedVerdicts: false,
         routedAuthV1: false,
         syncCrossingsV1: false,
+        watchRemoveV1: false,
       },
     );
   });
@@ -456,6 +470,19 @@ describe("parseMemoryProtocolFlags", () => {
     assertEquals(
       parseMemoryProtocolFlags({ operationCodecs: ["missing"] }),
       null,
+    );
+  });
+
+  it("accepts the watchRemoveV1 capability key", () => {
+    assertEquals(parseMemoryProtocolFlags({})?.watchRemoveV1, false);
+    assertEquals(
+      parseMemoryProtocolFlags({ watchRemoveV1: true })?.watchRemoveV1,
+      true,
+    );
+    assertEquals(parseMemoryProtocolFlags({ watchRemoveV1: "true" }), null);
+    assertEquals(
+      wireMemoryProtocolFlags(getMemoryProtocolFlags()).watchRemoveV1,
+      true,
     );
   });
 
@@ -494,8 +521,10 @@ describe("parseMemoryProtocolFlags", () => {
         sessionClose: false,
         connectionAuth: false,
         admissionNotice: false,
+        elidedVerdicts: false,
         routedAuthV1: false,
         syncCrossingsV1: false,
+        watchRemoveV1: false,
         sqliteCommitRowLabelEval: false,
         sqliteQueryReader: false,
         pendingReadStacks: false,
@@ -534,8 +563,10 @@ describe("parseMemoryProtocolFlags", () => {
         sessionClose: false,
         connectionAuth: false,
         admissionNotice: false,
+        elidedVerdicts: false,
         routedAuthV1: false,
         syncCrossingsV1: false,
+        watchRemoveV1: false,
       },
     );
   });
@@ -569,8 +600,10 @@ describe("parseMemoryProtocolFlags", () => {
         sessionClose: false,
         connectionAuth: false,
         admissionNotice: false,
+        elidedVerdicts: false,
         routedAuthV1: false,
         syncCrossingsV1: false,
+        watchRemoveV1: false,
       },
     );
   });
@@ -612,8 +645,10 @@ describe("parseMemoryProtocolFlags", () => {
         sessionClose: false,
         connectionAuth: false,
         admissionNotice: false,
+        elidedVerdicts: false,
         routedAuthV1: false,
         syncCrossingsV1: false,
+        watchRemoveV1: false,
       },
     );
   });
@@ -648,8 +683,10 @@ describe("parseMemoryProtocolFlags", () => {
         sessionClose: false,
         connectionAuth: false,
         admissionNotice: false,
+        elidedVerdicts: false,
         routedAuthV1: false,
         syncCrossingsV1: false,
+        watchRemoveV1: false,
       },
     );
   });
@@ -681,8 +718,10 @@ describe("parseMemoryProtocolFlags", () => {
         sessionClose: false,
         connectionAuth: false,
         admissionNotice: false,
+        elidedVerdicts: false,
         routedAuthV1: false,
         syncCrossingsV1: false,
+        watchRemoveV1: false,
       },
     );
   });
@@ -700,8 +739,10 @@ describe("parseMemoryProtocolFlags", () => {
         sessionClose: false,
         connectionAuth: false,
         admissionNotice: false,
+        elidedVerdicts: false,
         routedAuthV1: false,
         syncCrossingsV1: false,
+        watchRemoveV1: false,
       }),
       {
         genesisRoot: false,
@@ -727,8 +768,10 @@ describe("parseMemoryProtocolFlags", () => {
         sessionClose: false,
         connectionAuth: false,
         admissionNotice: false,
+        elidedVerdicts: false,
         routedAuthV1: false,
         syncCrossingsV1: false,
+        watchRemoveV1: false,
       },
     );
   });

@@ -1194,6 +1194,16 @@ export type MemoryProtocolFlags = {
    */
   syncCrossingsV1: boolean;
 
+  /**
+   * Server capability: `session.watch.remove` removes watches by id and
+   * answers with the difference between what the session was delivered and
+   * the smaller union (04-protocol.md §4.3.9). Inherent to the build, so a
+   * server of this version always advertises it. Absent (an older server)
+   * parses to false: a client then removes a watch by replacing the whole
+   * watch set, and keeps a document's watches rather than releasing them.
+   */
+  watchRemoveV1: boolean;
+
   /** The peer can exchange versioned binary gzip message envelopes. */
   messageCompressionV1: boolean;
 
@@ -1320,6 +1330,21 @@ export type MemoryProtocolFlags = {
   admissionNotice?: boolean;
 
   /**
+   * The peer's replica promotes a pending layer whose accept the verdict
+   * reports as elided (`AppliedCommit.elidedOpIndexes`) to the document its
+   * transaction computed, rather than folding the layer's ops over its
+   * confirmed base. A server that sees a client
+   * advertise it waives the second condition of the identity proof
+   * (03-commit-model.md §3.6.1) for that session's commits: a write that
+   * reaches the stored document from the reader's view is an identity even
+   * where replaying it on the stored document would change it, as a
+   * positional `splice` does. Build-inherent, so a peer of this version
+   * always advertises it. Absent (an older client) parses to false, and the
+   * server then holds that session's commits to both conditions.
+   */
+  elidedVerdicts?: boolean;
+
+  /**
    * Server capability: the server records the diagnostics a client reports
    * about its own session with `session.report` (04-protocol.md §4.14).
    * Build-inherent, so a server of this version always advertises it.
@@ -1349,6 +1374,7 @@ export type WireMemoryProtocolFlags = {
   operationCodecs?: readonly string[];
   syncSchemaTableV2?: boolean;
   syncCrossingsV1?: boolean;
+  watchRemoveV1?: boolean;
   messageCompressionV1?: boolean;
   sqliteCommitRowLabelEval?: boolean;
   sqliteQueryReader?: boolean;
@@ -1364,6 +1390,7 @@ export type WireMemoryProtocolFlags = {
   sessionClose?: boolean;
   connectionAuth?: boolean;
   admissionNotice?: boolean;
+  elidedVerdicts?: boolean;
   sessionReportV1?: boolean;
   routedAuthV1?: boolean;
 };
@@ -1403,6 +1430,29 @@ export type SessionDescriptor = {
   sessionId?: SessionId;
   seenSeq?: number;
   sessionToken?: SessionToken;
+
+  /**
+   * A random key the client makes for one session and sends on every open of
+   * it. The server keeps the key of a session's latest open, and resumes the
+   * session from the token that open presented, as well as from the token it
+   * issued, when the resume carries the same key: the connection can drop
+   * after the server handles a resume and before its response reaches the
+   * client, which then still holds only the token before. A resume from
+   * another holder of that token carries a different key, or none, and is
+   * refused as before. Only that fallback needs the key; the latest token
+   * resumes the session without one. Signed into the session.open invocation
+   * with the rest of this descriptor.
+   */
+  resumeKey?: string;
+
+  /**
+   * The number of this open among the opens of one session, counted by the
+   * client from 1 and sent with `resumeKey`. The fallback above is taken only
+   * by an attempt newer than the latest open's: a resume the client already
+   * gave up on carries the same key and token, and can reach the server after
+   * a newer resume has restored the session. Signed with the descriptor.
+   */
+  resumeAttempt?: number;
 
   /**
    * The read ceiling every `db.query` served for this session reads under
@@ -2013,6 +2063,16 @@ export type WatchAddRequest = {
   watches: WatchSpec[];
 };
 
+export type WatchRemoveRequest = {
+  type: "session.watch.remove";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+
+  /** The ids of the watches to remove; an id the session lacks is ignored. */
+  watchIds: string[];
+};
+
 export type SessionAckRequest = {
   type: "session.ack";
   requestId: string;
@@ -2341,6 +2401,7 @@ export type ClientMessage =
   | SqliteRegisterDiskSourceRequest
   | WatchSetRequest
   | WatchAddRequest
+  | WatchRemoveRequest
   | SessionAckRequest
   | SessionCloseRequest
   | EventAttentionResolveRequest
@@ -2581,6 +2642,10 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // the notice. A routed connection records no refusal, so it is told
   // nothing whatever both peers advertise.
   admissionNotice: true,
+  // Build-inherent: this build's replica promotes an elided layer to the
+  // document its transaction computed rather than folding its ops, so the
+  // server may elide a positional write for it.
+  elidedVerdicts: true,
   // Build-inherent: this build's server records the diagnostics a client
   // reports about its session.
   sessionReportV1: true,
@@ -2589,6 +2654,8 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // Build-inherent: this build's query walk reports the links it follows
   // out of a space, and its session frames carry them.
   syncCrossingsV1: true,
+  // Build-inherent: this build's server removes watches by id.
+  watchRemoveV1: true,
 });
 
 /**
@@ -2782,6 +2849,10 @@ export const parseMemoryProtocolFlags = (
   if (admissionNotice !== undefined && typeof admissionNotice !== "boolean") {
     return null;
   }
+  const elidedVerdicts = value.elidedVerdicts;
+  if (elidedVerdicts !== undefined && typeof elidedVerdicts !== "boolean") {
+    return null;
+  }
 
   const sessionReportV1 = value.sessionReportV1;
   if (sessionReportV1 !== undefined && typeof sessionReportV1 !== "boolean") {
@@ -2790,6 +2861,11 @@ export const parseMemoryProtocolFlags = (
 
   const syncCrossingsV1 = value.syncCrossingsV1;
   if (syncCrossingsV1 !== undefined && typeof syncCrossingsV1 !== "boolean") {
+    return null;
+  }
+
+  const watchRemoveV1 = value.watchRemoveV1;
+  if (watchRemoveV1 !== undefined && typeof watchRemoveV1 !== "boolean") {
     return null;
   }
 
@@ -2840,12 +2916,18 @@ export const parseMemoryProtocolFlags = (
     // Absent (an older peer) parses to false: a server then sends that
     // client no `session/admissible`.
     admissionNotice: admissionNotice === true,
+    // Absent (an older client) parses to false: the server then holds that
+    // session's commits to both conditions of the identity proof.
+    elidedVerdicts: elidedVerdicts === true,
     // Absent (an older server) parses to false: a client then sends no
     // `session.report`.
     sessionReportV1: sessionReportV1 === true,
     // Absent (an older server) parses to false: a client then finds the
     // links out of a space by reading what it synced.
     syncCrossingsV1: syncCrossingsV1 === true,
+    // Absent (an older server) parses to false: a client then replaces the
+    // whole watch set to remove a watch.
+    watchRemoveV1: watchRemoveV1 === true,
     routedAuthV1: value.routedAuthV1 === true,
   };
 };
@@ -2884,9 +2966,11 @@ export const wireMemoryProtocolFlags = (
   sessionClose: flags.sessionClose,
   connectionAuth: flags.connectionAuth,
   admissionNotice: flags.admissionNotice,
+  elidedVerdicts: flags.elidedVerdicts,
   sessionReportV1: flags.sessionReportV1,
   routedAuthV1: flags.routedAuthV1,
   syncCrossingsV1: flags.syncCrossingsV1,
+  watchRemoveV1: flags.watchRemoveV1,
 });
 
 /**
