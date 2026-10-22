@@ -3,7 +3,7 @@
 **Sketches and investigation notes, not a plan.** The design lives in
 [Reading Fabric data](fabric-read-model.md) and the two documents it points at:
 [Shaped reads and verb results](shaped-reads-and-verb-results.md) for the read
-layer and what a call adds to it, and [CLI surface shape](cli-surface-shape.md)
+layer and what a call adds to it, and [CLI surface shape](../history/plans/cli-surface-shape.md)
 for the command surface.
 
 What is kept here is call-specific detail those documents do not carry: what

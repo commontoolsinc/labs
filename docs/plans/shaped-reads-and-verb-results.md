@@ -4,7 +4,7 @@ The **read layer** and **calls**, two of the three concerns in
 [Reading Fabric data](fabric-read-model.md): the shared layer that turns a cell
 into structured output, and what calling a verb adds on top. Read that document
 first — this one uses its vocabulary. The third concern, the command surface, is
-[CLI surface shape](cli-surface-shape.md).
+[CLI surface shape](../history/plans/cli-surface-shape.md).
 
 ## The shared read layer
 
@@ -73,7 +73,7 @@ There are two syntaxes, each on its own flag
 
 The concise form is sugar for the flat case; the full form is a JSON Schema
 object and is what expresses nested structure. [CLI surface
-shape](cli-surface-shape.md) is where the split between them is reasoned out.
+shape](../history/plans/cli-surface-shape.md) is where the split between them is reasoned out.
 The measured facts at the end write `--schema` for both, because that is the
 flag the measurements were taken against.
 

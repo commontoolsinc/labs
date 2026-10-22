@@ -682,7 +682,7 @@ it, and naming their triggers here is what keeps them from being dropped when
 this document stops being read.
 
 **The command surface** —
-[The CLI surface shape](cli-surface-shape.md), already sequenced. Positional
+[The CLI surface shape](../history/plans/cli-surface-shape.md), already sequenced. Positional
 addresses and the top-level names land first, and can start as soon as the read
 layer has merged; they touch the same commands, so starting earlier means
 resolving the same files twice. Every spelling it retires is dated rather than
@@ -744,7 +744,7 @@ filed under one. It is sequenced in
 [its own plan](retention-and-provenance.md).
 
 **The command surface** —
-[The CLI surface shape](cli-surface-shape.md) sequences positional addresses,
+[The CLI surface shape](../history/plans/cli-surface-shape.md) sequences positional addresses,
 the top-level names, deprecation, and the move of each command under the noun
 it acts on. Kept apart because it renames rather than adds, so every step of it
 can break a caller who learned the current spelling.

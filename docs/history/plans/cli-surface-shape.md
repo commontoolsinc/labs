@@ -1,13 +1,20 @@
+---
+status: historical
+created: 2026-08-07
+archived: 2026-10-22
+reason: "Executed plan; every step of both arcs landed, the last being 7b, which removed the superseded command spellings."
+---
+
 # CLI surface shape
 
 The **command surface**, one of the three concerns in
-[Reading Fabric data](fabric-read-model.md), which defines the shared model. The
+[Reading Fabric data](../../plans/fabric-read-model.md), which defines the shared model. The
 `cf` surface grew one command at a time and now expresses a model the code no
 longer has. That costs more than tidiness: the names imply distinctions the runtime
 does not make, which misdirects design work before it starts.
 
 This document is about the command surface, not the machinery underneath.
-Nothing here blocks [Shaped reads and verb results](shaped-reads-and-verb-results.md).
+Nothing here blocks [Shaped reads and verb results](../../plans/shaped-reads-and-verb-results.md).
 
 ## Where this stands — read this first
 
@@ -149,7 +156,7 @@ contract as well as a boundary, and a handle cannot cross a serialized channel �
 so a reader supplying it would be asking for something the channel silently
 downgrades to an address. The suffix desugars to a projection-only `$link`
 instead; see
-[shaped reads](shaped-reads-and-verb-results.md) for the reasoning.
+[shaped reads](../../plans/shaped-reads-and-verb-results.md) for the reasoning.
 
 ## What it should look like
 
@@ -660,7 +667,7 @@ than taking anything away.
 7b. **Remove the superseded spellings** once their date has passed. Done: the
    hidden mounts, the step-7 notice and its dated constant, and the check
    that held the integration drills to the blessed spellings, are gone. Each
-   command answers only under the noun it acts on.
+   moved command answers only under the noun it acts on.
 
 Steps 1–5 are mechanical. Step 7 needs real decisions and belongs last, because
 each pair is two working commands whose merge changes behavior rather than
@@ -742,7 +749,7 @@ position, not the whole distance between the long form and the short one.
 **The prior question, and its answer.** Whether a reference grammar is the
 right home for this at all, or whether it stands in for a naming and
 resolution layer that does not exist. `cf` needs the grammar precisely because
-it cannot have a *place*: [Shuttle](shuttle/) carries a mutable position
+it cannot have a *place*: [Shuttle](../../plans/shuttle/) carries a mutable position
 across commands, and a one-shot process cannot. They are complements rather
 than substitutes, and a resolution layer would not have made either step
 smaller.
@@ -764,14 +771,14 @@ intermediate state wrong. What each step owes:
 
 | Step | Documentation owed |
 | --- | --- |
-| 2 | The read options gain a second host — `cf piece call`'s section in `packages/cli/README.md`, and [Verbs over the CLI](../common/verbs/over-the-cli.md) |
+| 2 | The read options gain a second host — `cf piece call`'s section in `packages/cli/README.md`, and [Verbs over the CLI](../../common/verbs/over-the-cli.md) |
 | 3 | Address forms wherever `--piece` is taught: the CLI README and the tutorial's workflow chapter |
 | 4 | `#argument` beside every `--input` example, in the same places |
 | 5 | The new spellings alongside the old ones everywhere both work |
 | 6a | The old spellings marked deprecated wherever they are taught, each carrying the removal date |
 | 6b | Removal of the old spellings, and of the deprecation notes 6a added |
 | 7 | The rule and the mapping here, `packages/cli/README.md`'s superseded-spellings table, and every example moved to the new spelling |
-| 7b | Removal of the superseded-spellings table, and of every mention of the old spellings |
+| 7b | Removal of the superseded-spellings table, and of the old spellings wherever the current surface is taught |
 
 **Old spellings stay as redirects, not errors, until the date 6a names.** A
 deprecated spelling that still works costs a line of aliasing; one that fails
