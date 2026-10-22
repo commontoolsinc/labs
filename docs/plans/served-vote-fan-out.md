@@ -298,8 +298,11 @@ Before a push: repo-wide `deno fmt --check`, `deno lint`, `deno task check`,
        its count did not remove the work. Each lands behind nothing where it
        is a pure cost reduction and behind a registry entry where it changes
        what a session receives. View-scoped replication is not one of the
-       seven; it is measured here because it stands to retire the
-       subscriptions the first three removals cheapen.
+       seven; it is measured here because it changes what each session's
+       walks cover, the rendered roots and the planner's selection rather
+       than everything the client subscribed to, which the first three
+       removals also cheapen. It keeps the per-session walk: under it the
+       burst's root evaluations halve and its walks do not fall.
    - [x] The serving loop's wave coalescing: a flush deadline that grows
          after a cut settle, capped by `SERVER_EXECUTION_FLUSH_DEADLINE_MAX_MS`.
          The [wave-costs record](../history/development/performance/2026-10-22-served-vote-wave-costs.md)
