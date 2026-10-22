@@ -33,6 +33,7 @@ import {
   MEMORY_STORAGE_PATH,
   RemoteSessionFactory,
   ROUTED_FRAME_SLOTS,
+  ROUTER_CREDIT_WAIT_MS,
   storageAddressForHost,
   toSpaceWebSocketAddress,
   toWebSocketAddress,
@@ -729,22 +730,25 @@ describe("WebSocketTransport failure signaling", () => {
     for (const type of ["transact", "session.watch.set"]) {
       it(`uploads a ${type} body larger than 4 MiB through peer events`, async () => {
         await withTransport(async (transport, socket) => {
-          const channel = new MessageChannel();
           const delivered = Promise.withResolvers<string | Uint8Array>();
           const receiver = new RouterAssembler();
           const received: string[] = [];
           transport.setReceiver((payload) => received.push(payload));
           try {
             const active = await selectCredits(transport, socket);
-            // Port messages are peer events in separate tasks. Native writes
-            // return `void`, and microtasks alone cannot drain this queue.
-            channel.port1.onmessage = (event: MessageEvent<Uint8Array>) => {
-              const record = event.data;
-              grantCredit(active, record.length);
-              const result = receiver.receive(record);
-              if (result !== undefined) delivered.resolve(result.payload);
+            // Credit is a peer event in a separate task, never a reply from
+            // inside the write: native writes return `void`, and microtasks
+            // alone cannot drain this queue. Under the fake clock that task is
+            // a zero-delay timer, which also holds the transport's credit
+            // deadline back while the turn is pending.
+            active.onSend = (frame) => {
+              const record = requireRecord(frame);
+              setTimeout(() => {
+                grantCredit(active, record.length);
+                const result = receiver.receive(record);
+                if (result !== undefined) delivered.resolve(result.payload);
+              }, 0);
             };
-            active.onSend = (frame) => channel.port2.postMessage(frame);
             const payload = `fvj1:${
               JSON.stringify({
                 type,
@@ -769,13 +773,54 @@ describe("WebSocketTransport failure signaling", () => {
             expect(active.sent.length).toBeGreaterThan(160);
             expect(received).toEqual([]);
           } finally {
-            channel.port1.close();
-            channel.port2.close();
             await transport.close();
           }
         });
       });
     }
+
+    it("fails a blocked upload whose credit never arrives within the wait limit and resets the connection", async () => {
+      await withTransport(async (transport, socket) => {
+        try {
+          const active = await selectCredits(
+            transport,
+            socket,
+            ROUTER_CHUNK_BYTES + 5,
+          );
+          const closed = Promise.withResolvers<Error | undefined>();
+          transport.setCloseReceiver(closed.resolve);
+          let settled = false;
+          const upload = transport.send(`fvj1:${
+            JSON.stringify({
+              type: "transact",
+              value: "x".repeat(40_000),
+            })
+          }`);
+          upload.then(() => settled = true, () => settled = true);
+          // The header is sent; the first chunk waits for credit that never
+          // comes.
+          await active.whenSent(3);
+          await clock.settle();
+          await clock.tick(ROUTER_CREDIT_WAIT_MS - 1);
+          expect(settled).toBe(false);
+          expect(active.readyState).toBe(DrivableWebSocket.OPEN);
+          await clock.tick(1);
+          // The failure is the payload's own, on a socket that was open, so
+          // the connection resets instead of replaying the payload on it.
+          await expect(upload).rejects.toMatchObject({
+            name: "ConnectionError",
+            ownWriteFailed: true,
+            cause: {
+              message: expect.stringContaining("credit did not arrive"),
+            },
+          });
+          expect(active.readyState).toBe(DrivableWebSocket.CLOSED);
+          expect(await closed.promise).toMatchObject({ ownWriteFailed: true });
+        } finally {
+          await transport.close();
+        }
+      });
+    });
 
     it("stalls at a one-record window and accepts partial and coalesced credit", async () => {
       await withTransport(async (transport, socket) => {

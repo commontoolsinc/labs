@@ -59,6 +59,15 @@ export const ROUTED_FRAME_SLOTS = 150_000;
 /** Largest supported public upload credit window, in on-wire record bytes. */
 const ROUTER_UPLOAD_WINDOW = 262_144;
 
+/**
+ * How long one credited record waits for the router's credit before its send
+ * fails. Credit acknowledges receipt of earlier records, so a router that has
+ * stopped acknowledging has stopped reading; the failure carries the
+ * write-failure tag, which resets the connection rather than retrying the
+ * payload on it.
+ */
+export const ROUTER_CREDIT_WAIT_MS = 60_000;
+
 /** Credit accounting for one selection on one socket. */
 type RouterUploadCredits = {
   /** Maximum bytes sent without an acknowledgement. */
@@ -846,8 +855,25 @@ export class WebSocketTransport implements MemoryClient.Transport {
             );
           }
           if (credits.outstanding + frame.length <= credits.window) break;
-          credits.waiter ??= Promise.withResolvers<void>();
-          await credits.waiter.promise;
+          // The wait ends when credit arrives or when none has for
+          // `ROUTER_CREDIT_WAIT_MS`; the latter fails this write on an open
+          // socket, so the catch below tags it as the payload's own failure.
+          const waiter = credits.waiter ??= Promise.withResolvers<void>();
+          const deadline = setTimeout(
+            () =>
+              waiter.reject(
+                new Error(
+                  "Router upload credit did not arrive within " +
+                    `${ROUTER_CREDIT_WAIT_MS} ms`,
+                ),
+              ),
+            ROUTER_CREDIT_WAIT_MS,
+          );
+          try {
+            await waiter.promise;
+          } finally {
+            clearTimeout(deadline);
+          }
         }
         // Charge before sending: even a synchronous peer reply must be bounded
         // by bytes already submitted on this connection.
