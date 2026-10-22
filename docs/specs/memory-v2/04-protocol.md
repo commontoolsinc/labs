@@ -960,6 +960,13 @@ unaffected.
 
 #### Negotiated label-table encoding
 
+The measured savings that motivated the label tables (3,930,754 to 669,274
+bytes and 211,817 to 58,476 values on a rehearsal sync) were taken before labs
+#8767, #8788 and #8790 changed how link labels are carried, and have not been
+re-measured since. The tables change neither stored documents nor CFC
+decisions: they are a wire representation that every receiver expands before
+reading.
+
 When both peers advertise `syncLabelTableV1`, a `SessionSync` in
 `response.ok.sync` or `session/effect.effect` may carry dense `labelTable` and
 `labelPathTable` arrays. Only `upserts[].doc.cfc.labelMap.entries[]` uses these

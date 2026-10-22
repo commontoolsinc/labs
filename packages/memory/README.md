@@ -129,6 +129,11 @@ Invalid grants or premature body records close the connection, and cancellation
 releases each owned reservation exactly once. Admission uses explicit capacity
 grants under the existing caps, independently of public `mrc\x01` credits.
 
+The measured savings behind the label tables (3,930,754 to 669,274 bytes and
+211,817 to 58,476 values on a rehearsal sync) were taken before labs #8767,
+#8788 and #8790 changed how link labels are carried, and have not been
+re-measured since. The tables change neither stored documents nor CFC decisions.
+
 Peers supporting `syncLabelTableV1` negotiate lossless interning of CFC
 label-map metadata in sync responses and effects. A sync's `labelTable` stores
 distinct labels and `labelPathTable` stores distinct paths; integer references
