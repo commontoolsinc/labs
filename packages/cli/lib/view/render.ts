@@ -403,7 +403,9 @@ export interface OverlayState {
 
 /** A push-button in a modal dialog. Its {@link kind} sets where the Tab focus
  * starts ("default") and which button Esc activates ("cancel"); its first letter
- * matching {@link hotkey} is drawn highlighted and activates it directly. */
+ * matching {@link hotkey} is drawn highlighted and activates it directly. A
+ * lowercase hotkey answers its letter typed in either case; an uppercase one
+ * answers only the uppercase letter. */
 export interface DialogButton {
   readonly label: string;
   readonly hotkey: string;
