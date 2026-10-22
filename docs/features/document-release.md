@@ -1,13 +1,19 @@
 # Document release
 
-A runtime holds a stored document because its memory session watches it. A
-watch names a root document and a selector (a path and a schema); the server
-keeps the session up to date with the root and with every document the schema
-reaches from it through links. The union of a session's watches is what the
-runtime's replica of the space holds. This document describes how the runtime
-removes the watches nothing needs any more, and drops the documents they kept
-loaded, so that a long-lived runtime that opens and closes many pieces does not
-hold every document it ever loaded.
+A runtime's memory session watches stored documents to keep their local copies
+current. A watch names a root document and a selector (a path and a schema);
+the server keeps the session up to date with the root and with every document
+the schema reaches from it through links. The union of a session's watches is
+what the runtime's replica keeps current through subscriptions. This document
+describes how the runtime removes the watches nothing needs any more, and
+drops the documents they kept loaded, so that a long-lived runtime that opens
+and closes many pieces does not hold every document it ever loaded.
+
+Independently fetched immutable copies are retained outside watch ownership
+until replica reset. Releasing an overlapping watch preserves those copies
+while dropping its otherwise unneeded documents. A fetched-only root has no
+server watch for a release pass to remove; see
+[Fetching immutable roots](schema-graph-queries.md#fetching-immutable-roots).
 
 The implementation is `SpaceReplica.releaseUnread()` in
 `packages/runner/src/storage/v2.ts`, driven by

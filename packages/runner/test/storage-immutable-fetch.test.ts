@@ -266,6 +266,63 @@ describe("immutable document fetching", () => {
     expect(replica.holdings()).toEqual([]);
   });
 
+  it("does not remove a server watch for a fetched-only root during release", async () => {
+    const value = { type: "string", description: "fetched-only release" };
+    const id = cid(value);
+    await write([[id, { value }]]);
+    const provider = manager.open(space);
+    expect((await provider.sync(id, rootOnly)).error).toBeUndefined();
+    const removal = stub(
+      server,
+      "watchRemove",
+      server.watchRemove.bind(server),
+    );
+    cleanup.push(removal.restore);
+
+    await replica.releaseUnread();
+    await replica.releaseUnread();
+
+    expect(removal.calls).toHaveLength(0);
+    expect(readerState().watches).toEqual([]);
+    expect(replica.getDocument(id)?.value).toEqual(value);
+    expect(replica.holdings()).toEqual([]);
+  });
+
+  it("keeps fetched content when release drops its overlapping traversal and mutable target", async () => {
+    const target = "of:released-immutable-target";
+    const value = {
+      target: { "/": { [LINK_V1_TAG]: { id: target, path: [] } } },
+    };
+    const id = cid(value);
+    await write([[id, { value }], [target, { value: "before release" }]]);
+    const provider = manager.open(space);
+    expect((await provider.sync(id, rootOnly)).error).toBeUndefined();
+    expect((await provider.sync(id, { path: [], schema: true })).error)
+      .toBeUndefined();
+    expect(replica.getDocument(target)?.value).toBe("before release");
+    expect(readerState().watches).toHaveLength(1);
+
+    await replica.releaseUnread();
+    await replica.releaseUnread();
+
+    expect(readerState().watches).toEqual([]);
+    expect(replica.getDocument(target)).toBeUndefined();
+    expect(replica.getDocument(id)?.value).toEqual(value);
+    expect(replica.isConfirmedDocument(id)).toBe(true);
+    expect(replica.holdings()).toEqual([]);
+    const query = stub(server, "graphQuery", server.graphQuery.bind(server));
+    cleanup.push(query.restore);
+    expect((await provider.sync(id, rootOnly)).error).toBeUndefined();
+    expect(query.calls).toHaveLength(0);
+    expect(replica.getDocument(id)?.value).toEqual(value);
+
+    await write([[target, { value: "after release" }]]);
+    expect((await provider.sync(id, { path: [], schema: true })).error)
+      .toBeUndefined();
+    expect(readerState().watches).toHaveLength(1);
+    expect(replica.getDocument(target)?.value).toBe("after release");
+  });
+
   it("falls back from a forged snapshot without failing healthy reads in the batch", async () => {
     const value = { type: "string", description: "verified schema" };
     const id = cid(value);

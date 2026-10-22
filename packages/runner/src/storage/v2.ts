@@ -7189,9 +7189,10 @@ export class SpaceReplica
    * no removal can take it from the session. Of the documents the answer says
    * the session no longer covers, one that something began to hold while the
    * removal was on its way keeps its value and is watched again on its own
-   * (`#watchAgain()`); every other one is emptied as any removal empties it
-   * and, unless a local write to it is pending, dropped, so that a later read
-   * of it loads it again. A pass begins by watching again each document an
+   * (`#watchAgain()`). Independently fetched immutable copies keep their
+   * values; every other one is emptied as any removal empties it and, unless
+   * a local write to it is pending, dropped, so that a later read of it loads
+   * it again. A pass begins by watching again each document an
    * earlier pass could not watch again, or by dropping it if nothing holds it
    * any more. A root read or pulled since the previous pass is
    * kept for the next one, so a document loaded for a read not yet made, or
@@ -7325,14 +7326,18 @@ export class SpaceReplica
 
   /**
    * Drops each document a removal the frame applied left absent, unless a
-   * local write to it is pending, and reports the ones it dropped.
+   * local write to it is pending or it has an independently fetched immutable
+   * copy, and reports the ones it dropped.
    */
   #forgetRemoved(removes: readonly SessionSync["removes"][number][]): void {
     const dropped: LocalDocAddress[] = [];
     for (const remove of removes) {
       const address = removedAddress(remove);
       const key = this.#docKeyOf(address);
-      if ((this.#docs.get(key)?.pending.length ?? 0) > 0) continue;
+      if (
+        this.#fetchedImmutableIds.has(key) ||
+        (this.#docs.get(key)?.pending.length ?? 0) > 0
+      ) continue;
       this.#docs.delete(key);
       if (address.id.startsWith("cid:")) {
         this.#kickedCfcSchemaPulls.delete(address.id.slice("cid:".length));
@@ -8034,6 +8039,17 @@ export class SpaceReplica
           retained.has(docKey(address.id, "space"))
         ).map(([address]) => address.id),
       );
+      // Successful fetches have no server watch for a release pass to remove.
+      for (const [address, selector] of rawEntries) {
+        if (
+          isImmutableRootEntry([address, selector]) &&
+          fetchedRoots.has(address.id)
+        ) {
+          this.#rootWatches.get(this.#docKeyOf(address))?.watches.delete(
+            watchIdForEntry(address, selector, ""),
+          );
+        }
+      }
       watchEntries = watchEntries.filter((entry) =>
         !isImmutableRootEntry(entry) || !fetchedRoots.has(entry[0].id)
       );

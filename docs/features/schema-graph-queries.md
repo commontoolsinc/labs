@@ -90,7 +90,10 @@ the retained snapshot.
 This creates no server watch, tracked graph, or session delivery-cache entry.
 The snapshot does not count as a subscription holding or advance the
 replica's complete-through watermark. It survives removal from a separate
-watch that also delivered it, while reset discards it. A terminal authorization
+watch that also delivered it, including removal by a document-release pass,
+while reset discards it. Release passes remove only actual watches; a successful
+fetch leaves no watch to remove. These fetched copies remain cached until reset,
+so fetch-once does not bound client memory. A terminal authorization
 denial also refuses cached pulls of mutable documents and records those reads
 for retry after re-admission.
 
