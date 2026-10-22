@@ -71,6 +71,7 @@ type Target = ProfileTargetConfig & {
   name?: string;
   bytes?: Uint8Array;
   clear?: true;
+  keepCurrent?: true;
 };
 
 function stubDeps(wish: WishReadResult = { result: null }): {
@@ -399,6 +400,38 @@ describe("cf profile command actions", () => {
       }
     });
 
+    it("sets the stored picture again with `--keep-current`", async () => {
+      const key = await makeTempKeyFile();
+      try {
+        const { deps, targets } = stubDeps();
+        const out = await captureStdout(() =>
+          profileSetPictureAction(
+            {
+              apiUrl: "http://127.0.0.1:8000",
+              identity: key.path,
+              keepCurrent: true,
+            },
+            CREATED.space,
+            undefined,
+            deps,
+          )
+        );
+
+        expect(out.trim()).toBe(
+          `Set the stored picture of profile ${CREATED.space} again`,
+        );
+        expect(
+          targets.map(({ bytes, clear, keepCurrent }) => ({
+            bytes,
+            clear,
+            keepCurrent,
+          })),
+        ).toEqual([{ bytes: undefined, clear: undefined, keepCurrent: true }]);
+      } finally {
+        await Deno.remove(key.path);
+      }
+    });
+
     it("throws a `ValidationError` for both a file and `--clear`, or neither, before connecting", async () => {
       const { deps, targets } = stubDeps();
       const options = {
@@ -415,6 +448,22 @@ describe("cf profile command actions", () => {
       ).rejects.toThrow(ValidationError);
       await expect(
         profileSetPictureAction(options, CREATED.space, undefined, deps),
+      ).rejects.toThrow(ValidationError);
+      await expect(
+        profileSetPictureAction(
+          { ...options, keepCurrent: true },
+          CREATED.space,
+          "./picture.png",
+          deps,
+        ),
+      ).rejects.toThrow(ValidationError);
+      await expect(
+        profileSetPictureAction(
+          { ...options, clear: true, keepCurrent: true },
+          CREATED.space,
+          undefined,
+          deps,
+        ),
       ).rejects.toThrow(ValidationError);
       expect(targets).toHaveLength(0);
     });

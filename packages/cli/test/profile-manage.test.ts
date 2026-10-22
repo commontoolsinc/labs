@@ -12,7 +12,12 @@ import { stub } from "@std/testing/mock";
 
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
-import { type Cell, type MemorySpace, Runtime } from "@commonfabric/runner";
+import {
+  type Cell,
+  type MemorySpace,
+  type NormalizedFullLink,
+  Runtime,
+} from "@commonfabric/runner";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
   EmulatedStorageManager,
@@ -129,6 +134,69 @@ describe("profile management", () => {
     );
   }
 
+  /**
+   * Makes a profile as the stranger, in the stranger's own space, names it
+   * `name` through its `setName`, and links it from the owner's Home
+   * `profiles` list with a write no handler made, which that list takes.
+   * Returns the profile's space.
+   */
+  async function listStrangersProfile(name: string): Promise<string> {
+    const storage = EmulatedStorageManager.connectTo(server, { as: stranger });
+    const theirs = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage,
+    });
+    let link: NormalizedFullLink;
+    try {
+      const program = await resolveLocalProgram(
+        (resolver) => theirs.harness.resolve(resolver),
+        {
+          main: new URL(
+            "../../patterns/system/profile-home.tsx",
+            import.meta.url,
+          ).pathname,
+          root: new URL("../../..", import.meta.url).pathname.replace(
+            /\/$/,
+            "",
+          ),
+        },
+      );
+      let tx = theirs.edit();
+      const pattern = await theirs.patternManager.compilePattern(program, {
+        space: stranger.did(),
+        tx,
+      });
+      const cell = theirs.getCell<Record<string, unknown>>(
+        stranger.did(),
+        "a stranger's profile",
+        undefined,
+        tx,
+      );
+      const profile = theirs.run(tx, pattern, { initialName: name }, cell);
+      theirs.prepareTxForCommit(tx);
+      expect((await tx.commit().settled).error).toBeUndefined();
+      await profile.pull();
+      tx = theirs.edit();
+      profile.withTx(tx).key("setName").send({ name });
+      expect((await tx.commit().settled).error).toBeUndefined();
+      await theirs.idle();
+      await storage.synced();
+      theirs.runner.stop(profile);
+      link = profile.getAsNormalizedFullLink();
+    } finally {
+      await theirs.dispose({ closeStorage: false });
+      await storage.close();
+    }
+    const list = host.key("profiles").resolveAsCell();
+    await list.sync();
+    const tx = runtime.edit();
+    list.withTx(tx).push(runtime.getCellFromLink(link));
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit().settled).error).toBeUndefined();
+    await runtime.idle();
+    return link.space;
+  }
+
   describe("listProfiles()", () => {
     it("returns no profiles for a person who has none", async () => {
       expect(await listProfiles(CONFIG, { loadPieces })).toEqual([]);
@@ -153,6 +221,23 @@ describe("profile management", () => {
       expect(listed.map((each) => each.picture)).toEqual([
         undefined,
         undefined,
+      ]);
+    });
+
+    it("leaves out a listed profile that is another identity's", async () => {
+      await createProfile({ ...CONFIG, name: "Ada" }, { loadPieces });
+      const theirs = await listStrangersProfile("Mallory");
+      const homeLinks = host.key("profiles").asSchema({
+        type: "array",
+        items: { type: "unknown", asCell: ["cell"] },
+      }).get() ?? [];
+      expect(homeLinks.map((each) => each.getAsNormalizedFullLink().space))
+        .toContain(theirs);
+
+      const listed = await listProfiles(CONFIG, { loadPieces });
+
+      expect(listed.map((each) => [each.name, each.current])).toEqual([
+        ["Ada", true],
       ]);
     });
 
@@ -201,16 +286,16 @@ describe("profile management", () => {
     });
 
     it("leaves the retired profile out of the list, and the rest in it", async () => {
-      const ada = await createProfile({ ...CONFIG, name: "Ada" }, {
-        loadPieces,
-      });
-      await createProfile({ ...CONFIG, name: "Alan" }, { loadPieces });
-
-      await retireProfile({ ...CONFIG, profileSpace: ada.space }, {
+      await createProfile({ ...CONFIG, name: "Ada" }, { loadPieces });
+      const alan = await createProfile({ ...CONFIG, name: "Alan" }, {
         loadPieces,
       });
 
-      expect(await listedNames()).toEqual(["Alan"]);
+      await retireProfile({ ...CONFIG, profileSpace: alan.space }, {
+        loadPieces,
+      });
+
+      expect(await listedNames()).toEqual(["Ada"]);
       expect((await listProfiles(CONFIG, { loadPieces }))[0].current).toBe(
         true,
       );
@@ -226,30 +311,60 @@ describe("profile management", () => {
     });
 
     it("refuses a profile that is retired already", async () => {
-      const ada = await createProfile({ ...CONFIG, name: "Ada" }, {
+      await createProfile({ ...CONFIG, name: "Ada" }, { loadPieces });
+      const alan = await createProfile({ ...CONFIG, name: "Alan" }, {
         loadPieces,
       });
-      await retireProfile({ ...CONFIG, profileSpace: ada.space }, {
+      await retireProfile({ ...CONFIG, profileSpace: alan.space }, {
         loadPieces,
       });
 
       await expect(
-        retireProfile({ ...CONFIG, profileSpace: ada.space }, { loadPieces }),
+        retireProfile({ ...CONFIG, profileSpace: alan.space }, { loadPieces }),
       ).rejects.toThrow(/is retired/);
+    });
+
+    it("refuses the profile `#profile` returns, and leaves it listed", async () => {
+      const ada = await createProfile({ ...CONFIG, name: "Ada" }, {
+        loadPieces,
+      });
+      await createProfile({ ...CONFIG, name: "Alan" }, { loadPieces });
+
+      await expect(
+        retireProfile({ ...CONFIG, profileSpace: ada.space }, { loadPieces }),
+      ).rejects.toThrow(/^Retiring profile /);
+      expect(await listedNames()).toEqual(["Ada", "Alan"]);
+    });
+
+    it("refuses a listed profile that is another identity's", async () => {
+      await createProfile({ ...CONFIG, name: "Ada" }, { loadPieces });
+      await createProfile({ ...CONFIG, name: "Alan" }, { loadPieces });
+      const theirs = await listStrangersProfile("Mallory");
+
+      await expect(
+        retireProfile({ ...CONFIG, profileSpace: theirs }, { loadPieces }),
+      ).rejects.toThrow(/is not one of .* own/);
+      expect(
+        (host.key("retiredProfiles").asSchema({
+          type: "array",
+          items: { type: "unknown", asCell: ["cell"] },
+        }).get() ?? []).length,
+      ).toBe(0);
     });
   });
 
   describe("restoreProfile()", () => {
     it("lists the restored profile again", async () => {
-      const ada = await createProfile({ ...CONFIG, name: "Ada" }, {
+      await createProfile({ ...CONFIG, name: "Ada" }, { loadPieces });
+      const alan = await createProfile({ ...CONFIG, name: "Alan" }, {
         loadPieces,
       });
-      await createProfile({ ...CONFIG, name: "Alan" }, { loadPieces });
-      await retireProfile({ ...CONFIG, profileSpace: ada.space }, {
+      await retireProfile({ ...CONFIG, profileSpace: alan.space }, {
         loadPieces,
       });
+      expect(await listedNames()).toEqual(["Ada"]);
 
-      await restoreProfile({ ...CONFIG, profileSpace: ada.space }, {
+      await restoreProfile({ ...CONFIG, profileSpace: alan.space }, {
         loadPieces,
       });
 
@@ -311,18 +426,30 @@ describe("profile management", () => {
     });
 
     it("refuses a retired profile", async () => {
-      const ada = await createProfile({ ...CONFIG, name: "Ada" }, {
+      await createProfile({ ...CONFIG, name: "Ada" }, { loadPieces });
+      const alan = await createProfile({ ...CONFIG, name: "Alan" }, {
         loadPieces,
       });
-      await retireProfile({ ...CONFIG, profileSpace: ada.space }, {
+      await retireProfile({ ...CONFIG, profileSpace: alan.space }, {
         loadPieces,
       });
 
       await expect(
-        renameProfile({ ...CONFIG, profileSpace: ada.space, name: "Count" }, {
+        renameProfile({ ...CONFIG, profileSpace: alan.space, name: "Count" }, {
           loadPieces,
         }),
       ).rejects.toThrow(/is retired/);
+    });
+
+    it("refuses a listed profile that is another identity's", async () => {
+      await createProfile({ ...CONFIG, name: "Ada" }, { loadPieces });
+      const theirs = await listStrangersProfile("Mallory");
+
+      await expect(
+        renameProfile({ ...CONFIG, profileSpace: theirs, name: "Count" }, {
+          loadPieces,
+        }),
+      ).rejects.toThrow(/is not one of .* own/);
     });
   });
 
@@ -445,7 +572,7 @@ describe("profile management", () => {
         .toBe(true);
     });
 
-    it("reports a picture stored without a label as not attested to its owner", async () => {
+    it("reports a picture stored without a label as not attested to its owner, and attests it with `keepCurrent`", async () => {
       const ada = await createProfile({ ...CONFIG, name: "Ada" }, {
         loadPieces,
       });
@@ -467,6 +594,41 @@ describe("profile management", () => {
       const [listed] = await listProfiles(CONFIG, { loadPieces });
       expect(listed.picture).toEqual(picture);
       expect(listed.pictureByOwner).toBe(false);
+
+      await setProfilePicture(
+        { ...CONFIG, profileSpace: ada.space, keepCurrent: true },
+        { loadPieces },
+      );
+      const [kept] = await listProfiles(CONFIG, { loadPieces });
+      expect(kept.picture).toEqual(picture);
+      expect(kept.pictureByOwner).toBe(true);
+    });
+
+    it("refuses `keepCurrent` for a profile with no picture, and stores none", async () => {
+      const ada = await createProfile({ ...CONFIG, name: "Ada" }, {
+        loadPieces,
+      });
+
+      await expect(
+        setProfilePicture(
+          { ...CONFIG, profileSpace: ada.space, keepCurrent: true },
+          { loadPieces },
+        ),
+      ).rejects.toThrow(/has no picture to set again/);
+      expect((await listProfiles(CONFIG, { loadPieces }))[0].picture)
+        .toBeUndefined();
+    });
+
+    it("refuses a listed profile that is another identity's", async () => {
+      await createProfile({ ...CONFIG, name: "Ada" }, { loadPieces });
+      const theirs = await listStrangersProfile("Mallory");
+
+      await expect(
+        setProfilePicture(
+          { ...CONFIG, profileSpace: theirs, bytes: picture },
+          { loadPieces },
+        ),
+      ).rejects.toThrow(/is not one of .* own/);
     });
 
     it("refuses bytes that are not a raster image, and leaves the picture", async () => {

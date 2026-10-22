@@ -350,7 +350,9 @@ export interface ListedProfile {
    * picture, for one another principal set, which anyone can, since a
    * profile's space lets anyone write, and for one stored without a label. A
    * host showing the picture as the person's face shows it only where this is
-   * `true`.
+   * `true`. A picture stored before writes to it were labeled carries no
+   * label, so it is `false` until its owner sets it again, as
+   * `setProfilePicture()` does with `keepCurrent`.
    */
   pictureByOwner: boolean;
 
@@ -401,16 +403,22 @@ function pictureBytes(value: unknown): Uint8Array | undefined {
 
 /**
  * Lists the profiles of `config.identity`, in the order `#profile` answers
- * in: the one it answers with first. The profiles are the ones `#profile`
- * collects (`loadProfileCandidates()`): a retired profile, or one whose
- * document is absent, is not listed. A person with no home root yet has no
- * profiles.
+ * in. The profiles are the ones `#profile` collects
+ * (`loadProfileCandidates()`) that are the identity's own: a retired
+ * profile, or one whose document is absent, is not listed, and neither is
+ * one whose `name` is not attested to the identity (`isOwnProfile()`). Any
+ * code that reaches Home can write a link into its `profiles` list, so a
+ * profile Home lists may be someone else's. The one `#profile` answers with
+ * is marked `current`, which no listed profile is when `#profile` answers
+ * with a profile that is not the identity's. A person with no home root yet
+ * has no profiles.
  *
  * `config.space` is the identity's home space. The home root is read and not
  * started, and no profile runs.
  *
- * @throws Error when a listed profile failed to load, since leaving it out
- * would report a profile that could not be read as one that is not there.
+ * @throws Error when a listed profile failed to load, or the label on its
+ * `name` cannot be read, since leaving it out would report a profile that
+ * could not be read as one that is not there or is not the identity's.
  */
 export async function listProfiles(
   config: SpaceConfig,
@@ -437,7 +445,11 @@ export async function listProfiles(
         cause: failures.get(failed),
       });
     }
-    return await Promise.all(ordered.map(async (profile, index) => {
+    const own = await Promise.all(
+      ordered.map((profile) => isOwnProfile(profile, root.space)),
+    );
+    const listed = ordered.filter((_, index) => own[index]);
+    return await Promise.all(listed.map(async (profile) => {
       const fields = profile.asSchema(profileFieldsSchema);
       await fields.sync();
       const value = fields.get();
@@ -455,7 +467,7 @@ export async function listProfiles(
         space: link.space,
         id: link.id,
         address: canonicalAddress({ space: link.space, id: link.id, scope }),
-        current: index === 0,
+        current: profile === ordered[0],
       };
     }));
   } finally {
@@ -488,6 +500,24 @@ function ownerAttests(cell: Cell<unknown>, principal: string): boolean {
   return attested?.length === 1 && attested[0] === principal;
 }
 
+/**
+ * Whether `profile`, a profile Home lists, is the identity `owner`'s own: the
+ * label on the value of its `name` attests `owner`, and no one else, as the
+ * principal it represents (`ownerAttests()`), which a write through the
+ * profile's own `setName` mints for whoever made it. A profile whose name
+ * carries no such label, or whose name another principal set, is not
+ * `owner`'s.
+ *
+ * @throws Error when the label cannot be read.
+ */
+async function isOwnProfile(
+  profile: Cell<unknown>,
+  owner: string,
+): Promise<boolean> {
+  await profile.asSchema(profileFieldsSchema).sync();
+  return ownerAttests(profile.key("name"), owner);
+}
+
 /** What the profile commands that act on one profile need. */
 export interface ProfileTargetConfig extends SpaceConfig {
   /** The profile's own space, which identifies it. */
@@ -500,8 +530,10 @@ export interface ProfileTargetConfig extends SpaceConfig {
  * `retired` says whether the profile must be one the home retired, or one it
  * has not.
  *
- * @throws Error when the home lists no such profile, or its retirement is
- * not what `retired` asks for.
+ * @throws Error when the home lists no such profile, when the profile it
+ * lists there is not the identity's own (`isOwnProfile()`) or the label that
+ * says so cannot be read, or when its retirement is not what `retired` asks
+ * for.
  */
 async function listedProfile(
   root: Cell<unknown>,
@@ -514,6 +546,12 @@ async function listedProfile(
   if (profile === undefined) {
     throw new Error(
       `No profile of ${config.space} lives in ${config.profileSpace}.`,
+    );
+  }
+  if (!await isOwnProfile(profile, config.space)) {
+    throw new Error(
+      `The profile in ${config.profileSpace} is not one of ` +
+        `${config.space}'s own: its name is not attested to that identity.`,
     );
   }
   if (isRetired(root, config) !== retired) {
@@ -783,14 +821,17 @@ export function isRasterImage(bytes: Uint8Array): boolean {
 }
 
 /**
- * What `setProfilePicture()` needs: the profile, and either the picture's
- * bytes or `clear: true` to remove it.
+ * What `setProfilePicture()` needs: the profile, and the picture's bytes,
+ * `keepCurrent: true` to set again the picture already stored, or
+ * `clear: true` to remove it.
  */
 export type ProfilePictureConfig =
   & ProfileTargetConfig
   & (
     /** The bytes of a raster image, stored as they are. */
     | { bytes: Uint8Array }
+    /** Sets the profile's stored picture again, as its owner. */
+    | { keepCurrent: true }
     /** Removes the picture and the legacy avatar text. */
     | { clear: true }
   );
@@ -802,34 +843,46 @@ export type ProfilePictureConfig =
  * scales them, as the shell's picture picker does to a 128-pixel square, so a
  * caller passes an image of the size it wants shown.
  *
+ * With `config.keepCurrent` it sets the picture the profile already stores
+ * again, which attests it to the identity making the call. A picture stored
+ * before writes to it were labeled carries no label, so it is not attested
+ * to its owner (`ListedProfile.pictureByOwner`) until its owner sets it
+ * again this way.
+ *
  * With `config.clear` it removes the picture, through `setPicture`, and the
  * legacy avatar text, through `setAvatar`, since a profile shows that text
  * wherever it has no picture: a person removing their picture expects none
  * to be shown.
  *
  * @throws Error when the bytes are more than `PROFILE_PICTURE_MAX_BYTES` or
- * are not a raster image (`isRasterImage()`), when the home lists no such
- * profile or has retired it, or when a write fails or does not land.
+ * are not a raster image (`isRasterImage()`), when `config.keepCurrent` is
+ * given for a profile with no picture, when the home lists no such profile of
+ * the identity's own or has retired it, or when a write fails or does not
+ * land.
  */
 export async function setProfilePicture(
   config: ProfilePictureConfig,
   deps: CreateProfileDeps = {},
 ): Promise<void> {
-  if ("bytes" in config) {
-    if (config.bytes.length > PROFILE_PICTURE_MAX_BYTES) {
+  const expected = "keepCurrent" in config
+    ? await storedPicture(config, deps)
+    : "bytes" in config
+    ? config.bytes
+    : undefined;
+  if (expected !== undefined) {
+    if (expected.length > PROFILE_PICTURE_MAX_BYTES) {
       throw new Error(
         `A profile picture can be at most ${PROFILE_PICTURE_MAX_BYTES} ` +
-          `bytes (256 KiB), and this one is ${config.bytes.length}. The ` +
+          `bytes (256 KiB), and this one is ${expected.length}. The ` +
           "shell stores a 128-pixel square; scale the image down first.",
       );
     }
-    if (!isRasterImage(config.bytes)) {
+    if (!isRasterImage(expected)) {
       throw new Error(
         "A profile picture must be a PNG, JPEG, GIF, WebP, AVIF or BMP image.",
       );
     }
   }
-  const expected = "bytes" in config ? config.bytes : undefined;
   await sendToProfile(
     config,
     expected === undefined
@@ -853,4 +906,31 @@ export async function setProfilePicture(
     },
     deps,
   );
+}
+
+/**
+ * Helper for {@link setProfilePicture}, which returns the bytes of the
+ * picture the listed profile of `config.identity` in `config.profileSpace`
+ * stores, whoever set it.
+ *
+ * @throws Error when no listed profile lives there, or it has no picture.
+ */
+async function storedPicture(
+  config: ProfileTargetConfig,
+  deps: CreateProfileDeps,
+): Promise<Uint8Array> {
+  const listed = (await listProfiles(config, deps)).find((each) =>
+    each.space === config.profileSpace
+  );
+  if (listed === undefined) {
+    throw new Error(
+      `No listed profile of ${config.space} lives in ${config.profileSpace}.`,
+    );
+  }
+  if (listed.picture === undefined) {
+    throw new Error(
+      `The profile in ${config.profileSpace} has no picture to set again.`,
+    );
+  }
+  return listed.picture;
 }

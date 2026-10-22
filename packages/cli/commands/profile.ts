@@ -308,37 +308,55 @@ export async function profileRenameAction(
   );
 }
 
+/** The options `cf profile set-picture` takes. */
+export type ProfilePictureOptions = ProfileCommandOptions & {
+  /** Removes the picture instead of setting one. */
+  clear?: boolean;
+
+  /** Sets the picture already stored again, as the identity. */
+  keepCurrent?: boolean;
+};
+
 /**
  * The `cf profile set-picture <space> [image-file]` action body: the
- * picture is the file's bytes, or, with `--clear` and no file, removed.
+ * picture is the file's bytes, or, with `--keep-current` and no file, the
+ * picture already stored, set again; or, with `--clear` and no file, it is
+ * removed.
  *
- * @throws ValidationError when given both a file and `--clear`, or neither.
+ * @throws ValidationError unless given exactly one of a file, `--clear` and
+ * `--keep-current`.
  */
 export async function profileSetPictureAction(
-  options: ProfileCommandOptions & { clear?: boolean },
+  options: ProfilePictureOptions,
   profileSpace: string,
   file: string | undefined,
   deps: ProfileCommandDeps = defaultDeps,
 ): Promise<void> {
   setQuietMode(!!options.quiet);
-  if ((file === undefined) === !options.clear) {
+  const given = [file !== undefined, !!options.clear, !!options.keepCurrent];
+  if (given.filter((each) => each).length !== 1) {
     throw new ValidationError(
-      "Give an image file, or --clear to remove the picture, but not both.",
+      "Give one of an image file, --clear to remove the picture, or " +
+        "--keep-current to set the stored picture again.",
       { exitCode: 1 },
     );
   }
   const target = { ...(await connection(options)), profileSpace };
   await deps.setProfilePicture(
-    file === undefined
+    file !== undefined
+      ? { ...target, bytes: await Deno.readFile(absPath(file)) }
+      : options.clear
       ? { ...target, clear: true }
-      : { ...target, bytes: await Deno.readFile(absPath(file)) },
+      : { ...target, keepCurrent: true },
   );
-  const cleared = file === undefined;
+  const cleared = !!options.clear;
   render(
     options.json
       ? { pictureSet: profileSpace, cleared }
       : cleared
       ? `Removed the picture of profile ${profileSpace}`
+      : options.keepCurrent
+      ? `Set the stored picture of profile ${profileSpace} again`
       : `Set the picture of profile ${profileSpace}`,
     { json: !!options.json },
   );
@@ -576,13 +594,20 @@ attested to the profile's owner is refused.`,
         `Set the picture of the profile that lives in space <space> to the
 bytes of <image-file>, a PNG, JPEG, GIF, WebP, AVIF or BMP image of at most
 256 KiB, stored as they are: nothing crops or scales them. With --clear and no
-file, remove the picture and the legacy avatar text.`,
+file, remove the picture and the legacy avatar text. With --keep-current and no
+file, set the picture already stored again, as you, which attests it to you: a
+picture stored before writes to it were labeled carries no label, and is not
+attested to its owner until its owner sets it again.`,
       ),
     )
       .arguments("<space:string> [image-file:string]")
       .option(
         "--clear",
         "Remove the picture, and the legacy avatar text, instead of setting one.",
+      )
+      .option(
+        "--keep-current",
+        "Set the picture already stored again, as you, so it is attested to you.",
       )
       .example(
         cliText(
@@ -596,9 +621,15 @@ file, remove the picture and the legacy avatar text.`,
         ),
         "Remove a profile's picture.",
       )
+      .example(
+        cliText(
+          `cf profile set-picture did:key:z6Mk… --keep-current -i ./ada.key -a <url>`,
+        ),
+        "Attest a profile's stored picture to its owner.",
+      )
       .action(
         async (
-          options: ProfileCommandOptions & { clear?: boolean },
+          options: ProfilePictureOptions,
           space: string,
           file?: string,
         ) => {

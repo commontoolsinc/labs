@@ -27,9 +27,24 @@ not attested to its owner. A retired profile is not listed, and neither is one
 whose document is gone; a listed profile that cannot be read fails the listing.
 Listing reads the home root and runs nothing.
 
+Only the identity's own profiles are listed. Any code that reaches Home can
+write a link into its `profiles` list, so a profile Home lists may be someone
+else's. A profile is the identity's own when the label on its `name` value
+attests the identity, and no one else, as the principal it represents, which a
+rename through the profile's own `setName` mints for whoever made it. A profile
+Home lists that is not the identity's own is not listed, no row is marked
+`current` when `#profile` answers with such a profile, and every command below
+that names a profile by its space refuses it. A label that cannot be read fails
+the listing, or the command, rather than being taken for someone else's.
+
 `cf profile get-picture <space> <file>` writes the bytes of the picture of the
 profile that lives in `<space>` to `<file>`, or to standard output when `<file>`
-is `-`. It refuses a picture not attested to the owner.
+is `-`. It refuses a picture not attested to the owner. A picture stored before
+writes to it were labeled carries no label at all, so it reads `byOwner: false`
+and `get-picture` refuses it. Its owner attests it by setting it again:
+`cf profile set-picture <space> --keep-current` sets the picture already stored
+again, as the identity running the command, and the write labels it with that
+identity.
 
 `cf profile rename <space> <name>` renames the profile that lives in `<space>`,
 and `cf profile set-picture <space> <image-file>` sets its picture to the bytes
@@ -38,9 +53,11 @@ stored as it is. Nothing crops or scales it, as the shell's picture picker does
 to a 128-pixel square, so pass an image of the size it should be shown at.
 `cf profile set-picture <space> --clear` removes the picture, and the legacy
 avatar text with it, since a profile shows that text where it has no picture.
-Both write through the profile's own handlers (`setName`, `setPicture`,
-`setAvatar`), so the profile runs for the length of the command, and both refuse
-a retired profile.
+`cf profile set-picture <space> --keep-current` sets the picture already stored
+again, which attests it to the identity running the command; it refuses a
+profile with no picture. `rename` and `set-picture` write through the profile's
+own handlers (`setName`, `setPicture`, `setAvatar`), so the profile runs for the
+length of the command, and both refuse a retired profile.
 
 `cf profile retire <space>` retires the profile that lives in `<space>`, as the
 Remove control in Home's profile picker does: Home lists it in
