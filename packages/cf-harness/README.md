@@ -1474,11 +1474,12 @@ than it is told for a reference. It names a piece, not a cell inside one: a path
 after the slug is refused, and the general cell case is CT-2319's. The retired
 `piece:` spelling is not read as an address.
 
-A qualified name is resolved in the session's own space or not at all. A space
-the session cannot check the name of — one configured by `did:key`, which
-carries no name — refuses the qualified form rather than answering with this
-space's same-slug piece, because the same slug in another space is a different
-piece. A bare slug is unaffected: it names no space to disagree about.
+A qualified name is resolved in the session's own space or not at all. The space
+in `pattern:<space>/<slug>` is spelled by its DID, or by the legacy name a
+session opened it by. A name for a space that has none, and any other space, is
+refused rather than answered with this space's same-slug piece, because the same
+slug in another space is a different piece. A bare slug is unaffected: it names
+no space to disagree about.
 
 An input cell names a task target, so failure is closed and loud rather than
 tolerated: a malformed argument is a usage error, and a reference that does not
@@ -2554,7 +2555,7 @@ The slug is validated, then checked for availability, before anything is
 written, so an unusable slug is a structured error that changes nothing. A slug
 already naming another piece is never repointed: the tool appends a counter —
 `-2`, `-3`, and so on — to the requested word until it reaches a free name, or
-one already naming this piece, and the receipt's `slug` and `url` carry the name
+one already naming this piece, and the receipt's `slug` carries the name
 assigned, which is where the model reads the address it got. A requested word so
 long that no counter fits under the slug length limit is the one collision that
 is refused. The availability question fails closed: a slug is free only on the
@@ -2776,15 +2777,13 @@ does not change the original publication record. A missing publication report
 means that attempt queued nothing, and `status: "queued"` records intent rather
 than index acceptance. This join needs no source hashing or live index lookup.
 
-The URL is the session's API URL, the space, and the slug — the address
-`cf piece new` prints — and it appears only when `--fabric-space` names the
-space. A space configured as a `did:key` has no URL that is not built from that
-DID, and a bare fabric identifier does not cross the model boundary, so the
-model-facing output carries the slug alone rather than a fabricated link. The
-prompt loop strips `pieceId` and records that omission. Nothing in the remaining
-output is swapped for a handle token, because nothing in it is a fabric
-reference: the slug is the model's own word and the URL is the operator's API
-URL and space name. Its error `message`, which can carry a DID from an
+The URL is the session's API URL, the space's DID, and the slug, which is the
+address the shell opens. A session configured by a space's legacy name gets the
+URL of the DID that name resolves to. The prompt loop strips `pieceId` and `url`
+from what the model is shown, because both carry fabric identifiers, and records
+those omissions; the console reads the URL from the persisted output. Nothing in
+the remaining output is swapped for a handle token, because the slug is the
+model's own word. Its error `message`, which can carry a DID from an
 authorization failure, is scrubbed for bare fabric identifiers like the other
 free-text fields. Compiler diagnostics come back as
 `{ status: "compile-error", message }` so the model can iterate on the source;
