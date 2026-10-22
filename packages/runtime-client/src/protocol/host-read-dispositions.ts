@@ -200,6 +200,10 @@ export const REQUEST_DISPOSITIONS = {
   },
   [RequestType.SetBreakpoints]: setting,
   [RequestType.UploadBlob]: write,
+  [RequestType.BlobUrl]: {
+    kind: "no-cell-value",
+    why: "the URL a space's host serves a blob at",
+  },
   [RequestType.GetSpaceRootPattern]: reference,
   [RequestType.PieceCreate]: reference,
   [RequestType.PieceGet]: reference,

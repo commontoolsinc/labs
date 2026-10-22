@@ -1837,43 +1837,27 @@ describe("cli piece parsing", () => {
     expect(names(space, false)).toContain("recreate-root");
   });
 
-  it("answers the retired `set-home` on both mounts with what replaced it", async () => {
-    // Retired rather than removed, for now: a script that still writes the
-    // command is told what to write instead, and is told the same day both
-    // times. Neither mount is offered to anyone new.
-    const names = (
-      // deno-lint-ignore no-explicit-any
-      command: any,
-      includeHidden: boolean,
-    ): string[] =>
-      command.getCommands(includeHidden).map((c: { getName(): string }) =>
-        c.getName()
-      );
+  it("reports `set-home` on both nouns as an unknown command", async () => {
+    // Neither noun mounts `set-home`, shown or hidden. A Home is created on
+    // its user's first open and changed in place with `cf piece setsrc` on its
+    // root, which leaves a command that installs one nothing to do.
+
     for (const noun of [piece, space]) {
-      expect(names(noun, true)).toContain("set-home");
-      expect(names(noun, false)).not.toContain("set-home");
+      expect(noun.getCommand("set-home", true)).toBeUndefined();
     }
     for (
       const args of [
-        argv`space set-home -i ./k.key -a http://localhost:8000 --reset`,
+        argv`space set-home`,
         argv`piece set-home -i ./k.key -a http://localhost:8000 ./my-home.tsx`,
       ]
     ) {
       const line = args.join(" ");
-      const { code, stdout, stderr } = await cf(args);
+      const { code, stderr } = await cf(args);
       expect(code, line).not.toBe(0);
-      // The refusal prints the help page as context, as every refusal here
-      // does, and that page is where the replacement is written out.
-      expect(stripAnsi(stdout.join("\n")), line).toContain("Retired.");
-      const said = stripAnsi(stderr.join("\n"));
-      expect(said, line).toContain("is retired");
-      expect(said, line).toContain("created on its user's first open");
-      expect(said, line).toContain("cf piece setsrc --cell <home-root>");
-      expect(said, line).toContain("stops answering after 2026-10-21");
+      expect(stripAnsi(stderr.join("\n")), line).toContain(
+        'Unknown command "set-home"',
+      );
     }
-    const { code, stdout } = await cf(argv`space set-home --help`);
-    expect(code).toBe(0);
-    expect(stripAnsi(stdout.join("\n"))).toContain("Retired.");
   });
 
   it("offers computed transforms for piece reads", () => {

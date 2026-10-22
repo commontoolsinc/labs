@@ -47,17 +47,23 @@ other code can write either, even code a member runs in the store's space.
 The handlers learn the principal they act for with `currentPrincipal()`, and an
 entry's adder from its `authored-by` label, which is how `remove` and `rename`
 admit the adder. They learn whether the principal is an OWNER of the store's
-space with `spaceAccess()`.
+space with `spaceAccess()`, and the space they run in with `spaceOf()`, which
+is how `add` refuses another space's blob. `rename`, and an `add` that chooses
+a free name, store the entry's bytes again under its new name with
+`nameBlob()` ([files](../../common/capabilities/files.md#renaming)).
 
 ## Modules
 
 The store's patterns are in `packages/patterns/fabrifile/`:
 
-- `schemas.tsx`: `FileEntry`, `BlobRef`, `FileProfile`, and
+- `schemas.tsx`: `FileEntry`, `BlobRef`, `FileProfile`, the requests and
+  their outcomes, `FileStoreFiles`, the store's files group, and
   `FileStoreOutput`.
 - `names.ts`: the [name rules](FileEntry.md#names), and the choice of a free
   name for `onConflict: "rename"`, as plain functions with no pattern in them.
-- `store.tsx`: `FileStore`. It has no `[UI]`.
+- `store.tsx`: `FileStore`, and the records it stores with the handlers that
+  write them, in one module because each record's write policy names its
+  writers. It has no `[UI]`.
 - `view.tsx`: `FileStoreView` (see [`FileStoreView.md`](FileStoreView.md)).
 
 `schemas.tsx`, `names.ts` and `store.tsx`, and every module they import, MUST
@@ -72,7 +78,5 @@ of `store.tsx` and fails on any module that renders.
 
 ## Prerequisites
 
-- **A blob reference a pattern can check**: the same as the contract's (see
-  [`README.md`](README.md#prerequisites)).
-- **Knowing its own space.** `add` refuses a `blob.space` other than the store's
-  own, so the handler needs the DID of the space it runs in.
+- **A blob reference a pattern can check, in full**: the same as the
+  contract's (see [`README.md`](README.md#prerequisites)).

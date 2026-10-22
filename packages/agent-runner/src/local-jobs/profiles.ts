@@ -457,9 +457,11 @@ export const localJobForeignSpaces = (
  * never assumed to, since a space it does not serve reads as empty and
  * nothing reports it — and every space `foreignSpaces` lists must be one an
  * input names. A piece address names a slug, which resolves only in the
- * profile's own space, so one naming another space is refused, as is one
- * qualified by name under a profile naming its space by DID, since only a
- * session can resolve the name to compare them.
+ * profile's own space, so one naming another space is refused. Under a profile
+ * naming its space by DID, an address names it by that DID, and one qualified
+ * by a name is refused, since that space has none. Under a profile naming its
+ * space by a legacy name, an address naming a space by DID is left to the
+ * session, which alone knows the DID that name resolves to.
  */
 const refuseInputs = (
   profile: LocalJobProfile,
@@ -503,21 +505,27 @@ const refuseInputs = (
     }
     let address;
     try {
+      address = parseNamedPieceAddress(ref);
+    } catch {
+      // A malformed address is the harness check's to describe, below.
+    }
+    if (
+      byDid && address?.spaceName !== undefined && !isDID(address.spaceName)
+    ) {
+      return `Input \`${name}\` names its space by name, and the profile names its space by DID; name the space by its DID, or send the space-relative /of:<id> form.`;
+    }
+    try {
       checkInputCellSpec(
         { name, ref },
         byDid ? fabric.space as MemorySpace : undefined,
         byDid ? undefined : fabric.space,
         routes,
       );
-      address = parseNamedPieceAddress(ref);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return message.includes(`\`${name}\``)
         ? message
         : `Input \`${name}\`: ${message}`;
-    }
-    if (byDid && address?.spaceName !== undefined) {
-      return `Input \`${name}\` names its space by name, and the profile names its space by DID, so it cannot be checked against the profile's space; send the space-relative /of:<id> form.`;
     }
   }
   return undefined;

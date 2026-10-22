@@ -180,6 +180,14 @@ interface PeekOverlay {
 const HORIZONTAL_STEP = 8;
 const MOUSE_WHEEL_STEP = 3;
 
+/** The size of the push dialog's body, before it is shrunk to fit the screen:
+ * the 13 lines that pushing a new branch to GitHub typically prints, then a
+ * blank line and a summary whose pull request address wraps onto a row of its
+ * own, in columns as wide as the widest that GitHub's line offering a pull
+ * request needs. */
+const PUSH_ROWS = 16;
+const PUSH_COLUMNS = 80;
+
 /** Whether two search matches occupy the same displayed range. */
 function sameDisplayedMatch(a: Match, b: Match): boolean {
   return a.line === b.line && a.start === b.start && a.end === b.end;
@@ -1233,8 +1241,9 @@ export class Session {
   }
 
   /** The push dialog: as much of the end of git's output as fits, then how the
-   * push ended, at the size of the screen so that it holds still as the output
-   * grows. Abort stops the push; Close takes the dialog down once it ends. */
+   * push ended, at a fixed size so that it holds still as the output grows.
+   * Abort stops the push; once it ends, Close takes the dialog down and Quit
+   * closes the viewer. */
   #pushDialog(): DialogState {
     const lines = this.#pushLines.at(-1) === ""
       ? this.#pushLines.slice(0, -1)
@@ -1242,30 +1251,37 @@ export class Session {
     const output = this.#pushSummary === ""
       ? lines
       : [...lines, "", this.#pushSummary];
-    // A line wider than the box wraps, so that an address at its end stays
-    // whole.
-    const columns = Math.max(1, this.width - 6);
+    // A line wider than the box wraps after its last space that fits, so that
+    // an address no wider than the box stays on one row, and a word wider than
+    // the box is broken. Git pads the lines a server sends with spaces when its
+    // output is not a terminal, and those would wrap onto rows of their own.
+    const columns = Math.max(1, Math.min(PUSH_COLUMNS, this.width - 8));
     const wrapped = output.flatMap((line) => {
-      const chars = [...line];
-      if (chars.length <= columns) return [line];
+      let chars = [...line.trimEnd()];
       const rowsOfLine: string[] = [];
-      for (let at = 0; at < chars.length; at += columns) {
-        rowsOfLine.push(chars.slice(at, at + columns).join(""));
+      while (chars.length > columns) {
+        const space = chars.lastIndexOf(" ", columns);
+        const words = chars.slice(0, space + 1).join("").trimEnd();
+        rowsOfLine.push(words || chars.slice(0, columns).join(""));
+        chars = chars.slice(words ? space + 1 : columns);
       }
+      rowsOfLine.push(chars.join(""));
       return rowsOfLine;
     });
-    const rows = Math.max(1, this.height - 7);
+    const rows = Math.max(1, Math.min(PUSH_ROWS, this.height - 7));
     const body = wrapped.slice(-rows);
     while (body.length < rows) body.push("");
     return {
       title: "Push",
       body,
       output: true,
-      buttons: [
-        this.#abortPush
-          ? { label: "Abort", hotkey: "a", kind: "cancel" }
-          : { label: "Close", hotkey: "c", kind: "cancel" },
-      ],
+      width: columns,
+      buttons: this.#abortPush
+        ? [{ label: "Abort", hotkey: "a", kind: "cancel" }]
+        : [
+          { label: "Close", hotkey: "c", kind: "cancel" },
+          { label: "Quit", hotkey: "Q" },
+        ],
     };
   }
 
@@ -4059,8 +4075,10 @@ export class Session {
     } else if (key.name === "escape") {
       index = buttons.findIndex((b) => b.kind === "cancel");
     } else {
-      const k = (key.char ?? key.name).toLowerCase();
-      index = buttons.findIndex((b) => b.hotkey.toLowerCase() === k);
+      const k = key.char ?? key.name;
+      index = buttons.findIndex((b) =>
+        b.hotkey === k || b.hotkey === k.toLowerCase()
+      );
     }
     if (index < 0 || index >= n) return; // an unbound key leaves the prompt up
     this.#activateButton(dialog, index, beforeButtonAction);
@@ -4088,17 +4106,19 @@ export class Session {
     if (this.#mode === "savePrompt") this.#applySaveButton(button);
     else if (this.#mode === "amendPrompt") this.#applyAmendButton(button);
     else if (this.#mode === "revertPrompt") this.#applyRevertButton(button);
-    else this.#applyPushButton();
+    else this.#applyPushButton(button);
   }
 
   /** Abort stops the push, which then ends; Close takes the dialog down and
-   * leaves how the push ended in the status line. */
-  #applyPushButton(): void {
+   * leaves how the push ended in the status line; Quit takes it down and quits,
+   * by way of the save prompt when there are unsaved edits. */
+  #applyPushButton(button: DialogButton): void {
     if (this.#abortPush) {
       this.#abortPush();
     } else {
       this.#mode = "normal";
       this.#message = this.#pushSummary;
+      if (button.hotkey === "Q") this.#requestQuit();
     }
   }
 
