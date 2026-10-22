@@ -49,7 +49,7 @@ own: `admitPanel` refuses an event whose `as` names a profile unless
 `principalOf(as, "represents-principal")` returns the principal the event acts
 for. A Fabric profile carries its own owner's `represents-principal`, so an
 event naming another principal's profile is refused, and so is one naming a
-profile that attests nobody or more than one principal, and one that acts for no
+profile from which `principalOf()` reads no principal, and one that acts for no
 one. An occurrence added without a profile records the principal who acted in
 `addedBy` instead, as the DID `currentPrincipal()` returns, and the runtime
 labels the field `authored-by` for that same principal. Nothing in an event
