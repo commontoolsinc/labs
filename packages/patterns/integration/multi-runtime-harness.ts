@@ -151,6 +151,17 @@ export interface MultiRuntimeSessionSpec {
   renderView?: boolean;
 
   /**
+   * Declare this session's runtime a web client, as a browser tab's worker
+   * is. The runtime then follows the web client's flags: under
+   * `EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION` it opens the piece by its
+   * name and UI tip alone, registers its rendered view (`renderView`) as a
+   * view interest the server selects documents for, and runs locally only
+   * the actions that selection admits. Unset, the session is an unclassed
+   * remote client, which replicates what it watches.
+   */
+  clientClass?: "web";
+
+  /**
    * Write-side `requiredIntegrity` floor for this session's runtime,
    * overriding the harness-wide setting. Set it per session to model a fleet
    * partway through the staged rollout, where one client already enforces the
@@ -965,6 +976,9 @@ export class MultiRuntimeHarness {
           cfc: cfcFor(started),
           watchPaths: options.watchPaths as FabricValue,
           ...(started.renderView === true ? { renderView: true } : {}),
+          ...(started.clientClass !== undefined
+            ? { clientClass: started.clientClass }
+            : {}),
           ...(started.wsDelayMs !== undefined
             ? { wsDelayMs: started.wsDelayMs }
             : {}),

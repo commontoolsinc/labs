@@ -264,6 +264,24 @@ describe("view plan publisher", () => {
     expect(fixture.publications.calls).toHaveLength(2);
   });
 
+  it("plans a cut wave over its last UI walk and re-walks at the quiescent one", async () => {
+    await publish();
+    await fixture.runtime.editWithRetry((tx) =>
+      fixture.output.withTx(tx).set(6)
+    );
+    // The visible value changed, so the walk is invalid; a wave the deadline
+    // cut plans over the walk it has, reading only the registration metadata.
+    const cut = fixture.reads.calls.length;
+    await fixture.publisher.publish(fixture.runtime, fixture.server, space, {
+      quiescent: false,
+    });
+    expect(fixture.reads.calls.length - cut).toBe(1);
+    expect(fixture.publications.calls).toHaveLength(2);
+    const quiet = fixture.reads.calls.length;
+    await publish();
+    expect(fixture.reads.calls.length - quiet).toBeGreaterThan(1);
+  });
+
   it("re-walks changed visible values and new view lifetimes", async () => {
     await publish();
     await fixture.runtime.editWithRetry((tx) =>

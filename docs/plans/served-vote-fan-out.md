@@ -305,11 +305,18 @@ Before a push: repo-wide `deno fmt --check`, `deno lint`, `deno task check`,
          the main thread, passes, walks, frames and client runs falling with
          them, the serving scheduler's runs not. Still open on it: counting
          the seed with a cap, and choosing the default cap.
-   - [ ] The server deciding what each session receives
-         (`EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION`), which stands to retire
-         most of the subscriptions the walks serve. It measured slow when
-         last tried, so it is turned on, counted with the probe, and read
-         for the naive step before anything else is built on it.
+   - [x] The server deciding what each session receives
+         (`EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION`), measured and read
+         ([record](../history/development/performance/2026-10-22-view-scoped-replication-vote-burst.md)):
+         25.9 s against 4.8 s, from a plan per view per wave re-walking the
+         UI and a full re-evaluation per changed plan; the planner plans a
+         cut wave over its last walk and an unchanged delivery rides the
+         next frame, for 9.1 s on the main thread and 5.4 s in the worker.
+         Still 2× the flag off on this workload, where every viewer sees
+         everything.
+   - [ ] What the view-scoped record leaves: one plan per snapshot rather than
+         per session, manifests only when they change, and whether plans
+         defer to quiescence as the UI walk does.
    - [ ] One root evaluation per (document, path) per walk with its schemas
          validated against it, and a memo for a selector that failed against
          a document version (the memory server, every arm).

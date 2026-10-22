@@ -94,6 +94,13 @@ export type SessionState = {
    * them out (CT-1927 review, round 7). Self-clearing. */
   forceFullResync: boolean;
 
+  /** Set when a planner selection changed what the session's views may run
+   * or adopt without changing what they are delivered: the next frame
+   * carries the new plans, over the incremental refresh, and a session
+   * nothing dirtied gets a frame of plans alone. Cleared as that frame is
+   * built. A changed delivery takes `forceFullResync` instead. */
+  viewPlansPending: boolean;
+
   /** Set once this session was admitted an explicit `entity_scope_key`
    * read (protocol.md §2's read row — lease holders only), and STICKY
    * for the session's life: it selects the session's WIRE VOCABULARY
@@ -356,6 +363,7 @@ export class SessionRegistry {
       caughtUpLocalSeq: existing?.caughtUpLocalSeq ?? 0,
       pendingCaughtUpLocalSeq: existing?.pendingCaughtUpLocalSeq ?? 0,
       forceFullResync: existing?.forceFullResync ?? false,
+      viewPlansPending: existing?.viewPlansPending ?? false,
       ...(existing?.leaseHolderReads === true
         ? { leaseHolderReads: true }
         : {}),
@@ -493,6 +501,7 @@ export class SessionRegistry {
     session.viewDemandGraphs = new Map();
     session.viewDemandEntities = new Map();
     session.forceFullResync = true;
+    session.viewPlansPending = false;
   }
 
   detach(space: string, sessionId: string, ownerConnectionId: string): void {

@@ -112,6 +112,7 @@ let watchPaths: readonly (readonly (string | number)[])[] = [[]];
  */
 let renderView = false;
 let viewMountCancel: (() => void) | undefined;
+let viewMounts = 0;
 
 /**
  * What the rendered view's reconciler reported since `renderErrors` last
@@ -260,14 +261,34 @@ async function attachPiece(next: PieceController): Promise<void> {
     for (const cancel of cancels) cancel();
   };
   viewMountCancel?.();
-  viewMountCancel = renderView
-    ? new WorkerReconciler({
-      onOps: () => {},
-      onError: (error) => {
-        viewRenderErrors.push(error.message);
-      },
-    }).mount(result().key("$UI").asSchema(rendererVDOMSchema))
+  viewMountCancel = renderView ? await mountView() : undefined;
+}
+
+/**
+ * Mounts the rendered view the way the browser worker does: under view-scoped
+ * replication the mount is first registered as a view interest on the piece's
+ * result, so the server selects the documents this session receives for it
+ * and the plan admits the actions it may run, and the reconciler's demand
+ * follows; otherwise the reconciler's demand is the whole of the view.
+ */
+async function mountView(): Promise<() => void> {
+  const { runtime } = controller();
+  const onError = (error: Error) => {
+    viewRenderErrors.push(error.message);
+  };
+  const cancelView = runtime.viewScopedReplicationRequested
+    ? await runtime.viewReplication.mount(
+      controller().getResult(currentPiece().getCell()),
+      `harness-view-${++viewMounts}`,
+      onError,
+    )
     : undefined;
+  const cancelRender = new WorkerReconciler({ onOps: () => {}, onError })
+    .mount(result().key("$UI").asSchema(rendererVDOMSchema));
+  return () => {
+    cancelRender();
+    cancelView?.();
+  };
 }
 
 /**
@@ -518,6 +539,7 @@ const handlers: Record<
       cfc,
       watchPaths: requestedWatchPaths,
       renderView: requestedRenderView,
+      clientClass,
     },
   ) {
     const identity = await Identity.fromKeyPair(
@@ -538,6 +560,7 @@ const handlers: Record<
       ...(cfcWriteFloor !== undefined
         ? { cfcWriteFloor: cfcWriteFloor as CfcWriteFloorMode }
         : {}),
+      ...(clientClass === "web" ? { clientClass } : {}),
     });
     if (recordRejections === true) {
       recordRejectionsInto(controller().runtime.telemetry);

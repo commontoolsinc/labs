@@ -6805,7 +6805,7 @@ export class SpaceServer implements TransactionSealDestination {
       // The owed re-drain rides quiet cycles too (round-2 thread 9): a
       // transport-failed delivery must retry on the NEXT loop cycle,
       // not wait for a new input wave or a re-activation.
-      await this.#publishViewPlan(runtime);
+      await this.#publishViewPlan(runtime, !exhausted);
       await this.#drainOutboxAppends(false);
       return;
     }
@@ -6914,7 +6914,7 @@ export class SpaceServer implements TransactionSealDestination {
         timing.time(commitStart, "executor", "wave", "commit");
       pending.then(timeCommit, timeCommit);
       this.#commitInFlight = { closing, outcome: pending, finish };
-      await this.#publishViewPlan(runtime);
+      await this.#publishViewPlan(runtime, !exhausted);
       return;
     }
     const outcome = await pending;
@@ -7267,7 +7267,7 @@ export class SpaceServer implements TransactionSealDestination {
     }
 
     if (publish && outcome.aborted === undefined) {
-      await this.#publishViewPlan(runtime);
+      await this.#publishViewPlan(runtime, !exhausted);
     }
 
     // Drain the durable append rows (FP1): after a wave that landed
@@ -7303,13 +7303,17 @@ export class SpaceServer implements TransactionSealDestination {
     }
   }
 
-  /** Publishes the space's view plan, timed as the cycle's `publish` phase. */
-  async #publishViewPlan(runtime: Runtime): Promise<void> {
+  /** Publishes the space's view plan, timed as the cycle's `publish` phase.
+   * `quiescent` says whether the settlement it follows reached quiescence
+   * rather than the flush deadline, which decides whether the publisher
+   * walks an invalidated UI again or plans over its last walk. */
+  async #publishViewPlan(runtime: Runtime, quiescent: boolean): Promise<void> {
     const publishStart = performance.now();
     await this.#viewPlanPublisher.publish(
       runtime,
       this.#options.server,
       this.#options.space,
+      { quiescent },
     );
     timing.time(publishStart, "executor", "wave", "publish");
   }

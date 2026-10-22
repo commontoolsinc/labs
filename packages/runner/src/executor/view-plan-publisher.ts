@@ -46,6 +46,10 @@ type Selection = Omit<ViewPlan, "id" | "revision" | "generation"> & {
 /** Independent invalidation of rendered reads and execution-dependent output. */
 type CachedView = {
   render: ViewReadCache<ViewRenderReads>;
+  /** The last UI walk, kept past its invalidation: a wave the flush deadline
+   * cut plans over it rather than walking again, and the walk is redone at
+   * the next settlement that reaches quiescence. */
+  rendered?: ViewRenderReads;
   selection: ViewReadCache<true>;
   execution?: ViewExecutionNode[];
 };
@@ -73,11 +77,19 @@ export class ViewPlanPublisher {
     this.#published.clear();
   }
 
-  /** Selects actual reads under each viewing identity and publishes complete roots. */
+  /**
+   * Selects actual reads under each viewing identity and publishes complete
+   * roots. `quiescent` says whether the settlement this follows reached
+   * quiescence: after one the flush deadline cut, a view whose UI walk a
+   * change invalidated is planned over its last walk, so that a burst of
+   * cut waves re-walks the UI once, at the settlement that ends it; the
+   * execution snapshot and the producer bases are fresh either way.
+   */
   async publish(
     runtime: Runtime,
     server: HostMemoryServer,
     space: MemorySpace,
+    { quiescent = true }: { quiescent?: boolean } = {},
   ): Promise<void> {
     if (this.#runtime !== runtime) {
       this.dispose();
@@ -141,10 +153,12 @@ export class ViewPlanPublisher {
         ) continue;
         planStart = performance.now();
         let render = cache.render.value;
+        if (render === undefined && !quiescent) render = cache.rendered;
         if (render === undefined) {
           const renderStart = performance.now();
           render = collectViewRenderReads(runtime, space, view, identity);
           cache.render.set(render, render);
+          cache.rendered = render;
           logger.time(renderStart, "render");
         }
         const handlers = new Set(

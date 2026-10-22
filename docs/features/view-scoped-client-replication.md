@@ -57,7 +57,10 @@ After a successful serving settlement, including a quiet settlement or a partial
 wave that reaches its flush deadline, the planner checks whether the view
 selection needs updating. Unsettled producers carry no currency basis. It
 traverses a new or changed visible view using renderer semantics and shared
-component schemas. Ordinary rendered attributes and object props contribute
+component schemas. After a wave the flush deadline cut, a view whose walk a
+change invalidated is planned over its last walk, with the current execution
+snapshot and producer bases; the walk is redone at the next settlement that
+reaches quiescence, so a burst of cut waves walks the UI once, as it ends. Ordinary rendered attributes and object props contribute
 their reads. Declared bindings contribute their effective component projection;
 stream targets identify visible handlers, and writable bindings identify direct
 edits.
@@ -128,7 +131,11 @@ Memory retains demand and supporting delivery as separate tracked graphs. Dirty
 documents refresh those graphs incrementally; support updates do not become
 execution demand. Ordinary watch additions extend the demand graph and deliver
 differences against the session's current delivery state. A full view
-replacement or recovery rebuilds the graphs. Unrelated commits without catch-up
+replacement or recovery rebuilds the graphs, as does a selection that changes
+what a view is delivered, which then diffs against the session's delivery
+state. A selection that changes only what the view may run or adopt leaves the
+graphs standing: its plans ride the session's next frame, a frame of plans
+alone when nothing dirtied it. Unrelated commits without catch-up
 markers or operation changes produce no view frame. View replacements declare
 the replica's current holdings when the server supports that protocol, allowing
 unchanged documents to be omitted while still delivering missing documents and

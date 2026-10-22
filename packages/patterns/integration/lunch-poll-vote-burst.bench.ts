@@ -111,12 +111,15 @@ const harness = await MultiRuntimeHarness.create({
   // the clients derive the tallies and cards they would show, the burst's end
   // is the moment that view is current rather than the moment the vote list
   // is, and no client re-reads the whole result on every change, which the
-  // harness's default root watch would make it do.
+  // harness's default root watch would make it do. Each is a web client, so
+  // that under `EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION` the server selects
+  // what each receives for that view, as it does for a browser.
   watchPaths: [],
   input: { renderPoll: true },
   sessions: NAMES.map((_, index) => ({
     label: `voter-${index + 1}`,
     renderView: true,
+    clientClass: "web",
   })),
 });
 const voters = harness.sessions;

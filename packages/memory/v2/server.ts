@@ -6552,19 +6552,30 @@ export class Server {
         }))),
       );
       if (denyForeign) return false;
-      // Resolve schema and graph closure before publishing planner output.
-      // A failed selection leaves the session's existing delivery intact.
-      await this.evaluateWatchSet(
-        space,
-        selection.delivery.map((query, index) => ({
-          id: `selection:${index}`,
-          kind: "graph" as const,
-          query,
-        })),
-        engine,
-        { principal: session!.principal, sessionId: session!.id },
-      );
-      if (!current()) return false;
+      // A selection delivering what the view's current one delivers changes
+      // only what the client may run or adopt: its support graphs stand, and
+      // the next frame carries the plans. One that delivers differently is
+      // resolved to its schema and graph closure first, so a failed selection
+      // leaves the session's existing delivery intact, and then rebuilds the
+      // graphs and diffs against the session's delivery state.
+      const sameDelivery = (
+        previous: ReturnType<SessionState["viewSelections"]["get"]>,
+      ) =>
+        previous !== undefined && previous.revision === handle.revision &&
+        valueEqual(previous.delivery, selection.delivery);
+      if (!sameDelivery(session!.viewSelections.get(handle.viewId))) {
+        await this.evaluateWatchSet(
+          space,
+          selection.delivery.map((query, index) => ({
+            id: `selection:${index}`,
+            kind: "graph" as const,
+            query,
+          })),
+          engine,
+          { principal: session!.principal, sessionId: session!.id },
+        );
+        if (!current()) return false;
+      }
       this.#assertRoutedAuthority(session!);
       const previous = session!.viewSelections.get(handle.viewId);
       if (
@@ -6577,7 +6588,8 @@ export class Server {
         ...selection,
         revision: handle.revision,
       });
-      session!.forceFullResync = true;
+      if (sameDelivery(previous)) session!.viewPlansPending = true;
+      else session!.forceFullResync = true;
       this.markSpaceDirty(space, []);
       return true;
     });
@@ -8113,6 +8125,7 @@ export class Server {
     const preCallCaughtUp = session.caughtUpLocalSeq;
     const preCallPending = session.pendingCaughtUpLocalSeq;
     const preCallForceFullResync = session.forceFullResync;
+    const preCallViewPlansPending = session.viewPlansPending;
     // Whether THIS pass re-armed a lapsed lease-holder exemption (see
     // below); restored on a throw so the re-arm's full evaluation is
     // not lost with the failed pass.
@@ -8154,7 +8167,10 @@ export class Server {
               sync.caughtUpLocalSeq = session.caughtUpLocalSeq;
             }
             await this.#attachOperationFields(space, sessionId, sync);
-            if (session.views.length > 0) this.#attachViewPlans(session, sync);
+            if (session.views.length > 0) {
+              this.#attachViewPlans(session, sync);
+              session.viewPlansPending = false;
+            }
             return {
               type: "session/effect",
               space,
@@ -8172,7 +8188,8 @@ export class Server {
               serverSeq > fromSeq;
             if (
               !hasPendingCatchUp && !mayCarryOperations &&
-              (session.views.length === 0 || !preCallForceFullResync)
+              (session.views.length === 0 ||
+                !(preCallForceFullResync || preCallViewPlansPending))
             ) {
               return null;
             }
@@ -8734,6 +8751,8 @@ export class Server {
           );
           session.forceFullResync = session.forceFullResync ||
             preCallForceFullResync;
+          session.viewPlansPending = session.viewPlansPending ||
+            preCallViewPlansPending;
           // A re-arm consumed by a throwing pass re-stages: the next
           // pass runs the full evaluation the lapse still owes.
           if (rearmedLeaseHolder) session.leaseHolderReadsLapsed = true;

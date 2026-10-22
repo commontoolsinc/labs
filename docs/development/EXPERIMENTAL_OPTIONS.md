@@ -594,6 +594,15 @@ flags it adopts from the deployment it runs against.
   for the current bounds and
   [the implementation plan](../plans/view-scoped-client-replication.md) for
   follow-up work.
+- **Status (2026-10-22):** off by default. Under the served vote burst, with
+  the flush deadline capped at 1000 ms, one burst of 25 votes takes 9.1 s on
+  the main-thread arm and 5.4 s in the worker with the flag on, against 4.8 s
+  and 4.7 s with it off; the planner now plans a wave the deadline cut over
+  its last UI walk, and a plan whose delivery is unchanged reaches the session
+  without a watch-set re-evaluation. What remains is a plan per session per
+  wave and the renderer-schema walk the planner and the memory server both
+  make
+  ([record](../history/development/performance/2026-10-22-view-scoped-replication-vote-burst.md)).
 
 
 ### `lazyMaterialization`
