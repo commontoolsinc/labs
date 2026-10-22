@@ -32,6 +32,75 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+/**
+ * A resolved root cell `id` in `space`, whose subscription delivers a name
+ * with the owner's `represents-principal` label, and whose space cell links
+ * `rootId` as its root. Like a runtime's, the space cell resolves its root
+ * only once it has been synced, and resolves to itself before that.
+ * `spaceCellOpened` holds back the request for the space cell when given;
+ * `delivered` resolves once the subscription has delivered.
+ */
+function resolvedInSpace(
+  space: string,
+  id: string,
+  rootId: string,
+  spaceCellOpened: Promise<void> = Promise.resolve(),
+) {
+  let synced = false;
+  const delivered = deferred<void>();
+  const root = {
+    ref: () => ({ path: [] }),
+    space: () => space,
+    id: () => rootId,
+  };
+  const unsynced = {
+    ref: () => ({ path: [] }),
+    space: () => space,
+    id: () => "of:space-cell",
+  };
+  const spaceCell = {
+    sync: () => {
+      synced = true;
+      return Promise.resolve();
+    },
+    key: () => ({
+      resolveAsCell: () => Promise.resolve(synced ? root : unsynced),
+    }),
+  };
+  return {
+    ref: () => ({ path: [] }),
+    space: () => space,
+    id: () => id,
+    runtime: () => ({
+      getCell: async (requested: string, cause: string) => {
+        await spaceCellOpened;
+        if (requested !== space || cause !== space) {
+          throw new Error("not the space cell");
+        }
+        return spaceCell;
+      },
+    }),
+    asSchema: () => ({
+      subscribe: (cb: (val: unknown, label?: unknown) => void) => {
+        cb({ name: "Ada" }, representsPrincipalLabel(OWNER_DID));
+        delivered.resolve();
+        return () => {};
+      },
+    }),
+    delivered: delivered.promise,
+  };
+}
+
+/** A badge bound to `resolved`, as a binding to a profile link resolves. */
+function badgeOver(resolved: unknown): CFProfileBadge {
+  const badge = new CFProfileBadge();
+  markConnected(badge, true);
+  badge.profile = {
+    resolveAsCell: () => Promise.resolve(resolved),
+  } as unknown as CFProfileBadge["profile"];
+  return badge;
+}
+
 function markConnected(element: CFProfileBadge, isConnected = true): void {
   Object.defineProperty(element, "isConnected", {
     configurable: true,
@@ -209,6 +278,7 @@ describe("CFProfileBadge", () => {
       el._applyValue({ name: "Ada" });
       el._state = "verified";
       el._seal = identitySeal(OWNER_DID);
+      el.accessForTestingOnly.profileKnown = true;
       expect(el._verified).toBe(true);
       expect(JSON.stringify(el.render())).toContain("verified");
     });
@@ -258,6 +328,7 @@ describe("CFProfileBadge", () => {
 
         el._state = "verified";
         el._seal = identitySeal(OWNER_DID);
+        el.accessForTestingOnly.profileKnown = true;
         expect(el._verified).toBe(true);
         expect(JSON.stringify(el.render())).toContain('"verified"');
       }
@@ -307,6 +378,8 @@ describe("CFProfileBadge", () => {
       let unsubscribeCount = 0;
       const resolvedCell = {
         ref: () => ({ path: [] }),
+        space: () => "did:key:zSpace",
+        id: () => "fid1:piece",
         asSchema: () => ({
           subscribe: (cb: (val: unknown) => void) => {
             subscribeCount++;
@@ -387,6 +460,62 @@ describe("CFProfileBadge", () => {
       deliver?.({ name: "Ada" }, representsPrincipalLabel(OWNER_DID));
       expect(el._state).toBe("verified");
       expect(el._seal?.did).toBe(OWNER_DID);
+    });
+
+    it("seeds the seal with the space when the cell is its space's root profile", async () => {
+      const space = "did:key:z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp";
+      const badge = badgeOver(
+        resolvedInSpace(space, "of:profile", "of:profile"),
+      );
+
+      await badge.accessForTestingOnly.resolve();
+
+      expect(badge.accessForTestingOnly.verified).toBe(true);
+      expect(badge.accessForTestingOnly.seal?.ringGradient).toBe(
+        identitySeal(OWNER_DID, space).ringGradient,
+      );
+      expect(badge.accessForTestingOnly.seal?.ringGradient).not.toBe(
+        identitySeal(OWNER_DID).ringGradient,
+      );
+    });
+
+    it("keeps the seal the principal's alone for a document that is not its space's root", async () => {
+      const space = "did:key:z6MkjchhfUsD6mmvni8mCdXHw216Xrm9bQe2mBH1P5RDjVJG";
+      const badge = badgeOver(
+        resolvedInSpace(space, "of:roster-entry", "of:room"),
+      );
+
+      await badge.accessForTestingOnly.resolve();
+
+      expect(badge.accessForTestingOnly.verified).toBe(true);
+      expect(badge.accessForTestingOnly.seal?.ringGradient).toBe(
+        identitySeal(OWNER_DID).ringGradient,
+      );
+    });
+
+    it("presents no seal until it knows whether the cell is a profile", async () => {
+      const space = "did:key:z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp";
+      const opened = deferred<void>();
+      const resolved = resolvedInSpace(
+        space,
+        "of:profile",
+        "of:profile",
+        opened.promise,
+      );
+      const badge = badgeOver(resolved);
+
+      const resolving = badge.accessForTestingOnly.resolve();
+      // The label has arrived; the space cell has not been opened.
+      await resolved.delivered;
+      expect(badge.accessForTestingOnly.state).toBe("verified");
+      expect(badge.accessForTestingOnly.verified).toBe(false);
+
+      opened.resolve();
+      await resolving;
+      expect(badge.accessForTestingOnly.verified).toBe(true);
+      expect(badge.accessForTestingOnly.seal?.ringGradient).toBe(
+        identitySeal(OWNER_DID, space).ringGradient,
+      );
     });
 
     it("stays presented (no seal) when the label has no represents-principal atom", () => {

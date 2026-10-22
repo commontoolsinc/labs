@@ -616,8 +616,8 @@ runtime holding the inbox refuses to let another principal's code copy the
 offers anywhere. The label does not stop another principal's runtime reading
 them, as the access section says.
 
-An offer is the envelope a loom share inbox keeps, its eight fields, and one
-more:
+An offer is the envelope a loom share inbox keeps, its nine fields, and one
+more, `receivedAt`:
 
 - `kind`: what is offered, such as `loom` or `fabrichat-room`. A reader acts
   only on the kinds it knows.
@@ -631,6 +631,11 @@ more:
   actor, from `currentPrincipal()`.
 - `sharedAt`: when the sender shared the offer, in milliseconds since the
   epoch, by the sender's clock.
+- `toProfile`: `{space}`, the recipient's profile the offer is for, by its
+  space DID, when the sender named one. Every profile of one identity points
+  at this one inbox, so this is what tells the recipient which of their
+  profiles was offered the thing. Like `from`, it is the sender's claim; a
+  reader acts on it only for a profile that is its own.
 - `receivedAt`: when the inbox received the offer, by its own clock. A
   handler's clock reads to the second, so two offers can share it.
 
@@ -666,8 +671,9 @@ does, and then checks the sender:
   (`loom`), `sharedAt`, unless it is a positive number, with the time the
   inbox received the offer, and `id` with `<space>@<sharedAt>`, so a resend
   with neither `id` nor `sharedAt` in a later second is kept again. An
-  `ownerOrigin` that is not an origin is kept empty. A field the envelope does
-  not name is not kept.
+  `ownerOrigin` that is not an origin is kept empty, and a `toProfile` whose
+  `space` is not a well-formed DID is not kept. A field the envelope does not
+  name is not kept.
 - The event is dropped when its `from` is not the principal sending it, or
   when an offer in the inbox already has its `from` and `id`. So a resend of
   one offer is kept once, the first one kept stays as it was, and no sender

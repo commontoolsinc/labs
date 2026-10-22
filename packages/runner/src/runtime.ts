@@ -904,6 +904,17 @@ export interface RuntimeOptions {
   cfcReadOnExceed?: CfcReadOnExceed;
 
   /**
+   * The space of the profile `#profile` answers with, among the user's
+   * profiles, for a runtime that acts as one of them (a host keeping one
+   * profile per identity it presents, as the Weaver does with its facets).
+   * When the home does not list that profile, or retired it, `#profile`
+   * fails rather than answer as another profile. The home's own default and
+   * most-recently-used profiles are unchanged, and nothing but `#profile`'s
+   * answer reads this.
+   */
+  preferredProfileSpace?: MemorySpace;
+
+  /**
    * Deployment policy records for the exchange-rule evaluator (Epic B2a,
    * spec §4.3). Validated, digested, and deep-frozen into a `PolicySnapshot`
    * at construction — malformed records throw at boot (fail-closed config,
@@ -1374,6 +1385,9 @@ export class Runtime {
 
   /** See `RuntimeOptions.cfcReadOnExceed`; `undefined` leaves `fail` in force. */
   readonly cfcReadOnExceed: CfcReadOnExceed | undefined;
+
+  /** See `RuntimeOptions.preferredProfileSpace`. */
+  readonly preferredProfileSpace: MemorySpace | undefined;
 
   /** Frozen deployment policy snapshot; undefined = no policies configured. */
   readonly cfcPolicySnapshot: PolicySnapshot | undefined;
@@ -2133,6 +2147,7 @@ export class Runtime {
       }
       this.cfcReadMaxConfidentiality = readCeiling.maxConfidentiality;
       this.cfcReadOnExceed = readCeiling.onExceed;
+      this.preferredProfileSpace = options.preferredProfileSpace;
       // Validates + digests + deep-freezes; throws on malformed records so a
       // config error surfaces at boot, not as a silently inert rule (same
       // eager-validation posture as the spaceHostMap URLs above).

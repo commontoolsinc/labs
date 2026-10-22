@@ -235,8 +235,8 @@ export {
 } from "./pattern-source-scheme.ts";
 export { DocumentLoadError, loadDocument } from "./document-readiness.ts";
 export {
+  loadProfileCandidates,
   orderProfileCandidates,
-  profileCellIsValid,
   type ProfileOrder,
 } from "./profile-order.ts";
 export {

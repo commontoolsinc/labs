@@ -47,11 +47,15 @@ import {
 } from "./shared-space-catalog.ts";
 import {
   type CreateProfileEvent,
+  type ProfileRetirementEvent,
+  restoreProfile,
+  retireProfile,
   seedProfileName,
   submitProfileCreation,
   type TrustedDefaultProfile,
   type TrustedProfileList,
   type TrustedProfileMru,
+  type TrustedRetiredProfileList,
 } from "./profile-create.tsx";
 import ProfilePicker from "./profile-picker.tsx";
 import { refusalReasonText } from "./private-inbox-refusal-text.ts";
@@ -134,6 +138,10 @@ export type HomeOutput = {
   defaultProfile?: TrustedDefaultProfile;
   legacyDefaultProfile?: BackwardsCompatibleProfile;
   mru: Default<TrustedProfileMru, []>;
+  // The profiles the user retired, appended by `retireProfile` and removed
+  // by `restoreProfile`. A retired profile stays in `profiles`, and is not
+  // one of the user's profiles: `#profile` and the picker leave it out.
+  retiredProfiles: Default<TrustedRetiredProfileList, []>;
   // The user's agent queue: the index of their agent runs and their
   // registered runner. `wish({ query: "#agent_queue" })` resolves to it, and
   // the `agent` builtin appends to its `entries`.
@@ -192,6 +200,11 @@ export type HomeOutput = {
   // a shared space away.
   removeSharedSpace: Stream<SharedSpaceRemoval, SharedSpaceRemovalResult>;
   createProfile: Stream<CreateProfileEvent>;
+  // Retires the profile the event links, as the picker's Remove does, unless
+  // it is the default.
+  retireProfile: Stream<ProfileRetirementEvent>;
+  // Restores the retired profile the event links.
+  restoreProfile: Stream<ProfileRetirementEvent>;
   // Gives Home the private inbox the deciding profile advertises: it adopts the
   // one the host vetted and names, with that profile, when the profile is in
   // Home's list and still points at it, or creates one when Home holds none
@@ -400,6 +413,8 @@ const Home = pattern(
       BackwardsCompatibleProfile | undefined
     >(undefined).for("defaultProfile");
     const mru = new Writable<BackwardsCompatibleProfile[]>([]).for("mru");
+    const retiredProfiles = new Writable<TrustedRetiredProfileList>([])
+      .for("retiredProfiles");
     // Home's private inbox, which a profile is pointed at when it is created
     // and when the host ensures the inbox.
     const privateInbox = new Writable<PrivateInboxHolder>({}).for(
@@ -465,6 +480,7 @@ const Home = pattern(
       legacyDefaultProfile: legacyDefaultProfile as any,
       offersSetDefault: true,
       mru: mru as any,
+      retiredProfiles: retiredProfiles as any,
       privateInbox,
     });
 
@@ -702,6 +718,7 @@ const Home = pattern(
       defaultProfile: defaultProfile as any,
       legacyDefaultProfile: legacyDefaultProfile as any,
       mru: mru as any,
+      retiredProfiles: retiredProfiles as any,
       agentQueue,
       chatManager,
       privateInbox,
@@ -724,6 +741,14 @@ const Home = pattern(
       adoptSpace: adoptSpaceHandler({ spaces }),
       renameSpace: renameSpaceHandler({ spaces }),
       createProfile: createProfileStream,
+      retireProfile: retireProfile({
+        retiredProfiles: retiredProfiles as any,
+        defaultProfile: defaultProfile as any,
+        legacyDefaultProfile: legacyDefaultProfile as any,
+      }),
+      restoreProfile: restoreProfile({
+        retiredProfiles: retiredProfiles as any,
+      }),
       ensurePrivateInbox: ensurePrivateInboxStream,
       requestPrivateInbox: requestPrivateInbox({
         profiles: profiles as any,

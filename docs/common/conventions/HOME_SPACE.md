@@ -103,6 +103,18 @@ most-recently-used (MRU) ordering:
   default".
 - `homeSpaceCell.defaultPattern.mru` — recency-ordered links; drives ordering
   after the default.
+- `homeSpaceCell.defaultPattern.retiredProfiles` — links to the profiles the
+  user retired. A retired profile keeps its link in `profiles` and is not one of
+  the user's profiles: `#profile` never answers with it and leaves it out of its
+  candidates, and a retired default is no default. Its space and data stay on
+  the host, so a link to it held elsewhere still shows it. The picker's Remove
+  control retires a profile after asking to confirm, through Home's
+  `retireProfile` handler, and `cf profile retire` does the same from the
+  command line. The picker lists retired profiles apart, each with a Restore
+  that calls Home's `restoreProfile` handler, as `cf profile restore` does; a
+  restored profile is one of the user's profiles again. `retireProfile` refuses
+  the profile the default names, so the picker offers no Remove on the
+  default's row.
 
 Each profile lives in its own space, created with the anonymous
 `PatternFactory.inSpace()` — one allocation per creation, each a new space with
@@ -181,13 +193,24 @@ it represents the person the host expects. Until the repair reaches it, a
 profile in such a space is reached only through a link to it, such as the one
 in `profiles`.
 
-`profiles`/`defaultProfile`/`mru` are CFC-protected profile-link data, created
-through the trusted profile-create / picker surfaces. Untrusted writes are
-rejected: adding/replacing a link fails the element contract, and structural
-changes (truncation/removal/reorder) fail the array's container
-`writeAuthorizedBy`. The inline `#profile` wish UI uses the trusted
-profile-create surface for the same creation event and does not navigate away
-from the current view.
+`profiles`, `defaultProfile`, `mru` and `retiredProfiles` are profile-link data
+with CFC write contracts. On `profiles` and `mru` each element carries the
+trusted profile-create or picker surface's UI contract, which gates adding or
+replacing a link, and the array container carries `writeAuthorizedBy`, which
+gates truncation, removal and reorder. Home keeps each of these lists in a
+document of its own, which its result links, and the contracts on `profiles` and
+`mru` are stated only on Home's result type, not on those documents. They do not
+hold there: an untrusted write to either list, through Home's result or to the
+document itself, commits. The `defaultProfile` slot's cell and the
+`retiredProfiles` cell carry their contracts themselves, so an untrusted write
+to either is refused. `retiredProfiles` names `retireProfile` and
+`restoreProfile` through `writePolicyAnyOf`, on the elements and the container
+alike, and neither asks for a gesture. Any pattern that reaches Home's streams
+can therefore retire or restore a profile by sending those handlers' events, as
+it can rename one or set its picture; what the contract refuses is a write by
+anything else. The inline `#profile` wish UI uses the trusted profile-create
+surface for the same creation event and does not navigate away from the current
+view.
 
 Patterns can discover profile data from any space:
 

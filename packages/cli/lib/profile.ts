@@ -1,29 +1,35 @@
 /**
- * Creating a profile from the command line.
+ * Creating, listing, renaming, picturing, retiring and restoring profiles
+ * from the command line.
  *
- * A profile is appended to the home root's `profiles` list, which is
- * owner-protected behind the create surface's UI contract: the append must
- * ride an event that a trusted surface attests to. In the shell that surface
- * is the create form, and the html renderer marks its click. Here the CLI is
- * the surface. The person typing the command is the same actor the renderer
- * stands in for, acting under their own key on their own machine, so the CLI
- * builds the event the renderer would have built and marks it the same way
- * (`trusted-action-event.ts`). What the contract refuses is pattern code or
- * untrusted content forging the gesture, and neither can reach this path.
+ * A profile is appended to the home root's `profiles` list, whose elements
+ * carry the create surface's UI contract: the append must ride an event
+ * marked with that surface's gesture. A command line renders no surface, so
+ * `createProfile()` builds the event the html renderer builds for a click on
+ * the create form and marks it the same way (`trusted-action-event.ts`); no
+ * renderer saw that event, and no reviewed surface was shown. The handler is
+ * the home pattern's `createProfile`, so the profile is made exactly as the
+ * shell makes one: in its own space, its display name carried on the event
+ * and never on a draft cell.
  *
- * The handler itself is the home pattern's `createProfile`, so the profile is
- * made exactly as the shell makes one: in its own space, its display name
- * carried on the event and never on a draft cell.
+ * Retiring and restoring send plain events to Home's `retireProfile` and
+ * `restoreProfile`, the only writers its `retiredProfiles` list admits, and
+ * renaming and picturing send plain events to the profile's own handlers.
  */
 
-import type { CellScope } from "@commonfabric/api";
+import type { CellScope, JSONSchema } from "@commonfabric/api";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
   type Cell,
   cellRuntime,
   getMetaLink,
   type IExtendedStorageTransaction,
+  loadProfileCandidates,
+  orderProfileCandidates,
   sendEvent,
 } from "@commonfabric/runner";
+import { cfcLabelViewForResolvedTargetWithStatus } from "@commonfabric/runner/cfc";
+import { exactPrincipalAttestations } from "@commonfabric/runner/cfc/represents-principal";
 
 import { canonicalAddress } from "./callable.ts";
 import { loadPieces, type SpaceConfig } from "./piece.ts";
@@ -38,6 +44,33 @@ import { buildActionEvent } from "./trusted-action-event.ts";
  */
 export const PROFILE_CREATE_SURFACE = "ProfileCreateSurface";
 export const PROFILE_CREATE_ACTION = "CreateProfile";
+
+/**
+ * Why `name`, trimmed, cannot be a profile's display name, or `undefined`
+ * when it can: it must not be empty, and must hold no control character,
+ * since it is stored on the profile and echoed to the terminal. The profile's
+ * own handlers refuse the same names (`nameHasControlCharacter()` in
+ * profile-home.tsx, a pattern this package does not import).
+ */
+export function profileNameProblem(name: string): string | undefined {
+  const trimmed = name.trim();
+  if (trimmed.length === 0) return "A profile needs a name.";
+  if (/\p{Cc}/u.test(trimmed)) {
+    return "A profile name cannot contain control characters.";
+  }
+  return undefined;
+}
+
+/**
+ * `name` trimmed, as a profile's display name.
+ *
+ * @throws Error when it cannot be one, saying why (`profileNameProblem()`).
+ */
+export function profileName(name: string): string {
+  const problem = profileNameProblem(name);
+  if (problem !== undefined) throw new Error(problem);
+  return name.trim();
+}
 
 /** What `createProfile()` needs: a connection, and the name to create under. */
 export interface ProfileCreateConfig extends SpaceConfig {
@@ -76,13 +109,17 @@ export interface CreateProfileDeps {
 const profileLinkListSchema = {
   type: "array",
   items: { type: "unknown", asCell: ["cell"] },
-  // deno-lint-ignore no-explicit-any
-} as any;
+} as const satisfies JSONSchema;
 
-/** The spaces the home root's `profiles` list links into, one per profile. */
-function profileSpaces(root: Cell<unknown>): Map<string, Cell<unknown>> {
-  const links = (root.key("profiles").asSchema(profileLinkListSchema)
-    .get() ?? []) as Cell<unknown>[];
+/**
+ * The spaces the home root's list under `key` links into, one per profile,
+ * each with its link.
+ */
+function profileSpaces(
+  root: Cell<unknown>,
+  key: "profiles" | "retiredProfiles" = "profiles",
+): Map<string, Cell<unknown>> {
+  const links = root.key(key).asSchema(profileLinkListSchema).get() ?? [];
   return new Map(
     links.map((link) => [link.getAsNormalizedFullLink().space, link]),
   );
@@ -135,27 +172,21 @@ export async function createdByThisCall(
 }
 
 /**
- * Sends the trusted create event on the home root's `createProfile` stream
- * and resolves with the transaction the handler committed.
+ * Sends `event` on `stream` and resolves with the transaction its handler
+ * committed.
  *
  * The append's own outcome is not the answer: the handler runs after the
- * append, and the profile exists once the handler's transaction — a
- * multi-space commit, since the profile is born in its own space — has
+ * append, and what it does exists once the handler's transaction has
  * committed. A refused append is the one outcome that never reaches a commit
  * callback, so it rejects here.
  */
-function sendCreate(
-  root: Cell<unknown>,
-  name: string,
+function sendAndCommit(
+  stream: Cell<unknown>,
+  event: unknown,
 ): Promise<IExtendedStorageTransaction> {
-  const event = buildActionEvent({ name }, {
-    surface: PROFILE_CREATE_SURFACE,
-    action: PROFILE_CREATE_ACTION,
-  });
   return new Promise((resolve, reject) => {
     try {
-      // deno-lint-ignore no-explicit-any
-      sendEvent(root.key("createProfile"), event, resolve, {
+      sendEvent(stream, event, resolve, {
         onAppended: (delivery, appendedTx) => {
           if (!delivery.delivered && appendedTx.status().status !== "error") {
             reject(new Error(`event append refused: ${delivery.refused}`));
@@ -222,7 +253,8 @@ async function materializeProfile(
  * nothing resolves. The root is ensured and started first, since the
  * handler runs in this process.
  *
- * @throws Error when the handler's commit fails, or when the list carries no
+ * @throws Error when the name is empty or holds a control character, when
+ * the handler's commit fails, or when the list carries no
  * new profile after it — the shape a refused owner-protected write arrives
  * in, since the runtime records the refusal on the transaction it rejected.
  */
@@ -230,32 +262,23 @@ export async function createProfile(
   config: ProfileCreateConfig,
   deps: CreateProfileDeps = {},
 ): Promise<CreatedProfile> {
-  const name = config.name.trim();
-  if (name.length === 0) {
-    throw new Error("A profile needs a name.");
-  }
-  if (/\p{Cc}/u.test(name)) {
-    throw new Error("A profile name cannot contain control characters.");
-  }
+  const name = profileName(config.name);
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
   const home = await pieces.ensureDefaultPattern();
   // Rebound to no transaction: the controller's cell rides a read
   // transaction, and a send opens a writable one of its own.
-  const root = (home.getCell() as Cell<unknown>).withTx();
+  const root = home.getCell().withTx().asSchema(undefined);
   await root.sync();
   const before = profileSpaces(root);
 
-  const committed = await sendCreate(root, name);
-  const status = committed.status();
-  if (status.status === "error") {
-    throw new Error(
-      `Creating profile "${name}" failed: ${
-        "message" in status.error
-          ? String(status.error.message)
-          : String(status.error)
-      }`,
-    );
-  }
+  const committed = await sendAndCommit(
+    root.key("createProfile"),
+    buildActionEvent({ name }, {
+      surface: PROFILE_CREATE_SURFACE,
+      action: PROFILE_CREATE_ACTION,
+    }),
+  );
+  throwIfFailed(committed, `Creating profile "${name}"`);
   // The append lands through the handler's cross-space commit and the
   // retry rounds behind it; the list is read once the runtime is idle and
   // storage has caught up, not off the transaction the send resolved with.
@@ -288,4 +311,544 @@ export async function createProfile(
     id: normalized.id,
     address: canonicalAddress({ space, id: normalized.id, scope }),
   };
+}
+
+/**
+ * Throws when `committed`, the transaction a handler committed, failed:
+ * `doing` names the act in the message.
+ */
+function throwIfFailed(
+  committed: IExtendedStorageTransaction,
+  doing: string,
+): void {
+  const status = committed.status();
+  if (status.status !== "error") return;
+  throw new Error(
+    `${doing} failed: ${
+      "message" in status.error
+        ? String(status.error.message)
+        : String(status.error)
+    }`,
+  );
+}
+
+/** One of a person's profiles, as `listProfiles()` reports it. */
+export interface ListedProfile {
+  /** The profile's stored display name, or "" when it has none yet. */
+  name: string;
+
+  /**
+   * The bytes of the profile's picture, a raster image, or `undefined` when
+   * it has none.
+   */
+  picture: Uint8Array | undefined;
+
+  /**
+   * Whether the picture is attested to its owner: the label its value carries
+   * names the person whose profiles these are, and no one else, as the
+   * principal it represents (`ownerAttests()`). `false` when there is no
+   * picture, for one another principal set, which anyone can, since a
+   * profile's space lets anyone write, and for one stored without a label. A
+   * host showing the picture as the person's face shows it only where this is
+   * `true`.
+   */
+  pictureByOwner: boolean;
+
+  /**
+   * The profile's legacy avatar text (a URL, a `data:` URL or a glyph), or
+   * "" when it has none, shown only where the profile has no picture.
+   */
+  avatar: string;
+
+  /**
+   * Whether the avatar text is attested to its owner, as `pictureByOwner`
+   * says of the picture. `false` when there is none.
+   */
+  avatarByOwner: boolean;
+
+  /** The profile's own space, which identifies it. */
+  space: string;
+
+  /** The profile piece's id within that space. */
+  id: string;
+
+  /** The canonical reference, as {@link CreatedProfile.address} is. */
+  address: string;
+
+  /** Whether `#profile` answers with this profile. */
+  current: boolean;
+}
+
+/**
+ * A profile's stored name, picture and avatar, read without running the
+ * profile.
+ */
+const profileFieldsSchema = {
+  type: "object",
+  properties: {
+    name: { type: "string" },
+    picture: { type: "FabricBytes" },
+    avatar: { type: "string" },
+  },
+} as const satisfies JSONSchema;
+
+/** The bytes `value`, a stored picture, holds; `undefined` for none. */
+function pictureBytes(value: unknown): Uint8Array | undefined {
+  return value instanceof FabricBytes && value.length > 0
+    ? value.slice()
+    : undefined;
+}
+
+/**
+ * Lists the profiles of `config.identity`, in the order `#profile` answers
+ * in: the one it answers with first. The profiles are the ones `#profile`
+ * collects (`loadProfileCandidates()`): a retired profile, or one whose
+ * document is absent, is not listed. A person with no home root yet has no
+ * profiles.
+ *
+ * `config.space` is the identity's home space. The home root is read and not
+ * started, and no profile runs.
+ *
+ * @throws Error when the profile `#profile` answers with failed to load, as
+ * `#profile` itself throws; a later profile that failed is not listed.
+ */
+export async function listProfiles(
+  config: SpaceConfig,
+  deps: CreateProfileDeps = {},
+): Promise<ListedProfile[]> {
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  try {
+    const home = await pieces.getDefaultPattern(false);
+    if (home === undefined) return [];
+    const root = home.withTx().asSchema(undefined);
+    const { candidates, failures } = await loadProfileCandidates(
+      pieces.runtime,
+      root,
+    );
+    const { ordered } = orderProfileCandidates(
+      pieces.runtime,
+      root,
+      root.space,
+      candidates,
+    );
+    const first = ordered[0];
+    if (first !== undefined && failures.has(first)) {
+      throw new Error(
+        `Cannot read the profile in ${first.space}, which '#profile' answers ` +
+          "with.",
+        { cause: failures.get(first) },
+      );
+    }
+    const readable = ordered.filter((profile) => !failures.has(profile));
+    return await Promise.all(readable.map(async (profile, index) => {
+      const fields = profile.asSchema(profileFieldsSchema);
+      await fields.sync();
+      const value = fields.get();
+      const link = profile.getAsNormalizedFullLink();
+      const scope = link.scope ?? "space";
+      const picture = pictureBytes(value?.picture);
+      return {
+        name: value?.name ?? "",
+        picture,
+        pictureByOwner: picture !== undefined &&
+          ownerAttests(profile.key("picture"), root.space),
+        avatar: value?.avatar ?? "",
+        avatarByOwner: (value?.avatar ?? "") !== "" &&
+          ownerAttests(profile.key("avatar"), root.space),
+        space: link.space,
+        id: link.id,
+        address: canonicalAddress({ space: link.space, id: link.id, scope }),
+        current: index === 0,
+      };
+    }));
+  } finally {
+    await pieces.dispose();
+  }
+}
+
+/**
+ * Whether the value at `cell` is attested to `principal`: the label its value
+ * cell carries, which the write that stored the value minted, attests
+ * `principal` and no one else as the principal it represents, read as
+ * `principalOf()` reads one (`exactPrincipalAttestations()`). The label of the
+ * document a field sits in says whom the field was installed for, not who
+ * wrote the value behind it (spec §3.7.2), so the value cell's label is the
+ * one read, as HOME_SPACE.md says a host reads a profile field. A value
+ * stored without a label, or attested to anyone else, is not attested to
+ * `principal`. Like every claim, it binds honest runtimes only.
+ *
+ * @throws Error when the label cannot be read, which is not the same as there
+ * being none.
+ */
+function ownerAttests(cell: Cell<unknown>, principal: string): boolean {
+  const { view, readFailed } = cfcLabelViewForResolvedTargetWithStatus(cell);
+  if (readFailed) {
+    throw new Error(
+      `Could not read the label of ${cell.getAsNormalizedFullLink().id}.`,
+    );
+  }
+  const attested = exactPrincipalAttestations(view, "represents-principal");
+  return attested?.length === 1 && attested[0] === principal;
+}
+
+/** What the profile commands that act on one profile need. */
+export interface ProfileTargetConfig extends SpaceConfig {
+  /** The profile's own space, which identifies it. */
+  profileSpace: string;
+}
+
+/**
+ * The profile of `config.identity` whose space is `config.profileSpace`, as
+ * a link from the list `root`, the home root, holds under `profiles`.
+ * `retired` says whether the profile must be one the home retired, or one it
+ * has not.
+ *
+ * @throws Error when the home lists no such profile, or its retirement is
+ * not what `retired` asks for.
+ */
+async function listedProfile(
+  root: Cell<unknown>,
+  config: ProfileTargetConfig,
+  retired: boolean,
+): Promise<Cell<unknown>> {
+  await root.sync();
+  await root.key("retiredProfiles").resolveAsCell().sync();
+  const profile = profileSpaces(root).get(config.profileSpace);
+  if (profile === undefined) {
+    throw new Error(
+      `No profile of ${config.space} lives in ${config.profileSpace}.`,
+    );
+  }
+  if (isRetired(root, config) !== retired) {
+    throw new Error(
+      retired
+        ? `The profile in ${config.profileSpace} is not retired.`
+        : `The profile in ${config.profileSpace} is retired.`,
+    );
+  }
+  return profile;
+}
+
+/**
+ * Whether the home root `root` lists the profile in `config.profileSpace` as
+ * retired, as it is loaded now.
+ */
+function isRetired(root: Cell<unknown>, config: ProfileTargetConfig): boolean {
+  return profileSpaces(root, "retiredProfiles").has(config.profileSpace);
+}
+
+/**
+ * Sends the event `{ profile }` on the home root's stream `streamName`, for
+ * the profile of `config.identity` whose space is `config.profileSpace`,
+ * which is retired before the send exactly when `retired` is true and is not
+ * after it. The home root is started, since its handler runs in this
+ * process. `doing` names the act in a failure's message.
+ *
+ * @throws Error when the commit fails, or when it leaves the profile's
+ * retirement as it was: a refused write does not reach the commit's own
+ * status, since the runtime records the refusal on the transaction it
+ * rejected.
+ */
+async function sendToHome(
+  config: ProfileTargetConfig,
+  streamName: "retireProfile" | "restoreProfile",
+  retired: boolean,
+  doing: string,
+  deps: CreateProfileDeps,
+): Promise<void> {
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  try {
+    const home = await pieces.ensureDefaultPattern();
+    const root = home.getCell().withTx().asSchema(undefined);
+    const profile = await listedProfile(root, config, retired);
+    const committed = await sendAndCommit(root.key(streamName), { profile });
+    throwIfFailed(committed, doing);
+    await pieces.runtime.idle();
+    await pieces.synced();
+    await root.key("retiredProfiles").resolveAsCell().sync();
+    if (isRetired(root, config) === retired) {
+      throw new Error(`${doing} committed, but Home's list did not change.`);
+    }
+  } finally {
+    await pieces.dispose();
+  }
+}
+
+/**
+ * Retires the profile of `config.identity` whose space is
+ * `config.profileSpace`, as the picker's Remove does: Home lists it in
+ * `retiredProfiles`, and it stops being one of the person's profiles until
+ * `restoreProfile()` restores it.
+ *
+ * @throws Error when the home lists no such profile, when the profile is
+ * retired already, or when the retire fails, as Home's handler fails it for
+ * the profile the default names, or does not land.
+ */
+export function retireProfile(
+  config: ProfileTargetConfig,
+  deps: CreateProfileDeps = {},
+): Promise<void> {
+  return sendToHome(
+    config,
+    "retireProfile",
+    false,
+    `Retiring profile ${config.profileSpace}`,
+    deps,
+  );
+}
+
+/**
+ * Restores the retired profile of `config.identity` whose space is
+ * `config.profileSpace`: Home takes it out of `retiredProfiles`, and it is
+ * one of the person's profiles again.
+ *
+ * @throws Error when the home lists no such profile, when the profile is not
+ * retired, or when the restore fails or does not land.
+ */
+export function restoreProfile(
+  config: ProfileTargetConfig,
+  deps: CreateProfileDeps = {},
+): Promise<void> {
+  return sendToHome(
+    config,
+    "restoreProfile",
+    true,
+    `Restoring profile ${config.profileSpace}`,
+    deps,
+  );
+}
+
+/** One event `sendToProfile()` sends, and the profile's stream it goes to. */
+interface ProfileSend {
+  /** The profile's stream. */
+  stream: "setName" | "setPicture" | "setAvatar";
+
+  /** The event sent on it. */
+  event: unknown;
+}
+
+/**
+ * Sends each of `sends`, in order and each in a commit of its own, to the
+ * profile of `config.identity` whose space is `config.profileSpace`, which
+ * the home lists and has not retired, running the profile so that its
+ * handlers exist, and waits for the commits to reach storage. The home root
+ * is read and not started. `doing` names the act in a failure's message.
+ *
+ * @throws Error when the home lists no such profile or retired it, when a
+ * commit fails, or when `landed`, given the profile's stored name, picture
+ * and avatar once the commits have reached storage, says the writes did not
+ * land: a refused write does not reach the commit's own status, since the
+ * runtime records the refusal on the transaction it rejected.
+ */
+async function sendToProfile(
+  config: ProfileTargetConfig,
+  sends: readonly ProfileSend[],
+  doing: string,
+  landed: (
+    stored: { name?: string; picture?: unknown; avatar?: string },
+  ) => boolean,
+  deps: CreateProfileDeps,
+): Promise<void> {
+  const load = deps.loadPieces ?? loadPieces;
+  const home = await load(config);
+  let target: { id: string; scope: CellScope };
+  try {
+    const root = await home.getDefaultPattern(false);
+    if (root === undefined) {
+      throw new Error(`${config.space} has no home, so it has no profiles.`);
+    }
+    const profile = await listedProfile(
+      root.withTx().asSchema(undefined),
+      config,
+      false,
+    );
+    const resolved = profile.withTx();
+    await resolved.sync();
+    const link = resolved.resolveAsCell().getAsNormalizedFullLink();
+    target = { id: link.id, scope: link.scope ?? "space" };
+  } finally {
+    await home.dispose();
+  }
+  const pieces = await load({ ...config, space: config.profileSpace });
+  try {
+    const piece = await pieces.getPieceCell(
+      target.id,
+      true,
+      undefined,
+      target.scope,
+    );
+    for (const { stream, event } of sends) {
+      const committed = await sendAndCommit(
+        piece.asSchema(undefined).key(stream),
+        event,
+      );
+      throwIfFailed(committed, doing);
+    }
+    await pieces.runtime.idle();
+    await pieces.synced();
+    const stored = piece.asSchema(profileFieldsSchema);
+    await stored.sync();
+    await pieces.stopPiece(piece);
+    if (!landed(stored.get() ?? {})) {
+      throw new Error(`${doing} committed, but the profile did not change.`);
+    }
+  } finally {
+    await pieces.dispose();
+  }
+}
+
+/**
+ * Renames the profile of `config.identity` whose space is
+ * `config.profileSpace` to `name`, through the profile's own `setName`.
+ *
+ * @throws Error when the name is empty or holds a control character, when
+ * the home lists no such profile or has retired it, or when the rename fails
+ * or does not land.
+ */
+export async function renameProfile(
+  config: ProfileTargetConfig & { name: string },
+  deps: CreateProfileDeps = {},
+): Promise<void> {
+  const name = profileName(config.name);
+  await sendToProfile(
+    config,
+    [{ stream: "setName", event: { name } }],
+    `Renaming profile ${config.profileSpace}`,
+    (stored) => stored.name === name,
+    deps,
+  );
+}
+
+/**
+ * The most bytes a profile picture `setProfilePicture()` stores may hold:
+ * 256 KiB. The shell's picture picker stores a 128-pixel square, which even
+ * as uncompressed RGBA is 64 KiB, so this admits four times that, a larger
+ * square or a less compressed one, and refuses a photograph straight off a
+ * camera. Every list, cache and feed that carries a profile carries its
+ * picture.
+ */
+export const PROFILE_PICTURE_MAX_BYTES = 256 * 1024;
+
+/** The header sizes a BMP's DIB header may have, by the version it is. */
+const BMP_DIB_HEADER_SIZES = new Set([12, 40, 52, 56, 64, 108, 124]);
+
+/**
+ * Whether `bytes` opens as a raster image an `<img>` decodes, by its leading
+ * bytes:
+ *
+ * - PNG: the eight-byte signature `89 50 4E 47 0D 0A 1A 0A`;
+ * - JPEG: `FF D8 FF`;
+ * - GIF: `GIF87a` or `GIF89a`;
+ * - WebP: `RIFF`, any four bytes, then `WEBP`;
+ * - BMP: `BM`, and at offset 14 a little-endian 32-bit DIB header size of
+ *   12, 40, 52, 56, 64, 108 or 124;
+ * - AVIF: an ISO BMFF `ftyp` box at offset 0 (a big-endian 32-bit size of at
+ *   least 16, then `ftyp`) whose major brand, at offset 8, or one of whose
+ *   compatible brands, from offset 16 to the box's end in steps of four, is
+ *   `avif` or `avis`.
+ *
+ * It looks at nothing past those bytes, so a file that opens like an image
+ * and is not one passes; what it keeps out is anything that does not open
+ * like one, SVG among them.
+ */
+export function isRasterImage(bytes: Uint8Array): boolean {
+  const ascii = (start: number, text: string) =>
+    start + text.length <= bytes.length &&
+    [...text].every((char, index) =>
+      bytes[start + index] === char.charCodeAt(0)
+    );
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const isAvif = () => {
+    if (bytes.length < 16 || !ascii(4, "ftyp")) return false;
+    const end = Math.min(view.getUint32(0), bytes.length);
+    if (end < 16) return false;
+    const brands = [8];
+    for (let offset = 16; offset + 4 <= end; offset += 4) brands.push(offset);
+    return brands.some((offset) =>
+      ascii(offset, "avif") || ascii(offset, "avis")
+    );
+  };
+  return [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((byte, index) =>
+    bytes[index] === byte
+  ) ||
+    (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 &&
+      bytes[2] === 0xff) ||
+    ascii(0, "GIF87a") || ascii(0, "GIF89a") ||
+    (ascii(0, "RIFF") && ascii(8, "WEBP")) ||
+    (ascii(0, "BM") && bytes.length >= 18 &&
+      BMP_DIB_HEADER_SIZES.has(view.getUint32(14, true))) ||
+    isAvif();
+}
+
+/**
+ * What `setProfilePicture()` needs: the profile, and either the picture's
+ * bytes or `clear: true` to remove it.
+ */
+export type ProfilePictureConfig =
+  & ProfileTargetConfig
+  & (
+    /** The bytes of a raster image, stored as they are. */
+    | { bytes: Uint8Array }
+    /** Removes the picture and the legacy avatar text. */
+    | { clear: true }
+  );
+
+/**
+ * Sets the picture of the profile of `config.identity` whose space is
+ * `config.profileSpace` to `config.bytes`, through the profile's own
+ * `setPicture`. The bytes are stored as they are: nothing here crops or
+ * scales them, as the shell's picture picker does to a 128-pixel square, so a
+ * caller passes an image of the size it wants shown.
+ *
+ * With `config.clear` it removes the picture, through `setPicture`, and the
+ * legacy avatar text, through `setAvatar`, since a profile shows that text
+ * wherever it has no picture: a person removing their picture expects none
+ * to be shown.
+ *
+ * @throws Error when the bytes are more than `PROFILE_PICTURE_MAX_BYTES` or
+ * are not a raster image (`isRasterImage()`), when the home lists no such
+ * profile or has retired it, or when a write fails or does not land.
+ */
+export async function setProfilePicture(
+  config: ProfilePictureConfig,
+  deps: CreateProfileDeps = {},
+): Promise<void> {
+  if ("bytes" in config) {
+    if (config.bytes.length > PROFILE_PICTURE_MAX_BYTES) {
+      throw new Error(
+        `A profile picture can be at most ${PROFILE_PICTURE_MAX_BYTES} ` +
+          `bytes (256 KiB), and this one is ${config.bytes.length}. The ` +
+          "shell stores a 128-pixel square; scale the image down first.",
+      );
+    }
+    if (!isRasterImage(config.bytes)) {
+      throw new Error(
+        "A profile picture must be a PNG, JPEG, GIF, WebP, AVIF or BMP image.",
+      );
+    }
+  }
+  const expected = "bytes" in config ? config.bytes : undefined;
+  await sendToProfile(
+    config,
+    expected === undefined
+      ? [
+        { stream: "setPicture", event: { clear: true } },
+        { stream: "setAvatar", event: { clear: true } },
+      ]
+      : [{
+        stream: "setPicture",
+        event: { picture: new FabricBytes(expected) },
+      }],
+    expected === undefined
+      ? `Removing the picture of profile ${config.profileSpace}`
+      : `Setting the picture of profile ${config.profileSpace}`,
+    (stored) => {
+      const picture = pictureBytes(stored.picture);
+      return expected === undefined
+        ? picture === undefined && (stored.avatar ?? "") === ""
+        : picture !== undefined && picture.length === expected.length &&
+          picture.every((byte, index) => byte === expected[index]);
+    },
+    deps,
+  );
 }

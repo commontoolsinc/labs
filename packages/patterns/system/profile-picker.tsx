@@ -1,6 +1,8 @@
 import {
+  type Cell,
   computed,
   type Default,
+  handler,
   ifElse,
   NAME,
   pattern,
@@ -10,8 +12,11 @@ import {
 } from "commonfabric";
 import ProfileCreate, {
   type DefaultProfileSlot,
-  profileLinkListSchema,
-  profileLinkSchema,
+  defaultProfileSpace,
+  profileLinks,
+  profileLinkSpace,
+  restoreProfile,
+  retireProfile,
   setDefaultProfile,
   setMruProfile,
   TRUSTED_PROFILE_PICKER_SURFACE,
@@ -26,7 +31,9 @@ import type {
 // The profile picker rendered as the `[UI]` of a #profile wish when the user
 // has 2+ profiles and no valid default. It renders each profile natively
 // (name + avatar + a link), offers an inline "create another" affordance, lets
-// the user pick a default, and stamps most-recently-used (MRU) on selection.
+// the user pick a default, stamps most-recently-used (MRU) on selection, and
+// retires a profile other than the default through Remove, which asks to
+// confirm first. Retired profiles are listed apart, each with a Restore.
 //
 // The picker is purely the SWITCHING affordance (CT-1829): the wish `.result`
 // does NOT flow through this pattern. The wish builtin resolves `.result`
@@ -52,6 +59,12 @@ type ProfilePickerInput = {
   legacyDefaultProfile?: Writable<BackwardsCompatibleProfile | undefined>;
   offersSetDefault: Default<boolean, true>;
   mru: Writable<BackwardsCompatibleProfile[]>;
+  // Home's retired profiles, which the picker lists apart, its Remove
+  // appends to through `retireProfile`, and its Restore removes from through
+  // `restoreProfile`.
+  // Defaulted, as an input a stored picker's argument may lack; absent, the
+  // picker lists no profile as retired.
+  retiredProfiles: Writable<Default<BackwardsCompatibleProfile[], []>>;
   // Home's private inbox, which a profile created here is pointed at; see
   // `ProfileCreateInput.privateInbox`.
   privateInbox?: ProfileInbox;
@@ -81,47 +94,37 @@ type ProfilePickerInput = {
 // reference, not a cell, so it carries no link and every row compared as "not
 // the default" (the badge never lit; 2026-09-11, the estuary profile preflight).
 //
-// Uses `getAsNormalizedFullLink().space` via the `as any` escape hatch — the
-// pattern-facing surface has no typed space accessor (precedent:
-// home-ben.tsx). Defensive: any throw / missing space ⇒ no match.
-
-// A cell's own space DID, or undefined if it isn't a resolvable link. Module
-// scope (not pattern context), so the `as any` escape hatch + `?.` are fine.
-// deno-lint-ignore no-explicit-any
-const linkSpace = (cell: unknown): string | undefined => {
-  try {
-    return (cell as any)?.getAsNormalizedFullLink?.()?.space as
-      | string
-      | undefined;
-  } catch {
-    return undefined;
-  }
-};
-
+// The spaces are read with `profileLinkSpace()`. Any throw or missing space
+// means no match.
 const sameProfileCell = (
   a: unknown,
   b: unknown,
   homeSpace: string | undefined,
 ): boolean => {
-  const spaceA = linkSpace(a);
-  const spaceB = linkSpace(b);
+  const spaceA = profileLinkSpace(a);
+  const spaceB = profileLinkSpace(b);
   if (!spaceA || !spaceB) return false;
   if (spaceA === homeSpace || spaceB === homeSpace) return false;
   return spaceA === spaceB;
 };
 
-/**
- * The default's link: `slot`, the slot's `profile`, when it names a profile,
- * and otherwise `legacy`. A link that resolves into the home space names none.
- */
-const defaultLink = (
-  slot: unknown,
-  legacy: unknown,
+// Whether `entry` names a profile in `retired`, compared by space.
+const isRetired = (
+  entry: unknown,
+  retired: readonly unknown[],
   homeSpace: string | undefined,
-): unknown => {
-  const space = linkSpace(slot);
-  return space && space !== homeSpace ? slot : legacy;
-};
+): boolean => retired.some((each) => sameProfileCell(each, entry, homeSpace));
+
+// Asks to confirm the retirement of a row's profile, or, with no profile
+// bound, withdraws the question: records which profile, by its space, the
+// confirmation is showing for. Remove asks first so that a stray click retires
+// nothing.
+const askToRetire = handler<
+  unknown,
+  { confirming: Writable<string>; profile?: Cell<BackwardsCompatibleProfile> }
+>((_, { confirming, profile }) => {
+  confirming.set(profile === undefined ? "" : profileLinkSpace(profile) ?? "");
+});
 
 export default pattern<
   ProfilePickerInput,
@@ -133,12 +136,13 @@ export default pattern<
     legacyDefaultProfile,
     offersSetDefault,
     mru,
+    retiredProfiles,
     privateInbox,
   },
 ) => {
   // Home space of the `profiles`/`defaultProfile`/`mru` container links — used
   // to reject entries that resolve into the home space (see sameProfileCell).
-  const homeSpace = linkSpace(profiles);
+  const homeSpace = profileLinkSpace(profiles);
 
   const profileCreate = ProfileCreate({
     profiles: profiles as any,
@@ -146,63 +150,143 @@ export default pattern<
     privateInbox,
   });
 
+  // The space of the profile whose Remove is awaiting confirmation, or "".
+  // Per session: an unanswered question belongs to the view that asked it,
+  // not to Home, so it neither outlives the session nor reaches another
+  // device.
+  const confirming = Writable.perSession.of<string>("");
+
   // Named, so the rows' documents are keyed by `profileRows` rather than by
-  // the map's position among the picker's nodes.
-  const profileRows = profiles.map((p, i) => (
-    <cf-hstack gap="2" align="center">
-      <div style={{ flex: "1" }}>
-        {
-          /* Profiles are identities — rendered via cf-cell-link (the
-              identity idiom is cf-profile-badge), not the generic piece
-              chip variant. */
-        }
-        <cf-cell-link $cell={p as any} />
-      </div>
-      {ifElse(
-        computed(() => {
-          // Read the default link and this row's list entry as cell REFS
-          // (asCell) so a cross-space profile not yet loaded here doesn't
-          // collapse to `undefined`, then match by the profile's own
-          // SPACE (CT-1843) — `equals` returns false cross-space
-          // (different entity id + scope). The entry comes from the list
-          // by index, not from `p`: see sameProfileCell.
-          const entries = ((profiles as any).asSchema(
-            profileLinkListSchema(),
-          ).get() ?? []) as unknown[];
-          const entry = entries[i as any];
-          const def = defaultLink(
-            (defaultProfile as any).key("profile").asSchema(
-              profileLinkSchema(),
-            ).get(),
-            (legacyDefaultProfile as any).asSchema(profileLinkSchema())
-              .get(),
+  // the map's position among the picker's nodes. A retired profile's row is
+  // empty.
+  const profileRows = profiles.map((p, i) => {
+    // Whether this row's profile is the default, matched by the profile's
+    // own SPACE (CT-1843): the default's link and this row's list entry name
+    // the same profile through different documents. The entry comes from the
+    // list by index, read as a link, not from `p`: see sameProfileCell.
+    const isDefault = computed(() => {
+      const space = profileLinkSpace(profileLinks(profiles)[i]);
+      return space !== undefined && space !== homeSpace &&
+        space === defaultProfileSpace(
+            defaultProfile,
+            legacyDefaultProfile,
             homeSpace,
           );
-          return def && entry ? sameProfileCell(def, entry, homeSpace) : false;
-        }),
-        <span style={{ color: "#0a7", fontSize: "12px" }}>default</span>,
-        ifElse(
-          offersSetDefault,
+    });
+    return ifElse(
+      computed(() =>
+        isRetired(
+          profileLinks(profiles)[i],
+          profileLinks(retiredProfiles),
+          homeSpace,
+        )
+      ),
+      null,
+      <cf-vstack gap="1">
+        <cf-hstack gap="2" align="center">
+          <div style={{ flex: "1" }}>
+            {
+              /* Profiles are identities — rendered via cf-cell-link (the
+              identity idiom is cf-profile-badge), not the generic piece
+              chip variant. */
+            }
+            <cf-cell-link $cell={p as any} />
+          </div>
+          {ifElse(
+            isDefault,
+            <span style={{ color: "#0a7", fontSize: "12px" }}>default</span>,
+            ifElse(
+              offersSetDefault,
+              <cf-button
+                size="sm"
+                variant="ghost"
+                data-ui-action={TRUSTED_PROFILE_SET_DEFAULT_ACTION}
+                onClick={setDefaultProfile({
+                  defaultProfile: defaultProfile as any,
+                  profile: p,
+                })}
+              >
+                Set default
+              </cf-button>,
+              null,
+            ),
+          )}
           <cf-button
             size="sm"
-            variant="ghost"
-            data-ui-action={TRUSTED_PROFILE_SET_DEFAULT_ACTION}
-            onClick={setDefaultProfile({
-              defaultProfile: defaultProfile as any,
-              profile: p,
-            })}
+            data-ui-action={TRUSTED_PROFILE_SET_MRU_ACTION}
+            onClick={setMruProfile({ mru: mru as any, profile: p })}
           >
-            Set default
-          </cf-button>,
+            Use
+          </cf-button>
+          {
+            /* The default has no Remove: retiring it would move `#profile`
+              to another profile, so another default is chosen first. */
+          }
+          {ifElse(
+            isDefault,
+            null,
+            <cf-button
+              size="sm"
+              variant="ghost"
+              onClick={askToRetire({ confirming, profile: p })}
+            >
+              Remove…
+            </cf-button>,
+          )}
+        </cf-hstack>
+        {ifElse(
+          computed(() => {
+            const space = profileLinkSpace(profileLinks(profiles)[i]);
+            return space !== undefined && confirming.get() === space;
+          }),
+          <cf-hstack gap="2" align="center">
+            <span style={{ flex: "1", fontSize: "12px" }}>
+              Remove this profile? It stops being one of your profiles, though
+              places that link to it still show it. You can restore it later
+              from the list of removed profiles below.
+            </span>
+            <cf-button
+              size="sm"
+              color="danger"
+              onClick={retireProfile({
+                retiredProfiles: retiredProfiles as any,
+                defaultProfile: defaultProfile as any,
+                legacyDefaultProfile: legacyDefaultProfile as any,
+                profile: p,
+              })}
+            >
+              Remove profile
+            </cf-button>
+            <cf-button
+              size="sm"
+              variant="ghost"
+              onClick={askToRetire({ confirming })}
+            >
+              Cancel
+            </cf-button>
+          </cf-hstack>,
           null,
-        ),
-      )}
+        )}
+      </cf-vstack>,
+    );
+  });
+
+  // The retired profiles, each with a Restore that makes it one of the
+  // user's profiles again.
+  const retiredRows = retiredProfiles.map((p) => (
+    <cf-hstack gap="2" align="center">
+      <div style={{ flex: "1" }}>
+        <cf-cell-link $cell={p as any} />
+      </div>
       <cf-button
         size="sm"
-        data-ui-action={TRUSTED_PROFILE_SET_MRU_ACTION}
-        onClick={setMruProfile({ mru: mru as any, profile: p })}
+        variant="ghost"
+        onClick={restoreProfile({
+          retiredProfiles: retiredProfiles as any,
+          profile: p,
+        })}
       >
-        Use
+        Restore
       </cf-button>
     </cf-hstack>
   ));
@@ -219,6 +303,16 @@ export default pattern<
       >
         <h3 style={{ margin: 0, fontSize: "14px" }}>Your profiles</h3>
         {profileRows}
+        {ifElse(
+          computed(() => profileLinks(retiredProfiles).length > 0),
+          <cf-vstack gap="1">
+            <h4 style={{ margin: 0, fontSize: "12px", color: "#888" }}>
+              Removed profiles
+            </h4>
+            {retiredRows}
+          </cf-vstack>,
+          null,
+        )}
         <hr style={{ border: "none", borderTop: "1px solid #e5e5e7" }} />
         <h4 style={{ margin: 0, fontSize: "12px", color: "#888" }}>
           Add another profile

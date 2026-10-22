@@ -3,7 +3,11 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { Cell } from "../src/cell.ts";
-import { orderProfileCandidates } from "../src/profile-order.ts";
+import {
+  loadProfileCandidates,
+  orderProfileCandidates,
+  preferProfile,
+} from "../src/profile-order.ts";
 import { Runtime } from "../src/runtime.ts";
 
 const signer = await Identity.fromPassphrase("runner-profile-order");
@@ -115,5 +119,96 @@ describe("orderProfileCandidates()", () => {
 
     expect(order.defaultValid).toBe(false);
     expect(namesInOrder(defaultPattern)).toEqual(["second", "first", "third"]);
+  });
+
+  it("leaves out a profile the home retired, keeping the rest in order", async () => {
+    const defaultPattern = await home({
+      mru: [profiles[2]],
+      retiredProfiles: [profiles[0]],
+    });
+
+    expect(namesInOrder(defaultPattern)).toEqual(["third", "second"]);
+  });
+
+  it("leaves out a retired default, which is no default, and answers with the next profile", async () => {
+    const defaultPattern = await home({
+      defaultProfile: { profile: profiles[1] },
+      retiredProfiles: [profiles[1]],
+    });
+    const order = orderProfileCandidates(
+      runtime,
+      defaultPattern,
+      signer.did(),
+      profiles,
+    );
+
+    expect(order.defaultValid).toBe(false);
+    expect(namesInOrder(defaultPattern)).toEqual(["first", "third"]);
+  });
+
+  it("keeps a default that is not retired valid while another profile is retired", async () => {
+    const defaultPattern = await home({
+      defaultProfile: { profile: profiles[1] },
+      retiredProfiles: [profiles[0]],
+    });
+    const order = orderProfileCandidates(
+      runtime,
+      defaultPattern,
+      signer.did(),
+      profiles,
+    );
+
+    expect(order.defaultValid).toBe(true);
+    expect(namesInOrder(defaultPattern)).toEqual(["second", "third"]);
+  });
+
+  it("matches a retired profile by its space, not by the document linked", async () => {
+    const elsewhereInSecond = await documentIn(
+      profiles[1].getAsNormalizedFullLink().space,
+      { name: "another document" },
+    );
+    const defaultPattern = await home({ retiredProfiles: [elsewhereInSecond] });
+
+    expect(namesInOrder(defaultPattern)).toEqual(["first", "third"]);
+  });
+
+  it("puts the preferred profile first and keeps the rest in their order, or returns `undefined` when none lives in the space", () => {
+    const second = profiles[1].getAsNormalizedFullLink().space;
+    const names = (order: Cell<unknown>[] | undefined) =>
+      order?.map((profile) => (profile.get() as { name: string }).name);
+
+    expect(names(preferProfile(profiles, second))).toEqual([
+      "second",
+      "first",
+      "third",
+    ]);
+    expect(preferProfile(profiles, signer.did())).toBeUndefined();
+  });
+
+  it("answers with no candidates when every profile is retired", async () => {
+    const defaultPattern = await home({ retiredProfiles: profiles });
+
+    expect(namesInOrder(defaultPattern)).toEqual([]);
+  });
+
+  it("loads as candidates the listed profiles that are neither retired nor absent, in list order", async () => {
+    const absentSpace = (await Identity.fromPassphrase("profile absent")).did();
+    const absent = runtime.getCell<unknown>(absentSpace, crypto.randomUUID());
+    const inHome = await documentIn(signer.did(), { name: "home" });
+    const defaultPattern = await home({
+      profiles: [profiles[0], absent, inHome, profiles[1], profiles[2]],
+      retiredProfiles: [profiles[1]],
+    });
+
+    const { candidates, failures } = await loadProfileCandidates(
+      runtime,
+      defaultPattern,
+    );
+
+    expect(
+      candidates.map((profile) => (profile.get() as { name: string }).name),
+    )
+      .toEqual(["first", "third"]);
+    expect(failures.size).toBe(0);
   });
 });

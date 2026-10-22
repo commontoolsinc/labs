@@ -74,6 +74,9 @@ export default pattern(() => {
     { profile?: Cell<{ inbox?: Pointer }> }
   >({}).for("defaultProfileSlot");
   const mru = new Writable<Cell<{ inbox?: Pointer }>[]>([]).for("mru");
+  const retiredProfiles = new Writable<Cell<{ inbox?: Pointer }>[]>([]).for(
+    "retiredProfiles",
+  );
   const ensured = new Writable(0).for("ensured");
   const adopted = new Writable<Pointer>({}).for("adopted");
   const decidedBy = new Writable<Named>({}).for("decidedBy");
@@ -84,6 +87,7 @@ export default pattern(() => {
     profiles,
     defaultProfile,
     mru,
+    retiredProfiles,
     ensured,
     adopted,
     decidedBy,
@@ -196,6 +200,13 @@ describe("ensurePrivateInboxOf()", () => {
   async function listRecent(profiles: Cell<unknown>[]): Promise<void> {
     await runtime.editWithRetry((tx) =>
       home.withTx(tx).key("mru" as never).set(profiles as never)
+    );
+  }
+
+  /** Puts `profiles` in Home's retired list. */
+  async function retire(profiles: Cell<unknown>[]): Promise<void> {
+    await runtime.editWithRetry((tx) =>
+      home.withTx(tx).key("retiredProfiles" as never).set(profiles as never)
     );
   }
 
@@ -408,6 +419,20 @@ describe("ensurePrivateInboxOf()", () => {
       expect(await deciderAddress()).toEqual(addressOf(deciding));
     });
 
+    it("passes over a retired profile, though it is the default, to the next in order", async () => {
+      const chosen = await usableInbox();
+      const retired = await profilePointingAt(await usableInbox());
+      const deciding = await profilePointingAt(chosen);
+      await listProfiles([retired, deciding]);
+      await setDefault(retired);
+      await retire([retired]);
+
+      await ensure();
+
+      expect(await adoptedAddress()).toEqual(addressOf(chosen));
+      expect(await deciderAddress()).toEqual(addressOf(deciding));
+    });
+
     it("passes over a default profile that points at no inbox, to the next in order", async () => {
       const chosen = await usableInbox();
       const unpointed = await profilePointingAt(undefined);
@@ -498,6 +523,33 @@ describe("ensurePrivateInboxOf()", () => {
       expect(
         result.outcome === "adopt" ? addressOf(result.inbox) : undefined,
       ).toEqual(addressOf(inbox));
+    });
+
+    it("rejects, sending nothing, when Home's retired list fails to load", async () => {
+      // Which profiles are retired is then unknown, so a retired one could be
+      // taken for the deciding profile.
+      const retired = await profilePointingAt(await usableInbox());
+      await listProfiles([
+        retired,
+        await profilePointingAt(await usableInbox()),
+      ]);
+      await retire([retired]);
+      const retiredList = home.key("retiredProfiles" as never).resolveAsCell();
+      const listId = retiredList.getAsNormalizedFullLink().id;
+      const settled = storage.loadsSettled.bind(storage);
+      using _failed = stub(
+        storage,
+        "loadsSettled",
+        (keys) =>
+          keys.some((key) => key.includes(listId))
+            ? Promise.reject(new Error("load failed"))
+            : settled(keys),
+      );
+
+      await expect(ensurePrivateInboxOf(runtime, home, identity.did())).rejects
+        .toThrow("Could not load document");
+      await runtime.idle();
+      expect(await home.key("ensured" as never).pull()).toBe(0);
     });
 
     it("rejects, sending nothing, when an earlier profile's load is reported failed though its sync resolves", async () => {

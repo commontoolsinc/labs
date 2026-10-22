@@ -760,6 +760,142 @@ describe("profile owner CFC policy", () => {
     }
   });
 
+  it("marks the home retired profiles list as integrity-protected data, written only by retireProfile and restoreProfile", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const homePattern = await compileHomePattern(runtime);
+      const rootSchema = homePattern.resultSchema as JSONSchema;
+      const retiredSchema = resolveLocalSchemaRef(
+        rootSchema,
+        (rootSchema as { properties?: Record<string, JSONSchema> }).properties
+          ?.retiredProfiles ?? {},
+      ) as {
+        type?: string;
+        items?: JSONSchema;
+        ifc?: { writePolicyAnyOf?: unknown[]; addIntegrity?: unknown[] };
+      };
+      expect(retiredSchema.type).toBe("array");
+      expect(retiredSchema.ifc?.addIntegrity).toContain("profile-link");
+      const writer = (handler: string) => ({
+        writeAuthorizedBy: {
+          __ctWriterIdentityOf: expect.objectContaining({
+            file: "/packages/patterns/system/profile-create.tsx",
+            path: [handler],
+          }),
+        },
+      });
+      expect(retiredSchema.ifc?.writePolicyAnyOf).toEqual([
+        writer("retireProfile"),
+        writer("restoreProfile"),
+      ]);
+      const itemSchema = resolveLocalSchemaRef(
+        rootSchema,
+        retiredSchema.items ?? {},
+      ) as {
+        ifc?: {
+          addIntegrity?: unknown[];
+          writePolicyAnyOf?: unknown[];
+          uiContract?: unknown;
+        };
+      };
+      expect(itemSchema.ifc?.addIntegrity).toContain("profile-link");
+      expect(itemSchema.ifc?.writePolicyAnyOf).toEqual(
+        retiredSchema.ifc?.writePolicyAnyOf,
+      );
+      expect(itemSchema.ifc?.uiContract).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects direct untrusted writes to the home retired profiles list", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const homePattern = await compileHomePattern(runtime);
+      const tx = runtime.edit();
+      runtime.getCell(
+        alice.did(),
+        "home-retired-untrusted",
+        homePattern.resultSchema,
+        tx,
+      );
+      const profile = runtime.getCell(
+        alice.did(),
+        "home-retired-untrusted-target",
+        undefined,
+        tx,
+      );
+      profile.set({ name: "Ada", avatar: "", elements: [] });
+      await tx.commit().settled;
+
+      const writeTx = runtime.edit();
+      const protectedHome = runtime.getCell(
+        alice.did(),
+        "home-retired-untrusted",
+        homePattern.resultSchema,
+        writeTx,
+      );
+      protectedHome.key("retiredProfiles").set([profile]);
+      writeTx.prepareCfc();
+      const result = await writeTx.commit().settled;
+      expect(result.error?.message).toContain(
+        "writePolicyAnyOf failed at /retiredProfiles",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects an untrusted removal from the home retired profiles list", async () => {
+    // Taking a profile out of `retiredProfiles` brings it back, which only
+    // `restoreProfile` may do.
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const homePattern = await compileHomePattern(runtime);
+      // Seeded through the raw document address, as the profiles truncation
+      // case above is, for the reason given there.
+      const seed = runtime.edit();
+      const profile = runtime.getCell(
+        alice.did(),
+        "home-retired-truncate-A",
+        undefined,
+        seed,
+      );
+      profile.set({ name: "Ada", avatar: "", elements: [] });
+      const home = runtime.getCell(
+        alice.did(),
+        "home-retired-truncate",
+        homePattern.resultSchema,
+        seed,
+      );
+      const storedRetired = toMemorySpaceAddress(
+        home.key("retiredProfiles").getAsNormalizedFullLink(),
+      );
+      seed.writeOrThrow(storedRetired, [profile.getAsLink()]);
+      expect((await seed.commit().settled).error).toBeUndefined();
+
+      const writeTx = runtime.edit();
+      const protectedHome = runtime.getCell(
+        alice.did(),
+        "home-retired-truncate",
+        homePattern.resultSchema,
+        writeTx,
+      );
+      expect(writeTx.readOrThrow(storedRetired)).toHaveLength(1);
+      protectedHome.key("retiredProfiles").set([]);
+      writeTx.prepareCfc();
+      const result = await writeTx.commit().settled;
+      expect(result.error?.message).toContain(
+        "writePolicyAnyOf failed at /retiredProfiles",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("does not expose a writable profile creation trigger", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
