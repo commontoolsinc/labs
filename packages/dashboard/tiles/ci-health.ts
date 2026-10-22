@@ -9,13 +9,15 @@
  * them.
  *
  * A run concluded `success` passes and a run concluded `failure`, `timed_out`,
- * or `startup_failure` fails. A `cancelled` run is either a queued run a newer
- * push replaced, which passed no judgment on the code, or a run that timed out
- * or was stopped while its jobs ran, which failed; an empty job listing is what
- * tells them apart. Every remaining conclusion — `skipped`, `neutral`, `stale`,
- * `action_required` — passes no judgment either, so the job is decided by the
- * newest run before it that does, however many runs came after that one, among
- * the workflow's newest RUNS_READ_MAX runs of any branch. A pass stays a pass
+ * or `startup_failure` fails. A `cancelled` run is either a run a newer one
+ * replaced, or whose jobs newer ones replaced, while they were queued, which
+ * passed no judgment on the code, or a run that timed out, was stopped while
+ * its jobs ran, or had a job fail, which failed; whether a job a runner ran
+ * ended in anything but success is what tells them apart. Every remaining
+ * conclusion — `skipped`, `neutral`, `stale`, `action_required` — passes no
+ * judgment either, so the job is decided by the newest run before it that
+ * does, however many runs came after that one, among the workflow's newest
+ * RUNS_READ_MAX runs of any branch. A pass stays a pass
  * until a run gives the job another verdict.
  *
  * A failure counts only while the job, as it is configured now, would still
@@ -290,10 +292,10 @@ async function verdictOf(
       Date.parse(other.created_at) <= ended
     );
     if (replaced) return undefined;
-    // Otherwise a run cancelled with an empty job listing is one a newer push
-    // replaced while it was still queued, and one that ran jobs timed out or
-    // was stopped.
-    return await attempts.cancelledBeforeAnyJob(run) ? undefined : "bad";
+    // Otherwise a run cancelled with no job a runner ran ending in anything
+    // but success is one a newer run replaced while it was still queued, and
+    // any other timed out, was stopped, or had a job fail.
+    return await attempts.cancelledWithoutVerdict(run) ? undefined : "bad";
   }
   return undefined;
 }
@@ -570,9 +572,9 @@ export function createCiHealth(
   let collected: CiJobs | undefined;
   let collectionsStarted = 0;
   let collectedFrom = 0;
-  // One job-count cache per workflow, by workflow id, held across collections.
-  // It reads with the credential the tile was given, like every other request
-  // the tile makes.
+  // One job-listing cache per workflow, by workflow id, held across
+  // collections. It reads with the credential the tile was given, like every
+  // other request the tile makes.
   const attempts = new Map<number, CompletedAttempts>();
 
   const judge = (

@@ -1,6 +1,6 @@
 /**
  * A stand-in for GitHub's workflow-run attempt endpoints, for the tests of the
- * tiles that read a run's earlier attempts and the job count of a cancelled
+ * tiles that read a run's earlier attempts and the job listing of a cancelled
  * one.
  */
 
@@ -66,7 +66,13 @@ export function byUrl(
  */
 export function collectFromWorkingRuns(tile: Tile, ctx: Ctx): Promise<TileView> {
   return withGithubAttempt(
-    { total_count: 2, jobs: [{ conclusion: "success" }, { conclusion: "success" }] },
+    {
+      total_count: 2,
+      jobs: [
+        { conclusion: "success", runner_name: "GitHub Actions 1" },
+        { conclusion: "success", runner_name: "GitHub Actions 2" },
+      ],
+    },
     () => tile.collect(ctx),
   );
 }

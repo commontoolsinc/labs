@@ -91,10 +91,23 @@ function attemptUrl(attempt: Run, repo = REPO): string {
   return `https://api.github.com/repos/${repo}/actions/runs/${attempt.id}/attempts/${attempt.run_attempt}`;
 }
 
-// Where the job count of `attempt` is requested.
+// Where the job listing of `attempt` starts.
 function jobsUrl(attempt: Run, repo = REPO): string {
-  return `${attemptUrl(attempt, repo)}/jobs?per_page=1`;
+  return jobPageUrl(attempt, 1, repo);
 }
+
+// A cancelled attempt's job listing when a newer run replaced it before it
+// listed any job.
+const NO_JOBS = { total_count: 0, jobs: [] };
+
+// A job a newer run replaced while it was queued.
+const QUEUED = { conclusion: "cancelled", runner_name: "" };
+
+// A job a runner was running when its attempt was cancelled.
+const STOPPED = { conclusion: "cancelled", runner_name: "GitHub Actions 1" };
+
+// A cancelled attempt's job listing when it stopped a job a runner was running.
+const STOPPED_JOB = { total_count: 1, jobs: [STOPPED] };
 
 // The trust grid's cell colors, in the newest-first order the runs arrive in.
 function cellColors(extra: string | undefined): string[] {
@@ -157,7 +170,7 @@ Deno.test("labs and loom ci trust: a cancelled run that never started is left ou
     ];
     const jobs = cancelled.map((attempt) => jobsUrl(attempt, repo));
     await withGithubAttempt(
-      byUrl(jobs.map((url) => [url, { total_count: 0 }])),
+      byUrl(jobs.map((url) => [url, NO_JOBS])),
       async (urls) => {
         const v = await tile.collect(ctx(runs));
         assertEquals(v.value, "50.0%");
@@ -174,7 +187,7 @@ Deno.test("labs and loom ci trust: a cancelled run that never started is left ou
   }
 });
 
-Deno.test("labs and loom ci trust: a cancelled run that ran jobs counts as a failure", async () => {
+Deno.test("labs and loom ci trust: a cancelled run that stopped a job on a runner counts as a failure", async () => {
   const cases = [
     { tile: labsCiTrust, repo: REPO },
     { tile: loomCiTrust, repo: LOOM_REPO },
@@ -188,7 +201,7 @@ Deno.test("labs and loom ci trust: a cancelled run that ran jobs counts as a fai
       run({ conclusion: "failure" }),
     ];
     await withGithubAttempt(
-      byUrl([[jobsUrl(timedOut, repo), { total_count: 38 }]]),
+      byUrl([[jobsUrl(timedOut, repo), STOPPED_JOB]]),
       async (urls) => {
         const v = await tile.collect(ctx(runs));
         assertEquals(v.value, "50.0%");
@@ -205,7 +218,114 @@ Deno.test("labs and loom ci trust: a cancelled run that ran jobs counts as a fai
   }
 });
 
-Deno.test("labs ci trust: a run is green only when its one attempt not cancelled before starting succeeded", async () => {
+Deno.test("labs and loom ci trust: a cancelled run whose cancelled jobs never reached a runner is left out of the share", async () => {
+  // A job-level concurrency group replaces the waiting job rather than the
+  // run, so the run lists the job, cancelled with an empty runner name, beside
+  // the jobs that ran.
+  const cases = [
+    { tile: labsCiTrust, repo: REPO },
+    { tile: loomCiTrust, repo: LOOM_REPO },
+  ];
+  for (const { tile, repo } of cases) {
+    const replaced = run({ conclusion: "cancelled" });
+    const runs = [
+      run({ conclusion: "success" }),
+      replaced,
+      run({ conclusion: "failure" }),
+    ];
+    await withGithubAttempt(
+      byUrl([[jobsUrl(replaced, repo), {
+        total_count: 3,
+        jobs: [
+          QUEUED,
+          { conclusion: "success", runner_name: "GitHub Actions 2" },
+          { conclusion: "skipped", runner_name: null },
+        ],
+      }]]),
+      async (urls) => {
+        const v = await tile.collect(ctx(runs));
+        assertEquals(v.value, "50.0%");
+        assertEquals(v.sub, "first-try green · 2 of last 3 runs");
+        assertEquals(urls, [jobsUrl(replaced, repo)]);
+        assertEquals(cellColors(v.extra), [
+          "var(--status-good)",
+          "var(--status-unknown)",
+          "var(--status-bad)",
+        ]);
+      },
+    );
+  }
+});
+
+Deno.test("labs ci trust: a cancelled run with a job that failed on a runner counts as a failure", async () => {
+  // Someone cancels a run after one job failed and while another was queued.
+  const cancelled = run({ conclusion: "cancelled" });
+  await withGithubAttempt(
+    byUrl([[jobsUrl(cancelled), {
+      total_count: 2,
+      jobs: [
+        { conclusion: "failure", runner_name: "GitHub Actions 1" },
+        QUEUED,
+      ],
+    }]]),
+    async () => {
+      const v = await labsCiTrust.collect(ctx([
+        run({ conclusion: "success" }),
+        cancelled,
+      ]));
+      assertEquals(v.value, "50.0%");
+      assertEquals(cellColors(v.extra), [
+        "var(--status-good)",
+        "var(--status-bad)",
+      ]);
+    },
+  );
+});
+
+Deno.test("labs ci trust: the job listing of a cancelled attempt is read only as far as its first job that did not succeed on a runner", async () => {
+  const timedOut = run({ conclusion: "cancelled" });
+  await withGithubAttempt(
+    byUrl([[
+      jobPageUrl(timedOut, 1),
+      {
+        total_count: 101,
+        jobs: [STOPPED, ...Array.from({ length: 99 }, () => QUEUED)],
+      },
+    ]]),
+    async (urls) => {
+      const v = await labsCiTrust.collect(ctx([timedOut]));
+      assertEquals(v.value, "0.0%");
+      assertEquals(urls, [jobPageUrl(timedOut, 1)]);
+    },
+  );
+});
+
+Deno.test("labs ci trust: a job cancelled on a runner counts as a failure on any page of the job listing", async () => {
+  const timedOut = run({ conclusion: "cancelled" });
+  await withGithubAttempt(
+    byUrl([
+      [
+        jobPageUrl(timedOut, 1),
+        { total_count: 101, jobs: Array.from({ length: 100 }, () => QUEUED) },
+      ],
+      [jobPageUrl(timedOut, 2), { total_count: 101, jobs: [STOPPED] }],
+    ]),
+    async (urls) => {
+      const v = await labsCiTrust.collect(ctx([
+        run({ conclusion: "success" }),
+        timedOut,
+      ]));
+      assertEquals(v.value, "50.0%");
+      assertEquals(cellColors(v.extra), [
+        "var(--status-good)",
+        "var(--status-bad)",
+      ]);
+      assertEquals(urls, [jobPageUrl(timedOut, 1), jobPageUrl(timedOut, 2)]);
+    },
+  );
+});
+
+Deno.test("labs ci trust: a run is green only when the one attempt left once cancellations without a verdict are passed over succeeded", async () => {
   const afterUnstartedGreen = run({ conclusion: "success", run_attempt: 2 });
   const afterUnstartedRed = run({ conclusion: "failure", run_attempt: 2 });
   const redAfterUnstarted = run({ conclusion: "success", run_attempt: 3 });
@@ -249,10 +369,10 @@ Deno.test("labs ci trust: a run is green only when its one attempt not cancelled
     byUrl([
       ...earlier.map((attempt) => [attemptUrl(attempt), attempt] as const),
       ...unstarted.map((attempt) =>
-        [jobsUrl(attempt), { total_count: 0 }] as const
+        [jobsUrl(attempt), NO_JOBS] as const
       ),
       ...ranJobs.map((attempt) =>
-        [jobsUrl(attempt), { total_count: 38 }] as const
+        [jobsUrl(attempt), STOPPED_JOB] as const
       ),
     ]),
     async (urls) => {
@@ -304,7 +424,7 @@ Deno.test("labs ci trust: an earlier attempt is requested once", async () => {
   await withGithubAttempt(
     byUrl([
       [attemptUrl(earlier), earlier],
-      [jobsUrl(earlier), { total_count: 0 }],
+      [jobsUrl(earlier), NO_JOBS],
     ]),
     async (urls) => {
       assertEquals((await labsCiTrust.collect(ctx([retried]))).value, "100.0%");
@@ -314,7 +434,7 @@ Deno.test("labs ci trust: an earlier attempt is requested once", async () => {
   );
 });
 
-Deno.test("labs ci trust: the job count of a cancelled attempt is requested once, and no other attempt's is", async () => {
+Deno.test("labs ci trust: the job listing of a cancelled attempt is requested once, and no other attempt's is", async () => {
   const neverStarted = run({ conclusion: "cancelled" });
   const timedOut = run({ conclusion: "cancelled" });
   const runs = [
@@ -326,7 +446,7 @@ Deno.test("labs ci trust: the job count of a cancelled attempt is requested once
   ];
   const jobs = [jobsUrl(neverStarted), jobsUrl(timedOut)];
   await withGithubAttempt(
-    byUrl([[jobs[0], { total_count: 0 }], [jobs[1], { total_count: 38 }]]),
+    byUrl([[jobs[0], NO_JOBS], [jobs[1], STOPPED_JOB]]),
     async (urls) => {
       for (let collection = 0; collection < 2; collection++) {
         const v = await labsCiTrust.collect(ctx(runs));
@@ -338,10 +458,10 @@ Deno.test("labs ci trust: the job count of a cancelled attempt is requested once
   );
 });
 
-Deno.test("labs ci trust: a job count is forgotten once its run leaves the window", async () => {
+Deno.test("labs ci trust: a job listing is forgotten once its run leaves the window", async () => {
   const cancelled = run({ conclusion: "cancelled" });
   const other = run({ conclusion: "success" });
-  await withGithubAttempt({ total_count: 0 }, async (urls) => {
+  await withGithubAttempt(NO_JOBS, async (urls) => {
     await labsCiTrust.collect(ctx([cancelled]));
     await labsCiTrust.collect(ctx([other]));
     await labsCiTrust.collect(ctx([cancelled]));
@@ -384,7 +504,7 @@ Deno.test("labs ci trust: an earlier attempt that is not the one asked for fails
   }
 });
 
-Deno.test("labs ci trust: a job count GitHub does not return fails the collection", async (t) => {
+Deno.test("labs ci trust: a job listing GitHub does not return fails the collection", async (t) => {
   const cases: { name: string; answer: GithubAnswer; message: string }[] = [
     {
       name: "failed request",
@@ -400,6 +520,21 @@ Deno.test("labs ci trust: a job count GitHub does not return fails the collectio
       name: "missing count",
       answer: { total_count: undefined },
       message: "did not include a numeric `total_count`",
+    },
+    {
+      name: "missing jobs",
+      answer: { total_count: 1 },
+      message: "did not include a numeric `total_count` and a `jobs` array",
+    },
+    {
+      name: "listing that ends short of its count",
+      answer: { total_count: 2, jobs: [] },
+      message: "job listing ended after 0 of its 2 jobs",
+    },
+    {
+      name: "job without a runner name",
+      answer: { total_count: 1, jobs: [{ conclusion: "failure" }] },
+      message: "holds a job without a string or null `conclusion`",
     },
   ];
   for (const { name, answer, message } of cases) {
@@ -474,8 +609,8 @@ Deno.test("labs ci trust grid: cell colors match trust scoring", async () => {
   await withGithubAttempt(
     byUrl([
       [attemptUrl(earlier), earlier],
-      [jobsUrl(neverStarted), { total_count: 0 }],
-      [jobsUrl(timedOut), { total_count: 38 }],
+      [jobsUrl(neverStarted), NO_JOBS],
+      [jobsUrl(timedOut), STOPPED_JOB],
     ]),
     async () => {
       const view = await labsCiTrust.collect(ctx(runs));
@@ -608,11 +743,15 @@ function jobPageUrl(attempt: Run, page: number, repo = REPO): string {
   return `${attemptUrl(attempt, repo)}/jobs?per_page=100&page=${page}`;
 }
 
-// A job listing page holding one job for each conclusion in `conclusions`.
+// A job listing page holding one job for each conclusion in `conclusions`,
+// each run on a runner unless it was skipped.
 function jobPage(total: number, conclusions: readonly string[]): GithubAnswer {
   return {
     total_count: total,
-    jobs: conclusions.map((conclusion) => ({ conclusion })),
+    jobs: conclusions.map((conclusion) => ({
+      conclusion,
+      runner_name: conclusion === "skipped" ? null : "GitHub Actions 1",
+    })),
   };
 }
 
