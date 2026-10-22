@@ -427,6 +427,7 @@ describe("prompt-loop run_pattern model boundary", () => {
         .toMatchObject({
           slug: "doubling-report",
           pieceId: registered[0].id,
+          space: pieces.getSpace(),
           url: `http://toolshed.test/${pieces.getSpace()}/doubling-report`,
         });
       const named = result.runState.toolOutputs.find((entry) =>
@@ -442,6 +443,9 @@ describe("prompt-loop run_pattern model boundary", () => {
           locations: [{
             artifactPath: named?.artifactPath,
             jsonPointer: "/pieceId",
+          }, {
+            artifactPath: named?.artifactPath,
+            jsonPointer: "/space",
           }, {
             artifactPath: named?.artifactPath,
             jsonPointer: "/url",

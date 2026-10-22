@@ -525,14 +525,16 @@ that copy goes stale.
 
 Which side answers which mistake follows from what each side can know. A slug
 the runtime's own rule refuses, an address carrying a path under the piece
-rather than the piece, and an address naming a space by a name that is not this
-console's are decidable from the text, so the route answers **400** naming which
-— the caller cannot see the space this console runs against, so a mismatch is
-this side's to explain. An address naming a space by DID is checked by the turn,
-since only the session knows the DID a configured name stands for. Whether the
-space HOLDS that slug is not a fact about the text; the turn finds it out and
-fails naming the slug, under the rule above that governs every reference which
-parses and still cannot mint.
+rather than the piece, an address naming a space that is not this console's, and
+a reference into a foreign space the operator did not admit are decidable from
+the text, so the route answers **400** naming which — the caller cannot see the
+space this console runs against, so a mismatch is this side's to explain. The
+route holds each reference to the rule the session's mint holds it to: the
+console resolves a configured legacy name to its DID at startup, as the session
+does, so an address may name this console's space by either. Whether the space
+HOLDS that slug is not a fact about the text; the turn finds it out and fails
+naming the slug, under the rule above that governs every reference which parses
+and still cannot mint.
 
 The address is scoped to pieces. A pane may show any cell in a space, and the
 general case is CT-2319's; a slug names a piece or it names nothing, which is
@@ -567,7 +569,8 @@ The completed-turn result is:
   "pieces": [
     {
       "slug": "reading-list",
-      "url": "http://localhost:8000/<space-did>/reading-list"
+      "url": "http://localhost:8000/<space-did>/reading-list",
+      "space": "<space-did>"
     }
   ],
   "spaceName": "<space-did>",
@@ -612,9 +615,11 @@ receipts, replay flags, and current versions, and is empty when the run composed
 none. Optional `originLoomId` is the turn's submitted origin. Enable the tools
 with `--loom-authoring-config` or `CF_HARNESS_LOOM_AUTHORING_CONFIG`; the
 complete contract is [Durable Loom authoring](../docs/LOOM_AUTHORING.md). Each
-entry copies `slug` and `url` from the output a successful `assign_slug` call
-persisted; the model is shown the slug alone. When that same held token also
-appeared in a verified successful composition, optional
+entry copies `slug`, `url`, and the piece's space DID `space` from the output a
+successful `assign_slug` call persisted; the model is shown the slug alone. A
+successful call whose output does not read back makes the result unavailable
+rather than leave the piece out. When that same held token also appeared in a
+verified successful composition, optional
 `loomComponents: [{loomId, componentId}]` identifies its saved membership. The
 correlation uses unique matching current-turn tool calls and request-order
 receipt IDs, never the human slug or assistant prose. When using this metadata,
@@ -622,7 +627,8 @@ clients suppress duplicate placement only after verifying the pair in a freshly
 opened manifest. Weaver also retains a legacy exact-reference membership check;
 absent either proof it keeps ordinary placement. Different tokens for the same
 Pattern are not inferred equivalent. No cell address or token is added to the
-result. `spaceName` identifies this console's configured space.
+result. `spaceName` is this console's space as it was configured: its DID, or
+the legacy name it was started with.
 
 The route never holds a request open; it answers with where the turn stands, and
 the status code says whether asking again can change the answer:
@@ -808,13 +814,14 @@ address is the one `assign_slug` recorded, which is the Fabric API's; a host
 that shows pieces somewhere else — a pane of its own, say, where the API's
 address answers with a login gate instead of the piece — names its prefix here,
 and every piece link on the page is composed as `<piecesBase>/<space>/<slug>`
-from the last two segments of the URL the run recorded. With no prefix named,
-the recorded URL is used as it stands rather than rebuilt. The prefix has to be
-an absolute `http` or `https` URL: it arrives from whatever opened the page and
-ends up in an `href`, so anything else — a `javascript:` URL, a relative path —
-is refused, the page says so, and the links stay on the recorded address. The
-console composes against a prefix it is given and knows nothing about the host
-that gave it.
+from the space DID and slug the run recorded, written as the shell writes a
+piece's path. With no prefix named, or no space recorded, the recorded URL is
+used as it stands rather than rebuilt. The prefix has to be an absolute `http`
+or `https` URL: it arrives from whatever opened the page and ends up in an
+`href`, so anything else — a `javascript:` URL, a relative path — is refused,
+the page says so, and the links stay on the recorded address. The console
+composes against a prefix it is given and knows nothing about the host that gave
+it.
 
 The pane reads the same event stream the console page reads, from sequence zero
 — so a pane opened halfway through a turn shows the steps that already happened

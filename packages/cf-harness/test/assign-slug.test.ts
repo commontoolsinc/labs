@@ -55,9 +55,9 @@ import {
   assignSlugTool,
   type AssignSlugToolErrorOutput,
   type AssignSlugToolSuccessOutput,
-  namedPieceUrl,
 } from "../src/tools/assign-slug.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
+import { urlToAppView } from "@commonfabric/navigation";
 import type { HarnessToolContext } from "../src/tools/types.ts";
 import type { RunPatternToolSuccessOutput } from "../src/tools/run-pattern.ts";
 import type {
@@ -621,6 +621,11 @@ describe("assign-slug", () => {
       );
       expect(pieces.getSpaceName()).toBeDefined();
       expect(output.url).not.toContain(`/${pieces.getSpaceName()}/`);
+      expect(output.space).toBe(pieces.getSpace());
+      expect(urlToAppView(new URL(output.url!))).toEqual({
+        spaceDid: pieces.getSpace(),
+        pieceSlug: "doubling-report",
+      });
       const registered = await pieces.getRegisteredPieces();
       expect(registered.map((piece) => piece.id)).toEqual([created.pieceId]);
       // The slug resolves to the same piece, so the address a person opens
@@ -1356,6 +1361,7 @@ describe("assign-slug", () => {
       expect(output.url).toBe(
         `http://toolshed.test/${spaceIdentity.did()}/doubling-report`,
       );
+      expect(output.space).toBe(spaceIdentity.did());
       expect(await resolvePieceAddress(didPieces, "doubling-report")).toBe(
         piece.pieceId,
       );
@@ -1569,16 +1575,6 @@ describe("assign-slug", () => {
         "could not establish the fabric session",
       );
       expect(output.message).toContain("authorization denied");
-    });
-
-    it("composes no URL when the session's API URL cannot carry one", () => {
-      // The URL guard fails closed: a session whose API URL does not parse
-      // yields no link rather than a broken one.
-      const broken = {
-        getSpace: () => "did:key:z6MkDemo",
-        runtime: { apiUrl: "http://[invalid" },
-      } as unknown as Parameters<typeof namedPieceUrl>[0];
-      expect(namedPieceUrl(broken, "doubling-report")).toBeUndefined();
     });
 
     it("returns an error for a token that does not parse as a reference", async () => {

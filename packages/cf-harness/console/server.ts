@@ -64,6 +64,8 @@ import {
   patternIndexFailure,
   patternIndexSearchRequest,
 } from "@commonfabric/pattern-index/front";
+import { legacySpaceDid } from "@commonfabric/identity";
+import { type DID, isDID } from "@commonfabric/identity/did";
 import {
   dirname,
   extname,
@@ -396,19 +398,19 @@ const callPatternIndex = (
  *
  * A reference may also be a piece's NAME — `pattern:<space>/<slug>`, or a bare
  * slug meaning this console's own space — which is what a surface showing a
- * rendered piece holds. `space` is this console's space as configured, and an
- * address naming another one is refused here: the caller cannot see which
- * space this console runs against, so a mismatch is this side's to explain.
- * Only a DID the session knows can be checked against a DID, so an address
- * naming a space by DID is left to the turn. Whether the space holds the slug
- * is the turn's to find out, like every other reference that parses and may
- * still not mint.
+ * rendered piece holds. Each reference is held to this console's space as the
+ * session's mint holds it, by the space's DID, by the legacy name it was
+ * configured by if any, and with the foreign spaces the operator admitted. An
+ * address or reference naming another space is refused here: the caller cannot
+ * see which space this console runs against, so a mismatch is this side's to
+ * explain. Whether the space holds the slug is the turn's to find out, like
+ * every other reference that parses and may still not mint.
  *
  * @throws Error naming the defect, which the route answers 400 with.
  */
 const parseTaskInputCells = (
   value: unknown,
-  space: string,
+  config: Pick<ConsoleConfig, "fabricSession" | "fabricSpaceDid">,
 ): readonly HarnessInputCellSpec[] => {
   if (value === undefined || value === null) {
     return [];
@@ -416,6 +418,7 @@ const parseTaskInputCells = (
   if (!Array.isArray(value)) {
     throw new Error("inputCells must be an array");
   }
+  const { space, foreignSpaces } = config.fabricSession;
   const specs: HarnessInputCellSpec[] = [];
   const names = new Set<string>();
   for (const entry of value) {
@@ -430,11 +433,16 @@ const parseTaskInputCells = (
     // to accept different references under the same name.
     const spec = parseInputCellArgument(`${name}=${ref}`);
     // And then once more against this console's own space, which the flag's
-    // parser cannot know. A named piece address spelling another space is a
-    // caller mistake decidable from the text alone, so it is answered now
-    // rather than spent on a turn; whether this space HOLDS the slug is not
-    // decidable from the text, and the turn answers that one.
-    checkInputCellSpec(spec, undefined, space);
+    // parser cannot know. A reference or address into a space this session
+    // does not admit is a caller mistake decidable from the text alone, so it
+    // is answered now rather than spent on a turn; whether this space HOLDS
+    // the slug is not decidable from the text, and the turn answers that one.
+    checkInputCellSpec(
+      spec,
+      config.fabricSpaceDid,
+      isDID(space) ? undefined : space,
+      foreignSpaces,
+    );
     if (names.has(spec.name)) {
       throw new Error(`inputCells names \`${spec.name}\` twice`);
     }
@@ -544,6 +552,12 @@ interface ConsoleConfig extends HarnessSessionConfig {
 
   /** A fabric session is required here; see `resolveConsoleConfig`. */
   fabricSession: HarnessFabricSessionConfig;
+
+  /**
+   * The DID of the session's space: the configured one, or the one a legacy
+   * name resolves to, as the session opens it.
+   */
+  fabricSpaceDid: DID;
 
   sessionDbPath?: string;
 
@@ -873,6 +887,7 @@ export const resolveConsoleConfig = async (
       }
       : {}),
   };
+  const fabricSpaceDid = isDID(space) ? space : await legacySpaceDid(space);
 
   // The checkout's skills/ tree gives the pattern-author subagent its
   // preloaded pattern-dev + pattern-schema skills; without a skills root the
@@ -936,6 +951,7 @@ export const resolveConsoleConfig = async (
       ? { researchReasoningEffort }
       : {}),
     fabricSession,
+    fabricSpaceDid,
     ...(loomAuthoring !== undefined ? { loomAuthoring } : {}),
     ...(spaceDbPath !== undefined ? { spaceDbPath } : {}),
     ...(patternIndexUrl !== undefined
@@ -2186,10 +2202,7 @@ export class ConsoleServer {
     let inputCells: readonly HarnessInputCellSpec[];
     let patternRefs: readonly HarnessPatternRefSpec[];
     try {
-      inputCells = parseTaskInputCells(
-        body.inputCells,
-        this.#config.fabricSession.space,
-      );
+      inputCells = parseTaskInputCells(body.inputCells, this.#config);
       checkTaskInputCellNames(inputCells, this.#config.connectorGrants);
       patternRefs = parseTaskPatternRefs(body.patternRefs);
     } catch (error) {

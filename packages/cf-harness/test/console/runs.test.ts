@@ -138,6 +138,7 @@ const ASSIGN_SLUG_OUTPUT = {
   value: {
     status: "ok",
     slug: "books",
+    space: "did:key:z6MkBooks",
     url: "http://localhost:8000/did:key:z6MkBooks/books",
   },
 };
@@ -189,7 +190,7 @@ const buildTranscript = (): HarnessTranscriptMessage[] => [
 describe("console/runs", () => {
   describe("consoleRunLens()", () => {
     it("keeps every run_pattern attempt, so the fix rounds stay visible", () => {
-      const lens = consoleRunLens(buildTranscript());
+      const lens = consoleRunLens(buildTranscript(), []);
       expect(lens.patternAttempts.map((attempt) => attempt.status)).toEqual([
         "compile-error",
         "ok",
@@ -217,7 +218,7 @@ describe("console/runs", () => {
     });
 
     it("returns no address for a piece whose persisted output it was not given", () => {
-      const lens = consoleRunLens(buildTranscript());
+      const lens = consoleRunLens(buildTranscript(), []);
       expect(lens.pieces[0].slug).toBe("books");
       expect(lens.pieces[0].url).toBeUndefined();
     });
@@ -226,7 +227,7 @@ describe("console/runs", () => {
       const lens = consoleRunLens([
         call("c1", "search_patterns", { tags: ["#books", "#reading"] }),
         result("c1", "search_patterns", { status: "ok", results: [] }),
-      ]);
+      ], []);
       expect(lens.searches[0].query).toBe("#books #reading");
     });
 
@@ -237,7 +238,7 @@ describe("console/runs", () => {
           status: "ok",
           results: [{ patternId: "p-books", description: "Reading list" }],
         }),
-      ]);
+      ], []);
       expect(lens.searches[0].hits[0]).toEqual({
         patternId: "p-books",
         description: "Reading list",
@@ -248,7 +249,7 @@ describe("console/runs", () => {
       const lens = consoleRunLens([
         call("c1", "run_pattern", { sourceText: "x" }),
         result("c1", "run_pattern", "the sandbox died mid-write"),
-      ]);
+      ], []);
       expect(lens.patternAttempts).toHaveLength(1);
       expect(lens.patternAttempts[0].status).toBe("unknown");
     });
@@ -777,6 +778,30 @@ describe("console/runs", () => {
           shown?.runState.handleTable?.referents?.map(({ token }) => token),
         )
           .toEqual([document.token]);
+      });
+    });
+
+    it("reads the address of a piece the run named from the output the naming call persisted", async () => {
+      await withArtifactRoot(async (root) => {
+        await writeRun(root, "r1", "2026-01-01T00:00:01.000Z");
+        expect((await readConsoleRun(root, "r1"))?.lens.pieces).toEqual([{
+          toolCallId: "c4",
+          slug: "books",
+        }]);
+        await Deno.writeTextFile(
+          join(
+            root,
+            "r1",
+            "tool-outputs",
+            toolOutputName("r1", "assign_slug", 4),
+          ),
+          JSON.stringify(ASSIGN_SLUG_OUTPUT.value),
+        );
+        expect((await readConsoleRun(root, "r1"))?.lens.pieces).toEqual([{
+          toolCallId: "c4",
+          slug: "books",
+          url: ASSIGN_SLUG_OUTPUT.value.url,
+        }]);
       });
     });
 

@@ -204,7 +204,7 @@ export const consoleRunTitle = (
  */
 export const consoleRunLens = (
   transcript: readonly HarnessTranscriptMessage[],
-  toolOutputs: readonly ConsoleToolOutputArtifact[] = [],
+  toolOutputs: readonly ConsoleToolOutputArtifact[],
 ): ConsoleRunLens => {
   const calls = toolCallsById(transcript);
   const patternAttempts: ConsolePatternAttempt[] = [];
@@ -313,7 +313,8 @@ export const summarizeConsoleRun = (
   transcript: readonly HarnessTranscriptMessage[] = [],
 ): ConsoleRunSummary => {
   const title = consoleRunTitle(transcript);
-  const pieceSlugs = consoleRunLens(transcript).pieces
+  // The slugs are in the transcript, so no persisted output is read.
+  const pieceSlugs = consoleRunLens(transcript, []).pieces
     .flatMap((piece) => piece.slug === undefined ? [] : [piece.slug]);
   return {
     runId: runState.runId,

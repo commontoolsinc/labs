@@ -76,6 +76,15 @@ export const runTree = (
   return roots;
 };
 
+/**
+ * The piece the page raises once a turn completes: the last one the turn
+ * named, or, when it named none, the one already shown.
+ */
+export const consolePieceAfterTurn = (
+  pieces: readonly ConsoleTurnResultPiece[],
+  shown: ConsoleTurnResultPiece | undefined,
+): ConsoleTurnResultPiece | undefined => pieces.at(-1) ?? shown;
+
 /** Selects a new console parent run to open while a turn is executing. */
 export const freshConsoleRun = (
   runs: readonly ConsoleListedRun[],
@@ -305,7 +314,7 @@ export class ConsoleApp extends LitElement {
         void this.#refresh();
         break;
       case "turn_completed":
-        this.piece = event.result.pieces.at(-1) ?? this.piece;
+        this.piece = consolePieceAfterTurn(event.result.pieces, this.piece);
         this.state = "done";
         this.running = false;
         this.activity = undefined;

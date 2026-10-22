@@ -37,6 +37,7 @@ import {
 import { stepCfcRecorded, withheldView } from "./steps-view.ts";
 import type { ConsoleStep } from "../steps.ts";
 import type { ConsoleTurnResultPiece } from "../turn-result.ts";
+import { pieceUrl } from "../../src/piece-url.ts";
 import type { BrowserToolAction } from "../../src/tools/browser.ts";
 import type { HarnessPolicyDecisionReasonCode } from "../../src/contracts/policy-trace.ts";
 import {
@@ -626,20 +627,19 @@ const piecesBaseFrom = (raw: string | null): string | undefined => {
 };
 
 /**
- * Where one piece is opened. The path of the URL the run recorded ends in the
- * space and the slug. The host that renders pieces somewhere other than the Fabric API
- * says so with `piecesBase`, and the pane puts those two segments after it;
- * with no base named, the recorded URL is used as it stands.
+ * Where one piece is opened. The host that renders pieces somewhere other than
+ * the Fabric API says so with `piecesBase`, and the pane composes the address
+ * under it from the piece's space and slug, as every piece address is composed
+ * (`pieceUrl`). With no base named, or no space recorded, the URL the run
+ * recorded is used as it stands.
  */
 export const consoleLivePieceHref = (
   piece: ConsoleTurnResultPiece,
   piecesBase: string | undefined,
 ): string =>
-  piecesBase === undefined
-    ? piece.url
-    : `${piecesBase}/${
-      new URL(piece.url).pathname.split("/").slice(-2).join("/")
-    }`;
+  (piecesBase === undefined || piece.space === undefined
+    ? undefined
+    : pieceUrl(piecesBase, piece.space, piece.slug)) ?? piece.url;
 
 /**
  * What the address a pane was opened at names. The session is the last segment

@@ -4,6 +4,7 @@ import { join } from "@std/path";
 import { spy } from "@std/testing/mock";
 import { FakeTime } from "@std/testing/time";
 import { nothing } from "lit";
+import { urlToAppView } from "@commonfabric/navigation";
 import {
   ConsoleLive,
   consoleLiveAddress,
@@ -72,6 +73,7 @@ describe("console/src/live-view", () => {
         slug: "reading-list",
         url:
           "http://localhost:8000/did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK/reading-list",
+        space: "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
       }],
       spaceName: "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
       finalText: "built it",
@@ -631,34 +633,38 @@ describe("console/src/live-view", () => {
     const piece = {
       slug: "reading-list",
       url: `http://localhost:8000/${space}/reading-list`,
-    };
+      space,
+    } as const;
 
     it("returns the address the run recorded when no base is named", () => {
       expect(consoleLivePieceHref(piece, undefined)).toBe(piece.url);
     });
 
-    it("returns the space and slug under the base a host renders pieces at", () => {
+    it("returns the piece's address under the base a host renders pieces at", () => {
       expect(consoleLivePieceHref(piece, "http://localhost:9901/pattern-pane"))
         .toBe(`http://localhost:9901/pattern-pane/${space}/reading-list`);
+      // Written as the shell writes it, so the shell reads back this piece.
+      expect(
+        urlToAppView(
+          new URL(consoleLivePieceHref(piece, "http://localhost:9901")),
+        ),
+      ).toEqual({ spaceDid: space, pieceSlug: "reading-list" });
     });
 
-    it("carries no query or fragment of the recorded address to the base", () => {
+    it("takes nothing of the recorded address but the space and slug", () => {
       const queried = {
         ...piece,
-        url: `http://localhost:8000/${space}/reading-list?t=1#top`,
+        url: `http://localhost:8000/api/v1/${space}/reading-list?t=1#top`,
       };
       expect(consoleLivePieceHref(queried, "http://host.test/p"))
         .toBe(`http://host.test/p/${space}/reading-list`);
     });
 
-    it("replaces the whole of the recorded address before the space", () => {
-      const prefixed = {
-        ...piece,
-        url: `http://localhost:8000/api/v1/${space}/reading-list`,
-      };
-      const href = consoleLivePieceHref(prefixed, "http://host.test/p");
-      expect(href).toBe(`http://host.test/p/${space}/reading-list`);
-      expect(href).not.toContain("/api/v1/");
+    it("returns the recorded address for a piece that recorded no space", () => {
+      const { space: _space, ...unplaced } = piece;
+      expect(consoleLivePieceHref(unplaced, "http://host.test/p")).toBe(
+        piece.url,
+      );
     });
   });
 

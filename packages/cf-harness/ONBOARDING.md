@@ -444,7 +444,8 @@ The successful result is:
   "pieces": [
     {
       "slug": "reading-list",
-      "url": "<toolshed-api-url>/<space-did>/reading-list"
+      "url": "<toolshed-api-url>/<space-did>/reading-list",
+      "space": "<space-did>"
     }
   ],
   "spaceName": "<space-did>",

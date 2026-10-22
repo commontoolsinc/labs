@@ -1,11 +1,10 @@
 /**
  * Projects a completed console turn from its durable run report and the
  * transcript the model received. The report identifies this run's transcript
- * messages and supplies its final assistant text. A missing or malformed
- * transcript, report, or run state produces no result rather than a partial
- * object that could be mistaken for a completed contract. A named piece's URL
- * comes from the output its `assign_slug` call persisted, and an output that
- * does not read back leaves out that piece alone.
+ * messages and supplies its final assistant text. A named piece's address
+ * comes from the output its `assign_slug` call persisted. Missing or malformed
+ * artifacts, that output included, produce no result rather than a partial
+ * object that could be mistaken for a completed contract.
  */
 
 import {
@@ -30,11 +29,9 @@ import {
   type ConsoleDisplayFit,
   publicConsoleDisplay,
 } from "./display-ceiling.ts";
-import {
-  artifactName,
-  type ConsoleToolOutputArtifact,
-  persistedToolOutput,
-} from "./steps.ts";
+import { artifactName } from "./steps.ts";
+import { readJson } from "./run-store.ts";
+import { type DID, isDID } from "@commonfabric/identity/did";
 import type { HarnessHandleTable } from "../src/contracts/handle-table.ts";
 import {
   assertValidHarnessHandleTable,
@@ -55,6 +52,13 @@ export interface ConsoleTurnResultPiece {
 
   /** Openable URL returned beside the slug. */
   url: string;
+
+  /**
+   * The DID of the space the slug names the piece in, which a host rendering
+   * pieces elsewhere composes its own address from. Absent when the output
+   * recorded none.
+   */
+  space?: DID;
 
   /** Verified composition membership for the same held token. No cell address. */
   loomComponents?: readonly { loomId: string; componentId: string }[];
@@ -179,8 +183,8 @@ interface TurnRunArtifacts {
   transcript: readonly HarnessTranscriptMessage[];
   currentTranscriptIndexes: ReadonlySet<number>;
 
-  /** The outputs the turn's `assign_slug` calls persisted. */
-  assignSlugOutputs: readonly ConsoleToolOutputArtifact[];
+  /** The piece each successful `assign_slug` call of the turn named, by index. */
+  pieces: ReadonlyMap<number, ConsoleTurnResultPiece>;
   finalText: string;
   revealed: Readonly<Record<string, string>>;
   taskOutcome: HarnessTaskOutcome;
@@ -351,35 +355,32 @@ const readTurnRunArtifacts = async (
         currentTranscriptIndexes.add(index);
       }
     }
-    // The transcript shows the model a piece's slug alone; the URL a person
-    // opens is in the output the call persisted. An output that does not read
-    // back costs its own piece and nothing else.
-    const assignSlugOutputs = (await Promise.all(
-      transcriptValue.flatMap((message, index) =>
-        currentTranscriptIndexes.has(index) && message.role === "tool" &&
-          message.toolName === "assign_slug" &&
-          message.resultRef?.artifactPath !== undefined
-          ? [message.resultRef.artifactPath]
-          : []
-      ).map(async (artifactPath) => {
-        try {
-          return [{
-            artifactPath,
-            value: JSON.parse(
-              await Deno.readTextFile(
-                join(runRoot, "tool-outputs", artifactName(artifactPath)),
-              ),
-            ),
-          }];
-        } catch {
-          return [];
-        }
-      }),
-    )).flat();
+    // The transcript shows the model a piece's slug alone; the address a
+    // person opens is in the output the call persisted, so a successful call
+    // whose output does not read back leaves the result incomplete.
+    const pieces = new Map<number, ConsoleTurnResultPiece>();
+    for (const [index, message] of transcriptValue.entries()) {
+      if (
+        !currentTranscriptIndexes.has(index) || message.role !== "tool" ||
+        message.toolName !== "assign_slug" || !reportsSuccess(message.content)
+      ) {
+        continue;
+      }
+      const path = message.resultRef?.artifactPath;
+      const piece = pieceFromAssignSlug(
+        path === undefined
+          ? undefined
+          : await readJson(join(runRoot, "tool-outputs", artifactName(path))),
+      );
+      if (piece === undefined) {
+        return undefined;
+      }
+      pieces.set(index, piece);
+    }
     return {
       transcript: transcriptValue,
       currentTranscriptIndexes,
-      assignSlugOutputs,
+      pieces,
       finalText: reportValue.finalAssistantText,
       revealed: handleTable === undefined ? {} : returnReferentValues(
         reportValue.finalAssistantText,
@@ -400,28 +401,40 @@ const readTurnRunArtifacts = async (
   }
 };
 
+/** Whether a model-facing tool message reports a successful call. */
+const reportsSuccess = (content: string): boolean => {
+  try {
+    const output: unknown = JSON.parse(content);
+    return isObjectOrArray(output) && "status" in output &&
+      output.status === "ok";
+  } catch {
+    return false;
+  }
+};
+
 /**
- * Copies the openable fields from one successful `assign_slug` output, as the
- * call persisted it.
+ * The openable fields of one successful `assign_slug` output, as the call
+ * persisted it, or `undefined` when it is not one.
  */
 const pieceFromAssignSlug = (
-  message: HarnessTranscriptMessage,
-  outputs: readonly ConsoleToolOutputArtifact[],
+  output: unknown,
 ): ConsoleTurnResultPiece | undefined => {
-  if (message.role !== "tool" || message.toolName !== "assign_slug") {
-    return undefined;
-  }
-  const output = persistedToolOutput(message.resultRef?.artifactPath, outputs)
-    ?.value;
   if (
     !isObjectOrArray(output) ||
     !("status" in output) || output.status !== "ok" ||
     !("slug" in output) || typeof output.slug !== "string" ||
-    !("url" in output) || typeof output.url !== "string"
+    !("url" in output) || typeof output.url !== "string" ||
+    ("space" in output && !isDID(output.space))
   ) {
     return undefined;
   }
-  return { slug: output.slug, url: output.url };
+  return {
+    slug: output.slug,
+    url: output.url,
+    ...("space" in output && isDID(output.space)
+      ? { space: output.space }
+      : {}),
+  };
 };
 
 /**
@@ -499,10 +512,7 @@ export const readConsoleTurnResult = async (
       ) {
         return [];
       }
-      const piece = pieceFromAssignSlug(
-        message,
-        artifacts.assignSlugOutputs,
-      );
+      const piece = artifacts.pieces.get(index);
       if (piece === undefined) return [];
       const args = callArguments(calls, index, message);
       const coverage = typeof args?.token === "string"

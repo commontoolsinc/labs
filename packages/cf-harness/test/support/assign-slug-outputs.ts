@@ -1,10 +1,10 @@
 /**
- * Persists a run's `assign_slug` outputs the way the harness does, for tests
- * that write a turn's artifacts by hand.
+ * Persists a run's `assign_slug` outputs through the harness's own artifact
+ * store, for tests that write a turn's artifacts by hand.
  */
 
-import { join } from "@std/path";
 import { isObjectNotArray } from "@commonfabric/utils/types";
+import { createFileSystemHarnessArtifactStore } from "../../src/artifacts.ts";
 import type { HarnessTranscriptMessage } from "../../src/contracts/transcript.ts";
 import {
   createToolOutputId,
@@ -12,17 +12,17 @@ import {
 } from "../../src/contracts/tool-result.ts";
 
 /**
- * Writes each `assign_slug` result in `transcript` that carries a URL whole
- * under `<runRoot>/tool-outputs/`, and returns the transcript the model read:
- * the same messages, each such result without its URL and with a result
- * reference naming the persisted output.
+ * Persists each `assign_slug` result in `transcript` that carries a URL,
+ * through the artifact store of run `runId` under `artifactRoot`, and returns
+ * the transcript with each such result as the model is shown it: its outcome
+ * and slug, with a result reference naming the persisted output.
  */
 export const persistAssignSlugOutputs = async (
-  runRoot: string,
+  artifactRoot: string,
   runId: string,
   transcript: readonly HarnessTranscriptMessage[],
 ): Promise<HarnessTranscriptMessage[]> => {
-  await Deno.mkdir(join(runRoot, "tool-outputs"), { recursive: true });
+  const store = createFileSystemHarnessArtifactStore({ artifactRoot, runId });
   return await Promise.all(transcript.map(async (message, index) => {
     if (message.role !== "tool" || message.toolName !== "assign_slug") {
       return message;
@@ -36,18 +36,21 @@ export const persistAssignSlugOutputs = async (
     if (!isObjectNotArray(value) || typeof value.url !== "string") {
       return message;
     }
-    const artifactPath = join(
-      runRoot,
-      "tool-outputs",
-      `${index}-assign_slug.json`,
+    const outputId = createToolOutputId(runId, "assign_slug", index);
+    const artifactPath = await store.persistToolOutput(
+      "assign_slug",
+      outputId,
+      { ...value, outputId },
     );
-    await Deno.writeTextFile(artifactPath, JSON.stringify(value));
-    const { url: _url, ...shown } = value;
     return {
       ...message,
-      content: JSON.stringify(shown),
+      content: JSON.stringify({
+        outputId,
+        status: value.status,
+        slug: value.slug,
+      }),
       resultRef: createToolResultRef(
-        createToolOutputId(runId, "assign_slug", index),
+        outputId,
         "assign_slug",
         runId,
         artifactPath,
