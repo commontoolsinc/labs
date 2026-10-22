@@ -248,6 +248,7 @@ for (
   const [flag, defineName] of [
     ["sharedMemoryConnection", "$EXPERIMENTAL_SHARED_MEMORY_CONNECTION"],
     ["localSessionDocuments", "$EXPERIMENTAL_LOCAL_SESSION_DOCUMENTS"],
+    ["instanceNames", "$EXPERIMENTAL_INSTANCE_NAMES"],
   ] as const
 ) {
   Deno.test({
