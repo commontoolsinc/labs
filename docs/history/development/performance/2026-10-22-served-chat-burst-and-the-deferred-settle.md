@@ -27,8 +27,9 @@ measurement), then each sends two messages with none of the eight settled
 first. The arms are the census's: the store read-through on, the overlap
 off, the flush deadline growing to a 1000 ms cap, the serving loop in the
 worker, and the flag off or on; `off` is the loop off. The vote burst is
-`lunch-poll-vote-burst.bench.ts` at its default size on the same arms, and on
-the main thread with the flag on. Both ran on one four-core container, whose
+`lunch-poll-vote-burst.bench.ts` at 5x5 (`CF_LUNCH_POLL_VOTERS=5` and
+`CF_LUNCH_POLL_OPTIONS=5`; the benchmark's default is 10x10) on the same arms,
+and on the main thread with the flag on. Both ran on one four-core container, whose
 readings move by half a second between runs of an arm, so a difference under
 that is not one.
 
@@ -57,6 +58,20 @@ one through a transaction that already committed appends at once, and one
 through a transaction that already failed is refused.
 `stream-send-origin-transaction.test.ts` pins every case, and its in-flight
 and failed cases fail against the first version.
+
+CI's run of the topic board seed test under server execution found what
+both versions still did: they tracked the event's intent when the send ran,
+and reported it refused when the transaction did not commit.
+`PieceController.edit()` sends every attempt under one caller event id, so an
+attempt `editWithRetry` aborted and ran again was reported refused before it
+fired, and the seed, which fails on any refused intent, failed. It exited
+with status 0 even so, since the rejection reaches the SES lockdown's
+unhandled-rejection handler, and the test saw only a missing fixture file.
+`76b9a7183` makes the fire happen at the commit: the intent is tracked, the
+event appended and the pending commit registered then. A transaction that
+does not commit fires nothing and signals nothing, and the echo its local
+run left on the overlay is retired without a terminal outcome, so a later
+fire of the same id keeps its echo.
 
 ## A drop of the parked head stranded the deferred settle
 
@@ -126,8 +141,9 @@ event, not an in-process cascade copy, read 3.9 s on the send burst, no
 different from deferring behind every parked head.
 
 With the deferral and these fixes, the vote burst with the flag on reads
-faster than with the loop off, on the main thread and in the worker. The send
-burst reads half a second slower than the loop off.
+faster than with the loop off on the main thread, by more than the half
+second this container's readings vary by, and about the same in the worker,
+within it. The send burst reads half a second slower than the loop off.
 
 ## Two removals tried and dropped
 

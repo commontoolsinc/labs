@@ -594,10 +594,12 @@ flags it adopts from the deployment it runs against.
   for the current bounds and
   [the implementation plan](../plans/view-scoped-client-replication.md) for
   follow-up work.
-- **Status (2026-10-22):** off by default. Under the served vote burst, with
-  the flush deadline capped at 1000 ms, the benchmark with the flag on reads
-  faster than with the serving loop off, 3.4 s on the main thread and 3.8 to
-  3.9 s in the worker against 4.3 s. Under the FabriChat send burst the
+- **Status (2026-10-22):** off by default. Under the served vote burst at
+  5x5, with the flush deadline capped at 1000 ms, the benchmark with the flag
+  on reads faster than with the serving loop off on the main thread, 3.4 s
+  against 4.3 s, and about the same in the worker, 3.8 to 3.9 s, a difference
+  within the half second its readings vary by between runs. Under the
+  FabriChat send burst the
   worker arm with it on reads 3.6 s against 3.1 s with the loop off. The
   planner plans a wave the deadline cut over its last UI walk; a
   plan whose delivery is unchanged reaches the session without a watch-set

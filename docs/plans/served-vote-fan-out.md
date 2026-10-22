@@ -16,8 +16,8 @@ below tracks them: the growing flush deadline and the serving pass that runs
 every ready event before one derivation pass have taken out most of the
 per-wave and per-event machinery, and view-scoped replication now plans less
 and walks less: with it on, the vote burst reads faster than with the loop
-off on the main thread and in the worker, and the FabriChat send burst half a
-second slower. What is left is the memory server's root evaluations, once
+off on the main thread and about the same in the worker, and the FabriChat
+send burst half a second slower. What is left is the memory server's root evaluations, once
 per session per flush pass with a tuple evaluated under every schema a
 reader declared; each client re-running what the server ran; and, with
 view-scoped replication on, the plan's size, a room's creating space running
