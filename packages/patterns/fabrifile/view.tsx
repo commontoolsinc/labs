@@ -9,21 +9,28 @@
  * so that it can say what came of them.
  */
 import {
+  type AnyCell,
   type Cell,
   computed,
+  equals,
   handler,
   NAME,
   pattern,
   type PerSession,
+  spaceAccess,
   spaceOf,
   type Stream,
   UI,
+  VIEWS,
   type VNode,
+  wish,
   Writable,
 } from "commonfabric";
 import type {
   AddFileEvent,
   FileEntry,
+  FileProfile,
+  FileProfileCell,
   FileStoreFiles,
   RemoveFileEvent,
   RenameFileEvent,
@@ -72,10 +79,19 @@ export interface FileStoreViewInput {
   store: FileStoreFiles;
 }
 
-/** What a view offers: its rendering, and the store's files group. */
+/**
+ * What a view offers: its rendering, the store it renders, and that store's
+ * files group as its own, so that a host asking the piece a container holds
+ * for its view groups finds the store's.
+ */
 export interface FileStoreViewOutput {
   [NAME]: string;
   [UI]: VNode;
+
+  /** The store the view renders. */
+  store: FileStoreFiles;
+
+  [VIEWS]: { files: FileStoreFiles };
 }
 
 /** Returns a new request id, for one request this session sends. */
@@ -136,6 +152,16 @@ const formatSize = (bytes: number): string =>
     ? `${(bytes / 1024).toFixed(1)} KB`
     : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 
+/**
+ * Indicates whether the viewer is offered a change to the store `anchor` is
+ * in: one its space admits with `WRITE` or `OWNER`. The store decides, and a
+ * level not known yet offers nothing.
+ */
+const mayWriteIn = (anchor: AnyCell<unknown>): boolean => {
+  const level = spaceAccess(anchor);
+  return level === "WRITE" || level === "OWNER";
+};
+
 /** What one row of the view renders. */
 interface FileRowInput {
   /** The entry. */
@@ -146,6 +172,9 @@ interface FileRowInput {
 
   /** The requests this session sent. */
   sent: SentCell;
+
+  /** The viewer's profile, which holds no value while it is unknown. */
+  viewer: FileProfileCell | undefined;
 }
 
 /**
@@ -153,7 +182,7 @@ interface FileRowInput {
  * is, who added it, and the controls that rename and remove it.
  */
 const FileRow = pattern<FileRowInput, { [UI]: VNode }>(
-  ({ entry, store, sent }) => {
+  ({ entry, store, sent, viewer }) => {
     const name = computed(() => entry.get().name);
     const mediaType = computed(() => entry.get().mediaType);
     const blob = computed(() => entry.get().blob);
@@ -162,6 +191,13 @@ const FileRow = pattern<FileRowInput, { [UI]: VNode }>(
       `${formatSize(entry.get().size)} · ${entry.get().mediaType}`
     );
     const addedBy = computed(() => entry.get().addedBy);
+    // Offered to its adder, as the viewer's profile names them, and to an
+    // OWNER; the store decides who may change an entry, by who wrote it.
+    const mayChange = computed(() =>
+      spaceAccess(entry) === "OWNER" ||
+      (mayWriteIn(entry) && viewer?.get() !== undefined &&
+        equals(entry.get().addedBy, viewer))
+    );
     return {
       [UI]: (
         <cf-card>
@@ -179,19 +215,31 @@ const FileRow = pattern<FileRowInput, { [UI]: VNode }>(
             <cf-vstack gap="0" style="flex: 1; min-width: 0;">
               <cf-blob-link blob={blob} name={name}>{name}</cf-blob-link>
               <cf-text variant="caption" tone="muted">{caption}</cf-text>
-              <cf-input
-                placeholder="Rename to…"
-                oncf-submit={renameEntry({ rename: store.rename, entry, sent })}
-              />
+              {mayChange
+                ? (
+                  <cf-input
+                    placeholder="Rename to…"
+                    oncf-submit={renameEntry({
+                      rename: store.rename,
+                      entry,
+                      sent,
+                    })}
+                  />
+                )
+                : null}
             </cf-vstack>
             <cf-profile-badge $profile={addedBy} size="xs" />
-            <cf-button
-              size="sm"
-              variant="ghost"
-              onClick={removeEntry({ remove: store.remove, entry, sent })}
-            >
-              Remove
-            </cf-button>
+            {mayChange
+              ? (
+                <cf-button
+                  size="sm"
+                  variant="ghost"
+                  onClick={removeEntry({ remove: store.remove, entry, sent })}
+                >
+                  Remove
+                </cf-button>
+              )
+              : null}
           </cf-hstack>
         </cf-card>
       ),
@@ -203,6 +251,9 @@ const FileRow = pattern<FileRowInput, { [UI]: VNode }>(
 export const FileStoreView = pattern<FileStoreViewInput, FileStoreViewOutput>(
   ({ store }) => {
     const sent = new Writable.perSession<SentRequest[]>([]);
+    const viewerWish = wish<FileProfile>({ query: "#profile" });
+    // The store's `add` is a cell in the store's own space.
+    const mayAdd = computed(() => mayWriteIn(store.add));
     const count = computed(() => store.entries.length);
     // What came of this session's requests, where that is not what was asked:
     // a refusal, or a file added under a name other than its own.
@@ -228,21 +279,33 @@ export const FileStoreView = pattern<FileStoreViewInput, FileStoreViewOutput>(
           </cf-vstack>
 
           <cf-vstack gap="3" padding="4">
-            <cf-file-input
-              multiple
-              showPreview={false}
-              buttonText="Add files"
-              oncf-change={addUploads({ add: store.add, anchor: store, sent })}
-            />
+            {mayAdd
+              ? (
+                <cf-file-input
+                  multiple
+                  showPreview={false}
+                  buttonText="Add files"
+                  oncf-change={addUploads({
+                    add: store.add,
+                    anchor: store,
+                    sent,
+                  })}
+                />
+              )
+              : null}
 
             {notices.map((notice) => <cf-text tone="muted">{notice}</cf-text>)}
 
             {count === 0 ? <cf-text tone="muted">No files yet.</cf-text> : null}
 
-            {store.entries.map((entry) => FileRow({ entry, store, sent }))}
+            {store.entries.map((entry) =>
+              FileRow({ entry, store, sent, viewer: viewerWish.result })
+            )}
           </cf-vstack>
         </cf-screen>
       ),
+      store,
+      [VIEWS]: { files: store },
     };
   },
 );
