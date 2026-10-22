@@ -15,6 +15,7 @@ import * as Engine from "@commonfabric/memory/v2/engine";
 import { Server } from "@commonfabric/memory/v2/server";
 import { authorizeLoopbackSessionOpen } from "@commonfabric/memory/v2/session-open-auth";
 import { defer } from "@commonfabric/utils/defer";
+import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 import { popFrame, pushFrame } from "../../src/builder/pattern.ts";
 import {
@@ -1183,7 +1184,7 @@ describe("spaceAccess()", () => {
       anyone?: "OWNER" | "WRITE" | "READ",
     ) => {
       const sorted = Object.fromEntries(
-        Object.entries(principals).sort(([a], [b]) => a < b ? -1 : 1),
+        utf8SortedKeysOf(principals).map((key) => [key, principals[key]]),
       );
       return anyone === undefined
         ? { principals: sorted }
