@@ -119,10 +119,10 @@ a chat among other things declares its own kind
 
 ## DID (Decentralized Identifier)
 
-An identifier, defined by the W3C DID Core specification, that its holder
-controls cryptographically rather than through a central registry. It is
-written `did:<method>:<id>`. Common Fabric names spaces, users, and services by
-DIDs, most of them using the [did:key] method.
+An identifier of the form `did:<method>:<id>`, from the W3C DID Core
+specification. Spaces and users are named by [did:key] DIDs, derived from a
+keypair, so whoever holds the private key controls the identity. Some services
+and CFC principals are named by `did:web` DIDs instead.
 
 ## [did:key]
 
