@@ -128,8 +128,10 @@ parent's internal cell for the instance's partial cause. Everything the child
 holds hangs off that result cell, so the partial cause is the child's
 identity.
 
-An instance bound to a `const` is a **named instance**. The transformer wraps
-it in `__cfHelpers.nameInstance(Child(...), "child")`
+In a runtime with the `instanceNames` experimental flag on
+(`docs/development/EXPERIMENTAL_OPTIONS.md`, off by default), an instance bound
+to a `const` is a **named instance**. The transformer wraps it in
+`__cfHelpers.nameInstance(Child(...), "child")`
 (`docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md` §13.2),
 and the builder takes that name as the instance's partial cause,
 `{ $instance: "child" }`, wherever no result key, node input or authored
@@ -267,7 +269,8 @@ What this leaves open:
   identity changed with it, so the positional rules have nothing to judge by
   and let the setup through. A child can then take another's state.
 - Anonymous roots other than named instances stay positional: an instance not
-  bound to a `const`, a `.map()` output and the element children under it.
+  bound to a `const`, every instance in a runtime with naming off, a `.map()`
+  output and the element children under it.
   When such a root moves to a number nothing held, its children are minted
   afresh and the old ones are orphaned with no refusal, since nothing sets up
   over them.
@@ -283,6 +286,14 @@ What this leaves open:
   source. A named instance is immune to that; carrying its child over in step
   1 relies on the previous pattern compiling under today's runtime to the
   numbering it was deployed with.
+- A runtime with naming off, or one that predates instance names, binds a
+  parent's children positionally, even where a naming runtime carried them
+  over to their names: reopening the parent, it runs whatever instance now
+  takes a carried child's positional number on that child's document, and
+  updating the parent, it shows the carried child's state under that instance,
+  with no refusal in either case (`packages/runner/test/instance-naming-modes.test.ts`).
+  The `instanceNames` flag stays off until such a runtime is kept away from a
+  space whose data a naming runtime wrote.
 
 ### Transaction provenance
 

@@ -3324,12 +3324,15 @@ A qualifying call, per `detectCallKind` (§5) — as of this writing:
   reactive values in its argument object still get property causes (test:
   "does not add root causes to pattern factory outputs" pins the absence of
   `.for("child", true)` alongside `.for(["child", "value"], true)`). At
-  variable position, with no authored `.for()` in its chain, the instance is
-  instead wrapped in `__cfHelpers.nameInstance(<call>, "<name>")`
-  (`isNameableInstance` / `createNameInstanceCall`): `const child = Child({
-  value })` becomes `const child = __cfHelpers.nameInstance(Child({ value }),
-  "child")` (test: "wraps a pattern factory output a `const` binds in
-  `nameInstance` with the binding's name"). An instance name is not a cause.
+  variable position, with no authored `.for()` in its chain, and with the
+  `instanceNames` transformation option on (off by default; the runner sets it
+  from its experimental flag of that name), the instance is instead wrapped in
+  `__cfHelpers.nameInstance(<call>, "<name>")` (`isNameableInstance` /
+  `createNameInstanceCall`): `const child = Child({ value })` becomes
+  `const child = __cfHelpers.nameInstance(Child({ value }), "child")` (tests,
+  under "instance naming": "wraps a pattern factory output a `const` binds in
+  `nameInstance` with the binding's name, when it is on" and "wraps nothing in
+  `nameInstance`, when it is off"). An instance name is not a cause.
   The pattern builder takes it as the instance's partial cause only where a
   result key or a node input gives the instance no name, so a name either of
   those gives outranks it; the runtime half is in

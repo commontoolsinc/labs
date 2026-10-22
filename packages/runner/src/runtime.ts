@@ -1939,6 +1939,9 @@ export class Runtime {
     this.experimental.lazyMaterialization ??= true;
     this.experimental.agentBuiltin ??= true;
     this.experimental.localFold ??= false;
+    // TODO(danfuzz): Turn this on only once a runtime whose naming mode
+    // differs from a space's data is kept away from that space;
+    // `instance-naming-modes.test.ts` pins what one does to it until then.
     this.experimental.instanceNames ??= false;
     this.experimental.localSessionDocuments ??= false;
 
