@@ -20,6 +20,7 @@ import {
   coveringSelector,
   createGraphQueryWalkStats,
   createSchemaMemo,
+  forgetSchemaMemoDocuments,
   GraphQueryWalk,
   type GraphQueryWalkStats,
   type IAttestation,
@@ -27,6 +28,7 @@ import {
   type ObjectStorageManager,
   parseCrossingDocKey,
   type SchemaMemo,
+  schemaMemoDocumentPrefix,
   type SchemaPathSelector,
   schemaTrackerCoversSelector,
   schemaTrackerKey,
@@ -496,12 +498,16 @@ export class EngineObjectManager implements ObjectStorageManager {
     // identity's keys (plus explicitly named instances, which dirty
     // marking addresses by exact key through the same construction).
     const scopeKey = this.#scopeKeyFor(scope);
-    for (const id of ids) {
-      const key = `${scopeKey}/${id}/application/json`;
-      this.#attestations.delete(key);
-      this.#details.delete(key);
-      this.#missing.delete(key);
-    }
+    for (const id of ids) this.forgetInstance(scopeKey, id);
+  }
+
+  /** Drops what is cached for the instance `scopeKey` names of `id`, so
+   * that the next read of it loads the stored document. */
+  forgetInstance(scopeKey: ScopeKey, id: string): void {
+    const key = `${scopeKey}/${id}/application/json`;
+    this.#attestations.delete(key);
+    this.#details.delete(key);
+    this.#missing.delete(key);
   }
 
   mergeFrom(other: EngineObjectManager): void {
@@ -1380,17 +1386,15 @@ const assembleSchemaDocClosures = (
 ): {
   trackerAdds: QueryDocKey[];
 
-  /** Every schema document the closure walk reached, the established ones
-   * included: each attributes to every document in `closureReferrers`, so
-   * that a schema document outlives the first document that delivered it
-   * for as long as any delivered document's refs reach it. */
-  closureKeys: QueryDocKey[];
-
-  /** The delivered documents whose refs the closure was walked from. */
-  closureReferrers: QueryDocKey[];
+  /** For each delivered document whose refs reach a schema document, every
+   * schema document they reach, the established ones and the ones reached
+   * through another included: the records the document keeps. A schema
+   * document stays delivered for as long as the closure of any delivered
+   * document holds it. */
+  closureOf: Map<QueryDocKey, ReadonlySet<QueryDocKey>>;
 
   /** A schema document a delivered document's new version no longer
-   * refers to, with that document: the attribution to release. */
+   * reaches, with that document: the attribution to release. */
   closureDrops: { referrer: QueryDocKey; key: QueryDocKey }[];
 
   additions: Map<QueryDocKey, EntitySnapshot>;
@@ -1399,27 +1403,34 @@ const assembleSchemaDocClosures = (
   const schemaDocKey = (hash: string): QueryDocKey =>
     toDocKey(space, `cid:${hash}`, DEFAULT_SCOPE, identity);
   const roots = new Set<string>();
-  const closureReferrers: QueryDocKey[] = [];
-  const closureDrops: { referrer: QueryDocKey; key: QueryDocKey }[] = [];
+  // Each delivered document's refs, with the refs of the version delivered
+  // before it where that version differs: the walk reaches both, so that
+  // the closure the old version kept is read off the registry below.
+  const referrers = new Map<
+    QueryDocKey,
+    { refs: ReadonlySet<string>; previousRefs?: ReadonlySet<string> }
+  >();
   for (const [key, snapshot] of delivered) {
     const previous = scans.get(key);
     const refs = scanSnapshotSchemaRefs(engine, key, snapshot, scans, stats);
-    if (previous !== undefined && previous.seq !== snapshot.seq) {
-      for (const hash of previous.refs) {
-        roots.add(hash);
-        if (!refs.has(hash)) {
-          closureDrops.push({ referrer: key, key: schemaDocKey(hash) });
-        }
-      }
-    }
+    const previousRefs = previous !== undefined && previous.seq !== snapshot.seq
+      ? previous.refs
+      : undefined;
+    for (const hash of previousRefs ?? []) roots.add(hash);
     for (const hash of refs) roots.add(hash);
-    if (refs.size > 0) closureReferrers.push(key);
+    if (refs.size > 0 || previousRefs !== undefined) {
+      referrers.set(key, { refs, previousRefs });
+    }
   }
+  // A schema document this state delivered, at the version it holds, and
+  // whose own closure is therefore delivered too; the registry still has
+  // it, so the closures below can be read through it.
   const isEstablished = (hash: string, key: QueryDocKey): boolean => {
     if (delivered.has(key)) return false;
     const scan = scans.get(key);
     return scan !== undefined && scan.refs.has(hash) &&
-      established.get(key)?.seq === scan.seq;
+      established.get(key)?.seq === scan.seq &&
+      lookupSchemaDocument(hash) !== undefined;
   };
   let verified = verifiedSchemaDocCaches.get(engine);
   if (verified === undefined) {
@@ -1427,20 +1438,6 @@ const assembleSchemaDocClosures = (
     verifiedSchemaDocCaches.set(engine, verified);
   }
   const trackerAdds: QueryDocKey[] = [];
-  const closureKeys = new Set<QueryDocKey>();
-  // The walk stops at an established schema document, whose own closure was
-  // delivered with it, so the documents below it are reached through the
-  // registry's copy instead, which holds every verified one.
-  const reachEstablished = (hash: string): void => {
-    const key = schemaDocKey(hash);
-    if (closureKeys.has(key)) return;
-    closureKeys.add(key);
-    const registered = lookupSchemaDocument(hash);
-    if (registered === undefined) return;
-    for (const ref of collectExternalSchemaRefHashes(registered)) {
-      reachEstablished(ref);
-    }
-  };
   const additions = new Map<QueryDocKey, EntitySnapshot>();
   // What the loader read for each hash, for the verified callback: the key
   // and snapshot, and whether this exact version had verified here before.
@@ -1452,11 +1449,7 @@ const assembleSchemaDocClosures = (
     roots,
     load: (hash) => {
       const key = schemaDocKey(hash);
-      if (isEstablished(hash, key)) {
-        reachEstablished(hash);
-        return { kind: "settled" };
-      }
-      closureKeys.add(key);
+      if (isEstablished(hash, key)) return { kind: "settled" };
       const id = `cid:${hash}`;
       manager.load({ id, scope: DEFAULT_SCOPE, type: "application/json" });
       const snapshot = snapshotForDocKey(space, manager, branch, key);
@@ -1519,13 +1512,39 @@ const assembleSchemaDocClosures = (
       }
     },
   });
-  return {
-    trackerAdds,
-    closureKeys: [...closureKeys],
-    closureReferrers,
-    closureDrops,
-    additions,
+  // Every schema document the walk reached is in the registry now, the
+  // established ones by the test above, so each referrer's closure is read
+  // through it: the documents its refs name, and theirs, and so on down.
+  const closures = new Map<string, Set<QueryDocKey>>();
+  const closureOfHash = (hash: string): ReadonlySet<QueryDocKey> => {
+    let closure = closures.get(hash);
+    if (closure === undefined) {
+      closure = new Set([schemaDocKey(hash)]);
+      closures.set(hash, closure);
+      const schema = lookupSchemaDocument(hash);
+      for (const ref of collectExternalSchemaRefHashes(schema ?? {})) {
+        for (const key of closureOfHash(ref)) closure.add(key);
+      }
+    }
+    return closure;
   };
+  const closureOf = new Map<QueryDocKey, ReadonlySet<QueryDocKey>>();
+  const closureDrops: { referrer: QueryDocKey; key: QueryDocKey }[] = [];
+  for (const [referrer, { refs, previousRefs }] of referrers) {
+    const closure = new Set<QueryDocKey>();
+    for (const hash of refs) {
+      for (const key of closureOfHash(hash)) closure.add(key);
+    }
+    if (closure.size > 0) closureOf.set(referrer, closure);
+    const dropped = new Set<QueryDocKey>();
+    for (const hash of previousRefs ?? []) {
+      for (const key of closureOfHash(hash)) {
+        if (!closure.has(key)) dropped.add(key);
+      }
+    }
+    for (const key of dropped) closureDrops.push({ referrer, key });
+  }
+  return { trackerAdds, closureOf, closureDrops, additions };
 };
 
 /**
@@ -1962,10 +1981,36 @@ const retireEmptied = (
     state.schemaRefs.delete(docKey);
     retirement.retired.add(docKey);
     retirement.rewalkDocs.delete(docKey);
+    // What the manager holds for a retired document stands for a walk
+    // whose records are gone: a root added again would be served the
+    // document as it was when that walk read it.
+    const { id, scopeKey } = fromDocKey(docKey);
+    state.manager.forgetInstance(scopeKey, id);
     releaseReferrer(missesView(state), docKey, changedMisses);
     releaseReferrer(crossingsView(state), docKey);
     releaseTrackedReferrer(state, docKey, retirement);
   }
+};
+
+/**
+ * Drops what the graph's memo holds for the documents `retirement`
+ * retired. A memo entry stands for a walk whose records are gone: a
+ * traversal reaching the document would find the entry and record nothing
+ * for it. The memo is scanned once for the pass, after its last
+ * retirement; the walks of the pass itself answer from a memo of their
+ * own, or walk their documents past the memo.
+ */
+const forgetRetiredFromMemo = (
+  state: TrackedGraphState,
+  retirement: Retirement,
+): void => {
+  if (retirement.retired.size === 0) return;
+  const forgotten = new Set<string>();
+  for (const docKey of retirement.retired) {
+    const { space, id, scope } = fromDocKey(docKey);
+    forgotten.add(schemaMemoDocumentPrefix({ space, scope, id }));
+  }
+  forgetSchemaMemoDocuments(state.memo, forgotten);
 };
 
 /**
@@ -2152,9 +2197,9 @@ const settleRetirement = (
       retireEmptied(state, retirement, changedMisses);
       if (retirement.candidates.size > 0) continue;
       if (retirement.reconcile.size === 0) {
-        if (retirement.suspects.size === 0) return touched;
+        if (retirement.suspects.size === 0) break;
         sweepSuspects(state, retirement);
-        if (retirement.emptied.size === 0) return touched;
+        if (retirement.emptied.size === 0) break;
         continue;
       }
       const reconcile = [...retirement.reconcile];
@@ -2219,6 +2264,8 @@ const settleRetirement = (
       retirement.reconcile.add(root.docKey);
     }
   }
+  forgetRetiredFromMemo(state, retirement);
+  return touched;
 };
 
 /**
@@ -2271,8 +2318,8 @@ const deliverTouched = (
   for (const key of staged.trackerAdds) {
     state.tracker.add(key, REJECTING_SELECTOR);
   }
-  for (const key of staged.closureKeys) {
-    for (const referrer of staged.closureReferrers) {
+  for (const [referrer, keys] of staged.closureOf) {
+    for (const key of keys) {
       recorders.tracked(key, REJECTING_SELECTOR, referrer, "walked");
     }
   }
@@ -2286,6 +2333,7 @@ const deliverTouched = (
   // uncovers nothing and the cascade ends here.
   retireOrphans(state, retirement);
   retireEmptied(state, retirement, changedMisses);
+  forgetRetiredFromMemo(state, retirement);
   for (const [key, snapshot] of staged.additions) {
     updates.set(key, snapshot);
   }
@@ -2587,8 +2635,8 @@ export const trackGraph = (
   for (const key of staged.trackerAdds) {
     schemaTracker.add(key, REJECTING_SELECTOR);
   }
-  for (const key of staged.closureKeys) {
-    for (const referrer of staged.closureReferrers) {
+  for (const [referrer, keys] of staged.closureOf) {
+    for (const key of keys) {
       tracked(key, REJECTING_SELECTOR, referrer, "walked");
     }
   }
@@ -2862,6 +2910,12 @@ export const refreshTrackedGraph = (
         affectedMisses.set(key, new Set(missedSelectors));
       }
     }
+    // The graph's own cache lets go of every dirty document, tracked or
+    // not: one that changed while nothing reached it is read at its stored
+    // version when a root added later does.
+    for (const [scope, ids] of invalidations) {
+      state.manager.invalidateIds(ids, scope);
+    }
     if (affectedDocs.size === 0 && affectedMisses.size === 0) {
       return null;
     }
@@ -2991,9 +3045,6 @@ export const refreshTrackedGraph = (
     );
     phases.enter("merge");
     for (const key of delivered.retired) retirement.retired.add(key);
-    for (const [scope, ids] of invalidations) {
-      state.manager.invalidateIds(ids, scope);
-    }
     state.manager.mergeFrom(manager);
 
     stats.managerReads = manager.readCount - readCountBefore;

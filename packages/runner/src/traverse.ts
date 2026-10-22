@@ -280,15 +280,53 @@ function memoIdComponent(id: string): string {
  * id that reads like a digest still gets a key of its own.
  */
 function schemaMemoAddressKey(address: IMemorySpaceAddress): string {
+  return `${schemaMemoDocumentPrefix(address)}${
+    keyComponent(address.type ?? "application/json")
+  }p${pathKey(address.path)}`;
+}
+
+/**
+ * The part every memo key for the document `address` names opens with,
+ * whatever type, path and schema the key goes on to name: the space, the
+ * scope and the id, each length-prefixed, through the `t` that starts the
+ * type. `forgetSchemaMemoDocuments()` matches memo keys by it.
+ */
+export function schemaMemoDocumentPrefix(
+  address: { space: string; scope?: IMemorySpaceAddress["scope"]; id: string },
+): string {
   return `s${keyComponent(address.space)}c${
     keyComponent(address.scope ?? "space")
   }${
     address.id.length > MAX_SPELLED_OUT_ID_LENGTH
       ? memoIdComponent(address.id)
       : `i${keyComponent(address.id)}`
-  }t${keyComponent(address.type ?? "application/json")}p${
-    pathKey(address.path)
-  }`;
+  }t`;
+}
+
+/** The `schemaMemoDocumentPrefix()` a memo key opens with. */
+function schemaMemoKeyDocumentPrefix(key: string): string {
+  let at = 0;
+  for (let component = 0; component < 3; component++) {
+    const colon = key.indexOf(":", at + 1);
+    at = colon + 1 + Number(key.slice(at + 1, colon));
+  }
+  return key.slice(0, at + 1);
+}
+
+/**
+ * Drops every entry of `memo` for the documents `prefixes` name, each a
+ * `schemaMemoDocumentPrefix()`. An entry stands for a traversal that
+ * recorded the document's reads and tracker entries; once those records
+ * are gone, a traversal that found the entry would skip the document and
+ * record nothing in their place.
+ */
+export function forgetSchemaMemoDocuments(
+  memo: SchemaMemo,
+  prefixes: ReadonlySet<string>,
+): void {
+  for (const key of memo.keys()) {
+    if (prefixes.has(schemaMemoKeyDocumentPrefix(key))) memo.delete(key);
+  }
 }
 
 /**

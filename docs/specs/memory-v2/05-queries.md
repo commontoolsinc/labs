@@ -313,8 +313,9 @@ document. Coverage follows the same rule: a later query naming a document
 an earlier evaluation reached is covered by existing watch state when the
 tracker already covers its selector. A server attributes each tracker record
 to what reached it: a watch root to its watch, a linked document to the
-document holding the link, a schema document to the document naming it. A
-covered root or link attributes to the record covering it. A record whose last
+document holding the link, a schema document to each delivered document whose
+refs reach it, directly or through the schema documents between. A covered
+root or link attributes to the record covering it. A record whose last
 walking referrer lets go retires, and the referrers it covered are walked on
 their own. Removing a watch releases its roots, and a write re-walks the
 changed document and releases what the re-walk does not reach again. Either

@@ -1013,6 +1013,13 @@ describe("Server", () => {
       const ids = (entries: readonly { id: string }[]) =>
         entries.map((entry) => entry.id).toSorted();
 
+      /** A link to `id` whose schema position carries `$ref: cid:<hash>`. */
+      const linkWithSchemaRef = (id: string, hash: string) => ({
+        "/": {
+          "link@1": { id, path: [], schema: { $ref: `cid:${hash}` } },
+        },
+      });
+
       /** Opens a session watching `of:a` permissively, then narrowly. */
       async function openCoveredFixture() {
         const fixture = await openFixture(0);
@@ -1169,6 +1176,151 @@ describe("Server", () => {
         }
       });
 
+      it("delivers a root added again after its removal with what it reaches, at the version stored", async () => {
+        // Removing the watch retires `of:a` and `of:x`, and the graph's
+        // read cache and traversal memo let go of both: adding the watch
+        // again reads `of:a` as it was written in between, and walks
+        // `of:x` below it. The watch on `of:b` keeps the graph throughout.
+        const fixture = await openFixture(0);
+        const rootValue = (n: number) => ({
+          value: { child: link(fixture.space, "of:x"), n },
+        });
+        try {
+          await fixture.writer.transact({
+            localSeq: 2,
+            reads: { confirmed: [], pending: [] },
+            operations: [
+              { op: "set", id: "of:a", value: rootValue(1) },
+              { op: "set", id: "of:x", value: { value: { name: "x" } } },
+              { op: "set", id: "of:b", value: { value: { name: "b" } } },
+            ],
+          });
+          await fixture.server.flushSessions();
+          await fixture.reader.watchAddSync([
+            permissive("of:a"),
+            watch("of:b"),
+          ]);
+          const removal = await fixture.reader.watchRemoveSync(["of:a:all"]);
+          expect(ids(removal.sync.removes)).toEqual(["of:a", "of:x"]);
+          await fixture.writer.transact({
+            localSeq: 3,
+            reads: { confirmed: [], pending: [] },
+            operations: [{ op: "set", id: "of:a", value: rootValue(2) }],
+          });
+          await fixture.server.flushSessions();
+          const added = await fixture.reader.watchAddSync([permissive("of:a")]);
+          expect(ids(added.sync.upserts)).toEqual(["of:a", "of:x"]);
+          expect(
+            added.sync.upserts.find((entry) => entry.id === "of:a")?.doc,
+          ).toEqual(rootValue(2));
+          expect(ids([...fixture.state.entities.values()])).toEqual([
+            "of:a",
+            "of:b",
+            "of:x",
+          ]);
+        } finally {
+          await fixture.close();
+        }
+      });
+
+      it("retracts, with a removed root, the schema documents only its own refs reach", async () => {
+        // `of:a` and `of:b` are walked in one evaluation, each linking
+        // under a `$ref` schema of its own. Each keeps the closure its own
+        // refs reach and no other, so removing `of:a` retracts its schema
+        // document and leaves the one `of:b` refers to delivered.
+        const onlyA = { type: "string", title: "only-a" } as const;
+        const onlyAHash = internSchemaAsTaggedHashString(onlyA);
+        const onlyB = { type: "string", title: "only-b" } as const;
+        const onlyBHash = internSchemaAsTaggedHashString(onlyB);
+        const fixture = await openFixture(0);
+        try {
+          await fixture.writer.transact({
+            localSeq: 2,
+            reads: { confirmed: [], pending: [] },
+            operations: [
+              { op: "set", id: `cid:${onlyAHash}`, value: { value: onlyA } },
+              { op: "set", id: `cid:${onlyBHash}`, value: { value: onlyB } },
+              { op: "set", id: "of:t", value: { value: { n: 1 } } },
+              {
+                op: "set",
+                id: "of:a",
+                value: { value: { x: linkWithSchemaRef("of:t", onlyAHash) } },
+              },
+              {
+                op: "set",
+                id: "of:b",
+                value: { value: { x: linkWithSchemaRef("of:t", onlyBHash) } },
+              },
+            ],
+          });
+          await fixture.server.flushSessions();
+          await fixture.reader.watchAddSync([watch("of:a"), watch("of:b")]);
+          expect(ids([...fixture.state.entities.values()])).toEqual(
+            [`cid:${onlyAHash}`, `cid:${onlyBHash}`, "of:a", "of:b"].toSorted(),
+          );
+          const removal = await fixture.reader.watchRemoveSync(["of:a"]);
+          expect(ids(removal.sync.removes)).toEqual(
+            [`cid:${onlyAHash}`, "of:a"].toSorted(),
+          );
+          expect(ids([...fixture.state.entities.values()])).toEqual(
+            [`cid:${onlyBHash}`, "of:b"].toSorted(),
+          );
+        } finally {
+          await fixture.close();
+        }
+      });
+
+      it("retracts, at the refresh, the whole closure of a schema ref a document no longer carries", async () => {
+        // `of:a` links under `outer`, which refers to `leaf`. Replacing
+        // `of:a` with a value carrying no ref releases the closure the old
+        // version kept whole, `leaf` with `outer`.
+        const leaf = { type: "string", title: "closure-leaf" } as const;
+        const leafHash = internSchemaAsTaggedHashString(leaf);
+        const outer = {
+          type: "object",
+          properties: { x: { $ref: `cid:${leafHash}` } },
+        } as const;
+        const outerHash = internSchemaAsTaggedHashString(outer);
+        const fixture = await openFixture(0);
+        try {
+          await fixture.writer.transact({
+            localSeq: 2,
+            reads: { confirmed: [], pending: [] },
+            operations: [
+              { op: "set", id: `cid:${leafHash}`, value: { value: leaf } },
+              { op: "set", id: `cid:${outerHash}`, value: { value: outer } },
+              { op: "set", id: "of:t", value: { value: { n: 1 } } },
+              {
+                op: "set",
+                id: "of:a",
+                value: { value: { x: linkWithSchemaRef("of:t", outerHash) } },
+              },
+            ],
+          });
+          await fixture.server.flushSessions();
+          const { view } = await fixture.reader.watchAddSync([watch("of:a")]);
+          expect(ids([...fixture.state.entities.values()])).toEqual(
+            [`cid:${leafHash}`, `cid:${outerHash}`, "of:a"].toSorted(),
+          );
+          const frames = view.subscribeSync();
+          const pushed = frames.next();
+          await fixture.writer.transact({
+            localSeq: 3,
+            reads: { confirmed: [], pending: [] },
+            operations: [{ op: "set", id: "of:a", value: { value: {} } }],
+          });
+          await fixture.server.flushSessions();
+          const { value: frame } = await pushed;
+          expect(ids(frame!.removes)).toEqual(
+            [`cid:${leafHash}`, `cid:${outerHash}`].toSorted(),
+          );
+          expect(ids(frame!.upserts)).toEqual(["of:a"]);
+          expect(ids([...fixture.state.entities.values()])).toEqual(["of:a"]);
+        } finally {
+          await fixture.close();
+        }
+      });
+
       it("keeps a schema document delivered while any delivered document refers to it", async () => {
         // Two roots link under one `$ref` schema. The schema documents are
         // walked in once, for the first root, and every later document
@@ -1181,11 +1333,7 @@ describe("Server", () => {
           properties: { x: { $ref: `cid:${leafHash}` } },
         } as const;
         const refHash = internSchemaAsTaggedHashString(refSchema);
-        const refLink = (id: string) => ({
-          "/": {
-            "link@1": { id, path: [], schema: { $ref: `cid:${refHash}` } },
-          },
-        });
+        const refLink = (id: string) => linkWithSchemaRef(id, refHash);
         const fixture = await openFixture(0);
         try {
           await fixture.writer.transact({

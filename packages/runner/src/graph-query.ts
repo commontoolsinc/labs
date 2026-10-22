@@ -32,6 +32,7 @@ import {
   coveringSelector,
   createSchemaMemo,
   createTraversalContext,
+  forgetSchemaMemoDocuments,
   getAtPath,
   type IAttestation,
   type IMemorySpaceValueAttestation,
@@ -40,6 +41,7 @@ import {
   MapSetStringToPathSelectors,
   type ObjectStorageManager,
   type SchemaMemo,
+  schemaMemoDocumentPrefix,
   SchemaObjectTraverser,
   type SchemaPathSelector,
   schemaTrackerCoversSelector,
@@ -56,8 +58,10 @@ export type {
 export {
   coveringSelector,
   createSchemaMemo,
+  forgetSchemaMemoDocuments,
   MapSetStringToPathSelectors,
   type SchemaMemo,
+  schemaMemoDocumentPrefix,
   schemaTrackerCoversSelector,
   schemaTrackerKey,
 };
@@ -234,25 +238,21 @@ export class GraphQueryWalk {
     // A referrer arrives as an address; its attribution key is its tracker
     // key, overridden to the explicit-instance key a root was recorded
     // under (`#keyOverrides`), as a miss's referrer is. A document reports
-    // once per link it holds, so the key is kept per document.
-    const referrerKeys = new Map<string, string>();
+    // once per link it holds, so its tracker key is kept per document. The
+    // override is read on every report: one walk visits every explicit
+    // instance of a root in turn, and each visit records its own.
+    const sourceKeys = new Map<string, string>();
     const referrerKeyOf = (
       source: { id: string; scope?: CellScope } | undefined,
     ): string | undefined => {
       if (source === undefined) return undefined;
       const cacheKey = `${source.scope ?? ""}\0${source.id}`;
-      let key = referrerKeys.get(cacheKey);
-      if (key === undefined) {
-        const sourceKey = schemaTrackerKey(
-          space,
-          source.id,
-          source.scope,
-          identity,
-        );
-        key = this.#keyOverrides.get(sourceKey) ?? sourceKey;
-        referrerKeys.set(cacheKey, key);
+      let sourceKey = sourceKeys.get(cacheKey);
+      if (sourceKey === undefined) {
+        sourceKey = schemaTrackerKey(space, source.id, source.scope, identity);
+        sourceKeys.set(cacheKey, sourceKey);
       }
-      return key;
+      return this.#keyOverrides.get(sourceKey) ?? sourceKey;
     };
     this.#context = createTraversalContext(
       new CompoundCycleTracker<FabricValue, JSONSchema | undefined>(),
