@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { hashOf } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import type { DID } from "@commonfabric/identity/did";
 import { type Cell, type JSONSchema, Runtime } from "@commonfabric/runner";
 import {
@@ -26,6 +27,8 @@ import {
 } from "@commonfabric/runner/storage/cache.deno";
 
 const owner = await Identity.fromPassphrase("fabrifile-store");
+// A member of the store's space, who may write in it but does not own it.
+const member = await Identity.fromPassphrase("fabrifile-store member");
 const PATTERNS = fromFileUrl(new URL("..", import.meta.url));
 
 /** The bytes of a small image, stored as `photo.png`. */
@@ -92,7 +95,7 @@ describe("FabriFile store", () => {
       apiUrl: new URL(import.meta.url),
       storageManager: storage,
     });
-    home = await runtime.createSpace({});
+    home = await runtime.createSpace({ grants: { [member.did()]: "WRITE" } });
   });
 
   afterEach(async () => {
@@ -119,7 +122,9 @@ describe("FabriFile store", () => {
    * person's profile is, since an entry may link only a labeled document.
    */
   const writeProfile = async (name: string) => {
-    const space = await runtime.createSpace({});
+    const space = await runtime.createSpace({
+      grants: { [member.did()]: "READ" },
+    });
     const tx = runtime.edit();
     const profile = runtime.getCell(space, `profile ${name}`, {
       type: "object",
@@ -186,7 +191,67 @@ describe("FabriFile store", () => {
       const { entries } = await facts();
       return await Promise.all(entries.map(read));
     };
-    return { store, send, facts, values };
+    /**
+     * Waits until the store, as this runtime sees it, has recorded an outcome
+     * for `requestId`, such as one a member's runtime sent.
+     */
+    const outcomeOf = async (requestId: string) =>
+      (await waitForCellValue<{ requests?: Record<string, unknown> }>(
+        runtime,
+        store.asSchema(storeSchema),
+        (value) => value?.requests?.[requestId] !== undefined,
+      )).requests![requestId];
+    return { store, send, facts, values, outcomeOf };
+  };
+
+  /**
+   * Runs `act` with a runtime of `member`'s over the same store, whose `send`
+   * sends to the stream `stream` of `store` as `member`, and whose `link`
+   * returns `member`'s cell for `cell`, and returns what `act` returns. The
+   * runtime is disposed of once `act` returns, so `act` waits there for what
+   * its sends must have done.
+   */
+  const asMember = async <T>(
+    act: (as: {
+      send: (
+        store: Cell<unknown>,
+        stream: string,
+        event: Record<string, unknown>,
+      ) => Promise<void>;
+      link: (cell: Cell<unknown>) => Cell<unknown>;
+    }) => Promise<T>,
+  ): Promise<T> => {
+    const memberStorage = EmulatedStorageManager.connectTo(server, {
+      as: member,
+    });
+    const memberRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: memberStorage,
+    });
+    const link = (cell: Cell<unknown>) =>
+      memberRuntime.getCellFromLink(cell.getAsNormalizedFullLink());
+    try {
+      return await act({
+        link,
+        send: async (store, stream, event) => {
+          // The member's runtime loads the store before writing to it, as a
+          // client showing it would have.
+          const own = link(store);
+          await own.pull();
+          await memberStorage.synced();
+          const tx = memberRuntime.edit();
+          own.withTx(tx).key(stream).send(event);
+          expect((await tx.commit().settled).error).toBeUndefined();
+          await memberRuntime.idle();
+          await memberStorage.synced();
+          await runtime.idle();
+          await storage.synced();
+        },
+      });
+    } finally {
+      await memberRuntime.dispose();
+      await memberStorage.close();
+    }
   };
 
   /** Returns what a client reads of `entry`. */
@@ -418,6 +483,74 @@ describe("FabriFile store", () => {
       await send("add", addEvent("a2", "photo.png", blobId));
 
       expect((await values()).map(({ name }) => name)).toEqual(["photo.png"]);
+    });
+  });
+
+  describe("who may change an entry", () => {
+    it("refuses a remove from a member who neither added the entry nor owns the space", async () => {
+      const blobId = await storeBlob(photo);
+      const { store, send, facts, values, outcomeOf } = await startStore(
+        await writeProfile("Ada"),
+      );
+      await send("add", addEvent("a1", "photo.png", blobId));
+      const [entry] = (await facts()).entries;
+
+      // The member's runtime stays up until the store records the outcome,
+      // since its event may commit only on a retry.
+      const outcome = await asMember(async ({ send, link }) => {
+        await send(store, "remove", { requestId: "x1", entry: link(entry) });
+        return await outcomeOf("x1");
+      });
+
+      expect(outcome).toMatchObject({
+        status: "refused",
+        code: "not-permitted",
+      });
+      expect(await values()).toHaveLength(1);
+    });
+
+    it("renames an entry for the member who added it", async () => {
+      const blobId = await storeBlob(photo);
+      const { store, facts, values, outcomeOf } = await startStore(
+        await writeProfile("Ada"),
+      );
+
+      const outcome = await asMember(async ({ send, link }) => {
+        await send(store, "add", addEvent("a1", "photo.png", blobId));
+        await outcomeOf("a1");
+        const [entry] = (await facts()).entries;
+        await send(store, "rename", {
+          requestId: "r1",
+          entry: link(entry),
+          name: "holiday.png",
+        });
+        return await outcomeOf("r1");
+      });
+
+      expect(outcome).toMatchObject({
+        status: "done",
+        name: "holiday.png",
+      });
+      expect((await values()).map(({ name }) => name)).toEqual([
+        "holiday.png",
+      ]);
+    });
+
+    it("removes an entry another member added, for an owner of the space", async () => {
+      const blobId = await storeBlob(photo);
+      const { store, send, facts, values, outcomeOf } = await startStore(
+        await writeProfile("Ada"),
+      );
+      await asMember(async ({ send }) => {
+        await send(store, "add", addEvent("a1", "photo.png", blobId));
+        await outcomeOf("a1");
+      });
+      const [entry] = (await facts()).entries;
+
+      await send("remove", { requestId: "x1", entry });
+
+      expect(await outcomeOf("x1")).toMatchObject({ status: "done" });
+      expect(await values()).toEqual([]);
     });
   });
 });

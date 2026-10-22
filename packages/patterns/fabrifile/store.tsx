@@ -112,13 +112,14 @@ const refuse = (
 
 /**
  * Indicates whether the principal the running event acts for may change the
- * store: one its space admits with `WRITE` or `OWNER`. A level not known yet
- * admits nothing.
+ * store: anyone but a principal its space admits with less than `WRITE`. A
+ * level not known yet is left to the space's own access list, which refuses
+ * the write where it does not admit it.
  */
 const mayWrite = (entries: EntriesCell): boolean => {
   const level = spaceAccess(entries);
-  return currentPrincipal() !== undefined &&
-    (level === "WRITE" || level === "OWNER");
+  return currentPrincipal() !== undefined && level !== "none" &&
+    level !== "READ";
 };
 
 /**
