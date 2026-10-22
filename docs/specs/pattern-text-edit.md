@@ -11,13 +11,14 @@ are CodeMirror change sets, which the server codec rebases over
 concurrent edits (`packages/memory/v2/operation-codec.ts`). Today the
 only way to submit one is the main-thread
 `runtime-client.applyOperation`, and its one caller is
-`cf-code-editor`. Pattern code has only `.set()`. While the field is
-active, the engine refuses an ordinary write that changes it
+`cf-code-editor`. Pattern code has only `.set()`. While the field has an
+active epoch, which it keeps until an explicit release, even after every
+editor has closed, the engine refuses an ordinary write that changes it
 (`OpFieldWriteConflictError`, `packages/memory/v2/engine.ts`), and the
 refusal rolls back the whole transaction.
 
-So **no handler, agent or pattern can put a single character into a
-note that anyone has open.** Only a person typing in the editor can.
+So **no handler, agent or pattern can put a single character into an
+active collaborative field.** Only an editor session can.
 That rules out:
 
 - an agent appending action items to shared meeting notes;
@@ -69,58 +70,97 @@ nobody else is writing. A live document is the opposite case.
 
 ## Semantics
 
+This builds on §7's model rather than around it. Three of §7's rules
+shape everything below:
+
+- the runner-facing collaboration surface is codec-neutral (plan WP6);
+- ordinary cell transactions do not learn editor semantics, and
+  `apply-op` never goes into `PendingVersion` (plan WP6);
+- changing a codec's validation or integration semantics needs a new
+  codec id (§7.5).
+
 ```ts
 type TextEdit =
   | { old: string; new: string; replaceAll?: boolean } // replace by content
   | { append: string }                                 // on its own line, at the end
   | { prepend: string };                               // on its own line, at the start
 
-type EditResult =
-  | { ok: true; duplicate: boolean }
-  | { ok: false; kind: "no-match" | "ambiguous"; edit: number; count: number }
-  | { ok: false; kind: "conflict"; reason: string }; // could not write at all
+type EditOutcome =
+  | { state: "pending" }
+  | { state: "applied"; duplicate: boolean }
+  | { state: "refused"; kind: "no-match" | "ambiguous" | "overlap"; edit: number; count?: number }
+  | { state: "conflict"; reason: string }; // could not write at all: authority,
+                                           // epoch or history, codec too old
 
 interface Writable<string> {
-  edit(e: TextEdit | readonly TextEdit[], opts: { dedupeId: string }): EditResult;
+  /** Submits a text edit as its own operation; never part of this handler's transaction. */
+  edit(e: TextEdit | readonly TextEdit[], opts: { dedupeId: string }): Reactive<EditOutcome>;
 }
+
+/** Pure; the same function the server runs. A handler may call it on its snapshot. */
+function matchEdits(value: string, edits: readonly TextEdit[]): MatchVerdict;
 ```
+
+`TextEdit` is a text-level request, not a CodeMirror type. A codec that
+supports text edits resolves them into its own operations. CodeMirror
+is the first such codec.
+
+### An edit is its own operation, with an outcome that arrives later
+
+`edit` does not join the handler's transaction. The runner submits it
+as a standalone `apply-op` after the handler commits, the way
+`applyOperation` does today. That follows plan WP6 and avoids teaching
+cell transactions editor semantics. Two consequences:
+
+- A later `.get()` in the same handler sees the old value.
+- The handler does not block, and nothing re-runs. The outcome is a
+  reactive value that resolves from `pending` to the server's verdict.
+  Anything that depends on the verdict, such as marking a proposal
+  stale, is derived from it. There is no prediction to keep consistent
+  with the server.
+
+A handler that wants to decide *whether* to submit can call
+`matchEdits` on its snapshot. That is an ordinary read, with ordinary
+conflicts. The server's verdict is still what counts.
 
 ### Where `old` is matched: on the server, when the edit lands
 
-`old` is matched against the field's value at integrate time, not
-against the value the handler read.
+`old` is matched against the value at integrate time, after the
+intervening operations, not against anything the caller read.
 
-Matching against the handler's read and shipping a change set for the
-codec to rebase would be wrong. Rebasing preserves positions, not
-meaning. If someone types inside the span being replaced, the rebase
-strands their words next to `new`, corrupting both edits with no
-signal to either party.
+Rebasing a client-side change set would be wrong. Rebasing preserves
+positions, not meaning. If someone types inside the span being
+replaced, the rebase strands their words next to `new`, corrupting both
+edits with no signal to either party. Matching at integrate time means
+the edit applies only where the exact text exists at the moment it
+lands. The engine serializes integration, so there is no gap between
+the check and the write. Typing elsewhere never blocks it.
 
-Matching at integrate time means the edit applies only where the exact
-text exists at the moment it lands. The engine serializes integration,
-so there is no gap between the check and the write. Typing elsewhere in
-the field never blocks the edit.
+The server stores the resolved change set as the integrated operation.
+Replay uses it as is and never runs matching again (§7.7.3, invariant
+4). The submitted row keeps the text-edit intent.
 
-The handler still gets a synchronous result. `edit` evaluates the same
-predicate against the handler's snapshot as a *prediction*, without
-recording a read dependency; otherwise every keystroke would invalidate
-the commit. The server evaluates it again. If the two verdicts
-disagree, the transaction rolls back and the scheduler re-runs the
-handler through its existing stale-basis path. On the re-run the
-snapshot is fresh, so the prediction agrees with the server, and the
-caller sees the real verdict. `edit` never retries.
+**A text edit needs no client base.** It matches against the head, so
+`intervening` is irrelevant to it. That requires either:
+
+- a server-resolved head base for text-edit payloads (a §7.7 wire
+  amendment); or
+- the runner fetching the epoch and cursor with `op.query` at send time.
+
+The first is simpler, and it removes a race. Epoch and history errors
+(`OpCursorMismatchError`, `OpHistoryUnavailableError`) map to
+`conflict`.
 
 ### Matching rules
 
 - Compare exact code units, with no normalization.
 - `old` must be non-empty. The one exception: `old: ""` matches once
   when the whole value is empty.
-- Count occurrences including overlaps (`"aa"` occurs twice in
-  `"aaa"`).
 - Without `replaceAll`, exactly one occurrence is required: zero is
-  `no-match`, two or more is `ambiguous`.
-- With `replaceAll`, at least one occurrence is required, and
-  replacement runs left to right over non-overlapping occurrences.
+  `no-match`, two or more is `ambiguous` (count includes overlaps).
+- With `replaceAll`, at least one is required. Replacement runs left to
+  right over non-overlapping occurrences, and `count` reports
+  non-overlapping occurrences.
 
 ### Append and prepend are line-oriented
 
@@ -131,45 +171,28 @@ Anchoring an append on "the current last line" would fail every time
 someone typed at the bottom.
 
 They mean "add this as its own line", so there is no newline for a
-caller to forget. The server resolves the separator when the edit
-lands, against the value as it is then:
+caller to forget:
 
-- `append` inserts `"\n"` first, unless the value is empty or already
-  ends with `"\n"`.
+- `append` inserts `"\n"` first, unless the value is empty or ends with
+  `"\n"`.
 - `prepend` inserts `"\n"` after the text, unless the value is empty or
-  the text already ends with `"\n"`.
+  the text ends with `"\n"`.
 
-Nothing else is normalized. A blank line asked for explicitly (a
-leading `"\n"`) is kept. Only the server can make this decision,
-because only it knows whether someone has just typed or deleted the
-trailing newline.
-
-Other cases are replacements:
-
-- Inserting after a known passage replaces it with itself plus the new
-  text, so the edit fails, correctly, if that passage changed.
-- Continuing the last line inline replaces that line.
-
-Two concurrent appends land in the order they are integrated.
+Nothing else is normalized, and an explicitly requested blank line is
+kept. Inserting after a known passage, or continuing the last line, is
+a replacement instead. Two concurrent appends land in the order they
+are integrated.
 
 ### Several edits
 
-Every edit in a list matches against the same starting value. This is
-unlike a sequence of edits, where one edit can create or destroy
-another's anchor. Matched spans must not overlap, and an overlap is a
-contract violation that throws. `append` and `prepend` count as
-zero-width spans at the boundary. The edits apply all or nothing, and a
-failure names the index of the first edit that failed.
-
-### Result kinds
-
-Each failure leads to a different next step, so each is its own value:
-
-| Result | Meaning | Caller's next step |
-| --- | --- | --- |
-| `no-match` | `old` is not in the text | The text moved: re-read |
-| `ambiguous` (with count) | `old` occurs more than once | Make `old` longer |
-| `conflict` | The write was refused (authority, history gone, codec mismatch) | Nothing is known about the text |
+- **Matching.** Every replacement matches against the same starting
+  value.
+- **Overlap.** Matched spans must not overlap. Overlap depends on the
+  value at integrate time, so it is a refusal (`overlap`), not a throw.
+- **Ordering at a boundary.** Inserts at the same boundary land in list
+  order. Each append's separator is resolved against the value as it
+  stands after the edits before it in the list.
+- **Atomicity.** The list applies all or nothing.
 
 ### Idempotence
 
@@ -177,27 +200,32 @@ Each failure leads to a different next step, so each is its own value:
 example `${eventId}:${purpose}`.
 
 A handler may run more than once, and in a shared space every
-participant's runtime may run it. The first submission applies, and
-later ones resolve to `{ok: true, duplicate: true}`. The dedupe check
-must run **before** matching. Otherwise a second runtime's `old` no
-longer matches, because the first runtime's edit already changed the
-text, and it reports a false `no-match`.
+participant's runtime may run it. The engine dedupes on
+`(epoch, dedupeId)`, ignoring the payload, **before** matching. So the
+second runtime resolves to `applied, duplicate: true` rather than a
+false `no-match` against text the first runtime already changed.
+
+`dedupeId` is a namespace separate from `submissionId`. A
+`submissionId` reused with a different payload is an error
+(`OpSubmissionMismatchError`), and two runtimes, or two model-generated
+payloads, legitimately differ. Submitted rows are never pruned (§7.8),
+so dedupe across the whole epoch is feasible with an indexed column.
+After release and a new epoch, the same `dedupeId` applies again.
 
 ### Proposals taken later
 
 A proposed edit (a suggestion offered now and accepted later) stores
-`{target, edits, dedupeId}`. Its state is derived reactively from the
-pure `matchEdits(currentValue, edits)`, so it can dim or withdraw as
-soon as `old` stops matching uniquely, without polling. On acceptance,
-the handler calls `edit`. A `no-match` or `ambiguous` result marks the
-proposal stale in the same transaction, and the proposer re-reads and
-proposes again.
+`{target, edits, dedupeId}`. Whether it still applies is derived from
+`matchEdits(currentValue, edits)`, so it can dim as soon as `old` stops
+matching uniquely. On acceptance it calls `edit`, and a `refused`
+outcome marks it stale for the proposer to re-read.
 
 ### Inactive fields
 
-On a field with no active epoch, `edit` activates it through the
-existing baseline-hash path. There is one write path, and once a field
-is active every writer uses `edit`.
+On a field with no active epoch, `edit` compiles to an ordinary patch,
+with a confirmed read and the normal conflict path. It does not
+activate the field. Activating it would make every existing `.set()`
+writer of that field start throwing.
 
 ## What it must not do
 
@@ -213,46 +241,54 @@ is active every writer uses `edit`.
 
 ## CFC
 
-- `edit` is a write. It needs the same write authority on the field as
-  `.set()`, checked at integrate time for the submitting principal. An
-  accepted proposal runs with the accepting user's authority, not the
-  proposer's.
-- The result discloses content: whether `old` matched, and how many
-  times. So the result carries the field's confidentiality label, as a
-  read would.
-- `new` flows into the field and is checked against the field's label,
-  like any write.
+- **`edit` needs READ as well as WRITE.** §7.13 requires only WRITE for
+  `apply-op`, but the outcome (`no-match`, `ambiguous` and its count,
+  `duplicate`) reveals content. A write-only principal would gain a read
+  oracle. Without READ, a refusal collapses to `conflict`.
+- **The outcome is labeled with the field's confidentiality**, attached
+  where the runner resolves it rather than through a recorded read.
+- **`new` is checked against the field's label**, like any write, at
+  integrate time, for the submitting principal. An accepted proposal
+  runs with the accepting user's authority, not the proposer's.
+- **No label side data.** Range-oriented CFC stays deferred (plan WP9),
+  so labels stay whole-field.
 
 ## What labs would add
 
-1. **A `replace` payload variant in the CodeMirror codec**,
-   `{clientId, replace: TextEdit[], dedupeId}`, accepted in place of
-   `changes`. `integrate` resolves it against the value after the
-   intervening operations into an ordinary change set, and that is what
-   the log stores. So `cf-code-editor` sees ordinary operations and does
-   not change. A server that predates the variant rejects the unknown
-   key, so the failure is loud.
-2. **Structured refusals** (`no-match` / `ambiguous`, with index and
-   count) in place of a generic codec error, so the runner can turn
-   them into a re-run or a value.
-3. **Dedupe by `dedupeId` across the whole epoch, checked before
-   matching.** Today the codec sees only the intervening window and
-   deduplicates after rebasing.
-4. **`Writable<string>.edit` in the runner.** It predicts against the
-   snapshot without recording a read, and enqueues an `apply-op` in the
-   handler's commit, which already accepts apply-ops atomically.
-5. **One exported pure `matchEdits(value, edits)`**, shared by the
-   runner, the codec and proposal UIs. Two implementations would let
-   predictions diverge from the server.
-6. **The same `EditResult` returned through any command or agent tool
-   surface**, unchanged.
+1. **A new codec id, `codemirror-changeset@2`,** accepting `changes` or
+   `replace`. The codec id is fixed for an epoch's life (§7.6), so
+   `cf-code-editor` moves to `@2` for new epochs. Detection is through
+   the codec handshake (§7.5), not unknown-key rejection.
+2. **A server-resolved head base** for text-edit payloads (§7.7), or
+   the runner fetching the cursor with `op.query`.
+3. **Engine dedupe on `(epoch, dedupeId)`**, indexed and checked before
+   integration.
+4. **Structured refusals** in place of a generic codec error.
+5. **`Writable<string>.edit` in the runner**: a standalone operation
+   after the handler commits, with a reactive outcome. It is not in
+   `PendingVersion`.
+6. **One exported pure `matchEdits`**, shared by the codec, the runner
+   and proposal UIs.
+7. **The outcome returned unchanged** through any command or agent tool
+   surface.
 
 ## Open questions
 
-1. An anchor can be unique at the handler's base cursor and become
-   ambiguous only because someone pasted a copy elsewhere. Should the
-   server then resolve it by mapping the base position through the
+These need Bernhard's call, since §7 and its plan are his:
+
+1. **Head base or `op.query`?** A server-resolved head base for
+   text-edit payloads, or the runner fetches the cursor? (This proposal
+   prefers the head base.)
+2. **What about fields still active under `@1`?** Should `edit` on such
+   a field return `conflict` until it is released and reopened, or is
+   there a sanctioned way to move a live epoch to `@2`?
+3. **Is a standalone operation with a reactive outcome the right
+   runner shape**, or would he rather amend WP6 to allow `apply-op` in a
+   handler's commit?
+4. **READ as well as WRITE** for text-edit payloads: an amendment to
+   §7.13?
+5. **Positional fallback.** An anchor can be unique at submit time and
+   become ambiguous only because someone pasted a copy elsewhere.
+   Should the server then map a submit-time position through the
    intervening operations? This proposal says no, until evidence says
    otherwise.
-2. Should range-oriented CFC, which §7's plan defers, change the label
-   on the result from the whole field to the matched range?
