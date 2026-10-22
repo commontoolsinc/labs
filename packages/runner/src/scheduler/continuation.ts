@@ -11,6 +11,12 @@ export interface ExecuteContinuationState {
   readonly consumeRerunAfterCurrentExecute: () => boolean;
   readonly hasPendingLineageHeadEvent: () => boolean;
   readonly hasLoadParkedHeadEvent: () => boolean;
+
+  /**
+   * Whether the pass just ended deferred its settle to the pass a load park's
+   * release starts, so the work it left is not cause for another pass.
+   */
+  readonly settleDeferredForLoadPark: () => boolean;
   readonly scheduleWake: (at: number) => void;
   readonly hasWakeTimer: () => boolean;
   readonly setScheduled: (scheduled: boolean) => void;
@@ -107,6 +113,13 @@ export function applyPullExecuteContinuation(
   const now = performance.now();
   const hasPendingLineageHeadEvent = state.hasPendingLineageHeadEvent();
   const hasLoadParkedHeadEvent = state.hasLoadParkedHeadEvent();
+  // A pass that deferred its settle to a parked head's release waits for that
+  // release, which queues the next pass; queueing one for the derivations it
+  // left would run passes that defer again until the loads settle.
+  if (hasLoadParkedHeadEvent && state.settleDeferredForLoadPark()) {
+    applyQuiescentContinuation(state, { hasParkedHeadEvent: true });
+    return;
+  }
   const hasQueuedEventReadyNow = state.eventQueue.length > 0 &&
     !isHeadEventParked(state, now) &&
     !hasPendingLineageHeadEvent &&

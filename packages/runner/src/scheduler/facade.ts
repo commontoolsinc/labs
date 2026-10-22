@@ -547,8 +547,6 @@ export class Scheduler {
     eventId: string;
     keys: readonly string[];
     generations: ReadonlyMap<string, number>;
-    /** Resolves once the loads settled and the park was released or failed. */
-    settled: Promise<void>;
   } | null = null;
 
   /**
@@ -577,8 +575,12 @@ export class Scheduler {
   #scheduled = false;
   #disposed = false;
 
-  /** Resolves when `dispose()` runs, for a wait a disposal has to end. */
-  #disposal = Promise.withResolvers<void>();
+  /**
+   * Whether the latest pass ended on a head parked on its loads, deferring its
+   * settle to the pass the park's release starts. While it holds, the
+   * continuation queues no pass for the deferred derivations.
+   */
+  #settleDeferredForLoadPark = false;
   #actionRunState!: SchedulerActionRunState;
   #graphSnapshotState!: SchedulerGraphSnapshotState;
   #settleLoopState!: SchedulerSettleLoopState;
@@ -2684,7 +2686,6 @@ export class Scheduler {
     this.#headEventLoadPark = null;
     this.#headEventLoadParkHistory = null;
     this.#disposed = true;
-    this.#disposal.resolve();
     for (const record of this.#nodes.nodes()) {
       record.cancelLocalReadWake?.();
       record.cancelLocalReadWake = undefined;
@@ -2757,7 +2758,27 @@ export class Scheduler {
     if (this.runningPromise) await this.runningPromise;
 
     this.#beginExecuteCycle();
-    const eventBlockingDeps = await this.#processExecuteEventPhases();
+    const deferredBefore = this.#settleDeferredForLoadPark;
+    const { eventBlockingDeps, dispatched } = await this
+      .#processExecuteEventPhases();
+    // Under the serving posture a head the preflight parked on its loads,
+    // behind events this pass dispatched, ends the pass without its settle:
+    // the pass the park's release starts dispatches it and settles behind
+    // it, so the derivations the events before it invalidated run once
+    // behind all of them rather than once per parked event. The pass ends
+    // rather than waiting on the loads, so the serving loop keeps cycling
+    // while they are in flight. A head that parks again before this pass
+    // dispatched anything keeps a settle the previous pass deferred waiting
+    // with it; one that parks with no batch ahead of it lets the settle run.
+    this.#settleDeferredForLoadPark = this.runtime.servingPosture === true &&
+      (dispatched > 0 || deferredBefore) && eventBlockingDeps.size === 0 &&
+      this.#hasLoadParkedHeadEvent();
+    if (this.#settleDeferredForLoadPark) {
+      this.#recordExecuteEndTelemetry();
+      this.#applyExecuteContinuation();
+      logger.timeEnd("scheduler", "execute");
+      return;
+    }
     const initialSeeds = this.#buildInitialExecuteSeeds(eventBlockingDeps);
 
     const settleResult = await this.#runSettleLoop(initialSeeds);
@@ -2790,41 +2811,31 @@ export class Scheduler {
    * event the preflight holds for such a dependency ends the phases, so the
    * settle runs it. The run stops at an event that is not ready, at the
    * events the pass began with, and at a phase that dispatched nothing.
+   * Returns the dependencies those events wait on and how many events the
+   * phases dispatched.
    */
-  async #processExecuteEventPhases(): Promise<Set<Action>> {
+  async #processExecuteEventPhases(): Promise<{
+    eventBlockingDeps: Set<Action>;
+    dispatched: number;
+  }> {
     const eventBlockingDeps = new Set<Action>();
     let remaining = this.#eventQueue.length;
-    // A head the preflight parked on loads its own cold reads started is
-    // waited for and tried again, in place of the pass the park's release
-    // would otherwise wake: the loads are the preflight's own, and settle
-    // soon. Bounded, since a retry may park on keys the first did not.
-    let parkRetries = 0;
+    let dispatched = 0;
     while (true) {
       const head = this.#eventQueue[0];
       const deps = await this.#processExecuteEventPhase();
       for (const dep of deps) eventBlockingDeps.add(dep);
+      if (head !== undefined && this.#eventQueue[0] !== head) dispatched++;
       if (
-        !this.runtime.servingPosture || deps.size > 0 || head === undefined
+        !this.runtime.servingPosture || deps.size > 0 || head === undefined ||
+        this.#eventQueue[0] === head
       ) break;
-      if (this.#eventQueue[0] === head) {
-        const park = this.#headEventLoadPark;
-        if (
-          park?.eventId !== head.id || parkRetries >= 4 || this.#disposed
-        ) break;
-        parkRetries++;
-        // Disposal ends the wait as well: a load still pending when the
-        // scheduler is torn down would otherwise hold this pass open.
-        await Promise.race([park.settled, this.#disposal.promise]);
-        if (this.#disposed || this.#eventQueue[0] !== head) break;
-        continue;
-      }
-      parkRetries = 0;
       if (--remaining <= 0 || this.#eventQueue.length === 0) break;
       // The handler's run has to have landed before the next preflight
       // reads what it wrote.
       if (this.runningPromise) await this.runningPromise;
     }
-    return eventBlockingDeps;
+    return { eventBlockingDeps, dispatched };
   }
 
   async #processExecuteEventPhase(): Promise<Set<Action>> {
@@ -3398,6 +3409,7 @@ export class Scheduler {
       },
       hasPendingLineageHeadEvent: () => this.#hasPendingLineageHeadEvent(),
       hasLoadParkedHeadEvent: () => this.#hasLoadParkedHeadEvent(),
+      settleDeferredForLoadPark: () => this.#settleDeferredForLoadPark,
       scheduleWake: (at) => this.#gates.scheduleWake(at),
       hasWakeTimer: () => this.#gates.hasWakeTimer(),
       setScheduled: (scheduled) => {
@@ -3904,17 +3916,11 @@ export class Scheduler {
           failures.push(error);
         })
       ));
-    this.#headEventLoadPark = {
-      eventId: event.id,
-      keys,
-      generations,
-      // Registered ahead of the release below, so that a waiter on it finds
-      // the park released or failed when it resumes.
-      settled: settled.then(() => {
-        if (failures.length === 0) this.#releaseHeadEventLoadPark(event.id);
-        else this.#failHeadEventLoadPark(event, failures);
-      }),
-    };
+    this.#headEventLoadPark = { eventId: event.id, keys, generations };
+    void settled.then(() => {
+      if (failures.length === 0) this.#releaseHeadEventLoadPark(event.id);
+      else this.#failHeadEventLoadPark(event, failures);
+    });
   }
 
   #releaseHeadEventLoadPark(eventId: string): void {

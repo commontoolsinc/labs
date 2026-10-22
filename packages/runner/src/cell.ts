@@ -2376,23 +2376,54 @@ export class CellImpl<T extends FabricValue>
           // this fire is the first thing the runtime does.
           const overlay = this.#runtime.speculationOverlay;
           const eventId = firedEventId;
-          const outcome = replica.enqueueEventAppend({
-            sidecarId,
-            stream,
-            eventId,
-            payload: event as never,
-            ...(mintedKeys !== undefined
-              ? { runtimeInjectedEventKeys: [...mintedKeys] }
-              : {}),
-            // The renderer-trust attestation (fan-out stage B, OW34):
-            // the runtime — never the pattern — records that the sent
-            // event carried the process-local renderer-trust mark, so the
-            // SERVED handler run can re-mark the payload and record the
-            // trusted-event policy input its UI-contract-gated writes
-            // need. The sister of the injected-keys carriage above, same
-            // trust argument (see StreamEventEntry.rendererTrusted).
-            ...(isRendererTrustedEvent(event) ? { rendererTrusted: true } : {}),
-          }).then((delivery) => {
+          const append = () =>
+            replica.enqueueEventAppend!({
+              sidecarId,
+              stream,
+              eventId,
+              payload: event as never,
+              ...(mintedKeys !== undefined
+                ? { runtimeInjectedEventKeys: [...mintedKeys] }
+                : {}),
+              // The renderer-trust attestation (fan-out stage B, OW34):
+              // the runtime — never the pattern — records that the sent
+              // event carried the process-local renderer-trust mark, so
+              // the SERVED handler run can re-mark the payload and record
+              // the trusted-event policy input its UI-contract-gated
+              // writes need. The sister of the injected-keys carriage
+              // above, same trust argument (see
+              // StreamEventEntry.rendererTrusted).
+              ...(isRendererTrustedEvent(event)
+                ? { rendererTrusted: true }
+                : {}),
+            });
+          // A fire made inside an open transaction is work that transaction
+          // launched (scheduler-v2 I10): its append waits for the
+          // transaction to commit, and one that fails or is aborted, as
+          // `editWithRetry` aborts an attempt it runs again, drops it. So
+          // an attempt run again fires its event once, under its own id,
+          // rather than once per attempt. The local echo below follows the
+          // same transaction through its speculation lineage.
+          // A read-only transaction commits nothing and so launches nothing:
+          // a fire through one appends at once, as one with none does.
+          const originTx = this.#tx;
+          const outcome = (
+            originTx === undefined ||
+              originTx.status().status !== "ready" ||
+              originTx.isReadOnly?.() === true
+              ? append()
+              : new Promise<Awaited<ReturnType<typeof append>>>((resolve) => {
+                originTx.addCommitCallback((_tx, result) => {
+                  resolve(
+                    result.error === undefined ? append() : {
+                      delivered: false,
+                      refused: "the transaction that sent the event did " +
+                        `not commit: ${result.error.message}`,
+                    },
+                  );
+                });
+              })
+          ).then((delivery) => {
             if (!delivery.delivered) {
               // Deterministic admission refusal: the intent is dead —
               // un-render the echo and signal (events.md §5).

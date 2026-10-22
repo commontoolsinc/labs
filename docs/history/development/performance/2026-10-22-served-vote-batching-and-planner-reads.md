@@ -45,9 +45,13 @@ holds, each handler reading what the one before it wrote, and settles once
 `#processExecuteEventPhases`). The first attempt moved nothing: the
 preflight parks the head event on the loads its own cold reads start, and
 every event parked in turn, so the pass still took one event per pass. A
-head the preflight parked on its own loads is now waited for inside the pass
-and tried again, up to four times, and the wait ends with the scheduler's
-disposal as well. The specification's account is in
+head the preflight parks on its loads, behind events the pass already
+dispatched, now ends the pass without its settle, and the pass the park's
+release starts dispatches it and settles behind it. A first version waited
+for the loads inside the pass instead; that held the serving loop's cycles
+for as long as the loads took, which an exactly-once test of the drain's
+in-flight guard showed, and was replaced before landing. The specification's
+account is in
 [`events.md`](../../../specs/server-side-execution/events.md) and
 [`serving-loop.md`](../../../specs/server-side-execution/serving-loop.md).
 

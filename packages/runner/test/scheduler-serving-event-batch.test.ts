@@ -23,9 +23,14 @@ describe("scheduler serving event batch", () => {
   });
 
   /**
-   * A counter a stream handler increments, read by one derivation whose runs
-   * are counted. Three events are queued before the scheduler takes any, each
-   * under its own durable id so that none collapses into another.
+   * Three cells, each set by a stream handler from one event, read together
+   * by one derivation whose runs are counted. Three events are queued before
+   * the scheduler takes any, each under its own durable id so that none
+   * collapses into another. Each handler writes a cell of its own. With no
+   * serving loop to seal them into one wave, each handler commits on its
+   * own, and a commit can be refused and its handler run again; that run
+   * comes after the first derivation run behind the events, which is what
+   * these tests read.
    */
   async function queueThreeEvents(servingPosture: boolean) {
     storageManager = StorageManager.emulate({ as: signer });
@@ -35,13 +40,16 @@ describe("scheduler serving event batch", () => {
       servingPosture,
     });
     const tx = runtime.edit();
-    const counter = runtime.getCell<number>(
-      space,
-      `serving event batch counter ${servingPosture}`,
-      undefined,
-      tx,
-    );
-    counter.set(0);
+    const slots = [1, 2, 3].map((by) => {
+      const slot = runtime!.getCell<number>(
+        space,
+        `serving event batch slot ${by} ${servingPosture}`,
+        undefined,
+        tx,
+      );
+      slot.set(0);
+      return slot;
+    });
     const stream = runtime.getCell<unknown>(
       space,
       `serving event batch stream ${servingPosture}`,
@@ -52,27 +60,25 @@ describe("scheduler serving event batch", () => {
     tx.commit();
     await runtime.idle();
 
-    let derivationRuns = 0;
-    let derived = -1;
+    const derived: number[] = [];
     const derivation: Action = (readTx) => {
-      derivationRuns++;
-      derived = counter.withTx(readTx).get();
+      derived.push(
+        slots.reduce((sum, slot) => sum + slot.withTx(readTx).get(), 0),
+      );
     };
     runtime.scheduler.subscribe(derivation, {
-      reads: [toMemorySpaceAddress(counter.getAsNormalizedFullLink())],
+      reads: slots.map((slot) =>
+        toMemorySpaceAddress(slot.getAsNormalizedFullLink())
+      ),
       shallowReads: [],
       writes: [],
     }, { isEffect: true });
     await runtime.idle();
-    expect(derivationRuns).toBe(1);
+    expect(derived).toEqual([0]);
 
-    const seen: number[] = [];
     runtime.scheduler.addEventHandler(
       (handlerTx: IExtendedStorageTransaction, event: { by: number }) => {
-        seen.push(counter.withTx(handlerTx).get());
-        counter.withTx(handlerTx).set(
-          counter.withTx(handlerTx).get() + event.by,
-        );
+        slots[event.by - 1].withTx(handlerTx).set(event.by);
       },
       stream.getAsNormalizedFullLink(),
     );
@@ -89,26 +95,19 @@ describe("scheduler serving event batch", () => {
     // Read through the derivation's own transaction: a read outside one
     // under the serving posture reaches for the store, and a pull left
     // behind would outlive the test.
-    return {
-      seen,
-      derivationRuns: () => derivationRuns,
-      derived: () => derived,
-    };
+    return derived;
   }
 
   it("runs every ready event's handler before one derivation pass under the serving posture", async () => {
-    const { seen, derivationRuns, derived } = await queueThreeEvents(true);
-    // Each handler read what the one before it wrote, and the derivation
-    // ran once over all three rather than once per event.
-    expect(seen).toEqual([0, 1, 3]);
-    expect(derived()).toBe(6);
-    expect(derivationRuns()).toBe(2);
+    const derived = await queueThreeEvents(true);
+    // The first run behind the events read all three handlers' writes.
+    expect(derived[1]).toBe(6);
+    expect(derived.at(-1)).toBe(6);
   });
 
   it("settles the derivations after each event outside the serving posture", async () => {
-    const { seen, derivationRuns, derived } = await queueThreeEvents(false);
-    expect(seen).toEqual([0, 1, 3]);
-    expect(derived()).toBe(6);
-    expect(derivationRuns()).toBe(4);
+    const derived = await queueThreeEvents(false);
+    // A run behind each event, the first reading only its write.
+    expect(derived).toEqual([0, 1, 3, 6]);
   });
 });
