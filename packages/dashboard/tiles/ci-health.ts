@@ -10,10 +10,11 @@
  *
  * A run concluded `success` passes and a run concluded `failure`, `timed_out`,
  * or `startup_failure` fails. A `cancelled` run is either a run a newer one
- * replaced, or whose jobs newer ones replaced, while they were queued, which
- * passed no judgment on the code, or a run that timed out, was stopped while
- * its jobs ran, or had a job fail, which failed; whether a job a runner ran
- * ended in anything but success is what tells them apart. Every remaining
+ * replaced, or whose jobs newer ones replaced, which passed no judgment on the
+ * code, or a run that timed out, was stopped while its jobs ran, or had a job
+ * fail, which failed; whether a job a runner ran ended in anything but success
+ * for a reason other than a concurrency group cancelling it is what tells them
+ * apart. Every remaining
  * conclusion — `skipped`, `neutral`, `stale`, `action_required` — passes no
  * judgment either, so the job is decided by the newest run before it that
  * does, however many runs came after that one, among the workflow's newest
@@ -269,32 +270,15 @@ async function readRuns(
   }
 }
 
-/**
- * Whether a completed run says the job failed, passed, or nothing at all.
- * `runs` are the workflow's other recent runs, of any status.
- */
+/** Whether a completed run says the job failed, passed, or nothing at all. */
 async function verdictOf(
   run: Run,
-  runs: readonly Run[],
   attempts: CompletedAttempts,
 ): Promise<Status | undefined> {
   const conclusion = run.conclusion ?? "";
   if (conclusion === "success") return "good";
   if (FAILING_CONCLUSIONS.has(conclusion)) return "bad";
   if (conclusion === "cancelled") {
-    // A newer run created while this one was still going replaced it. A
-    // concurrency group that cancels in progress stops the older run when the
-    // newer one starts, whether or not the older one had started its jobs, and
-    // that judges nothing about the code.
-    const ended = Date.parse(run.updated_at);
-    const replaced = runs.some((other) =>
-      Date.parse(other.created_at) > Date.parse(run.created_at) &&
-      Date.parse(other.created_at) <= ended
-    );
-    if (replaced) return undefined;
-    // Otherwise a run cancelled with no job a runner ran ending in anything
-    // but success is one a newer run replaced while it was still queued, and
-    // any other timed out, was stopped, or had a job fail.
     return await attempts.cancelledWithoutVerdict(run) ? undefined : "bad";
   }
   return undefined;
@@ -312,7 +296,7 @@ async function settle(
 ): Promise<{ run: Run; status: Status } | undefined> {
   for (const run of runs) {
     if (run.status !== "completed") continue;
-    const status = await verdictOf(run, runs, attempts);
+    const status = await verdictOf(run, attempts);
     if (status !== undefined) return { run, status };
   }
   return undefined;

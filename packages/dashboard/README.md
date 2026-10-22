@@ -727,7 +727,7 @@ installation with the same permissions; see [Credentials](#credentials).
 
 | tile | source | needs |
 |---|---|---|
-| ci | every job the organization runs outside pull requests, in every repository the token can see that is not archived: for each active workflow, the newest run on that repository's own default branch that passed or failed, however many runs that judged nothing came after it, among the workflow's newest thousand runs of any branch. The headline is `passing` when every one of them passes, the repository's name when a single job is failing, as in `loom failing`, and a count when more than one is, as in `3 failing`. The header carries how many jobs the headline speaks for and how many repositories they came from. The body lists every failing job with its conclusion and how long ago it ran; while the tile is not red it also lists the labs and loom main builds, so the two builds the team watches stay visible, and a red tile lists only its failing jobs. A failure older than `CI_FAILURE_FRESH_HOURS` is orange rather than red: it is still failing and still counted, and it is no longer the thing that just broke. A failure made before the workflow's file last changed does not count at all, since that is what a job someone stopped rather than fixed looks like. A repository whose workflow listing cannot be read is listed too, and turns the tile orange rather than being passed over. The rows carry no links of their own, because the tile itself opens the page below | `GH_TOKEN` (or `GITHUB_TOKEN`) with Actions read across the organization |
+| ci | every job the organization runs outside pull requests, in every repository the token can see that is not archived: for each active workflow, the newest run on that repository's own default branch that passed or failed, however many runs that judged nothing came after it, among the workflow's newest thousand runs of any branch. The headline is `passing` when every one of them passes, the repository's name when a single job is failing, as in `loom failing`, and a count when more than one is, as in `3 failing`. The header carries how many jobs the headline speaks for and how many repositories they came from. The body lists every failing job with its conclusion and how long ago it ran; while the tile is not red it also lists the labs and loom main builds, so the two builds the team watches stay visible, and a red tile lists only its failing jobs. A failure older than `CI_FAILURE_FRESH_HOURS` is orange rather than red: it is still failing and still counted, and it is no longer the thing that just broke. A failure made before the workflow's file last changed does not count at all, since that is what a job someone stopped rather than fixed looks like. A repository whose workflow listing cannot be read is listed too, and turns the tile orange rather than being passed over. The rows carry no links of their own, because the tile itself opens the page below | `GH_TOKEN` (or `GITHUB_TOKEN`) with Actions and Checks read across the organization |
 | CI jobs → `/ci` | every job the ci tile read, at full width: the repository, linked to its page, and the workflow, what started the deciding run (`push`, `schedule`, `workflow_dispatch`, and the rest, as GitHub names them), what that run concluded, how long it took, when it started, and how long ago that was. Every column sorts, once up and once down, on the value behind the cell rather than on what the cell says, so durations and times order as the measurements they are; the page opens worst first and a column of equal values keeps that order beneath it. Workflows with no verdict are listed under the table rather than through it, each with why: no completed run on the default branch, which is what a workflow only a pull request triggers looks like; runs that all judged nothing; or a workflow changed since it failed. So are repositories whose workflow listing could not be read, each linked to its page and to its actions on GitHub. A workflow with a run in progress on its default branch carries a blue dot after its name, which links to that run, and the summary above the table counts them. Only a run in progress carries one: a queued run, or one waiting for approval, does not. It renders the tile's own last collection rather than asking GitHub again, so opening it costs no requests and shows exactly what the tile shows, running dots included: a run that starts or ends between collections shows at the next one. The page is live: an open copy shows each collection within a serving tick of the tile finishing it, without reloading, and in whatever order the reader sorted it | none |
 | labs ci trust, labs ci duration | GitHub Actions (`deno.yml` in `commonfabric/labs`), via the REST API. Trust reads the runs on main; duration reads the pull request runs. Each trust tile opens its repository's page, and each cell of its strip opens its run | `GH_TOKEN` (or `GITHUB_TOKEN`) |
 | loom ci trust, loom ci duration | the same two tiles for `commonfabric/loom` (`test-fast.yml`) | `GH_TOKEN` (read access to loom); optional `DASHBOARD_LOOM_REPO` |
@@ -759,26 +759,33 @@ lifetime, so an unreachable host is then reported as an outage even when every
 host is unreachable together.
 
 GitHub concludes a workflow run as `cancelled` for several reasons, among them a
-newer run replacing the run, or one of its jobs, while it is still queued, a job
-running past its `timeout-minutes`, and someone stopping the run while it runs.
-Of those, only the first says nothing about the commit. A run replaced while
-queued lists no jobs at all, except a partial rerun (**Re-run failed jobs**),
-whose listing also carries the jobs it reused from the attempt before. A job
-replaced by a job-level concurrency group is listed as cancelled with an empty
+concurrency group replacing the run, or one of its jobs, with a newer one,
+whether it is still queued or already running, a job running past its
+`timeout-minutes`, and someone stopping the run while it runs. Of those, only
+the first says nothing about the commit. A run replaced while queued lists no
+jobs at all, except a partial rerun (**Re-run failed jobs**), whose listing
+also carries the jobs it reused from the attempt before. A job replaced by a
+job-level concurrency group while queued is listed as cancelled with an empty
 runner name, and its run is concluded `cancelled` even when the run's other
-jobs passed. Only a job a runner ran says
-anything about the commit, so the ci trust tiles pass over a cancelled attempt
-in which every job a runner ran succeeded. A cancelled attempt with a job a
-runner ran that ended in anything else, a job stopped while it ran among them,
-counts as a failure, as every conclusion other than success does. The ci tile
-reads a cancelled run that way only when no newer run of its workflow replaced
-it; a concurrency group that cancels in progress replaces a run after its jobs
-have started as well, which the job listing would take for a failure. The ci
-tile's section below says how. The run listing does not carry the jobs, so each
-tile requests the job listing of every cancelled attempt it reaches, up to the
-page holding the first job a runner ran that did not succeed, once, and holds
-the answer while the run stays in the tile's window. No other conclusion takes
-that request.
+jobs passed. A job a runner was running
+when it was cancelled carries an annotation on its check run that says why: a
+concurrency group's starts `Canceling since a higher priority waiting request
+for`, a timeout's says the job exceeded its maximum execution time, and a
+person's says who cancelled the run. The ci and ci trust tiles therefore pass
+over a cancelled attempt in which every job a runner ran either succeeded or
+was cancelled by a concurrency group. A cancelled attempt with a job a runner
+ran that ended any other way, a job that timed out or that a person stopped
+among them, counts as a failure, as every conclusion other than success does.
+The decision rests on the annotations rather than on when the attempt started
+and ended relative to other runs, so a run that times out while a newer run
+waits for it still fails, and so does a rerun of an older run. The run listing
+does not carry the jobs, nor a job its annotations, so each tile requests the
+job listing of every cancelled attempt it reaches, up to the page holding the
+first job a runner ran that did not succeed for a reason of its own, and the
+annotations of each job a runner ran that was cancelled, up to and including
+that one, page by page until one gives the concurrency group as the reason. Each answer is
+requested once and held while the run stays in the tile's window. No other
+conclusion takes those requests.
 
 The **ci** tile reads each workflow's runs on the default branch, of any
 status, newest first, and decides the job from the newest completed one
@@ -786,14 +793,13 @@ carrying a verdict, however many runs after it carry none, among its newest
 thousand runs of any branch. A run still going
 carries none. A run concluded `success` passes; a run
 concluded `failure`, `timed_out`, or `startup_failure` fails. A `cancelled` run
-judges nothing when a newer run of the same workflow was created while it was
-still going: a concurrency group that cancels in progress stops the older run
-when the newer one starts, whether or not the older one had started its jobs,
-and on gvisor's release workflow, which takes over half an hour, that read as a
-failure for as long as the newer run took. Any other cancelled run is read
-through the same job listing the ci trust tiles use, so a run replaced while it
-was still queued passes no judgment while one killed by its own
-`timeout-minutes`, or stopped by a person, counts as a failure. The remaining
+is read through the same job listing and annotations the ci trust tiles use,
+so a run a concurrency group replaced, while it was queued or while its jobs
+ran, passes no judgment, while one killed by its own `timeout-minutes`, or
+stopped by a person, counts as a failure. On gvisor's release workflow, which
+cancels in progress and takes over half an hour, a run replaced while it ran
+therefore passes no judgment instead of reading as a failure for as long as the
+newer run took. The remaining
 conclusions — `skipped`, `neutral`, `stale`, `action_required` — pass no
 judgment either, so the run before them decides the job instead. A pass
 therefore stays a pass until a run gives the job another verdict: a job gated
@@ -891,14 +897,16 @@ of them, so ending a job's verdict at a skipped run would drop a conditional
 job's real failure the next time it skipped.
 
 The **labs ci trust**, **loom ci trust**, and **weaver ci trust** percentages pass over each cancelled
-attempt in which every job a runner ran succeeded. A run is first-try green when
+attempt in which every job a runner ran succeeded or was cancelled by a
+concurrency group. A run is first-try green when
 exactly one of its attempts is left and it succeeded. It is red when that
 attempt did not succeed, and red when more than one is left, since the run
 needed a rerun, whatever the rerun's result. A run with no attempt left is left
 out of the percentage. The run listing carries only a run's latest attempt, so
 the tile requests a run's earlier attempts from GitHub in order until the run is
 decided, each at most once, and holds them while the run stays in the trust
-window. An earlier attempt or a job listing that cannot be read turns the tile
+window. An earlier attempt, a job listing, or a job's annotations that cannot
+be read turn the tile
 gray, keeping its last value, until a later collection reads it.
 
 The **labs ci duration**, **loom ci duration**, and **weaver ci duration** tiles
@@ -1077,9 +1085,11 @@ requests an hour, where a personal access token is allowed 5,000.
    App**. An app the enterprise owns can be installed only on the enterprise
    and its organizations, which are the two installations the dashboard uses.
    Give it any homepage URL and clear **Webhook** → **Active**.
-2. **Repository permissions**: **Actions**, **Contents**, and **Pull
-   requests**, all **Read-only**. **Metadata** becomes read-only
-   automatically. **Pull requests** is for **recent commits**.
+2. **Repository permissions**: **Actions**, **Checks**, **Contents**, and
+   **Pull requests**, all **Read-only**. **Metadata** becomes read-only
+   automatically. **Checks** is for the annotations that say why a job was
+   cancelled, which the **ci** and **ci trust** tiles read. **Pull requests**
+   is for **recent commits**.
 3. **Organization permissions**: **Members** **Read-only** for **github
    users**. GitHub refuses an app's tokens for an organization's billing
    ("Resource not accessible by integration"), so **github spend** reads
@@ -1105,8 +1115,9 @@ Powers **ci**, **labs ci trust**, **labs ci duration**, the **loom** and
 **github spend** when `GH_BILLING_TOKEN` is unset. It also powers the optional
 publisher-activity indicators on **flaky tests** and **test selection**; their
 public measurements need no token. Needs
-repo **Actions: read** on `commonfabric/labs`, `commonfabric/loom`, and
-`commonfabric/commonfabric-weaver`. When `GH_BILLING_ENTERPRISE` is unset,
+repo **Actions: read** and **Checks: read** on `commonfabric/labs`,
+`commonfabric/loom`, and `commonfabric/commonfabric-weaver`; **Checks** is for
+the annotations that say why a job was cancelled. When `GH_BILLING_ENTERPRISE` is unset,
 the github-ci-spend tile additionally needs org **Administration: read** on
 `commonfabric`. When it is set, a fallback `GH_TOKEN` instead needs one of
 the enterprise credentials described under `GH_BILLING_TOKEN`; a separate
@@ -1131,8 +1142,9 @@ organization member; other callers see only public memberships.
    repositories** with `commonfabric/labs`, `commonfabric/loom`, and
    `commonfabric/commonfabric-weaver` covers every other GitHub tile, and
    narrows **ci** and **recent commits** to those three.
-4. **Repository permissions**: set **Actions**, **Contents**, and **Pull
-   requests** to **Read-only**. **Pull requests** is for **recent commits**.
+4. **Repository permissions**: set **Actions**, **Checks**, **Contents**, and
+   **Pull requests** to **Read-only**. **Checks** is for the **ci** and **ci
+   trust** tiles. **Pull requests** is for **recent commits**.
 5. **Organization permissions**: set **Members** to **Read-only** for GitHub
    users. Set **Administration** to **Read-only** for github spend. Only an org
    owner or billing manager can grant the latter permission. Skip either
@@ -1140,7 +1152,7 @@ organization member; other callers see only public memberships.
 6. **Generate token** and copy it (`github_pat_…`, shown once).
 
 If you only need the labs CI tiles, keep `commonfabric` as the resource owner,
-select only `commonfabric/labs`, and grant Actions/Contents read without any
+select only `commonfabric/labs`, and grant Actions, Checks, and Contents read without any
 organization permissions. Classic PATs also work (use `read:org` for GitHub
 users and `admin:org` for github spend). If the org requires approval for
 fine-grained tokens, yours stays pending until an owner approves it.
@@ -1788,7 +1800,7 @@ Everything below is a tunable constant in `config.ts`:
 
 - **Status thresholds:** `TRUST_GOOD`/`TRUST_WARN` (first-try-green %), `DUR_GOOD`/`DUR_WARN` (median CI minutes).
 - **Data windows:** The shared fetch returns at most `CI_RUNS_MAX=200` workflow runs and stops at `CI_RUNS_MAX_AGE_DAYS=60` days. CI trust uses the newest `TRUST_RUNS_MAX=160` fetched runs. CI duration uses whichever is larger: `DUR_MIN_RUNS=20` passing runs or `DUR_MAX_AGE_HOURS=6` hours. The benchmark trend uses the same larger-of-the-two idea in days: `BENCH_TREND_MIN_RUNS=20` runs or `BENCH_TREND_MAX_AGE_DAYS=14` days. Recent commits shows `RECENT_DISPLAY=50` commits.
-- **ci-trust cell grid:** The grid has up to `TRUST_RUNS_MAX=160` square cells in rows of `TRUST_COLS=40`. On wide tiles, the squares stop growing and the columns spread out to keep the grid clear of the subheading while preserving its equal left, right, and bottom insets. First-try successes are green. In-progress runs are blue. Completed runs that lower the trust percentage are red, including a run that needed a rerun and a run whose one attempt left was cancelled with a job a runner ran that did not succeed. Ignored runs are gray, including a run every attempt of which was cancelled with every job a runner ran succeeding.
+- **ci-trust cell grid:** The grid has up to `TRUST_RUNS_MAX=160` square cells in rows of `TRUST_COLS=40`. On wide tiles, the squares stop growing and the columns spread out to keep the grid clear of the subheading while preserving its equal left, right, and bottom insets. First-try successes are green. In-progress runs are blue. Completed runs that lower the trust percentage are red, including a run that needed a rerun and a run whose one attempt left was cancelled with a job a runner ran that did not succeed for a reason other than a concurrency group cancelling it. Ignored runs are gray, including a run every attempt of which was cancelled with every job a runner ran succeeding or cancelled by a concurrency group.
 
 ## Local development
 

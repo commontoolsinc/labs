@@ -2,15 +2,16 @@
  * Reports the share of recent completed runs that passed on the first attempt,
  * which is the dashboard's signal for flakiness, with a history strip carrying
  * the newest runs in the trust window. A cancelled attempt with no job a runner
- * ran ending in anything but success, as when a newer run replaces a queued run
- * or its queued jobs, is not a try and is passed over. A run passes on the
- * first try when exactly one try is left and it succeeded. A try that did not
- * succeed, a cancelled attempt that stopped or failed a job on a runner among
- * them, makes the run a failure, and so does a second try whatever its
- * result, since the run needed a rerun. A run with no try left is left out of
- * the share. One factory builds the labs, loom, and weaver instances against
- * their own repository and workflow. Each tile links to its repository's page,
- * and each cell of its strip to its run.
+ * ran ending in anything but success, other than by a concurrency group
+ * cancelling it, is not a try and is passed over, as when a newer run replaces
+ * a run or its jobs, queued or running. A run passes on the first try when
+ * exactly one try is left and it succeeded. A try that did not succeed, a
+ * cancelled attempt in which a job timed out, was stopped by a person, or
+ * failed on a runner among them, makes the run a failure, and so does a second
+ * try whatever its result, since the run needed a rerun. A run with no try left
+ * is left out of the share. One factory builds the labs, loom, and weaver
+ * instances against their own repository and workflow. Each tile links to its
+ * repository's page, and each cell of its strip to its run.
  */
 
 import { maxOf, minOf } from "@commonfabric/utils/math";
@@ -41,12 +42,13 @@ type TrustOutcome = "green" | "red" | "run" | "gray";
 
 /**
  * Scores `run` by the attempts left once every cancelled attempt in which
- * every job a runner ran succeeded is passed over: green when exactly one is
- * left and it succeeded, gray when none is, and red otherwise, so a rerun
- * makes a run red whatever its result. An unfinished run is left out of the
- * share too. Reads attempts in order and stops once the outcome is decided. Rejects when an
- * earlier attempt, or a cancelled attempt's job listing, cannot be read from
- * GitHub.
+ * every job a runner ran succeeded, or was cancelled by a concurrency group,
+ * is passed over: green when exactly one is left and it succeeded, gray when
+ * none is, and red otherwise, so a rerun makes a run red whatever its result.
+ * An unfinished run is left out of the share too. Reads attempts in order and
+ * stops once the outcome is decided. Rejects when an earlier attempt, or a
+ * cancelled attempt's job listing or a cancelled job's annotations, cannot be
+ * read from GitHub.
  */
 async function trustOutcome(
   run: Run,
