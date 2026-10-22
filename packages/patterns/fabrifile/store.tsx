@@ -172,6 +172,18 @@ const mayChange = (
 };
 
 /**
+ * Indicates whether `target`, a request's `entry`, holds what an entry holds,
+ * in any store: something other than an entry is a request of the wrong type,
+ * where an entry of another store is one the store does not hold.
+ */
+const namesAnEntry = (target: Cell<FileEntry> | undefined): boolean =>
+  typeof target?.get()?.name === "string";
+
+/** Indicates whether `value` is what a request may name as its `onConflict`. */
+const isNameConflict = (value: unknown): boolean =>
+  value === undefined || value === "refuse" || value === "rename";
+
+/**
  * The name an entry is to have: `name` itself, or a free one where `name` is
  * taken and `onConflict` is `rename`, or `undefined` where it is taken and the
  * request is to be refused.
@@ -223,14 +235,16 @@ export const commitAdd = handler<AddFileEvent, AddState>(
     if (
       typeof name !== "string" || typeof mediaType !== "string" ||
       typeof size !== "number" || typeof blob?.id !== "string" ||
-      blob.id === "" || typeof blob?.space !== "string"
+      blob.id === "" || typeof blob?.space !== "string" ||
+      !isNameConflict(event.onConflict)
     ) {
       refuse(
         requests,
         requestId,
         "invalid-request",
         "An add needs a `name`, a `mediaType`, a `size`, and a `blob` with a " +
-          "`space` and an `id`.",
+          "`space` and an `id`, and takes an `onConflict` of `refuse` or " +
+          "`rename`.",
       );
       return;
     }
@@ -289,7 +303,7 @@ export const commitRemove = handler<RemoveFileEvent, ChangeState>(
     if (!mayWrite(entries)) return;
     const requestId = event?.requestId ?? eventKey();
     if (requests.key(requestId).get() !== undefined) return;
-    if (event?.entry === undefined) {
+    if (!namesAnEntry(event?.entry)) {
       refuse(requests, requestId, "invalid-request", "This names no `entry`.");
       return;
     }
@@ -328,7 +342,7 @@ export const commitRename = handler<RenameFileEvent, ChangeState>(
     if (!mayWrite(entries)) return;
     const requestId = event?.requestId ?? eventKey();
     if (requests.key(requestId).get() !== undefined) return;
-    if (event?.entry === undefined) {
+    if (!namesAnEntry(event?.entry)) {
       refuse(requests, requestId, "invalid-request", "This names no `entry`.");
       return;
     }
@@ -347,8 +361,14 @@ export const commitRename = handler<RenameFileEvent, ChangeState>(
       return;
     }
     const name = event?.name;
-    if (typeof name !== "string") {
-      refuse(requests, requestId, "invalid-request", "This names no `name`.");
+    if (typeof name !== "string" || !isNameConflict(event?.onConflict)) {
+      refuse(
+        requests,
+        requestId,
+        "invalid-request",
+        "A rename needs a `name`, and takes an `onConflict` of `refuse` or " +
+          "`rename`.",
+      );
       return;
     }
     if (!isValidName(name)) {

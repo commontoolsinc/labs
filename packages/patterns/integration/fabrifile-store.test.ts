@@ -361,7 +361,7 @@ describe("FabriFile store", () => {
       });
     });
 
-    it("refuses a request missing its name, media type, size or blob", async () => {
+    it("refuses a request missing its name, media type, size or blob, or naming an unknown conflict rule", async () => {
       const blobId = await storeBlob(photo);
       const { send, facts } = await startStore(await writeProfile("Ada"));
 
@@ -372,9 +372,13 @@ describe("FabriFile store", () => {
         ...addEvent("a3", "photo.png", blobId),
         blob: { space: home, id: "" },
       });
+      await send(
+        "add",
+        addEvent("a4", "photo.png", blobId, { onConflict: "overwrite" }),
+      );
 
       const { requests } = await facts();
-      for (const id of ["a1", "a2", "a3"]) {
+      for (const id of ["a1", "a2", "a3", "a4"]) {
         expect({ id, ...requests[id] }).toMatchObject({
           id,
           status: "refused",
@@ -498,10 +502,12 @@ describe("FabriFile store", () => {
 
       await send("remove", { requestId: "x1" });
       await send("rename", { requestId: "r1", name: "holiday.png" });
+      await send("remove", { requestId: "x2", entry: "photo.png" });
 
       const { requests } = await facts();
       expect(requests.x1).toMatchObject({ code: "invalid-request" });
       expect(requests.r1).toMatchObject({ code: "invalid-request" });
+      expect(requests.x2).toMatchObject({ code: "invalid-request" });
     });
 
     it("frees the removed entry's name", async () => {

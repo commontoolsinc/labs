@@ -19,8 +19,9 @@ import {
 } from "commonfabric";
 import {
   countElements,
-  findElement,
   findNodeByProp,
+  propValue,
+  readValue,
 } from "../test/vnode-helpers.ts";
 import {
   type AddFileEvent,
@@ -33,6 +34,17 @@ import {
 import { FileStoreView, type FileStoreViewOutput } from "./view.tsx";
 
 const SPACE = "did:key:z6Mk-fabrifile-view-access";
+
+/**
+ * How the control under the wrapper of class `name` in `root` is displayed:
+ * `block` where it is offered, `none` where it is not.
+ */
+const displayOf = (root: unknown, name: string) =>
+  readValue(
+    (propValue(findNodeByProp(root, "className", name), "style") as
+      | { display?: unknown }
+      | undefined)?.display,
+  );
 
 /** Records nothing; the view's offer is what these tests are about. */
 const ignoreAdd = handler<AddFileEvent, Record<string, never>>(() => {});
@@ -85,12 +97,12 @@ export const owner = pattern<{ setup: Setup }>(({ setup }) => {
       { label: "seeded" },
       {
         assertion: assert(() =>
-          findElement(view[UI], "cf-file-input") !== undefined
+          displayOf(view[UI], "fabrifile-add") === "block"
         ),
       },
       {
         assertion: assert(() =>
-          findNodeByProp(view[UI], "placeholder", "Rename to…") !== undefined
+          displayOf(view[UI], "fabrifile-rename") === "block"
         ),
       },
     ],
@@ -108,12 +120,12 @@ export const member = pattern<{ setup: Setup }>(({ setup }) => {
       },
       {
         assertion: assert(() =>
-          findElement(view[UI], "cf-file-input") !== undefined
+          displayOf(view[UI], "fabrifile-add") === "block"
         ),
       },
       {
         assertion: assert(() =>
-          findNodeByProp(view[UI], "placeholder", "Rename to…") === undefined
+          displayOf(view[UI], "fabrifile-rename") === "none"
         ),
       },
     ],
@@ -131,12 +143,12 @@ export const reader = pattern<{ setup: Setup }>(({ setup }) => {
       },
       {
         assertion: assert(() =>
-          findElement(view[UI], "cf-file-input") === undefined
+          displayOf(view[UI], "fabrifile-add") === "none"
         ),
       },
       {
         assertion: assert(() =>
-          findNodeByProp(view[UI], "placeholder", "Rename to…") === undefined
+          displayOf(view[UI], "fabrifile-rename") === "none"
         ),
       },
     ],

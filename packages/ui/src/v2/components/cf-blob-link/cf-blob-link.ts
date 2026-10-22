@@ -12,10 +12,10 @@ import { type BlobReference, BlobUrlResolver } from "../../utils/blob-url.ts";
  *
  * `blob` names the blob, by its space's DID and its id there, as a FabriFile
  * entry holds them. The component asks the runtime for the URL that space's
- * host serves the blob at to be saved, and renders its content as a link to
- * it, which saves the file under `name`, from any origin. A pattern offers a stored file this way
- * without forming a URL itself. Until the URL arrives, and for a reference
- * that names no blob, the content is shown as plain text.
+ * host serves the blob at for saving, and renders its content as a link to it,
+ * which saves the file under `name` from any origin. A pattern offers a stored
+ * file this way without forming a URL itself. Until the URL arrives, and for a
+ * reference that names no blob, the content is shown as plain text.
  *
  * @element cf-blob-link
  *

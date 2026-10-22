@@ -95,7 +95,8 @@ can still be too large to rename.
 - A name is any non-empty string of well-formed Unicode of at most 1024 bytes
   as UTF-8. Every download's
   `Content-Disposition` is `inline` for a type served as itself, and
-  `attachment` for every other, naming the file when the blob has a name.
+  `attachment` for every other, or for any type under `?download`, naming the
+  file when the blob has a name.
 - The bytes stay in the space's own store beside its cells. There is no
   offload to an object store, and no signed or expiring URL.
 - GIF, JPEG, PNG, and WebP are served as their own media type, so an `<img>`

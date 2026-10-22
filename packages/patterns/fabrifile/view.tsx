@@ -73,6 +73,14 @@ interface SentRequest {
 /** The cell of the requests this session sent. */
 type SentCell = Writable<SentRequest[]>;
 
+/**
+ * How a control offered to some viewers and not others is displayed. The
+ * view's tree is one for every viewer, so a control is shown or hidden by its
+ * `display` rather than built for some viewers only, and starts out `hidden`
+ * until its display has a value.
+ */
+type ControlDisplay = "block" | "none";
+
 /** What a view renders: a store's files group. */
 export interface FileStoreViewInput {
   /** The store. */
@@ -193,10 +201,12 @@ const FileRow = pattern<FileRowInput, { [UI]: VNode }>(
     const addedBy = computed(() => entry.get().addedBy);
     // Offered to its adder, as the viewer's profile names them, and to an
     // OWNER; the store decides who may change an entry, by who wrote it.
-    const mayChange = computed(() =>
+    const changeDisplay = computed((): ControlDisplay =>
       spaceAccess(entry) === "OWNER" ||
-      (mayWriteIn(entry) && viewer?.get() !== undefined &&
-        equals(entry.get().addedBy, viewer))
+        (mayWriteIn(entry) && viewer?.get() !== undefined &&
+          equals(entry.get().addedBy, viewer))
+        ? "block"
+        : "none"
     );
     return {
       [UI]: (
@@ -215,31 +225,35 @@ const FileRow = pattern<FileRowInput, { [UI]: VNode }>(
             <cf-vstack gap="0" style="flex: 1; min-width: 0;">
               <cf-blob-link blob={blob} name={name}>{name}</cf-blob-link>
               <cf-text variant="caption" tone="muted">{caption}</cf-text>
-              {mayChange
-                ? (
-                  <cf-input
-                    placeholder="Rename to…"
-                    oncf-submit={renameEntry({
-                      rename: store.rename,
-                      entry,
-                      sent,
-                    })}
-                  />
-                )
-                : null}
+              <div
+                className="fabrifile-rename"
+                hidden
+                style={{ display: changeDisplay }}
+              >
+                <cf-input
+                  placeholder="Rename to…"
+                  oncf-submit={renameEntry({
+                    rename: store.rename,
+                    entry,
+                    sent,
+                  })}
+                />
+              </div>
             </cf-vstack>
             <cf-profile-badge $profile={addedBy} size="xs" />
-            {mayChange
-              ? (
-                <cf-button
-                  size="sm"
-                  variant="ghost"
-                  onClick={removeEntry({ remove: store.remove, entry, sent })}
-                >
-                  Remove
-                </cf-button>
-              )
-              : null}
+            <div
+              className="fabrifile-remove"
+              hidden
+              style={{ display: changeDisplay }}
+            >
+              <cf-button
+                size="sm"
+                variant="ghost"
+                onClick={removeEntry({ remove: store.remove, entry, sent })}
+              >
+                Remove
+              </cf-button>
+            </div>
           </cf-hstack>
         </cf-card>
       ),
@@ -253,7 +267,9 @@ export const FileStoreView = pattern<FileStoreViewInput, FileStoreViewOutput>(
     const sent = new Writable.perSession<SentRequest[]>([]);
     const viewerWish = wish<FileProfile>({ query: "#profile" });
     // The store's `add` is a cell in the store's own space.
-    const mayAdd = computed(() => mayWriteIn(store.add));
+    const addDisplay = computed((): ControlDisplay =>
+      mayWriteIn(store.add) ? "block" : "none"
+    );
     const count = computed(() => store.entries.length);
     // What came of this session's requests, where that is not what was asked:
     // a refusal, or a file added under a name other than its own.
@@ -279,20 +295,22 @@ export const FileStoreView = pattern<FileStoreViewInput, FileStoreViewOutput>(
           </cf-vstack>
 
           <cf-vstack gap="3" padding="4">
-            {mayAdd
-              ? (
-                <cf-file-input
-                  multiple
-                  showPreview={false}
-                  buttonText="Add files"
-                  oncf-change={addUploads({
-                    add: store.add,
-                    anchor: store,
-                    sent,
-                  })}
-                />
-              )
-              : null}
+            <div
+              className="fabrifile-add"
+              hidden
+              style={{ display: addDisplay }}
+            >
+              <cf-file-input
+                multiple
+                showPreview={false}
+                buttonText="Add files"
+                oncf-change={addUploads({
+                  add: store.add,
+                  anchor: store,
+                  sent,
+                })}
+              />
+            </div>
 
             {notices.map((notice) => <cf-text tone="muted">{notice}</cf-text>)}
 
