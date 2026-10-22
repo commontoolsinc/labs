@@ -509,9 +509,10 @@ with one row of overlap. While browsing, `j` / `k` and `J` / `K` move down / up,
 Space and `b` / `B` page down / up, and `g` / `G` jump to the top / bottom.
 Ctrl-N / Ctrl-P move down / up, and Ctrl-D / Ctrl-U move half a page.
 Confirmation prompts use navigation keys to move button focus; Space activates
-the focused button. Pressing the mouse on a button pushes it, and releasing the
-mouse over the same button activates it. Printable keys enter text while a
-filter is active.
+the focused button. Pressing the primary mouse button on a button pushes it,
+and releasing it over the same button activates that button. Releasing it
+anywhere else, or pressing a key first, lets go of the button without
+activating it. Printable keys enter text while a filter is active.
 
 Press `i` in a diff to open its file and commit list. The list starts in browse
 mode. Press `/` to filter it by file name, commit hash, or commit subject. In
