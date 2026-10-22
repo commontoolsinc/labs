@@ -193,7 +193,10 @@ certificate private key, compromise exposes that key too.
    verified selection; `router.ready` acknowledges private negotiation support
    and echoes it exactly. This preserves `stableExpressionResultIds` admission
    and prevents an endpoint upgrade from enabling an encoding absent from the
-   public handshake. Private transport compatibility is independently versioned;
+   public handshake. A client whose capabilities omit
+   `stableExpressionResultIds` is not refused by the router: it receives a
+   context, a ticket and a data socket, and the toolshed answers each of its
+   `session.open` requests with the final `SessionRevokedError` refusal. Private transport compatibility is independently versioned;
    `routerEncodingNegotiation` and `routerRequestAdmission` are required on
    authenticated private peers and excluded from public and effective Memory
    capabilities. The signed binary `rpc1` asserts request-admission support with

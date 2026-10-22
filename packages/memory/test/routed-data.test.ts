@@ -283,6 +283,7 @@ async function fixture(
     extraSpaces = [],
     serverFlags,
     negotiatedFlags = {},
+    clientFlags = {},
   }: {
     modernCellRep?: boolean;
     clientModernCellRep?: boolean;
@@ -300,6 +301,12 @@ async function fixture(
 
     /** Effective public negotiation over the fixture's original client flags. */
     negotiatedFlags?: Record<string, boolean | string[]>;
+
+    /**
+     * The client's own capabilities where they differ from the toolshed's;
+     * `undefined` removes a capability the client does not know.
+     */
+    clientFlags?: Record<string, boolean | string[] | undefined>;
   } = {},
 ) {
   setModernCellRepConfig(modernCellRep);
@@ -372,12 +379,15 @@ async function fixture(
     limits,
     ...(clock === undefined ? {} : { now: () => clock.now }),
   });
-  const flagObject = {
-    ...server.memoryProtocolFlags(),
-    modernCellRep: clientModernCellRep,
-    connectionAuth: true,
-    routedAuthV1: true,
-  };
+  const flagObject = Object.fromEntries(
+    Object.entries({
+      ...server.memoryProtocolFlags(),
+      ...clientFlags,
+      modernCellRep: clientModernCellRep,
+      connectionAuth: true,
+      routedAuthV1: true,
+    }).filter(([, value]) => value !== undefined),
+  );
   const flags = routedFlags(flagObject);
   const encodingFlags = {
     ...Object.fromEntries(
@@ -2270,6 +2280,41 @@ Deno.test("a routed toolshed serves either cell representation, and refuses a cl
     }
   }
   setModernCellRepConfig(true);
+});
+
+Deno.test("a client without stableExpressionResultIds reaches a data socket, and the toolshed refuses each of its session opens for good", async () => {
+  // The router no longer refuses the flag's absence: the context, its ticket
+  // and the data socket are all granted, and the toolshed answers every
+  // `session.open` with the final refusal, which the SDK treats as terminal
+  // for the session (04-protocol.md, routed-mode-a.md).
+  const f = await fixture("stable-ids-absent", {
+    clientFlags: { stableExpressionResultIds: undefined },
+  });
+  try {
+    expect(Object.hasOwn(f.encodingFlags, "stableExpressionResultIds")).toBe(
+      false,
+    );
+    expect(f.greeted.type).toBe("hello.ok");
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const message = await f.request({
+        type: "session.open",
+        space: f.space.did(),
+        principal: f.principal.did(),
+        session: {},
+      });
+      expect(message.ok).toBeUndefined();
+      expect(message.error).toMatchObject({
+        name: "SessionRevokedError",
+        message: expect.stringContaining(
+          "incompatible expression result identities",
+        ),
+      });
+    }
+    expect(f.socket.readyState).toBe(WebSocket.OPEN);
+    expect(f.link.readyState).toBe(WebSocket.OPEN);
+  } finally {
+    await f.close();
+  }
 });
 
 Deno.test("a routed connection is not sent session/admissible when a grant admits a refused principal", async () => {

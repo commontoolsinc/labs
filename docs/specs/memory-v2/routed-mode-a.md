@@ -21,6 +21,12 @@ clients use its `hello`, `connection.challenge`, `connection.auth`,
   or resetting the transport restores the default; a replacement connection
   learns its own cap. Byte, nesting, duplicate-key and DID checks remain active
   when counting is disabled.
+- The router does not refuse a client whose capabilities omit
+  `stableExpressionResultIds`: such a client is granted a context, a ticket
+  and a data socket, and the toolshed answers each of its `session.open`
+  requests with the final `SessionRevokedError` refusal of
+  [04-protocol.md](04-protocol.md), which the SDK treats as terminal for that
+  session.
 - `connection.auth` carries `{statement: BASE64URL}`: an unpadded canonical
   base64url signed `mra1` record. Its principal, command, audience, protocol,
   deployment, challenge, issue time and expiry all participate in the signature.
