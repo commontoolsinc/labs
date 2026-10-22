@@ -264,6 +264,24 @@ describe("label-metadata-table", () => {
     }
   });
 
+  it("sends the envelope inline when the dictionaries would exceed the expansion budget", () => {
+    const label = { confidentiality: ["x".repeat(1024 * 1024)], integrity: [] };
+    const doc = {
+      cfc: {
+        version: 1,
+        labelMap: {
+          version: 1,
+          entries: Array.from({ length: 17 }, () => ({ path: ["p"], label })),
+        },
+      },
+    };
+    for (const endpoint of endpoints) {
+      const source = endpoint.wrap([doc]);
+      expect(endpoint.compress(source)).toBe(source);
+      expect(endpoint.has(source)).toBe(false);
+    }
+  });
+
   it("preserves malformed inline patch payloads and keeps table-free whole-field numbers inline", () => {
     const root = "/cfc/labelMap/entries";
     const patches = [

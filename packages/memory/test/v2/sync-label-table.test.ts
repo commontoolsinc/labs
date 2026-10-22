@@ -677,16 +677,14 @@ describe("sync-label-table", () => {
       [path],
     );
     expect(() => expandSessionSyncLabels(oversized)).toThrow("byte limit");
-    expect(() =>
-      compressSessionSyncLabels(
-        wireSync(
-          Array(maximum + 1).fill(label),
-          undefined,
-          Array(maximum + 1).fill(path),
-        ),
-      )
-    )
-      .toThrow("byte limit");
+    // The sender never produces what the receiver refuses: past the budget
+    // it leaves the frame inline, which every receiver accepts.
+    const inline = wireSync(
+      Array(maximum + 1).fill(label),
+      undefined,
+      Array(maximum + 1).fill(path),
+    );
+    expect(compressSessionSyncLabels(inline)).toBe(inline);
     const pathMaximum = Math.floor(
       MAX_SYNC_LABEL_EXPANSION_BYTES /
         encoder.encode(canonical(path)).length,
@@ -704,7 +702,7 @@ describe("sync-label-table", () => {
       .toThrow("byte limit");
   });
 
-  it("throws before delivering a reference amplification beyond the byte budget", () => {
+  it("throws before delivering a reference amplification beyond the byte budget and sends such frames inline", () => {
     const label = {
       integrity: [{ type: "opaque", payload: "x".repeat(65536) }],
     };
@@ -719,8 +717,7 @@ describe("sync-label-table", () => {
       expandSessionSyncLabels(wireSync(Array(maximum + 1).fill(0), [label]))
     )
       .toThrow("byte limit");
-    expect(() =>
-      compressSessionSyncLabels(wireSync(Array(maximum + 1).fill(label)))
-    ).toThrow("byte limit");
+    const inline = wireSync(Array(maximum + 1).fill(label));
+    expect(compressSessionSyncLabels(inline)).toBe(inline);
   });
 });

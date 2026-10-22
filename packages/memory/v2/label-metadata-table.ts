@@ -110,11 +110,11 @@ interface CompressionTable {
  * Inputs are neither mutated nor frozen. Call only for a negotiated endpoint.
  * Preserves uninterpreted inline metadata. Returns the envelope unchanged, which
  * is always a valid encoding, when a whole-field label or path already holds a
- * number (a dictionary would make that stored number read as a reference).
- * Throws on an already-compressed envelope, a selected label containing a
- * reserved schema reference, or dictionaries past
- * `MAX_LABEL_METADATA_EXPANSION_BYTES`. Compress labels before schemas when
- * labels contain schema-bearing links.
+ * number (a dictionary would make that stored number read as a reference) or
+ * when the selected dictionaries would expand past
+ * `MAX_LABEL_METADATA_EXPANSION_BYTES`. Throws on an already-compressed envelope
+ * or a selected label containing a reserved schema reference. Compress labels
+ * before schemas when labels contain schema-bearing links.
  */
 export function compressLabelMetadata(
   envelope: Record<string, unknown>,
@@ -151,7 +151,7 @@ export function compressLabelMetadata(
     if (state.values.length > 0) dictionaries[state.spec.name] = state.values;
   }
   if (Object.keys(dictionaries).length === 0) return envelope;
-  requireExpansionBudget(expandedBytes);
+  if (expandedBytes > MAX_LABEL_METADATA_EXPANSION_BYTES) return envelope;
   const rewritten = mapEnvelope(envelope, (value, field) => {
     const state = states[field === "label" ? 0 : 1];
     if (!isPlainObject(value) && !Array.isArray(value)) return value;
