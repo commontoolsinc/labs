@@ -70,8 +70,8 @@ import {
 import Room, { type RoomOutput } from "./room.tsx";
 
 /**
- * The kind of every offer here, and the kind each room's space declares by
- * default.
+ * The `kind` an offer carries when its event names none, and the kind each
+ * room's space declares by default.
  */
 const OFFER_KIND = "fabrichat-room";
 
