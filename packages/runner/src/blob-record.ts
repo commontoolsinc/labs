@@ -96,19 +96,18 @@ function toByteArray(value: unknown): Uint8Array | undefined {
     return undefined;
   }
 
-  const entries = Object.entries(value)
-    .map(([key, item]) => [Number(key), item] as const)
-    .filter(([index, item]) =>
-      Number.isInteger(index) && index >= 0 &&
-      typeof item === "number" && Number.isInteger(item) &&
-      item >= 0 && item <= 255
-    )
-    .toSorted(([left], [right]) => left - right);
+  // `Object.entries()` lists an object's array-index keys first, in ascending
+  // order, so a record of bytes lists each key at its own position. Any other
+  // entry, or a value that is not a byte, makes the body not byte-shaped.
+  const entries = Object.entries(value);
   if (
     entries.length === 0 ||
-    entries.some(([index], position) => index !== position)
+    entries.some(([key, item], position) =>
+      key !== String(position) || typeof item !== "number" ||
+      !Number.isInteger(item) || item < 0 || item > 255
+    )
   ) {
     return undefined;
   }
-  return Uint8Array.from(entries.map(([, item]) => item as number));
+  return Uint8Array.from(entries, ([, item]) => item as number);
 }

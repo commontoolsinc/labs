@@ -205,6 +205,40 @@ describe("nameBlob()", () => {
     expect(await root.named()).toBe(idOf(photo));
   });
 
+  it("returns an id for a blob stored with its body as a record of byte values", async () => {
+    const stored = {
+      type: photo.type,
+      body: { "0": 137, "1": 80, "2": 78, "3": 71 },
+    };
+    const blobId = hashOf(stored).toString();
+    await server.writeDocument(home, blobDocumentId(blobId), stored);
+    const root = await spawnRoot();
+
+    await root.rename(blobId, "photo.png");
+
+    expect(await root.named()).toBe(idOf(photo));
+  });
+
+  it("returns `undefined` for a blob whose body is a record holding anything but its bytes in order", async () => {
+    const root = await spawnRoot();
+
+    for (
+      const body of [
+        { "0": 137, "1": 300 },
+        { "0": 137, "1": 80, note: "x" },
+        { "0": 137, "2": 80 },
+      ]
+    ) {
+      const stored = { type: photo.type, body };
+      const blobId = hashOf(stored).toString();
+      await server.writeDocument(home, blobDocumentId(blobId), stored);
+      await root.rename(blobId, "photo.png");
+    }
+
+    expect(root.seen.filter((id) => id !== undefined)).toEqual([]);
+    expect(await root.named()).toBe("");
+  });
+
   it("returns `undefined` for a blob the space does not hold", async () => {
     const root = await spawnRoot();
 
