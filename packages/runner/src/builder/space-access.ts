@@ -178,10 +178,7 @@ export function spaceMembers(
   if (!isACL(acl)) return undefined;
   const principals: Record<DID, SpaceGrantLevel> = {};
   let anyone: SpaceGrantLevel | undefined;
-  const entries = Object.entries(acl).sort(([a], [b]) =>
-    a < b ? -1 : a > b ? 1 : 0
-  );
-  for (const [user, entry] of entries) {
+  for (const [user, entry] of Object.entries(acl)) {
     if (entry === undefined) continue;
     if (user === ANYONE_USER) anyone = entry;
     else if (isDID(user)) principals[user] = entry;

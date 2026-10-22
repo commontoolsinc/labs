@@ -4946,10 +4946,7 @@ export declare const spaceAccessOf: SpaceAccessOfFunction;
  * `spaceMembers()` returns them.
  */
 export interface SpaceMemberList {
-  /**
-   * Each principal the list names, with the level its entry grants, in
-   * ascending order of DID.
-   */
+  /** Each principal the list names, with the level its entry grants. */
   readonly principals: Readonly<Record<DID, SpaceGrantLevel>>;
 
   /**

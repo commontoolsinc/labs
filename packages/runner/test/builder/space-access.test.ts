@@ -1175,8 +1175,8 @@ describe("spaceAccess()", () => {
 
   describe("spaceMembers()", () => {
     /**
-     * Returns the member list naming `principals`, in the order of their DIDs,
-     * and `anyone`, if given.
+     * Returns the member list naming `principals`, in the order of their DIDs
+     * so that two equal lists render as the same JSON, and `anyone`, if given.
      */
     const listOf = (
       principals: AclValue,
@@ -1202,15 +1202,11 @@ describe("spaceAccess()", () => {
 
         const runtime = clientRuntime(bob);
         await syncAcl(runtime);
-        const members = membersIn(runtime, runtime.edit());
-        expect(members).toStrictEqual(listOf({
+        expect(membersIn(runtime, runtime.edit())).toStrictEqual(listOf({
           [alice.did()]: "OWNER",
           [bob.did()]: "WRITE",
           [carol.did()]: "READ",
         }, "READ"));
-        expect(Object.keys(members!.principals)).toEqual(
-          [alice.did(), bob.did(), carol.did()].sort(),
-        );
       });
 
       it("returns no `anyone` for a list with no `*` entry", async () => {
@@ -1437,8 +1433,8 @@ describe("spaceAccess()", () => {
     describe("in a dependent computation", () => {
       /**
        * Like {@link computedCell}, where `level` returns the list
-       * `spaceMembers()` returns for a cell in `space`, as JSON; `unknown`
-       * stands in for `undefined`.
+       * `spaceMembers()` returns for a cell in `space`, as the JSON of
+       * {@link listOf}; `unknown` stands in for `undefined`.
        */
       function membersCell(
         runtime: Runtime,
@@ -1446,7 +1442,9 @@ describe("spaceAccess()", () => {
       ): Promise<Cell<{ level?: string; derived?: string }>> {
         return computedCell(runtime, user, (target) => {
           const members = spaceMembers(target);
-          return members === undefined ? "unknown" : JSON.stringify(members);
+          return members === undefined
+            ? "unknown"
+            : JSON.stringify(listOf(members.principals, members.anyone));
         });
       }
 
