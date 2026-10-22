@@ -49,11 +49,12 @@ import { cellOfTarget } from "./space-access.ts";
  * `represents-principal` claim it also reads whether the value's `name` field,
  * followed through its links, holds a written name. That read is a verifier
  * read, so it adds no confidentiality to the transaction, and a change to the
- * name runs the computation again too. Nothing else of the value is read. What a claim's `kind` and `subject` disclose is
- * public by the label-metadata classification
- * (`docs/specs/cfc-label-metadata-confidentiality.md` §2), so the observation
- * adds no confidentiality to the result. If that classification ever made the
- * subject protected, this throws, since no label could be carried for it.
+ * name runs the computation again too. Nothing else of the value is read. What
+ * a claim's `kind` and `subject` disclose is public by the label-metadata
+ * classification (`docs/specs/cfc-label-metadata-confidentiality.md` §2), so
+ * the observation adds no confidentiality to the result. If that
+ * classification ever made the subject protected, this throws, since no label
+ * could be carried for it.
  *
  * `options.label` says which label is read. `"resolved"`, the default, is the
  * label on the document `target`'s value resolves to. `"written"` is the label

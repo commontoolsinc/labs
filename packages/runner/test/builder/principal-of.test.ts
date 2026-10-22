@@ -162,7 +162,7 @@ describe("principalOf()", () => {
       () => principalOf(target, kind),
     );
 
-  /** Calls `principalsOf(target, "represents-principal")` in a handler frame. */
+  /** Calls `principalsOf()` for `represents-principal` in a handler frame. */
   const principalsIn = (tx: IExtendedStorageTransaction, target: unknown) =>
     inFrame(tx, "handler", () => principalsOf(target, "represents-principal"));
 
@@ -432,7 +432,7 @@ describe("principalOf()", () => {
     // principal of whichever runtime set them up: here alice's, beside or in
     // place of bob's.
 
-    /** The entries of a profile bob owns, its defaults also stamped by alice. */
+    /** The label of bob's profile, its defaults also stamped by alice. */
     const stamped = (): SeedEntry[] => [
       claimsAt(["name"], claim("represents-principal", bob.did())),
       claimsAt(

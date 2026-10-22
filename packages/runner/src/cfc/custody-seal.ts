@@ -1428,10 +1428,9 @@ const resolveSeats = async (
       // The attestation is read from these entries (from the root's and the
       // `name` field's among them, for a seat whose owner wrote a name), so
       // they are the ones the room's readers must hold, whatever their
-      // observation class. The
-      // attestation's subject is itself public metadata (a
-      // `represents-principal` subject is classified public for invariant
-      // 12), so no label-metadata clause governs the DID.
+      // observation class. The attestation's subject is itself public
+      // metadata (a `represents-principal` subject is classified public for
+      // invariant 12), so no label-metadata clause governs the DID.
       const withheld = clauseWithheldFromRoom(
         principalClaimEntries(view)
           .flatMap((entry) =>
