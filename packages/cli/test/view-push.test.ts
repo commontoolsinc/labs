@@ -706,7 +706,7 @@ describe("view-push", () => {
       session.finishBranchPush("Pushed feature to origin.");
 
       const dialog = session.view().dialog!;
-      expect(dialog.buttons.map((b) => b.label)).toEqual(["Close"]);
+      expect(dialog.buttons.map((b) => b.label)).toEqual(["Close", "Quit"]);
       expect(dialog.body.slice(0, 3).map((line) => line.trimEnd())).toEqual([
         "To origin",
         "",
@@ -715,7 +715,41 @@ describe("view-push", () => {
       session.handleKey({ name: "enter" });
       expect(session.view().dialog).toBeNull();
       expect(session.view().message).toBe("Pushed feature to origin.");
+      expect(session.quit).toBe(false);
       expect(aborted).toBe(0);
+    });
+
+    it("quits on `Q` once the push ends, and not on `q` or while it runs", () => {
+      const session = editableSession();
+      session.beginBranchPush(() => {});
+
+      session.handleKey({ name: "Q", char: "Q" });
+      expect(session.quit).toBe(false);
+      expect(session.view().dialog?.title).toBe("Push");
+
+      session.finishBranchPush("Pushed feature to origin.");
+      session.handleKey({ name: "q", char: "q" });
+      expect(session.quit).toBe(false);
+      expect(session.view().dialog?.title).toBe("Push");
+      session.handleKey({ name: "Q", char: "Q" });
+
+      expect(session.quit).toBe(true);
+    });
+
+    it("asks to save unsaved edits before Quit quits", () => {
+      const session = editableSession();
+      session.handleKey({ name: "e", char: "e" });
+      session.handleKey({ name: "X", char: "X" });
+      session.handleKey({ name: "escape" });
+      session.beginBranchPush(() => {});
+      session.finishBranchPush("Pushed feature to origin.");
+
+      session.handleKey({ name: "Q", char: "Q" });
+
+      expect(session.quit).toBe(false);
+      expect(session.view().dialog?.title).toBe("Save Changes");
+      session.handleKey({ name: "d", char: "d" });
+      expect(session.quit).toBe(true);
     });
   });
 

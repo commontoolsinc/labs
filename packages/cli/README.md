@@ -543,8 +543,9 @@ as it stands, to the branch of the same name on `origin`. The push is forced,
 but fails rather than discard commits on `origin` that the branch has never
 included, even when they have been fetched. A dialog shows git's output as it
 arrives, with an Abort button that stops the push. When the push ends, the
-dialog adds how it ended and the button becomes Close, which leaves that summary
-in the status line. When the server's reply offers a page for creating a pull
+dialog adds how it ended, and two buttons replace Abort. Close leaves that
+summary in the status line. Quit (`Q`) closes the viewer, first offering to save
+any unsaved edits. When the server's reply offers a page for creating a pull
 request, the viewer opens it in the browser. Git asks nothing on the terminal
 while the viewer holds it; a question such as a key's passphrase goes to the
 program `SSH_ASKPASS` names, and fails when it names none. `P` refuses to push

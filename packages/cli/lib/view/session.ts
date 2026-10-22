@@ -1234,7 +1234,8 @@ export class Session {
 
   /** The push dialog: as much of the end of git's output as fits, then how the
    * push ended, at the size of the screen so that it holds still as the output
-   * grows. Abort stops the push; Close takes the dialog down once it ends. */
+   * grows. Abort stops the push; once it ends, Close takes the dialog down and
+   * Quit closes the viewer. */
   #pushDialog(): DialogState {
     const lines = this.#pushLines.at(-1) === ""
       ? this.#pushLines.slice(0, -1)
@@ -1261,11 +1262,12 @@ export class Session {
       title: "Push",
       body,
       output: true,
-      buttons: [
-        this.#abortPush
-          ? { label: "Abort", hotkey: "a", kind: "cancel" }
-          : { label: "Close", hotkey: "c", kind: "cancel" },
-      ],
+      buttons: this.#abortPush
+        ? [{ label: "Abort", hotkey: "a", kind: "cancel" }]
+        : [
+          { label: "Close", hotkey: "c", kind: "cancel" },
+          { label: "Quit", hotkey: "Q" },
+        ],
     };
   }
 
@@ -4059,8 +4061,10 @@ export class Session {
     } else if (key.name === "escape") {
       index = buttons.findIndex((b) => b.kind === "cancel");
     } else {
-      const k = (key.char ?? key.name).toLowerCase();
-      index = buttons.findIndex((b) => b.hotkey.toLowerCase() === k);
+      const k = key.char ?? key.name;
+      index = buttons.findIndex((b) =>
+        b.hotkey === k || b.hotkey === k.toLowerCase()
+      );
     }
     if (index < 0 || index >= n) return; // an unbound key leaves the prompt up
     this.#activateButton(dialog, index, beforeButtonAction);
@@ -4088,17 +4092,19 @@ export class Session {
     if (this.#mode === "savePrompt") this.#applySaveButton(button);
     else if (this.#mode === "amendPrompt") this.#applyAmendButton(button);
     else if (this.#mode === "revertPrompt") this.#applyRevertButton(button);
-    else this.#applyPushButton();
+    else this.#applyPushButton(button);
   }
 
   /** Abort stops the push, which then ends; Close takes the dialog down and
-   * leaves how the push ended in the status line. */
-  #applyPushButton(): void {
+   * leaves how the push ended in the status line; Quit takes it down and quits,
+   * by way of the save prompt when there are unsaved edits. */
+  #applyPushButton(button: DialogButton): void {
     if (this.#abortPush) {
       this.#abortPush();
     } else {
       this.#mode = "normal";
       this.#message = this.#pushSummary;
+      if (button.hotkey === "Q") this.#requestQuit();
     }
   }
 
