@@ -4933,9 +4933,11 @@ const parseHelloOk = (
   if (parsed === null) {
     return null;
   }
-  if (message.routerTransport !== undefined && message.routerTransport !== 1) {
-    return null;
-  }
+  // Only private transport version 1 is known here. Any other advertised
+  // version offers no streaming to this client, which keeps the legacy
+  // routed framing the server must still accept; it does not fail the
+  // handshake, since the router may offer a version this build predates.
+  const routerTransport = message.routerTransport === 1 ? 1 : undefined;
   const frameSlots = message.routerFrameSlots;
   if (
     frameSlots !== undefined && frameSlots !== null &&
@@ -4947,7 +4949,7 @@ const parseHelloOk = (
   return {
     flags: parsed,
     sessionOpen: message.sessionOpen,
-    ...(message.routerTransport === 1 ? { routerTransport: 1 } : {}),
+    ...(routerTransport === undefined ? {} : { routerTransport }),
     ...(typeof message.routerUploadWindow === "number"
       ? { routerUploadWindow: message.routerUploadWindow }
       : {}),
