@@ -562,8 +562,11 @@ other.
 - [x] Let `apply-op` name no base: the commit's recursive read of the field is
       what it was written against, so it applies at the field's current
       version with nothing to rebase over, and activates an inactive field from
-      that value. Without such a read, or after an earlier operation in the
-      commit wrote the field, it is rejected (§7.6, §7.7.1).
+      that value. The engine states that base before applying it, as the
+      field's current cursor or as `null` with the current value's hash, so
+      the apply path itself is unchanged. Without such a read, or after an
+      earlier operation in the commit wrote the field, it is rejected (§7.6,
+      §7.7.1).
 - [x] Add `Writable<string>.applyChanges()`, taking changes in the shape of a
       CodeMirror change spec against the value the handler read. The handler's
       transaction records them and writes the changed text, so CFC, its later
@@ -585,8 +588,9 @@ Required tests:
 
 - [x] An `apply-op` without a base applies at the current version beside a
       read of the field or of the document, activates an inactive field,
-      replays as a duplicate, and is rejected without a recursive read or after
-      an earlier write to the field in the commit.
+      replays with its commit, and is rejected without a recursive read, after
+      an earlier write to the field in the commit, or under its submission id
+      in a later commit.
 - [x] A stale confirmed read of the field refuses the commit as a
       `ConflictError` before the operation applies.
 - [x] A handler's edit commits beside an ordinary write to another field of the

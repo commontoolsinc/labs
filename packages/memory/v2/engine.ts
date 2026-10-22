@@ -4737,7 +4737,7 @@ const validateCursor = (cursor: unknown): cursor is OpCursor =>
   Number.isSafeInteger((cursor as { version?: unknown }).version) &&
   (cursor as { version: number }).version >= 0;
 
-const validateApplyOperation = (operation: ApplyOpOperation): void => {
+const validateApplyOperation = (operation: BasedApplyOpOperation): void => {
   validateOperationPath(operation.path);
   if (
     typeof operation.id !== "string" || operation.id.length === 0 ||
@@ -4748,10 +4748,7 @@ const validateApplyOperation = (operation: ApplyOpOperation): void => {
   ) {
     throw new ProtocolError("apply-op identity fields are malformed");
   }
-  if (
-    operation.base !== undefined && operation.base !== null &&
-    !validateCursor(operation.base)
-  ) {
+  if (operation.base !== null && !validateCursor(operation.base)) {
     throw new OpCursorMismatchError("apply-op cursor is malformed");
   }
   if (
@@ -4821,6 +4818,64 @@ const commitReadIsFieldBase = (
   });
 };
 
+/** An `apply-op` whose base is stated, as the engine applies one. */
+type BasedApplyOpOperation = ApplyOpOperation & { base: OpCursor | null };
+
+/**
+ * Returns `operation` with its base stated. One that names none is written
+ * against its commit's read of the field (`commitReadIsFieldBase()`), and the
+ * field holds what that read saw, so its base is the field's current cursor,
+ * or, for a field with no active epoch, `null` with the hash of the value the
+ * field holds. Either way it applies with nothing to rebase over.
+ *
+ * @throws OpCursorMismatchError when the commit does not stand as the base.
+ */
+const withStatedBase = (
+  engine: Engine,
+  options: {
+    branch: BranchName;
+    commit: ClientCommit;
+    opIndex: number;
+    operation: ApplyOpOperation;
+    scopeKey: string;
+  },
+): BasedApplyOpOperation => {
+  const { branch, commit, opIndex, operation, scopeKey } = options;
+  if (operation.base !== undefined) {
+    return { ...operation, base: operation.base };
+  }
+  validateOperationPath(operation.path);
+  if (!commitReadIsFieldBase(commit, opIndex, operation)) {
+    throw new OpCursorMismatchError(
+      "an apply-op without a base needs the commit's recursive read of the " +
+        "field, and no earlier operation in the commit writing it",
+    );
+  }
+  const field = selectOperationField(
+    engine,
+    operationFieldParams(branch, operation.id, scopeKey, operation.path),
+  );
+  if (field?.active === 1) {
+    return {
+      ...operation,
+      base: { epoch: field.epoch, version: field.version },
+    };
+  }
+  const document = readStateForScopeKey(engine, {
+    branch,
+    id: operation.id,
+    scope: normalizeScope(operation.scope),
+    scopeKey,
+  })?.document ?? null;
+  return {
+    ...operation,
+    base: null,
+    baselineHash: operationBaselineHash(
+      valueAtOperationPath(document, operation.path),
+    ),
+  };
+};
+
 const storedOperationResolution = (
   operationIndex: number,
   address: ApplyOpResolution["address"],
@@ -4857,27 +4912,15 @@ const applyOperation = (
     branch: BranchName;
     seq: number;
     opIndex: number;
-    operation: ApplyOpOperation;
+    operation: BasedApplyOpOperation;
     principal?: string;
     sessionId: SessionId;
     scopeKeyOverride?: string;
-
-    /**
-     * Whether the commit stands as the base of an `apply-op` that names none
-     * (see `commitReadIsFieldBase()`).
-     */
-    readIsBase: boolean;
   },
 ): { resolution: ApplyOpResolution; revision?: AppliedRevision } => {
   const { branch, seq, opIndex, operation, principal, sessionId } = options;
   assertDefaultOperationBranch(branch);
   validateApplyOperation(operation);
-  if (operation.base === undefined && !options.readIsBase) {
-    throw new OpCursorMismatchError(
-      "an apply-op without a base needs the commit's recursive read of the " +
-        "field, and no earlier operation in the commit writing it",
-    );
-  }
   if (isStreamEntriesDocId(operation.id)) {
     throw new ProtocolError(
       "apply-op cannot mutate a stream sidecar document",
@@ -4919,16 +4962,11 @@ const applyOperation = (
     | OperationSubmissionRow
     | undefined;
   if (duplicate) {
-    // A submission without a base took the version the field held when it
-    // landed, so the stored base version says nothing a replay could
-    // disagree with.
-    const base = operation.base;
     if (
       duplicate.codec !== operation.codec ||
-      (base != null && base.epoch !== duplicate.epoch) ||
-      (base !== undefined &&
-        duplicate.base_version !== (base?.version ?? 0)) ||
-      (base === null &&
+      (operation.base !== null && operation.base.epoch !== duplicate.epoch) ||
+      duplicate.base_version !== (operation.base?.version ?? 0) ||
+      (operation.base === null &&
         operation.baselineHash !== priorField?.baseline_hash) ||
       duplicate.submitted_payload !== encodeMemoryBoundary(operation.payload)
     ) {
@@ -4955,26 +4993,22 @@ const applyOperation = (
 
   let epoch: number;
   let currentVersion: number;
-  let baseVersion: number;
   let baselineHash: string;
   let intervening: FabricValue[];
   if (!activeField) {
-    if (operation.base != null) {
+    if (operation.base !== null) {
       throw new OpCursorMismatchError(
-        "inactive operation fields require a null or absent base",
+        "inactive operation fields require a null base",
       );
     }
-    // Without a base, the commit's read of the field is what the payload was
-    // computed from, and the field still holds it.
     const currentHash = operationBaselineHash(currentMaterialized);
-    if (operation.base === null && operation.baselineHash !== currentHash) {
+    if (operation.baselineHash !== currentHash) {
       throw new OpFieldBaselineMismatchError(
         "operation field baseline hash mismatch",
       );
     }
     epoch = (priorField?.epoch ?? 0) + 1;
     currentVersion = 0;
-    baseVersion = 0;
     baselineHash = currentHash;
     intervening = [];
     engine.database.prepare(`
@@ -4995,6 +5029,7 @@ const applyOperation = (
         "operation field codec cannot change within an epoch",
       );
     }
+    let baseVersion: number;
     if (operation.base === null) {
       if (operation.baselineHash !== activeField.baseline_hash) {
         throw new OpFieldBaselineMismatchError(
@@ -5002,10 +5037,6 @@ const applyOperation = (
         );
       }
       baseVersion = 0;
-    } else if (operation.base === undefined) {
-      // The commit's read of the field stands in for a cursor: it saw the
-      // version the field holds now, so there is nothing to rebase over.
-      baseVersion = activeField.version;
     } else {
       if (operation.base.epoch !== activeField.epoch) {
         throw new OpCursorMismatchError("operation field epoch mismatch");
@@ -5212,7 +5243,7 @@ const applyOperation = (
     epoch,
     submission_id: operation.submissionId,
     codec: operation.codec,
-    base_version: baseVersion,
+    base_version: operation.base?.version ?? 0,
     submitted_payload: encodeMemoryBoundary(operation.payload),
     integrated_from: currentVersion,
     integrated_to: nextVersion,
@@ -5225,7 +5256,7 @@ const applyOperation = (
     epoch,
     submission_id: operation.submissionId,
     codec: operation.codec,
-    base_version: baseVersion,
+    base_version: operation.base?.version ?? 0,
     submitted_payload: encodeMemoryBoundary(operation.payload),
     integrated_from: currentVersion,
     integrated_to: nextVersion,
@@ -6574,16 +6605,25 @@ const applyCommitTransaction = (
       continue;
     }
     if (operation.op === "apply-op") {
+      const scopeKeyOverride = scopeKeyByOpIndex.get(opIndex);
       const applied = applyOperation(engine, {
         branch,
         seq,
         opIndex,
-        operation,
+        operation: withStatedBase(engine, {
+          branch,
+          commit,
+          opIndex,
+          operation,
+          scopeKey: scopeKeyOverride ??
+            resolveScopeKey(operation.scope, {
+              principal: scanPrincipal,
+              sessionId: scanSession,
+            }),
+        }),
         principal: scanPrincipal,
         sessionId: scanSession,
-        scopeKeyOverride: scopeKeyByOpIndex.get(opIndex),
-        readIsBase: operation.base === undefined &&
-          commitReadIsFieldBase(commit, opIndex, operation),
+        scopeKeyOverride,
       });
       operationResolutions.push(applied.resolution);
       if (applied.revision) revisions.push(applied.revision);

@@ -2086,7 +2086,38 @@ describe("v2-operation-engine", () => {
       }
     });
 
-    it("returns the original resolution for a replayed submission after the field moved on", async () => {
+    it("returns the stored result for a resend of its commit", async () => {
+      const { engine, path } = await openTestEngine();
+      try {
+        const seededSeq = seed(engine);
+        const commit = {
+          localSeq: 1,
+          reads: readAt(seededSeq),
+          operations: [unbased("agent:1", "abcd", "!")],
+        };
+        const original = applyCommit(engine, {
+          sessionId: "session:agent",
+          commit,
+        });
+        const resent = applyCommit(engine, {
+          sessionId: "session:agent",
+          commit,
+        });
+
+        expect(resent.seq).toBe(original.seq);
+        expect(resent.operationResolutions).toEqual(
+          original.operationResolutions,
+        );
+        expect(read(engine, { id: "of:collaborative" })).toEqual({
+          value: { body: "abcd!" },
+        });
+      } finally {
+        close(engine);
+        await Deno.remove(path);
+      }
+    });
+
+    it("throws `OpSubmissionMismatchError` for its submission id in a later commit", async () => {
       const { engine, path } = await openTestEngine();
       try {
         const seededSeq = seed(engine);
@@ -2099,41 +2130,19 @@ describe("v2-operation-engine", () => {
             operations: [operation],
           },
         });
-        const moved = applyCommit(engine, {
-          sessionId: "session:bob",
-          commit: {
-            localSeq: 2,
-            reads: { confirmed: [], pending: [] },
-            operations: [{
-              op: "apply-op",
-              id: "of:collaborative",
-              path: toValuePath(["body"]),
-              codec: CODEMIRROR_CHANGESET_CODEC,
-              submissionId: "bob:2",
-              base: { epoch: 1, version: 3 },
-              payload: {
-                updates: [{ clientId: "bob", changes: changes(5, 0, ">") }],
-              },
-            }],
-          },
-        });
 
-        const replayed = applyCommit(engine, {
-          sessionId: "session:agent",
-          commit: {
-            localSeq: 2,
-            reads: readAt(moved.seq),
-            operations: [operation],
-          },
-        });
-        expect(replayed.operationResolutions?.[0]).toMatchObject({
-          from: original.operationResolutions?.[0].from,
-          to: original.operationResolutions?.[0].to,
-          duplicate: true,
-        });
-        expect(read(engine, { id: "of:collaborative" })).toEqual({
-          value: { body: ">abcd!" },
-        });
+        // The id landed against version 2; the later commit's read stands for
+        // version 3, the one the first submission left.
+        expect(() =>
+          applyCommit(engine, {
+            sessionId: "session:agent",
+            commit: {
+              localSeq: 2,
+              reads: readAt(original.seq),
+              operations: [operation],
+            },
+          })
+        ).toThrow(OpSubmissionMismatchError);
       } finally {
         close(engine);
         await Deno.remove(path);

@@ -303,12 +303,12 @@ Ordinary writes in the same commit may change other paths of the document, as
 `submissionId` is durable across session replacement and reconnect:
 
 - repeating an identical submission in the same field epoch returns its
-  original resolution without integrating it again; a submission without a
-  base is identical when its codec and payload are, since the version it
-  landed at is the one its read resolved to
+  original resolution without integrating it again
 - reusing the id with a different codec, base, or payload is a protocol error
 - normal `(sessionId, localSeq)` replay remains the idempotency boundary for the
-  complete commit
+  complete commit, and is the only one for an `apply-op` without a base: its
+  base is stated when it lands, so its id in any later commit names a
+  different base
 
 ### 7.7.3 Resolution and receipt
 
