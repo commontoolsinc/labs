@@ -1037,8 +1037,7 @@ reference, and both are read on exactly as if they had been written, so
 
 Those three each sit under the noun they act on: `get` and `set` name a cell, so
 they are `cf cell` subcommands, while `call` invokes a verb on a piece and is a
-`cf piece` one. The bare `cf get`, `cf set` and `cf call` still answer, hidden
-and superseded — see [Superseded spellings](#superseded-spellings).
+`cf piece` one.
 
 A target may select `#argument` on its piece segment, before any qualifiers or
 path, which selects the piece's arguments cell the way `--input` does — on a
@@ -1073,8 +1072,7 @@ link is also checked against its destination's contract, which still refuses a
 required field it cannot reach. Addressing the raw argument cell by id avoids
 that whole-document check, but it is an unsafe recovery tool: it can erase
 link-bearing data that a later `cf cell set` will refuse to restore because the
-serialized link has no durable source contract. The superseded `cf set` spelling
-mounts this same command and has identical validation behavior.
+serialized link has no durable source contract.
 
 ## Linking piece inputs
 
@@ -2670,39 +2668,12 @@ ID from it, as [Space invitations](#space-invitations) describes.
 
 ## Command visibility
 
-A registered command appears in `cf --help` unless it is one of the two kinds
-below. The direct `fuse-daemon` and `fuse-supervisor` entry points are visible
+A registered command appears in `cf --help` unless it is hidden, as
+`cf completion complete` is: the completion scripts call it, and nobody types
+it. The direct `fuse-daemon` and `fuse-supervisor` entry points are visible
 because packaged launchers use them. Shell completion drops commands whose
 description opens with `Internal:`, because those are spawned by `cf fuse` and
 never typed at a prompt.
-
-### Superseded spellings
-
-Each command sits under the noun it acts on. Where that moved a command, the
-spelling it had is still accepted and still completes its own flags and
-arguments, so a script written against it keeps working; it is hidden from
-`cf --help` and never offered as a completion, and a run that reaches it says on
-stderr what to write instead — its help page included, whether `--help` asked
-for that page or a refusal printed it, since the page is otherwise a screen of
-examples in the spelling that is going away. A line refused during argument
-parsing never reaches the command, and carries the notice only where the refusal
-prints a help page with it — the reads that reserve stdout for machine-readable
-output print none, so `cf get --bogus` says nothing. **These spellings are not
-guaranteed to work after 2026-09-11**, so migrate before then: a later change
-removes them, and nothing holds them open past that date.
-
-| Write this               | Instead of               |
-| ------------------------ | ------------------------ |
-| `cf cell get`            | `cf get`                 |
-| `cf cell set`            | `cf set`                 |
-| `cf cell get-label`      | `cf piece get-label`     |
-| `cf cell set-label`      | `cf piece set-label`     |
-| `cf piece call`          | `cf call`                |
-| `cf space recreate-root` | `cf piece recreate-root` |
-
-This is a migration aid rather than a second surface: nothing here teaches the
-right column as an alternative spelling to keep using. `--piece` is a different
-case — a deprecated name for `--cell` that carries no end date and no notice.
 
 ## Evaluating patterns from another tool
 

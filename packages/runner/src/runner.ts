@@ -12447,8 +12447,8 @@ export class Runner {
         // the client-written one — `{}` as the existence witness, the handler's
         // plain return under `plainResultReceipts` — and the cell identity is
         // the same cause-derived address, so the verb contract's readback
-        // (`cf call`'s `.result`) reads a serving-written receipt the same
-        // way it reads a client-written one.
+        // (`cf piece call`'s `.result`) reads a serving-written receipt the
+        // same way it reads a client-written one.
         //
         // Write-once is CAS, not a wire precondition: no markCreateOnly (a
         // create-only mark must not ride a wave commit whose event the
