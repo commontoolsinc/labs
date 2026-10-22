@@ -47,7 +47,10 @@ other code can write either, even code a member runs in the store's space.
 The handlers learn the principal they act for with `currentPrincipal()`, and an
 entry's adder from its `authored-by` label, which is how `remove` and `rename`
 admit the adder. They learn whether the principal is an OWNER of the store's
-space with `spaceAccess()`.
+space with `spaceAccess()`, and the space they run in with `spaceOf()`, which
+is how `add` refuses another space's blob. `rename`, and an `add` that chooses
+a free name, store the entry's bytes again under its new name with
+`nameBlob()` ([files](../../common/capabilities/files.md#renaming)).
 
 ## Modules
 
@@ -74,5 +77,3 @@ of `store.tsx` and fails on any module that renders.
 
 - **A blob reference a pattern can check**: the same as the contract's (see
   [`README.md`](README.md#prerequisites)).
-- **Knowing its own space.** `add` refuses a `blob.space` other than the store's
-  own, so the handler needs the DID of the space it runs in.

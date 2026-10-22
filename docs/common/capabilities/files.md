@@ -57,6 +57,16 @@ space served from another host saves the file under its hash instead.
 and builds the download in the browser, so using it means holding the bytes in
 a cell.
 
+## Renaming
+
+A handler renames a file by naming its blob again: `nameBlob(target, blobId,
+name)` returns the id of a blob holding the same bytes and media type under
+`name`, in the space `target`'s value lives in, and the handler stores that id
+where it kept the old one. A blob never changes, so the space then holds the
+bytes under both names. The new blob's record is stored when the handler's
+transaction commits, and its bytes travel with the commit: the handler loads
+them first, and is run again once they arrive.
+
 ## What the store provides
 
 - One upload holds at most 10 MB; the server returns 413 above that.
@@ -79,6 +89,8 @@ a cell.
   a browser downloads it rather than rendering it inline. Every blob is served
   with `X-Content-Type-Options: nosniff`, so a browser takes the type as given
   rather than guessing one from the bytes.
+- A record a handler stores with `nameBlob()` carries no label either, so the
+  name it gives is readable by anyone who can fetch the blob.
 - Nothing deletes a blob. Removing a record drops the reference; the bytes
   stay.
 - The upload and download routes are not authenticated: anyone who holds a
