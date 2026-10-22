@@ -902,12 +902,11 @@ holds the measurements and the conditions for revisiting.
   §3.8.3. A principal may read a space it cannot write, and a reactive
   computation it runs there still writes its outputs. With the flag off, a
   write of that kind that the space refuses for lack of a grant is reverted
-  like any other rejection; the re-run then finds its input unchanged and
-  its output gone, writes again, and is refused again, for as long as the
-  scheduler's retry budget allows, and the replica reports a refusal for
-  each attempt. With the flag on, the replica keeps the write as a fold over
-  the document's confirmed value, so the re-run the refusal causes reads
-  what it computed and settles.
+  like any other rejection, the scheduler takes no retry on it, and the
+  revert does not run the computation again; it runs again when an input it
+  did not write changes, and is refused again. With the flag on, the replica
+  keeps the write as a fold over the document's confirmed value, and the
+  re-run the refusal causes reads what it computed and settles.
 - **Current default and planned end state.** Off by default. Set
   `EXPERIMENTAL_LOCAL_FOLD=true` or pass
   `RuntimeOptions.experimental.localFold: true` to keep refused derived
@@ -917,6 +916,14 @@ holds the measurements and the conditions for revisiting.
 - **Status on 2026-10-14.** Both arms are covered by
   `packages/runner/test/refused-derived-write.test.ts`, and the plumbing by
   `packages/runner/test/experimental-options.test.ts`.
+- **Status on 2026-10-20.** A refused derived write the replica reverts takes
+  no scheduler retry, so a READ principal running a pattern locally settles
+  after one refusal per computation. Its derived state is not stored, the
+  panel list's result container among it, so such a principal sees a loom's
+  root without its panels; `packages/toolshed/test/loom-cold-reader.test.ts`
+  pins that beside the cases that render them: a WRITE viewer under local and
+  server execution, a READ viewer under server execution, and a READ viewer
+  under local execution with the flag on.
 - **Path to removal.** Remove the env mapping, the runtime option and its
   authority and shell-source entries, the shell define, and the gate in the
   scheduler. If the fold loses, the fold machinery in
@@ -1566,6 +1573,14 @@ the per-epic implementation notes).
 >   Older servers omit it, which parses as `false`, and a client then keeps its
 >   reports to itself rather than sending a message the server would refuse.
 >   It is permanent.
+> - **`watchRemoveV1`** is a build-inherent capability, hardwired to `true`.
+>   It advertises `session.watch.remove`, which removes watches by id and
+>   answers with only what changed (the memory protocol chapter's section
+>   4.3.9). Only the server advertises it; a client reads it from `hello.ok`
+>   and never offers it. Older servers omit it, which parses as `false`, and a
+>   client then removes a watch by replacing the session's watch set, and
+>   keeps the watches of documents nothing reads rather than releasing them.
+>   It is permanent.
 > - **`admissionNotice`** is a build-inherent capability, hardwired to `true`
 >   on both peers. It advertises the `session/admissible` push of the memory
 >   protocol chapter's section 4.2.2: a server tells a connection it refused a
@@ -1618,15 +1633,19 @@ the per-epic implementation notes).
   a high-RTT link this dominates cold-load wall-clock. With the flag on,
   refreshes overlap up to a bounded window (`CONCURRENT_WATCH_REFRESH_WINDOW`,
   currently 8) in `storage/v2.ts`, and the memory client issues the whole
-  watch-mutation family (`watch.set` + `watch.add`) in an ordered issue phase so
-  wire order is preserved and application stays ordered. Watch removals derive
-  a full replacement set from session state, so they wait for preceding
-  responses to be applied before constructing that set. Later acquisitions
-  remain behind the removal in wire order. Each removal therefore drains the
-  in-flight window: acquisitions issued after it wait until every earlier
-  response has applied and the removal has been sent. Operation-watch
-  cancellations pay that drain. Independent acquisitions still overlap, and
-  same-tick microtask coalescing is unchanged.
+  watch-mutation family (`watch.set`, `watch.add` and `watch.remove`) in an
+  ordered issue phase so wire order is preserved and application stays
+  ordered. Watch removals wait for preceding responses to be applied before
+  they are sent. A removal by id (`session.watch.remove`, to a server
+  advertising `watchRemoveV1`) waits so that the watch intent it updates
+  holds every earlier acquisition; a removal by replacement (`watch.set`, to
+  an older server) also derives the full remaining set from that state. Later
+  acquisitions remain behind the removal in wire order. Each removal therefore
+  drains the in-flight window: acquisitions issued after it wait until every
+  earlier response has applied and the removal has been sent. Operation-watch
+  cancellations and document release passes pay that drain. Independent
+  acquisitions still overlap, and same-tick microtask coalescing is
+  unchanged.
 - **Current default and planned end state.** Off by default. It is a spike
   pending live measurement on a real (estuary-latency) load; the window size is
   a tuning value. End state is either graduation to always-on with a settled

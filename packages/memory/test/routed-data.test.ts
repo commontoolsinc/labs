@@ -898,6 +898,49 @@ Deno.test("a session's watch IDs are bounded by configuration, and a mutation pa
       await f.close();
     }
   });
+  await t.step("a removal frees room under the bound", async () => {
+    const f = await fixture("watches-per-session-removal", {
+      limits: { watchesPerSession: 8 },
+    });
+    try {
+      const session = await f.open();
+      const request = (type: string, fields: Record<string, unknown>) =>
+        f.request({
+          type,
+          space: f.space.did(),
+          sessionId: session.sessionId,
+          ...fields,
+        });
+      assert(
+        (await request("session.watch.set", { watches: watches("a", 8) })).ok,
+      );
+      const reasons = await refusalReasons(async () => {
+        const refused = await request("session.watch.add", {
+          watches: watches("b", 1),
+        });
+        assert(refused.error !== undefined, JSON.stringify(refused));
+      });
+      assertEquals(reasons, ["frame-limit"]);
+      // Removing one ID the session holds and one it does not leaves room
+      // for exactly one more.
+      assert(
+        (await request("session.watch.remove", { watchIds: ["a0", "z0"] })).ok,
+      );
+      assert(
+        (await request("session.watch.add", { watches: watches("b", 1) })).ok,
+      );
+      const after = await refusalReasons(async () => {
+        const refused = await request("session.watch.add", {
+          watches: watches("c", 1),
+        });
+        assert(refused.error !== undefined, JSON.stringify(refused));
+      });
+      assertEquals(after, ["frame-limit"]);
+      assertEquals(f.socket.readyState, 1);
+    } finally {
+      await f.close();
+    }
+  });
   await t.step("the default bound of 2,048, in one frame", async () => {
     const f = await fixture("watches-per-session-default");
     try {

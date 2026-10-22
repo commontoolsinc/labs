@@ -51,6 +51,7 @@ import type {
   Schema,
 } from "./builder/types.ts";
 import { registerBuiltins } from "./builtins/index.ts";
+import type { Cancel } from "./cancel.ts";
 import {
   type Cell,
   createCell,
@@ -276,6 +277,12 @@ const uiCellWriteLogger = getLogger("runtime.ui-cell-write", {
   level: "error",
 });
 
+// Release passes that failed; see `Runtime.#requestDocumentRelease()`.
+const documentReleaseLogger = getLogger("runtime.document-release", {
+  enabled: true,
+  level: "warn",
+});
+
 export type { IExtendedStorageTransaction, MemorySpace };
 
 export interface ConsoleHandlerOutput {
@@ -434,11 +441,13 @@ export interface ExperimentalOptions {
   /**
    * A reactive computation's write that the space refuses for lack of a
    * grant is kept as a local fold over the document's confirmed value
-   * (`docs/specs/memory-v2/03-commit-model.md` §3.8.3), so that the re-run
-   * reads what it computed and settles. When false, such a write is reverted
-   * like any other rejection, and the computation runs again against the
-   * same refusal until the scheduler's retry budget is spent. Defaults to
-   * off.
+   * (`docs/specs/memory-v2/03-commit-model.md` §3.8.3), where the write sits
+   * directly on the confirmed value it was made over, so that the re-run the
+   * refusal causes reads what the principal computed and settles; a write
+   * over anything else reverts. When false, such a write is reverted like
+   * any other rejection, a refusal the server marks with permanent evidence
+   * takes no retry, and the computation runs again only when an input it did
+   * not write changes. Defaults to off.
    */
   localFold?: boolean | undefined;
 }
@@ -1325,6 +1334,12 @@ export type CommitRetryPullFailure = {
  */
 export class Runtime {
   #tearingDownWrites = false;
+
+  /** The release pass waiting for the scheduler to go idle, if any. */
+  #documentRelease: Promise<void> | undefined;
+
+  /** Undoes what `#installDocumentRelease()` registered. */
+  readonly #documentReleaseCancels: Cancel[] = [];
   readonly #writeTeardown = new AbortController();
   readonly #transactions = new WeakSet<IExtendedStorageTransaction>();
   readonly #derivedInternalCellIds = new DerivedInternalCellIds();
@@ -2130,6 +2145,8 @@ export class Runtime {
         options.errorHandlers,
       );
 
+      this.#installDocumentRelease();
+
       // Register built-in modules with runtime injection
       registerBuiltins(this);
 
@@ -2497,6 +2514,7 @@ export class Runtime {
   }
 
   async #disposeInner(closeStorage: boolean): Promise<void> {
+    for (const cancel of this.#documentReleaseCancels.splice(0)) cancel();
     this.#viewReplication?.dispose();
     // Before either drain below, each of which waits for the scheduler to go
     // idle: a queued event waiting for its piece to become startable waits on
@@ -3089,6 +3107,65 @@ export class Runtime {
   #missingDocLoadKicks = new Set<string>();
 
   /**
+   * Lets the storage manager release the documents nothing reads (see
+   * `releaseUnreadDocuments()`): it asks the scheduler whether an action
+   * reads a document, and forgets a load kicked for a document it drops, so
+   * that a later read of it kicks the load again.
+   */
+  #installDocumentRelease(): void {
+    const manager = this.storageManager;
+    const cancels = [
+      manager.addDocumentReader?.((address) =>
+        this.scheduler.readsEntity(
+          entityKey(
+            { ...address, scope: normalizeCellScope(address.scope) },
+            this.scopeKeyIdentity,
+          ),
+        )
+      ),
+      manager.subscribeDocumentsDropped?.((space, addresses) => {
+        for (const address of addresses) {
+          this.#missingDocLoadKicks.delete(
+            `${space}\0${
+              address.scopeKey ??
+                resolveScopeKey(address.scope, this.scopeKeyIdentity)
+            }\0${address.id}`,
+          );
+        }
+      }),
+    ];
+    for (const cancel of cancels) {
+      if (cancel !== undefined) this.#documentReleaseCancels.push(cancel);
+    }
+  }
+
+  /**
+   * Releases the documents nothing reads, once the scheduler is next idle
+   * (`IStorageManager.releaseUnreadDocuments()`), and resolves when that
+   * pass has run. Stopping a piece asks for one. A host asks for one when
+   * something that read documents through this runtime has gone, such as a
+   * client whose subscriptions it cancelled. Calls made while a pass waits
+   * for the scheduler share it.
+   */
+  releaseUnreadDocuments(): Promise<void> {
+    this.#documentRelease ??= (async () => {
+      try {
+        await this.scheduler.idle();
+      } finally {
+        // A request made from here on asks for a pass of its own.
+        this.#documentRelease = undefined;
+      }
+      await this.storageManager.releaseUnreadDocuments?.();
+    })().catch((error) => {
+      documentReleaseLogger.warn("release-failed", () => [
+        "releasing the documents nothing reads failed:",
+        error,
+      ]);
+    });
+    return this.#documentRelease;
+  }
+
+  /**
    * Asynchronously load a link target that a read found absent from the
    * local replica. Cross-space targets (CT-1667): per-space server queries
    * cannot follow links across space boundaries, so the client must fetch
@@ -3101,7 +3178,8 @@ export class Runtime {
    * `storageManager.synced()` and `Cell.pull()`'s convergence loop can await
    * it; the absent doc is a tracked read, so the reader re-runs on arrival.
    * Deduped per (space, id): the kicked sync leaves a live subscription
-   * behind, so repeat kicks add nothing.
+   * behind, so repeat kicks add nothing until the storage manager drops the
+   * document, which forgets the kick.
    */
   ensureLinkedDocLoaded(
     link: NormalizedFullLink,

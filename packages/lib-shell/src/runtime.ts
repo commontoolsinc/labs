@@ -811,6 +811,7 @@ export class RuntimeInternals extends EventTarget {
     space: DID;
     contentType: string;
     body: Uint8Array | ArrayBufferLike;
+    name?: string;
     suffix?: string;
   }): Promise<{ id: string; url: string }> {
     this.#check();

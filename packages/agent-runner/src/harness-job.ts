@@ -14,6 +14,11 @@
  * so a caller never depends on them.
  */
 
+import type { HarnessRunDepth } from "@commonfabric/cf-harness/contracts/run-depth";
+import type {
+  HarnessTaskDomain,
+  HarnessTaskTag,
+} from "@commonfabric/cf-harness/task-classification";
 import { join } from "@std/path";
 
 import {
@@ -104,6 +109,21 @@ export interface HarnessJobSpec {
 
   /** The most model turns the job may take; the harness's own when absent. */
   maxModelTurns?: number;
+
+  /** How far to take the task; the harness's default when absent. */
+  depth?: HarnessRunDepth;
+
+  /**
+   * The task's kinds of work, in place of the harness's classification; an
+   * empty list states none and leaves them to the harness.
+   */
+  taskTags?: readonly HarnessTaskTag[];
+
+  /** Where the task's work happens, in place of the harness's; `[]` is none. */
+  taskDomains?: readonly HarnessTaskDomain[];
+
+  /** The provider reasoning effort; the provider's default when absent. */
+  reasoningEffort?: string;
 
   /** The host-owned file backing the read-only Loom tools. */
   loomRetrievalConfigPath?: string;
@@ -300,6 +320,16 @@ const argvOf = (
     : []),
   ...(spec.maxModelTurns !== undefined
     ? ["--max-model-turns", String(spec.maxModelTurns)]
+    : []),
+  ...(spec.depth !== undefined ? ["--depth", spec.depth] : []),
+  ...(spec.taskTags !== undefined && spec.taskTags.length > 0
+    ? ["--task-tags", spec.taskTags.join(",")]
+    : []),
+  ...(spec.taskDomains !== undefined
+    ? ["--task-domains", spec.taskDomains.join(",") || "none"]
+    : []),
+  ...(spec.reasoningEffort !== undefined
+    ? ["--reasoning-effort", spec.reasoningEffort]
     : []),
   ...Object.entries(spec.fabric?.inputs ?? {}).flatMap(([name, ref]) => [
     "--input-cell",

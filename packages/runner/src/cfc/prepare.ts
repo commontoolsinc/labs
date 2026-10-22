@@ -2490,10 +2490,15 @@ const storedMetadataFor = (
   id: URI,
   scope: ReturnType<typeof normalizeCellScope>,
   type: MediaType,
+  meta = INTERNAL_VERIFIER_META,
 ): CfcMetadata | undefined =>
-  readStoredCfcMetadata(tx, { space, id, scope, type }, {
-    meta: INTERNAL_VERIFIER_META,
-  });
+  readStoredCfcMetadata(tx, { space, id, scope, type }, { meta });
+
+// The same read for a consumer that is run again when what it consumed
+// changes (a sink): a verifier read still, so it adds no taint and the
+// collection below skips it, but one reactivity sees, so a write of a label
+// alone, the value left as it was, runs that consumer again.
+const SUBSCRIBED_ENVELOPE_META = internalVerifierRead;
 
 /** A source's projected view and the principal claims its root owns. */
 type LinkSourceProjection = {
@@ -10593,6 +10598,14 @@ type ConsumedReadAddress = Pick<
  */
 const collectConsumedLabelImpl = (
   tx: IExtendedStorageTransaction,
+  options: {
+    /**
+     * Read each consumed document's stored labels so that reactivity sees
+     * them: a consumer run again on what it read (a sink) is then run again
+     * when a label alone moves. Off, as the prepare pass reads them.
+     */
+    subscribe?: boolean;
+  } = {},
 ): {
   confidentiality: readonly CfcConfClause[];
   integrity: readonly CfcAtom[];
@@ -10674,7 +10687,14 @@ const collectConsumedLabelImpl = (
     const type = read.type ?? "application/json";
     const metadataKey = stringTupleKey([read.space, read.id, scope, type]);
     if (!labelIndexes.has(metadataKey)) {
-      const metadata = storedMetadataFor(tx, read.space, read.id, scope, type);
+      const metadata = storedMetadataFor(
+        tx,
+        read.space,
+        read.id,
+        scope,
+        type,
+        options.subscribe ? SUBSCRIBED_ENVELOPE_META : INTERNAL_VERIFIER_META,
+      );
       labelIndexes.set(
         metadataKey,
         metadata === undefined
@@ -14219,10 +14239,13 @@ export const deriveFlowJoin: typeof deriveFlowJoinImpl = (tx, options) => {
 };
 
 /** Collects consumed labels and records its preparation span. */
-export const collectConsumedLabel: typeof collectConsumedLabelImpl = (tx) => {
+export const collectConsumedLabel: typeof collectConsumedLabelImpl = (
+  tx,
+  options,
+) => {
   const started = performance.now();
   try {
-    return collectConsumedLabelImpl(tx);
+    return collectConsumedLabelImpl(tx, options);
   } finally {
     cfcLogger.time(started, "collectConsumedLabel");
   }

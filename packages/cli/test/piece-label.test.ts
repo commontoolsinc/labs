@@ -20,7 +20,6 @@ import {
 } from "../lib/piece.ts";
 import {
   getCellCfcLabelFromCommand,
-  piece,
   setCellCfcLabelFromCommand,
   setQuietMode,
 } from "../commands/piece.ts";
@@ -127,14 +126,6 @@ describe("cf piece CFC labels", () => {
         | undefined)?.actionHandler;
     expect(actionHandler(cell, "get-label")).toBe(getCellCfcLabelFromCommand);
     expect(actionHandler(cell, "set-label")).toBe(setCellCfcLabelFromCommand);
-    // The superseded mount runs the same function behind the notice, so its
-    // handler is the wrapper rather than the function itself.
-    expect(actionHandler(piece, "get-label")).not.toBe(
-      getCellCfcLabelFromCommand,
-    );
-    expect(actionHandler(piece, "set-label")).not.toBe(
-      setCellCfcLabelFromCommand,
-    );
 
     const options = {
       apiUrl: "https://example.com",

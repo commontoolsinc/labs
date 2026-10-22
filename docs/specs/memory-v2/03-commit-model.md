@@ -839,7 +839,9 @@ and a refusal of one is reverted and reported.
 The fold is gated by the `localFold` experimental flag
 ([registry](../../development/EXPERIMENTAL_OPTIONS.md#localfold)), off by
 default. Without it, a refused derived write is reverted as any other
-rejection is, and the computation runs again against the same refusal.
+rejection is. The computation is not retried, and the revert of its own
+write does not run it again; it runs again when an input it did not write
+changes, and is refused again while the grant is missing.
 
 ## 3.9 Commit Ordering
 

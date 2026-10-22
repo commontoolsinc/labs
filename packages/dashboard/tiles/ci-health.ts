@@ -39,11 +39,19 @@
  * The two main builds are judged from the snapshots of their runs that the ci
  * trust tiles read, each time a snapshot arrives, and are published with those
  * tiles. Every other job is judged from a sweep of the organization that runs
- * in the background at most once every SWEEP_TTL_MS. A collection shows the
- * last sweep that finished and never waits for one, so a slow sweep holds up
+ * in the background once every SWEEP_TTL_MS, and as soon as the GitHub
+ * webhook relay delivers the activity of a run of one of those jobs. While
+ * the relay vouches for the runs held, a sweep reads only the runs that have
+ * changed since the last one (github-runs.ts). A collection shows the last
+ * sweep that finished and never waits for one, so a slow sweep holds up
  * neither this tile's main builds nor the tiles published with them. When a
  * sweep ends, the tile asks to be collected again from the snapshots already
  * held, so the sweep's findings are shown at once.
+ *
+ * Whether a failing job's workflow has changed since the failure is read once
+ * for each failing run. It is read again after the relay delivers a push to
+ * the run's repository's default branch, or when the relay cannot vouch that
+ * none has been delivered.
  */
 
 import {
@@ -72,13 +80,28 @@ import {
   escapeHtml,
   friendlyError,
   github,
+  GITHUB_REQUEST_CONCURRENCY,
+  inParallel,
   memo,
+  messageOf,
   runDurationMs,
   STATUS_RANK,
 } from "../lib.ts";
 import type { GitHubCredential } from "../github-auth.ts";
 import { type GitHubRun, RunLists } from "../github-runs.ts";
+import {
+  Freshness,
+  type GitHubWebhooks,
+  githubWebhooks,
+  pushOf,
+  sameRepo,
+  workflowRunOf,
+} from "../github-webhooks.ts";
 import { dashboardCacheFile } from "../history-files.ts";
+import {
+  type OrganizationRepo,
+  organizationRepos,
+} from "../organization-repos.ts";
 import {
   type Ctx,
   type Run,
@@ -88,14 +111,13 @@ import {
   type TileView,
 } from "../types.ts";
 
-const ORG = REPO.split("/")[0];
-
 // The set of repositories and the workflows in them changes far more slowly
 // than a job's result, so the inventory is read once an hour while the results
 // behind it are read every SWEEP_TTL_MS.
 const INVENTORY_TTL_MS = 3_600_000;
 
-// How often the runs of every job other than the two main builds are read.
+// How often the runs of every job other than the two main builds are read
+// when no delivery of the relay has asked for it sooner.
 export const SWEEP_TTL_MS = 300_000;
 
 // The two main builds the dashboard used to carry a tile each for, whose runs
@@ -104,11 +126,6 @@ const PINNED = [
   runSource(REPO, CI_WORKFLOW, "main"),
   runSource(LOOM_REPO, LOOM_CI_WORKFLOW, "main"),
 ];
-
-// Requests in flight at once. The inventory is tens of repositories wide and
-// GitHub asks for a client's requests to be spread out rather than fired
-// together.
-const REQUEST_CONCURRENCY = 8;
 
 const FAILING_CONCLUSIONS = new Set([
   "failure",
@@ -126,12 +143,6 @@ const PULL_REQUEST_EVENTS = new Set([
 // The most runs of one workflow, of any branch or event, read for a verdict.
 // A workflow with no verdict among its newest runs this far down has none.
 const RUNS_READ_MAX = 1_000;
-
-interface OrgRepo {
-  full_name: string;
-  default_branch: string;
-  archived: boolean;
-}
 
 interface Workflow {
   id: number;
@@ -155,22 +166,12 @@ interface Listing {
   error?: string;
 }
 
-const isOrgRepo = (value: unknown): value is OrgRepo =>
-  typeof value === "object" && value !== null &&
-  typeof (value as OrgRepo).full_name === "string" &&
-  typeof (value as OrgRepo).default_branch === "string" &&
-  typeof (value as OrgRepo).archived === "boolean";
-
 const isWorkflow = (value: unknown): value is Workflow =>
   typeof value === "object" && value !== null &&
   Number.isSafeInteger((value as Workflow).id) &&
   typeof (value as Workflow).name === "string" &&
   typeof (value as Workflow).path === "string" &&
   typeof (value as Workflow).state === "string";
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 
 function workflowFile(path: string): string {
@@ -188,58 +189,19 @@ function isPinned(repo: string, path: string): boolean {
   );
 }
 
-/** Runs tasks with a bounded number in flight, answering in the given order. */
-async function inParallel<T>(
-  limit: number,
-  tasks: readonly (() => Promise<T>)[],
-): Promise<T[]> {
-  const results = new Array<T>(tasks.length);
-  let next = 0;
-  const worker = async (): Promise<void> => {
-    while (next < tasks.length) {
-      const index = next++;
-      results[index] = await tasks[index]();
-    }
-  };
-  await Promise.all(
-    Array.from({ length: Math.min(limit, tasks.length) }, worker),
-  );
-  return results;
-}
-
-/**
- * Every repository in the organization the token can see, minus the archived
- * ones. A token that cannot see a private repository is not shown it here, so
- * the tile covers what the token reaches and says nothing about the rest.
- */
-async function organizationRepos(credential: GitHubCredential): Promise<OrgRepo[]> {
-  const repos: OrgRepo[] = [];
-  for (let page = 1;; page++) {
-    const batch = await github<unknown>(
-      `orgs/${ORG}/repos?per_page=100&page=${page}`,
-      credential,
-    );
-    if (!Array.isArray(batch) || !batch.every(isOrgRepo)) {
-      throw new Error("GitHub organization repositories returned invalid data");
-    }
-    for (const repo of batch) if (!repo.archived) repos.push(repo);
-    if (batch.length < 100) return repos;
-  }
-}
-
 async function repoWorkflows(
-  repo: OrgRepo,
+  repo: OrganizationRepo,
   credential: GitHubCredential,
 ): Promise<RepoInventory> {
   const inventory: RepoInventory = {
-    repo: repo.full_name,
-    branch: repo.default_branch,
+    repo: repo.name,
+    branch: repo.branch,
     workflows: [],
   };
   try {
     for (let page = 1;; page++) {
       const answer = await github<{ workflows?: unknown }>(
-        `repos/${repo.full_name}/actions/workflows?per_page=100&page=${page}`,
+        `repos/${repo.name}/actions/workflows?per_page=100&page=${page}`,
         credential,
       );
       const batch = answer.workflows;
@@ -261,7 +223,7 @@ async function repoWorkflows(
 async function readInventory(credential: GitHubCredential): Promise<RepoInventory[]> {
   const repos = await organizationRepos(credential);
   return await inParallel(
-    REQUEST_CONCURRENCY,
+    GITHUB_REQUEST_CONCURRENCY,
     repos.map((repo) => () => repoWorkflows(repo, credential)),
   );
 }
@@ -551,9 +513,13 @@ function ciHealthView(collected: CiJobs, now = Date.now()): TileView {
 interface Sweep {
   repos: RepoInventory[];
   jobs: Job[];
-  redefined: Map<number, Promise<boolean>>;
+  redefined: Redefinitions;
   at: number;
 }
+
+// Whether each failing run's workflow has changed since the run, by run id,
+// with the repository the run is in.
+type Redefinitions = Map<number, { repo: string; answer: Promise<boolean> }>;
 
 /** The ci tile, and a way to wait for the sweep it has under way. */
 export interface CiHealthTile extends Tile {
@@ -563,21 +529,40 @@ export interface CiHealthTile extends Tile {
 }
 
 /**
- * Builds the ci tile, which reads every workflow's runs through `lists`.
+ * Builds the ci tile, which reads every workflow's runs through `lists`, and
+ * learns of their activity, and of pushes, from `webhooks`.
  */
 export function createCiHealth(
   lists: RunLists = new RunLists(),
+  webhooks: GitHubWebhooks = githubWebhooks,
 ): CiHealthTile {
   // The inventory is read on first use and shared until it goes stale. A read
   // that fails is not kept, so the next sweep tries again.
   let inventory: (() => Promise<RepoInventory[]>) | undefined;
   // The last sweep that finished, why the last one failed if it did, and the
-  // one under way. A sweep starts at most once every SWEEP_TTL_MS, and a
-  // collection never waits for one.
+  // one under way. A sweep starts once every SWEEP_TTL_MS, or when a delivery
+  // asks for one, and a collection never waits for one. A delivery's sweep
+  // reads with the latest collection's context and credential.
   let swept: Sweep | undefined;
   let sweepFailure: string | undefined;
   let sweepStartedAt = -Infinity;
   let sweep: Promise<void> | undefined;
+  let sweepWanted = false;
+  let collectedWith: { ctx: Ctx; credential: GitHubCredential } | undefined;
+  // Whether each failing run's workflow has changed since the run, kept from
+  // sweep to sweep while the relay vouches for it. A push to a repository's
+  // default branch drops the answers for that repository's runs.
+  let redefined: Redefinitions = new Map();
+  const definitions = new Freshness(webhooks, () => false);
+  webhooks.listen((delivery) => {
+    const push = pushOf(delivery);
+    if (push === undefined || push.ref !== `refs/heads/${push.defaultBranch}`) {
+      return;
+    }
+    for (const [id, { repo }] of redefined) {
+      if (sameRepo(repo, push.repo)) redefined.delete(id);
+    }
+  });
   // What the latest collection to finish saw, which is what the page renders.
   // The tile is collected once for each of its snapshots, and the scheduler
   // shows the view of the collection that started last, so the page keeps
@@ -592,7 +577,7 @@ export function createCiHealth(
 
   const judge = (
     listing: Listing,
-    redefined: Map<number, Promise<boolean>>,
+    redefined: Redefinitions,
     credential: GitHubCredential,
   ): Promise<Job> => {
     let held = attempts.get(listing.workflow.id);
@@ -602,19 +587,21 @@ export function createCiHealth(
     }
     held.observe(listing.runs);
     const changedSince = (failing: Listing, run: Run): Promise<boolean> => {
-      let answer = redefined.get(run.id);
+      let answer = redefined.get(run.id)?.answer;
       if (!answer) {
         answer = redefinedSince(failing.inventory, failing.workflow, run, credential)
           .catch((error) => {
             // The failure stands, and the reason it could not be checked is
-            // logged with the other unreadable reads.
+            // logged with the other unreadable reads. The next sweep asks
+            // again.
+            redefined.delete(run.id);
             console.error(
               `ci: could not read ${shortName(failing.inventory.repo)} · ${failing.workflow.name}'s history:`,
               messageOf(error),
             );
             return false;
           });
-        redefined.set(run.id, answer);
+        redefined.set(run.id, { repo: failing.inventory.repo, answer });
       }
       return answer;
     };
@@ -631,32 +618,40 @@ export function createCiHealth(
       }
     }
     const listings = await inParallel(
-      REQUEST_CONCURRENCY,
+      GITHUB_REQUEST_CONCURRENCY,
       readable.flatMap((repo) =>
         repo.workflows
           .filter((workflow) => !isPinned(repo.repo, workflow.path))
           .map((workflow) => () => readRuns(lists, repo, workflow, credential))
       ),
     );
-    const redefined = new Map<number, Promise<boolean>>();
+    let read: (() => void) | undefined;
+    if (!definitions.current) {
+      redefined = new Map();
+      read = definitions.reading();
+    }
+    const checked = redefined;
     const jobs = await inParallel(
-      REQUEST_CONCURRENCY,
-      listings.map((listing) => () => judge(listing, redefined, credential)),
+      GITHUB_REQUEST_CONCURRENCY,
+      listings.map((listing) => () => judge(listing, checked, credential)),
     );
+    read?.();
     logUnreadable([
       ...repos.filter((repo) => repo.error !== undefined).map((repo) =>
         repo.repo
       ),
       ...jobs.filter(isUnreadable).map(jobName),
     ]);
-    return { repos, jobs, redefined, at: Date.now() };
+    return { repos, jobs, redefined: checked, at: Date.now() };
   };
 
   // Starts a sweep when one is due. Once it ends, the tile asks to be
   // collected again, so what the sweep found is shown without waiting for
-  // the next snapshot.
+  // the next snapshot, and a sweep a delivery asked for meanwhile starts.
   const startSweep = (ctx: Ctx, credential: GitHubCredential): void => {
-    if (sweep || Date.now() - sweepStartedAt < SWEEP_TTL_MS) return;
+    if (sweep) return;
+    if (!sweepWanted && Date.now() - sweepStartedAt < SWEEP_TTL_MS) return;
+    sweepWanted = false;
     sweepStartedAt = Date.now();
     sweep = readSweep(credential).then(
       (result) => {
@@ -673,8 +668,29 @@ export function createCiHealth(
     ).finally(() => {
       sweep = undefined;
       ctx.collectAgain?.();
+      if (sweepWanted && collectedWith) {
+        startSweep(collectedWith.ctx, collectedWith.credential);
+      }
     });
   };
+
+  // A run of a job the sweep judges, on its repository's default branch and
+  // not for a pull request, asks for a sweep at once when it finishes, which
+  // is when it can give the job a verdict.
+  webhooks.listen((delivery) => {
+    const activity = workflowRunOf(delivery);
+    if (
+      activity === undefined ||
+      activity.run.status !== "completed" ||
+      activity.run.head_branch !== activity.defaultBranch ||
+      PULL_REQUEST_EVENTS.has(activity.run.event) ||
+      isPinned(activity.repo, activity.run.path)
+    ) return;
+    sweepWanted = true;
+    if (collectedWith) {
+      startSweep(collectedWith.ctx, collectedWith.credential);
+    }
+  });
 
   // The two main builds, judged from the snapshots of their runs the tile is
   // collected from. A snapshot that is missing or out of date makes its build
@@ -725,6 +741,7 @@ export function createCiHealth(
       }
 
       const collection = ++collectionsStarted;
+      collectedWith = { ctx, credential };
       startSweep(ctx, credential);
       if (sweepFailure !== undefined) {
         return {
