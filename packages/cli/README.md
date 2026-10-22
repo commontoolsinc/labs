@@ -1775,10 +1775,11 @@ authority. A caller enqueues
 instructions?, context?, resultSchema, tools?, maxModelTurns?, maxInputBytes?,
 maxOutputTokens?, imageAttachments?, depth?, tags?, domains?, reasoningEffort?,
 browserHost?, inputs?, foreignSpaces?}`
-with `POST /jobs`, bounded at 1 MiB of UTF-8 JSON before parsing, reads a job with `GET /jobs/<id>` or the newest with
-`GET /jobs?limit=n`, stops one with `POST /jobs/<id>/cancel`, and watches one
-with `GET /jobs/<id>/events?after=<seq>`, a stream of server-sent events that
-ends after the job's terminal state. A request's `depth` (`quick`, `standard` or
+with `POST /jobs`, bounded at 1 MiB of UTF-8 JSON before parsing, reads a job
+with `GET /jobs/<id>` or the newest with `GET /jobs?limit=n`, stops one with
+`POST /jobs/<id>/cancel`, and watches one with
+`GET /jobs/<id>/events?after=<seq>`, a stream of server-sent events that ends
+after the job's terminal state. A request's `depth` (`quick`, `standard` or
 `deep`), `tags` and `domains` say how far to take the task, what kind of work it
 is and where it happens, each of the last two in place of the harness's
 classification. `domains: []` states no domain; `tags` must name at least one
@@ -1811,10 +1812,9 @@ tools, its host Loom files, its model-turn cap, the prompt-slot role its task
 binds as, and whether a job may bring a browser host (`browserHost: true`). A
 request may name fewer tools and fewer turns, narrow its model limits, and,
 under a profile that admits one, declare a browser host (below); leaving it out
-declines the browser. Under
-a profile with a fabric session it may hand the job pieces as
-`inputs: {<name>: <address>}`: each becomes an input cell the model holds as a
-handle from its first turn. An address naming another space by DID
+declines the browser. Under a profile with a fabric session it may hand the job
+pieces as `inputs: {<name>: <address>}`: each becomes an input cell the model
+holds as a handle from its first turn. An address naming another space by DID
 (`//<did>/of:<id>`) needs that space's host in
 `foreignSpaces: {<did>: <origin>}`; the job's session is routed there for that
 space, under the profile's identity, and may call the verbs of the piece it was
