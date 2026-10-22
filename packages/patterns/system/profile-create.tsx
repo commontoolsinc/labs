@@ -305,6 +305,59 @@ export const defaultProfileSpace = (
   );
 };
 
+/** Home's profile lists, as `liveProfileSpaces()` reads them. */
+export type ProfileLists = {
+  /** Home's `profiles` list. */
+  profiles: unknown;
+
+  /** Home's default profile slot, `DefaultProfileSlot`, if bound. */
+  defaultProfile?: unknown;
+
+  /** The cell a home keeps an earlier default in, if bound. */
+  legacyDefaultProfile?: unknown;
+
+  /** Home's `mru` list. */
+  mru: unknown;
+
+  /** Home's `retiredProfiles` list, if bound. */
+  retiredProfiles?: unknown;
+};
+
+/**
+ * The spaces of the user's live profiles, the ones in `profiles` that are not
+ * in `retiredProfiles`, in the order `#profile` returns them for a runtime
+ * that names no preferred profile: the default first, unless it is retired,
+ * then by rank in `mru`, then in list order. The first is the profile
+ * `#profile` returns. Profiles are compared by their own space, and a link
+ * into `homeSpace` names none. This is the order the runner's
+ * `orderProfileCandidates()` decides `#profile` by, which pattern code cannot
+ * import.
+ */
+export const liveProfileSpaces = (
+  lists: ProfileLists,
+  homeSpace: string | undefined,
+): string[] => {
+  const spaces = (list: unknown): (string | undefined)[] =>
+    list === undefined ? [] : profileLinks(list).map(profileLinkSpace);
+  const retired = new Set(spaces(lists.retiredProfiles));
+  const live = spaces(lists.profiles).filter((space): space is string =>
+    space !== undefined && space !== homeSpace && !retired.has(space)
+  );
+  const preferred = defaultProfileSpace(
+    lists.defaultProfile,
+    lists.legacyDefaultProfile,
+    homeSpace,
+  );
+  const mru = spaces(lists.mru);
+  const rank = (space: string): number => {
+    if (space === preferred) return -1;
+    const index = mru.indexOf(space);
+    return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+  };
+  // `sort()` is stable, so profiles of equal rank keep their list order.
+  return live.sort((a, b) => rank(a) - rank(b));
+};
+
 // Retires one of the user's profiles: appends its link to Home's
 // `retiredProfiles` list. A retired profile is not one of the user's
 // profiles: `#profile` never answers with it and leaves it out of its
@@ -316,12 +369,18 @@ export const defaultProfileSpace = (
 // is.
 //
 // Any pattern that reaches Home's streams can send this handler's event, as
-// it can a profile's rename, so the handler refuses the profile Home's
-// default names: retiring it would quietly move `#profile` to another
-// profile. The person chooses another default first.
+// it can a profile's rename, so the handler refuses the profile `#profile`
+// returns for a runtime that names no preferred profile, the first of
+// `liveProfileSpaces()`: retiring it would quietly move `#profile` to another
+// profile. That is the default when one is set, and otherwise the most
+// recently used live profile, or the first listed. The person sets another
+// profile as the default first. The last live profile is always that
+// profile, so it is never retired.
 export const retireProfile = handler<
   ProfileRetirementEvent,
   {
+    profiles: Writable<BackwardsCompatibleProfile[]>;
+    mru: Writable<BackwardsCompatibleProfile[]>;
     retiredProfiles: Writable<Cell<BackwardsCompatibleProfile>[]>;
     defaultProfile?: Writable<DefaultProfileSlot>;
     legacyDefaultProfile?: Writable<BackwardsCompatibleProfile | undefined>;
@@ -329,22 +388,30 @@ export const retireProfile = handler<
   }
 >((
   event,
-  { retiredProfiles, defaultProfile, legacyDefaultProfile, profile },
+  {
+    profiles,
+    mru,
+    retiredProfiles,
+    defaultProfile,
+    legacyDefaultProfile,
+    profile,
+  },
 ) => {
   const target = profile ?? event.profile;
   const space = profileLinkSpace(target);
   if (target === undefined || space === undefined) {
     throw new Error("Cannot retire a profile: the event names no profile.");
   }
-  if (
-    space === defaultProfileSpace(
-      defaultProfile,
-      legacyDefaultProfile,
-      profileLinkSpace(retiredProfiles),
-    )
-  ) {
+  const live = liveProfileSpaces(
+    { profiles, defaultProfile, legacyDefaultProfile, mru, retiredProfiles },
+    profileLinkSpace(retiredProfiles),
+  );
+  if (live[0] === space) {
     throw new Error(
-      "Cannot retire the default profile: choose another default first.",
+      live.length === 1
+        ? "Cannot retire the user's only profile."
+        : "Cannot retire the profile `#profile` returns: set another " +
+          "profile as the default first.",
     );
   }
   const retired = profileLinks(retiredProfiles);

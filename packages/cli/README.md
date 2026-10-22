@@ -48,7 +48,9 @@ Remove control in Home's profile picker does: Home lists it in
 restored. `#profile` does not answer with it, `cf profile list` leaves it out,
 and the picker lists it among the removed profiles. The profile's space and its
 data stay on the host, so a link to it held elsewhere still shows it. Home
-refuses to retire the profile its default names; choose another default first.
+refuses to retire the profile `#profile` returns: the default when one is set,
+and otherwise the most recently used profile, or the first listed. The last live
+profile is always that profile. Set another profile as the default first.
 `cf profile restore <space>` restores a retired profile, as the picker's Restore
 does, and it is then one of the identity's profiles again. Both send a plain
 event to Home's handler of the same name, the only writers `retiredProfiles`

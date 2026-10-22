@@ -113,8 +113,12 @@ most-recently-used (MRU) ordering:
   command line. The picker lists retired profiles apart, each with a Restore
   that calls Home's `restoreProfile` handler, as `cf profile restore` does; a
   restored profile is one of the user's profiles again. `retireProfile` refuses
-  the profile the default names, so the picker offers no Remove on the
-  default's row.
+  the profile `#profile` returns for a runtime that names no preferred profile:
+  the default when one is set, and otherwise the first live profile by MRU and
+  then by list order. Retiring that profile would move `#profile` to another
+  profile without the person choosing it, so another default is set first. The
+  last live profile is always that profile, so it cannot be retired. The picker
+  offers no Remove on that profile's row.
 
 Each profile lives in its own space, created with the anonymous
 `PatternFactory.inSpace()` — one allocation per creation, each a new space with

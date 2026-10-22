@@ -4513,7 +4513,9 @@ describe("wish built-in", () => {
           const removes = textLeaves(pickerCell.key(UI).get()).filter((leaf) =>
             leaf.trim() === "Remove…"
           );
-          expect(removes).toHaveLength(2);
+          // Ada and Hopper are listed, and Ada, whom `#profile` returns,
+          // offers no Remove.
+          expect(removes).toHaveLength(1);
         } finally {
           globalThis.fetch = originalFetch;
           await runtime.idle();

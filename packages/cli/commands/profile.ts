@@ -613,8 +613,9 @@ file, remove the picture and the legacy avatar text.`,
         `Retire the profile that lives in space <space>, as the picker's
 Remove does: it stops being one of your profiles, and '#profile' does not
 answer with it, until 'cf profile restore' restores it. The profile's space
-and data stay on the host. Your default profile cannot be retired; choose
-another default first.`,
+and data stay on the host. The profile '#profile' returns, which is your
+default when you have one, cannot be retired, and neither can your last
+profile. Set another profile as the default first.`,
       ),
     )
       .arguments("<space:string>")

@@ -13,6 +13,7 @@ import {
 import ProfileCreate, {
   type DefaultProfileSlot,
   defaultProfileSpace,
+  liveProfileSpaces,
   profileLinks,
   profileLinkSpace,
   restoreProfile,
@@ -32,8 +33,9 @@ import type {
 // has 2+ profiles and no valid default. It renders each profile natively
 // (name + avatar + a link), offers an inline "create another" affordance, lets
 // the user pick a default, stamps most-recently-used (MRU) on selection, and
-// retires a profile other than the default through Remove, which asks to
-// confirm first. Retired profiles are listed apart, each with a Restore.
+// retires a profile through Remove, which asks to confirm first. Remove is
+// offered on every row but the one `retireProfile` refuses: the profile
+// `#profile` returns. Retired profiles are listed apart, each with a Restore.
 //
 // The picker is purely the SWITCHING affordance (CT-1829): the wish `.result`
 // does NOT flow through this pattern. The wish builtin resolves `.result`
@@ -173,6 +175,19 @@ export default pattern<
             homeSpace,
           );
     });
+    // Whether this row's profile is the one `#profile` returns, which
+    // `retireProfile` refuses to retire.
+    const isAnswering = computed(() => {
+      const space = profileLinkSpace(profileLinks(profiles)[i]);
+      return space !== undefined &&
+        space === liveProfileSpaces({
+            profiles,
+            defaultProfile,
+            legacyDefaultProfile,
+            mru,
+            retiredProfiles,
+          }, homeSpace)[0];
+    });
     return ifElse(
       computed(() =>
         isRetired(
@@ -219,11 +234,12 @@ export default pattern<
             Use
           </cf-button>
           {
-            /* The default has no Remove: retiring it would move `#profile`
-              to another profile, so another default is chosen first. */
+            /* The profile `#profile` returns has no Remove: retiring it
+              would move `#profile` to another profile, so another default
+              is chosen first. */
           }
           {ifElse(
-            isDefault,
+            isAnswering,
             null,
             <cf-button
               size="sm"
@@ -249,6 +265,8 @@ export default pattern<
               size="sm"
               color="danger"
               onClick={retireProfile({
+                profiles,
+                mru,
                 retiredProfiles: retiredProfiles as any,
                 defaultProfile: defaultProfile as any,
                 legacyDefaultProfile: legacyDefaultProfile as any,

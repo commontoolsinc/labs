@@ -16,8 +16,9 @@ import { click, elementsLabeled, textLeaves } from "./support/vnode-text.ts";
 // must say "default"; every other row offers "Set default". A default held as
 // a link at the root of a cell, `legacyDefaultProfile`, is the default while
 // the slot holds none, and with no slot bound no row offers "Set default".
-// Every row but the default's offers Remove, which retires the row's profile
-// only once it is confirmed. A retired profile gets no row of its own, and is
+// Every row but the one `#profile` returns offers Remove, which retires the
+// row's profile only once it is confirmed: that row is the default's, or, with
+// no default, the most recently used profile's, or the first row's. A retired profile gets no row of its own, and is
 // listed among the removed profiles with a Restore.
 //
 // The pin exists because the badge compared the default link against the map
@@ -79,14 +80,16 @@ describe("profile-picker default badge", () => {
   /**
    * Runs a picker over profiles `a` and `b`, given the profile the slot names
    * (`"none"` for an empty slot, `"unbound"` for no slot), the profile a
-   * legacy cell links to at its root, if any, and the profiles retired, and
-   * returns its result and the cell holding its retired list.
+   * legacy cell links to at its root, if any, the profiles retired, and the
+   * profiles in the MRU list, most recent first, and returns its result and
+   * the cell holding its retired list.
    */
   async function startPicker(
     cause: string,
     defaultProfile: "a" | "b" | "none" | "unbound",
     legacyDefaultProfile?: "a" | "b",
     retired: readonly ("a" | "b")[] = [],
+    mru: readonly ("a" | "b")[] = [],
   ): Promise<{
     result: Cell<Record<string, unknown>>;
     retiredList: Cell<unknown>;
@@ -144,7 +147,7 @@ describe("profile-picker default badge", () => {
             : {},
         }),
         ...(legacy ? { legacyDefaultProfile: legacy } : {}),
-        mru: [],
+        mru: mru.map((each) => each === "a" ? a : b),
         retiredProfiles: retiredList,
       },
       resultCell,
@@ -230,17 +233,17 @@ describe("profile-picker default badge", () => {
     ).toEqual(["default", "Set default"]);
   });
 
-  it("offers Remove on the row of every profile", async () => {
-    expect((await renderPicker("picker removes", "none")).removes).toBe(2);
+  it("offers Remove on every row but the first when no default is set and none was used", async () => {
+    expect((await renderPicker("picker removes", "none")).removes).toBe(1);
   });
 
-  it("lists no row for a retired profile", async () => {
+  it("lists no row for a retired profile, and offers no Remove on the last live one", async () => {
     const shown = await renderPicker("picker retired a", "none", undefined, [
       "a",
     ]);
 
     expect(shown.badges).toEqual(["Set default"]);
-    expect(shown.removes).toBe(1);
+    expect(shown.removes).toBe(0);
   });
 
   it("lists no row for a retired default", async () => {
@@ -249,13 +252,13 @@ describe("profile-picker default badge", () => {
     ]);
 
     expect(shown.badges).toEqual(["Set default"]);
-    expect(shown.removes).toBe(1);
+    expect(shown.removes).toBe(0);
   });
 
   it("retires a row's profile once its Remove is confirmed, and not before", async () => {
     const { result, retiredList } = await startPicker("picker remove", "none");
     try {
-      await click(rt, elementsLabeled(view(result), "Remove…")[1]);
+      await click(rt, elementsLabeled(view(result), "Remove…")[0]);
       await result.pull();
       expect(elementsLabeled(view(result), "Remove profile")).toHaveLength(1);
       expect(spacesIn(retiredList)).toEqual([]);
@@ -263,7 +266,28 @@ describe("profile-picker default badge", () => {
       await click(rt, elementsLabeled(view(result), "Remove profile")[0]);
       await result.pull();
       expect(spacesIn(retiredList)).toEqual([spaceB]);
+      expect(removeOffers(view(result))).toBe(0);
+    } finally {
+      rt.runner.stop(result);
+    }
+  });
+
+  it("offers Remove on the first row, and not the most recently used one's, when no default is set", async () => {
+    const { result, retiredList } = await startPicker(
+      "picker remove mru",
+      "none",
+      undefined,
+      [],
+      ["b"],
+    );
+    try {
       expect(removeOffers(view(result))).toBe(1);
+
+      await click(rt, elementsLabeled(view(result), "Remove…")[0]);
+      await result.pull();
+      await click(rt, elementsLabeled(view(result), "Remove profile")[0]);
+      await result.pull();
+      expect(spacesIn(retiredList)).toEqual([spaceA]);
     } finally {
       rt.runner.stop(result);
     }
@@ -284,12 +308,12 @@ describe("profile-picker default badge", () => {
       expect(textLeaves(view(result)).map((leaf) => leaf.trim())).toContain(
         "Removed profiles",
       );
-      expect(removeOffers(view(result))).toBe(1);
+      expect(removeOffers(view(result))).toBe(0);
 
       await click(rt, elementsLabeled(view(result), "Restore")[0]);
       await result.pull();
       expect(spacesIn(retiredList)).toEqual([]);
-      expect(removeOffers(view(result))).toBe(2);
+      expect(removeOffers(view(result))).toBe(1);
       expect(textLeaves(view(result)).map((leaf) => leaf.trim())).not
         .toContain("Removed profiles");
     } finally {

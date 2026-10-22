@@ -43,6 +43,7 @@ describe("profile-retire", () => {
   let resultSchema: JSONSchema | undefined;
   let ada: Cell<unknown>;
   let alan: Cell<unknown>;
+  let grace: Cell<unknown>;
 
   beforeEach(async () => {
     manager = EmulatedStorageManager.emulate({ as: signer });
@@ -64,7 +65,8 @@ describe("profile-retire", () => {
     await result.pull();
     await create("Ada");
     await create("Alan");
-    [ada, alan] = links("profiles");
+    await create("Grace");
+    [ada, alan, grace] = links("profiles");
   });
 
   afterEach(async () => {
@@ -176,58 +178,99 @@ describe("profile-retire", () => {
     return error?.message;
   }
 
-  it("retires a profile through Home's retireProfile, and restores it through restoreProfile", async () => {
-    await send("retireProfile", { profile: ada });
-    expect(retired()).toEqual([spaceOf(ada)]);
+  /** A click on the picker's control labeled `label`, in row `row`. */
+  async function clickPicker(
+    ui: () => unknown,
+    label: string,
+    row: number,
+    action: string,
+  ): Promise<void> {
+    await click(rt, elementsLabeled(ui(), label)[row], pickerGesture(action));
+    await host.pull();
+  }
 
-    await send("restoreProfile", { profile: ada });
+  it("retires a profile through Home's retireProfile, and restores it through restoreProfile", async () => {
+    await send("retireProfile", { profile: alan });
+    expect(retired()).toEqual([spaceOf(alan)]);
+
+    await send("restoreProfile", { profile: alan });
     expect(retired()).toEqual([]);
   });
 
   it("keeps each profile once, in the order retired, and changes nothing for an event naming no profile", async () => {
+    await send("retireProfile", { profile: grace });
     await send("retireProfile", { profile: alan });
-    await send("retireProfile", { profile: ada });
-    await send("retireProfile", { profile: alan });
+    await send("retireProfile", { profile: grace });
     await send("retireProfile", {});
     await send("restoreProfile", {});
 
-    expect(retired()).toEqual([spaceOf(alan), spaceOf(ada)]);
+    expect(retired()).toEqual([spaceOf(grace), spaceOf(alan)]);
   });
 
   it("restores nothing for a profile that is not retired", async () => {
     await send("retireProfile", { profile: alan });
-    await send("restoreProfile", { profile: ada });
+    await send("restoreProfile", { profile: grace });
 
     expect(retired()).toEqual([spaceOf(alan)]);
   });
 
-  it("refuses to retire the profile Home's default names, and retires another", async () => {
+  it("refuses to retire the first listed profile while no default is set and none was used", async () => {
+    await send("retireProfile", { profile: ada });
+    expect(retired()).toEqual([]);
+
+    await send("retireProfile", { profile: grace });
+    expect(retired()).toEqual([spaceOf(grace)]);
+  });
+
+  it("refuses to retire the most recently used profile while no default is set, and retires the first listed", async () => {
     const { result, ui } = await pickerOverHome();
     try {
-      await click(
-        rt,
-        elementsLabeled(ui(), "Set default")[0],
-        pickerGesture("SetDefaultProfile"),
-      );
-      await host.pull();
-      expect(
-        spaceOf(host.key("defaultProfile").key("profile").resolveAsCell()),
-      ).toBe(spaceOf(ada));
-
-      await send("retireProfile", { profile: ada });
-      expect(retired()).toEqual([]);
+      await clickPicker(ui, "Use", 1, "SetMruProfile");
+      expect(links("mru").map(spaceOf)).toEqual([spaceOf(alan)]);
 
       await send("retireProfile", { profile: alan });
-      expect(retired()).toEqual([spaceOf(alan)]);
+      expect(retired()).toEqual([]);
+
+      await send("retireProfile", { profile: ada });
+      expect(retired()).toEqual([spaceOf(ada)]);
     } finally {
       rt.runner.stop(result);
     }
   });
 
-  it("retires a profile into Home's list through the picker's confirmed Remove", async () => {
+  it("refuses to retire the profile Home's default names, and retires another", async () => {
     const { result, ui } = await pickerOverHome();
     try {
-      await click(rt, elementsLabeled(ui(), "Remove…")[1]);
+      await clickPicker(ui, "Set default", 1, "SetDefaultProfile");
+      expect(
+        spaceOf(host.key("defaultProfile").key("profile").resolveAsCell()),
+      ).toBe(spaceOf(alan));
+
+      await send("retireProfile", { profile: alan });
+      expect(retired()).toEqual([]);
+
+      await send("retireProfile", { profile: ada });
+      expect(retired()).toEqual([spaceOf(ada)]);
+    } finally {
+      rt.runner.stop(result);
+    }
+  });
+
+  it("refuses to retire the last live profile", async () => {
+    await send("retireProfile", { profile: alan });
+    await send("retireProfile", { profile: grace });
+    expect(retired()).toEqual([spaceOf(alan), spaceOf(grace)]);
+
+    await send("retireProfile", { profile: ada });
+    expect(retired()).toEqual([spaceOf(alan), spaceOf(grace)]);
+  });
+
+  it("offers Remove on every row but the one `#profile` returns, and retires a profile through the confirmed Remove", async () => {
+    const { result, ui } = await pickerOverHome();
+    try {
+      expect(elementsLabeled(ui(), "Remove…")).toHaveLength(2);
+
+      await click(rt, elementsLabeled(ui(), "Remove…")[0]);
       await result.pull();
       await click(rt, elementsLabeled(ui(), "Remove profile")[0]);
       await host.pull();
@@ -239,7 +282,7 @@ describe("profile-retire", () => {
   });
 
   it("refuses an untrusted write to the list, whole or at an element", async () => {
-    await send("retireProfile", { profile: ada });
+    await send("retireProfile", { profile: grace });
     const viaResult = (tx: IExtendedStorageTransaction) =>
       rt.getCell(home, "home", resultSchema, tx).key("retiredProfiles");
 
@@ -259,6 +302,6 @@ describe("profile-retire", () => {
         viaResult(tx).set([ada, alan].map((each) => each.resolveAsCell()))
       ),
     ).toContain("writePolicyAnyOf failed");
-    expect(retired()).toEqual([spaceOf(ada)]);
+    expect(retired()).toEqual([spaceOf(grace)]);
   });
 });

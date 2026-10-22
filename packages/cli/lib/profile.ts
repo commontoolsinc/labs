@@ -584,7 +584,7 @@ async function sendToHome(
  *
  * @throws Error when the home lists no such profile, when the profile is
  * retired already, or when the retire fails, as Home's handler fails it for
- * the profile the default names, or does not land.
+ * the profile `#profile` returns, or does not land.
  */
 export function retireProfile(
   config: ProfileTargetConfig,

@@ -201,7 +201,7 @@ export type HomeOutput = {
   removeSharedSpace: Stream<SharedSpaceRemoval, SharedSpaceRemovalResult>;
   createProfile: Stream<CreateProfileEvent>;
   // Retires the profile the event links, as the picker's Remove does, unless
-  // it is the default.
+  // it is the one `#profile` returns (see `retireProfile`).
   retireProfile: Stream<ProfileRetirementEvent>;
   // Restores the retired profile the event links.
   restoreProfile: Stream<ProfileRetirementEvent>;
@@ -742,6 +742,8 @@ const Home = pattern(
       renameSpace: renameSpaceHandler({ spaces }),
       createProfile: createProfileStream,
       retireProfile: retireProfile({
+        profiles: profiles as any,
+        mru: mru as any,
         retiredProfiles: retiredProfiles as any,
         defaultProfile: defaultProfile as any,
         legacyDefaultProfile: legacyDefaultProfile as any,
