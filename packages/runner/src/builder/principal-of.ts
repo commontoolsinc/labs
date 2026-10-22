@@ -9,11 +9,15 @@ import { resolveLink } from "../link-resolution.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import {
   exactPrincipalAttestations,
+  isWrittenProfileName,
   PRINCIPAL_CLAIM_KINDS,
   type PrincipalClaimKind,
+  PROFILE_NAME_FIELD,
 } from "../cfc/represents-principal.ts";
+import type { Runtime } from "../runtime.ts";
 import { withdrawHandlerWhileLoading } from "../scheduler/handler-load-wait.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { internalVerifierRead } from "../storage/reactivity-log.ts";
 import { topFrame } from "./frame-context.ts";
 import { cellOfTarget } from "./space-access.ts";
 
@@ -23,7 +27,10 @@ import { cellOfTarget } from "./space-access.ts";
  * profile's label says; for `authored-by`, who wrote it. The claim is read at
  * the value's root and on its top-level fields, in exactly the form a runtime
  * mints, as `exactPrincipalAttestations()` reads it, and never from what a
- * link the value holds carries.
+ * link the value holds carries. A `represents-principal` claim on a value
+ * holding a name its owner wrote is read from the root and the `name` field
+ * alone: the written name says whose the value is, and a field still at its
+ * default may carry another runtime's principal.
  *
  * Returns `undefined` when the label names no verified single principal of
  * that kind: when it attests none, when it attests more than one, when a claim
@@ -33,13 +40,16 @@ import { cellOfTarget } from "./space-access.ts";
  * returns `undefined`, as missing metadata does, which is the normalization
  * of hidden cases that CFC spec §4.6.4.1 requires. A label still loading is
  * not one of them, in a handler: the handler is withdrawn and runs again once
- * its document arrives.
+ * its document arrives. So is a `name` still loading.
  *
  * The read is of `target`'s label: the value's cell is followed through any
- * links it holds, which reads the pointers along the way and no other value
- * contents, and then only its stored label is consulted, through the calling
- * code's own transaction, so a change to the label runs a reactive computation
- * that called this again. What a claim's `kind` and `subject` disclose is
+ * links it holds, which reads the pointers along the way, and then its stored
+ * label is consulted, through the calling code's own transaction, so a change
+ * to the label runs a reactive computation that called this again. For a
+ * `represents-principal` claim it also reads whether the value's `name` field,
+ * followed through its links, holds a written name. That read is a verifier
+ * read, so it adds no confidentiality to the transaction, and a change to the
+ * name runs the computation again too. Nothing else of the value is read. What a claim's `kind` and `subject` disclose is
  * public by the label-metadata classification
  * (`docs/specs/cfc-label-metadata-confidentiality.md` §2), so the observation
  * adds no confidentiality to the result. If that classification ever made the
@@ -179,7 +189,7 @@ function attestedPrincipals(
     : cell.resolveAsCell().getAsNormalizedFullLink();
   // The default read policy journals the read as a dependency, so a label
   // change runs the calling computation again.
-  const principals = attestedPrincipalsAt(tx, link, claimKind);
+  const principals = attestedPrincipalsAt(runtime, tx, link, claimKind);
   if (frame.frameKind === "handler") {
     withdrawHandlerWhileLoading(
       runtime,
@@ -187,6 +197,15 @@ function attestedPrincipals(
       link,
       `the label of \`${link.id}\` was read while its document was still loading`,
     );
+    if (claimKind === "represents-principal") {
+      const name = profileNameLink(runtime, tx, link);
+      withdrawHandlerWhileLoading(
+        runtime,
+        tx,
+        name,
+        `the name of \`${link.id}\` was read while its document was still loading`,
+      );
+    }
   }
   return principals;
 }
@@ -196,14 +215,17 @@ function attestedPrincipals(
  * `kind`, read through `tx` as `principalsOf()` reads a cell's: `[]` when it
  * attests none and for a label the caller cannot observe, and `undefined` when
  * a claim there is in any form but the one a runtime mints. `link` names the
- * document whose label is read; nothing is followed from it. This is the read
- * a host makes of a document it holds no frame for, so a label still loading
- * withdraws no handler here.
+ * document whose label is read. For a `represents-principal` claim the value's
+ * `name` field is followed from there, through `runtime`, to see whether it
+ * holds a written name (`profileNameWrittenAt()`); nothing else is followed.
+ * This is the read a host makes of a document it holds no frame for, so a
+ * label still loading withdraws no handler here.
  *
  * @throws If the label is stored in a form this build cannot interpret
  *   (`StoredCfcMetadataError`), or the transaction's read of it fails.
  */
 export function attestedPrincipalsAt(
+  runtime: Runtime,
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   kind: PrincipalClaimKind,
@@ -216,5 +238,46 @@ export function attestedPrincipalsAt(
   return exactPrincipalAttestations(
     cfcLabelViewFromMetadata(metadata, link.path.map(String)),
     kind,
+    kind === "represents-principal" && profileNameWrittenAt(runtime, tx, link),
+  );
+}
+
+/**
+ * Returns whether the value at `link` holds a name its owner wrote, as
+ * `isWrittenProfileName()` decides it: its `name` field, followed through any
+ * links it holds, read through `tx` as a verifier read. That adds no
+ * confidentiality to the transaction, and a change to the name runs a
+ * reactive computation that read it again. A name still loading reads as not
+ * written.
+ *
+ * @throws If the transaction's read fails.
+ */
+export function profileNameWrittenAt(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+): boolean {
+  return isWrittenProfileName(
+    tx.readValueOrThrow(profileNameLink(runtime, tx, link), {
+      meta: internalVerifierRead,
+    }),
+  );
+}
+
+/**
+ * Helper for `profileNameWrittenAt()`, which returns the link to where the
+ * `name` field of the value at `link` resolves, its links followed through
+ * `tx`.
+ */
+function profileNameLink(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+): NormalizedFullLink {
+  return resolveLink(
+    runtime,
+    runtime.readTx(tx),
+    { ...link, path: [...link.path, PROFILE_NAME_FIELD] },
+    "value",
   );
 }

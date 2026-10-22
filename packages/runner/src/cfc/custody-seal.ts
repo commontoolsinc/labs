@@ -44,6 +44,7 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 
+import { profileNameWrittenAt } from "../builder/principal-of.ts";
 import { type Cell, cellRuntime, isCell } from "../cell.ts";
 import { resolveLink } from "../link-resolution.ts";
 import {
@@ -86,6 +87,7 @@ import { CfcReadCeilingError } from "./read-ceiling.ts";
 import {
   exactPrincipalAttestations,
   principalClaimEntries,
+  PROFILE_NAME_FIELD,
 } from "./represents-principal.ts";
 import { snapshotJsonValue } from "./share-snapshot-value.ts";
 import { type CfcTrustConfig, createTrustResolver } from "./trust.ts";
@@ -1410,6 +1412,9 @@ const resolveSeats = async (
     const seat = runtime.getCellFromLink(link);
     await seat.sync();
     await seat.resolveAsCell().sync();
+    // Whether the seat's owner wrote a name decides which of its fields
+    // attest, so the name's document is loaded too.
+    await seat.resolveAsCell().key(PROFILE_NAME_FIELD).resolveAsCell().sync();
     const tx = runtime.edit();
     try {
       const target = seat.withTx(tx).resolveAsCell().getAsNormalizedFullLink();
@@ -1420,8 +1425,10 @@ const resolveSeats = async (
       // The seal writes the DID into terms every reader of the room sees, so
       // the cell must already be one they hold, whether or not its label
       // traveled into the terms with the reference.
-      // The attestation is read from these entries, so they are the ones the
-      // room's readers must hold, whatever their observation class. The
+      // The attestation is read from these entries (from the root's and the
+      // `name` field's among them, for a seat whose owner wrote a name), so
+      // they are the ones the room's readers must hold, whatever their
+      // observation class. The
       // attestation's subject is itself public metadata (a
       // `represents-principal` subject is classified public for invariant
       // 12), so no label-metadata clause governs the DID.
@@ -1441,6 +1448,7 @@ const resolveSeats = async (
       const principals = exactPrincipalAttestations(
         view,
         "represents-principal",
+        profileNameWrittenAt(runtime, tx, target),
       );
       if (
         principals === undefined || !principals.every(isWellFormedDID)

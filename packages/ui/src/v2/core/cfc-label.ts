@@ -83,13 +83,16 @@ export const readCfcLabelView = async (
  * The principal a label says its value belongs to: the one DID
  * `authorPrincipalCandidates` finds in the `represents-principal` atoms at
  * the root and on the top-level fields, where an owner-protected profile
- * carries its owner's. `undefined` when those name no principal or more than
- * one, and atoms deeper down or carried by a link are not counted: they
- * describe documents this one links to.
+ * carries its owner's. `nameWritten` says whether the value holds a name its
+ * owner wrote, which narrows the fields that count to the root and `name`.
+ * `undefined` when those name no principal or more than one, and atoms deeper
+ * down or carried by a link are not counted: they describe documents this one
+ * links to.
  */
 export const ownerPrincipalFromLabel = (
   view: CfcLabelView | undefined,
+  nameWritten: boolean,
 ): string | undefined => {
-  const candidates = authorPrincipalCandidates(view);
+  const candidates = authorPrincipalCandidates(view, nameWritten);
   return candidates.length === 1 ? candidates[0] : undefined;
 };

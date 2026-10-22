@@ -1,0 +1,1 @@
+{"date":"2026-10-22","from":{"k":"unit","s":"runner","n":"principalOf() > what it reads > reads the label, and not the value, through the calling code's transaction"},"to":{"k":"unit","s":"runner","n":"principalOf() > what it reads > reads the label, and of the value only its `name`, through the calling code's transaction"}}

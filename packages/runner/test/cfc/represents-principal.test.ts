@@ -4,6 +4,7 @@ import type { CfcLabelView } from "../../src/cfc/label-view-core.ts";
 import {
   authorPrincipalCandidates,
   exactPrincipalAttestations,
+  isWrittenProfileName,
 } from "../../src/cfc/represents-principal.ts";
 
 const DID = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
@@ -19,8 +20,77 @@ const representsAt = (path: string[], subject: string) => ({
   label: { integrity: [{ kind: "represents-principal", subject }] },
 });
 
+/**
+ * A profile's label as a runtime that set up its defaults can leave it: the
+ * owner on `name`, the owner and `OTHER_DID` on `avatar`, and `OTHER_DID`
+ * alone on `inbox`.
+ */
+const stamped = () =>
+  view([
+    representsAt(["name"], DID),
+    {
+      path: ["avatar"],
+      label: {
+        integrity: [
+          { kind: "represents-principal", subject: DID },
+          { kind: "represents-principal", subject: OTHER_DID },
+        ],
+      },
+    },
+    representsAt(["inbox"], OTHER_DID),
+  ]);
+
 describe("represents-principal", () => {
+  describe("isWrittenProfileName", () => {
+    it("returns `true` for a string holding more than whitespace", () => {
+      expect(isWrittenProfileName("Ada")).toBe(true);
+      expect(isWrittenProfileName(" Ada ")).toBe(true);
+    });
+
+    it("returns `false` for an empty or blank string, and for anything but a string", () => {
+      for (
+        const name of ["", "  ", "\n", undefined, null, 1, { first: "Ada" }]
+      ) {
+        expect(isWrittenProfileName(name)).toBe(false);
+      }
+    });
+  });
+
   describe("authorPrincipalCandidates", () => {
+    it("returns the DID the root and `name` name for a value whose owner wrote a name", () => {
+      expect(authorPrincipalCandidates(stamped(), true)).toEqual([DID]);
+      expect(
+        authorPrincipalCandidates(
+          view([representsAt([], DID), ...stamped().entries]),
+          true,
+        ),
+      ).toEqual([DID]);
+    });
+
+    it("returns every DID the fields name for the same value with no written name", () => {
+      expect(authorPrincipalCandidates(stamped(), false)).toEqual([
+        DID,
+        OTHER_DID,
+      ]);
+    });
+
+    it("returns both DIDs for a written name whose own label names two", () => {
+      const label = view([
+        representsAt(["name"], DID),
+        representsAt(["name"], OTHER_DID),
+        representsAt(["bio"], DID),
+      ]);
+      expect(authorPrincipalCandidates(label, true)).toEqual([DID, OTHER_DID]);
+    });
+
+    it("does not count what a link carried onto `name` for a value whose owner wrote a name", () => {
+      const label = view([
+        { ...representsAt(["name"], OTHER_DID), observes: "followRef" },
+        representsAt(["bio"], DID),
+      ]);
+      expect(authorPrincipalCandidates(label, true)).toEqual([]);
+    });
+
     it("returns the DID a profile's field atoms name when the root has none", () => {
       // A message's link to a Fabric profile: the root holds the message's own
       // `authored-by`, and the profile's owner-protected fields their owner.
@@ -33,17 +103,17 @@ describe("represents-principal", () => {
         representsAt(["bio"], DID),
         representsAt(["elements"], DID),
       ]);
-      expect(authorPrincipalCandidates(label)).toEqual([DID]);
+      expect(authorPrincipalCandidates(label, false)).toEqual([DID]);
     });
 
     it("returns the root's DID for an author labeled only at its root", () => {
       const label = view([representsAt([], DID)]);
-      expect(authorPrincipalCandidates(label)).toEqual([DID]);
+      expect(authorPrincipalCandidates(label, false)).toEqual([DID]);
     });
 
     it("returns one DID when the root and a top-level field agree", () => {
       const label = view([representsAt([], DID), representsAt(["name"], DID)]);
-      expect(authorPrincipalCandidates(label)).toEqual([DID]);
+      expect(authorPrincipalCandidates(label, false)).toEqual([DID]);
     });
 
     it("returns both DIDs when the root and a top-level field disagree", () => {
@@ -53,7 +123,7 @@ describe("represents-principal", () => {
         representsAt([], OTHER_DID),
         representsAt(["name"], DID),
       ]);
-      expect(authorPrincipalCandidates(label)).toEqual([OTHER_DID, DID]);
+      expect(authorPrincipalCandidates(label, false)).toEqual([OTHER_DID, DID]);
     });
 
     it("returns both DIDs when top-level fields disagree", () => {
@@ -61,7 +131,7 @@ describe("represents-principal", () => {
         representsAt(["name"], DID),
         representsAt(["avatar"], OTHER_DID),
       ]);
-      expect(authorPrincipalCandidates(label)).toEqual([DID, OTHER_DID]);
+      expect(authorPrincipalCandidates(label, false)).toEqual([DID, OTHER_DID]);
     });
 
     it("does not count atoms below the top-level fields", () => {
@@ -72,7 +142,7 @@ describe("represents-principal", () => {
         representsAt(["elements"], DID),
         representsAt(["elements", "0", "cell"], OTHER_DID),
       ]);
-      expect(authorPrincipalCandidates(label)).toEqual([DID]);
+      expect(authorPrincipalCandidates(label, false)).toEqual([DID]);
     });
 
     it("returns no DID for a string-form atom", () => {
@@ -84,7 +154,7 @@ describe("represents-principal", () => {
           label: { integrity: [`represents-principal:${DID}`] },
         },
       ]);
-      expect(authorPrincipalCandidates(label)).toEqual([]);
+      expect(authorPrincipalCandidates(label, false)).toEqual([]);
     });
 
     it("returns no DID for a subject that is not a DID as written", () => {
@@ -94,7 +164,7 @@ describe("represents-principal", () => {
         representsAt(["bio"], DID.replace("did:", "DID:")),
         representsAt(["elements"], "alice"),
       ]);
-      expect(authorPrincipalCandidates(label)).toEqual([]);
+      expect(authorPrincipalCandidates(label, false)).toEqual([]);
     });
 
     it("does not count an entry a link carries from another document", () => {
@@ -106,7 +176,7 @@ describe("represents-principal", () => {
         { ...representsAt(["friend"], OTHER_DID), observes: "followRef" },
         { ...representsAt([], OTHER_DID), observes: "followRef" },
       ]);
-      expect(authorPrincipalCandidates(label)).toEqual([DID]);
+      expect(authorPrincipalCandidates(label, false)).toEqual([DID]);
     });
 
     it("returns no DID for a label with no represents-principal atom", () => {
@@ -116,9 +186,9 @@ describe("represents-principal", () => {
           label: { integrity: [{ kind: "authored-by", subject: DID }] },
         },
       ]);
-      expect(authorPrincipalCandidates(label)).toEqual([]);
-      expect(authorPrincipalCandidates(view([]))).toEqual([]);
-      expect(authorPrincipalCandidates(undefined)).toEqual([]);
+      expect(authorPrincipalCandidates(label, false)).toEqual([]);
+      expect(authorPrincipalCandidates(view([]), false)).toEqual([]);
+      expect(authorPrincipalCandidates(undefined, false)).toEqual([]);
     });
   });
 
@@ -136,10 +206,13 @@ describe("represents-principal", () => {
         // Below the top-level fields, as authorPrincipalCandidates reads it.
         representsAt(["elements", "0"], "did:key:deeper"),
       ]);
-      expect(exactPrincipalAttestations(label, "represents-principal")).toEqual(
-        [DID, OTHER_DID],
-      );
-      expect(exactPrincipalAttestations(undefined, "represents-principal"))
+      expect(exactPrincipalAttestations(label, "represents-principal", false))
+        .toEqual(
+          [DID, OTHER_DID],
+        );
+      expect(
+        exactPrincipalAttestations(undefined, "represents-principal", false),
+      )
         .toEqual([]);
     });
 
@@ -159,10 +232,46 @@ describe("represents-principal", () => {
       ];
       for (const [atom, candidates] of cases) {
         const label = view([{ path: ["name"], label: { integrity: [atom] } }]);
-        expect(authorPrincipalCandidates(label)).toEqual(candidates);
-        expect(exactPrincipalAttestations(label, "represents-principal"))
+        expect(authorPrincipalCandidates(label, false)).toEqual(candidates);
+        expect(exactPrincipalAttestations(label, "represents-principal", false))
           .toBeUndefined();
       }
+    });
+
+    it("counts a `represents-principal` claim on the root and `name` alone for a value whose owner wrote a name", () => {
+      expect(
+        exactPrincipalAttestations(stamped(), "represents-principal", true),
+      )
+        .toEqual([DID]);
+      expect(
+        exactPrincipalAttestations(stamped(), "represents-principal", false),
+      ).toEqual([DID, OTHER_DID]);
+    });
+
+    it("refuses a claim in a form the runtime does not mint on any field, whether or not the name is written", () => {
+      const label = view([
+        representsAt(["name"], DID),
+        {
+          path: ["bio"],
+          label: { integrity: [`represents-principal:${DID}`] },
+        },
+      ]);
+      expect(exactPrincipalAttestations(label, "represents-principal", true))
+        .toBeUndefined();
+      expect(exactPrincipalAttestations(label, "represents-principal", false))
+        .toBeUndefined();
+    });
+
+    it("counts an `authored-by` claim on any field whether or not the name is written", () => {
+      const label = view([
+        {
+          path: ["body"],
+          label: { integrity: [{ kind: "authored-by", subject: OTHER_DID }] },
+        },
+      ]);
+      expect(exactPrincipalAttestations(label, "authored-by", true)).toEqual([
+        OTHER_DID,
+      ]);
     });
 
     it("skips what a link carries and a claim of another kind", () => {
@@ -174,9 +283,10 @@ describe("represents-principal", () => {
           label: { integrity: [{ kind: "authored-by", subject: OTHER_DID }] },
         },
       ]);
-      expect(exactPrincipalAttestations(label, "represents-principal")).toEqual(
-        [DID],
-      );
+      expect(exactPrincipalAttestations(label, "represents-principal", false))
+        .toEqual(
+          [DID],
+        );
     });
 
     it("returns each DID an `authored-by` claim attests when asked for that kind", () => {
@@ -192,7 +302,7 @@ describe("represents-principal", () => {
         // A claim of the other kind is skipped.
         representsAt(["name"], "did:key:represented"),
       ]);
-      expect(exactPrincipalAttestations(label, "authored-by")).toEqual([
+      expect(exactPrincipalAttestations(label, "authored-by", false)).toEqual([
         DID,
         OTHER_DID,
       ]);
@@ -217,7 +327,7 @@ describe("represents-principal", () => {
           },
           { path: ["body"], label: { integrity: [atom] } },
         ]);
-        expect(exactPrincipalAttestations(label, "authored-by"))
+        expect(exactPrincipalAttestations(label, "authored-by", false))
           .toBeUndefined();
       }
     });

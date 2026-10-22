@@ -4285,7 +4285,11 @@ export type PrincipalClaimKind = "authored-by" | "represents-principal";
  * The claim is read at the value's root and on its top-level fields, and only
  * in the form the runtime writes when it resolves `RepresentsCurrentUser`,
  * `AuthoredByCurrentUser` or `ownerPrincipal`, which a pattern cannot write
- * for anyone but the principal it runs for.
+ * for anyone but the principal it runs for. For a `represents-principal` claim
+ * on a value whose owner wrote a name (a `name` field holding more than
+ * whitespace), only the root and the `name` field count: the written name says
+ * whose the value is, and a field still at its default may carry the
+ * principal of another runtime.
  *
  * `undefined` means the label names no verified single principal of that kind:
  * none, more than one, or a claim in some other form. It also means that
@@ -4295,9 +4299,10 @@ export type PrincipalClaimKind = "authored-by" | "represents-principal";
  * `undefined` as well, as missing metadata does; a label stored in a form the
  * runtime cannot interpret throws.
  *
- * It reads the label, and no contents of the value beyond the link pointers
- * needed to reach it. In a reactive computation
- * (`computed()`, `lift()`) the result updates when the label changes. It can
+ * It reads the label, the value's `name` for a `represents-principal` claim,
+ * and no other contents of the value beyond the link pointers needed to reach
+ * them. In a reactive computation (`computed()`, `lift()`) the result updates
+ * when the label or the name changes. It can
  * also be called in a handler, on a cell an event names. Calling it in a
  * pattern body throws: wrap it in `computed()` instead.
  *

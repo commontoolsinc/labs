@@ -10,6 +10,7 @@
 import type { CfcLabelView } from "@commonfabric/runner/cfc";
 import {
   authorPrincipalCandidates,
+  isWrittenProfileName,
   PRINCIPAL_CLAIM_KINDS,
   principalClaimEntries,
   principalClaimSubject,
@@ -662,7 +663,14 @@ class AuthorshipObservationState {
         : undefined;
       const profile = await readLabelView(author, "represents-principal");
       unloadedCell = profile.unloadedCell;
-      const candidates = authorPrincipalCandidates(profile.view);
+      // A profile whose owner wrote a name attests by that name, so the value
+      // read above, when there is one, says which of its fields count.
+      const candidates = authorPrincipalCandidates(
+        profile.view,
+        isWrittenProfileName(
+          isObjectNotArray(valueClaim) ? valueClaim.name : undefined,
+        ),
+      );
       // A label naming more than one principal names none, and the claim's
       // own value does not stand in for it.
       authorClaim = candidates.length > 1 ? undefined : principalAuthorClaim(

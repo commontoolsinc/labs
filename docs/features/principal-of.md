@@ -38,6 +38,23 @@ owner-protected fields carry their owner's claim. It does not read a claim
 deeper down, which describes a document the value links to, nor one that a
 link carries from the document it points to (an entry observed as `followRef`).
 
+A `represents-principal` claim on a value whose owner wrote a name is read from
+fewer places. When the value's `name` field, followed through its links, holds
+a string with something besides whitespace in it, only the claims on the root
+and on `name` count. A written name is its owner's own claim about whose the
+value is. A field still at its default can carry the principal of whichever
+runtime set that default up, beside the owner's or in its place, so a profile
+whose untouched fields carry another runtime's principal still names its owner.
+A value with no written name is read from every top-level field, so one whose
+fields name two principals names neither, and never someone else. The written
+name narrows which claims are counted, not which are checked: a claim in a form
+a runtime does not mint, on any of those fields, gives `undefined` either way.
+An `authored-by` claim is read from every top-level field whatever the name
+holds. `isWrittenProfileName()` and `representsPrincipalEntries()` in
+`represents-principal.ts` decide this for every reader of a profile's
+principal: `principalOf()`, the profile badge, the authorship check and the
+worker's text-integrity boundary.
+
 `target` is followed through any links it holds first, so a cell holding a
 link to a profile returns the profile's principal.
 
@@ -128,14 +145,18 @@ computation's read scope as it was.
 
 ## What it reads
 
-The call reads the target's stored label, and no contents of its value beyond
-the link pointers needed to resolve the target. Following the target's links
-probes whether its value is a link, and that probe is the only read of the
-value's document it makes outside the label. The label is read
-through `readStoredCfcMetadata()`, the runtime-internal verifier read the rest
-of the runtime uses for label metadata, in the calling code's own transaction.
-The read is a dependency like any other, so a computation that called
-`principalOf()` runs again when the label changes.
+The call reads the target's stored label, and, for a `represents-principal`
+claim, the value's `name`, followed through its links to see whether it holds
+a written name. It reads no other contents of the value beyond the link
+pointers needed to resolve the target and its `name`. Following those links
+probes whether each is a link, and outside the label those probes and the name
+are the only reads of the value's document it makes. The label is read through
+`readStoredCfcMetadata()`, the runtime-internal verifier read the rest of the
+runtime uses for label metadata, and the name through the same kind of verifier
+read, both in the calling code's own transaction. So reading the name adds no
+confidentiality to the transaction. Each read is a dependency like any other,
+so a computation that called `principalOf()` runs again when the label or the
+name changes. An `authored-by` claim reads no part of the value.
 
 A document whose load is still in flight has no label to read yet, and that is
 not its state. A computation needs nothing for it, since the load's arrival
@@ -148,7 +169,10 @@ before. The call withdraws only when the replica has no local basis for the
 document, not even a confirmed absence, and a load for it is in flight. A
 withdrawal therefore always has a load to wait on: once the load for a
 document that does not exist has settled, its absence is confirmed, and the
-handler's next run reads it as unlabeled and gives `undefined`.
+handler's next run reads it as unlabeled and gives `undefined`. A handler
+reading a `represents-principal` claim withdraws the same way while the
+document its target's `name` resolves to is loading. A computation reads a
+name still loading as not written, and runs again when it lands.
 
 ## What the result discloses
 
@@ -199,11 +223,14 @@ authority and intent.
 ## Tests
 
 `packages/runner/test/builder/principal-of.test.ts` covers the reader against
-stored labels of each shape above, claims the runtime minted in a handler
+stored labels of each shape above, a profile with and without a written name
+whose other fields carry another runtime's principal, claims the runtime minted
+in a handler
 (`authored-by` against that handler's `currentPrincipal()`, and
 `represents-principal`), the refused pattern-written claim and the refused
 write-back of a returned DID, the reads the call makes, a lift that runs again
-on a label-only change beside one that holds the same cell and does not, the
+on a label-only change beside one that holds the same cell and does not, a
+lift that runs again once the name is written, the
 withdrawal of a handler that reads a document still loading beside the cases
 that do not withdraw, and the call in a compiled pattern's handler and
 `computed()`. `packages/runner/test/executor-cross-space.test.ts` covers a
@@ -211,4 +238,5 @@ served handler reading the label of a foreign document its event reaches
 through a link chain, and one whose chain reaches a document that does not
 exist.
 `packages/runner/test/cfc/represents-principal.test.ts` covers
-`exactPrincipalAttestations()` for both kinds.
+`exactPrincipalAttestations()` for both kinds, and the written-name rule as
+`authorPrincipalCandidates()` and `exactPrincipalAttestations()` read it.

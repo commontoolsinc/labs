@@ -168,6 +168,7 @@ async function readPlan(
   let represented: DID[] | undefined;
   try {
     represented = attestedPrincipalsAt(
+      runtime,
       tx,
       profileLink,
       "represents-principal",

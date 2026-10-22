@@ -49,7 +49,11 @@ import {
   type NestedRenderPath,
   NestedRenderReferenceSchema,
 } from "@commonfabric/runner/component-read-contract";
-import { authorPrincipalCandidates } from "@commonfabric/runner/cfc/represents-principal";
+import {
+  authorPrincipalCandidates,
+  isWrittenProfileName,
+  PROFILE_NAME_FIELD,
+} from "@commonfabric/runner/cfc/represents-principal";
 import {
   type CfcLabelView,
   cfcLabelViewForCell,
@@ -1825,10 +1829,31 @@ export class WorkerReconciler {
   /**
    * The principals the label of `cell`'s value says it represents, as
    * `authorPrincipalCandidates()` reads them from the document that holds the
-   * value; none when that label cannot be read.
+   * value, given whether the value's `name` holds a name its owner wrote;
+   * none when that label cannot be read.
    */
   #representedPrincipalsForCell(cell: Cell<unknown>): string[] {
-    return authorPrincipalCandidates(cfcLabelViewForResolvedTarget(cell));
+    return authorPrincipalCandidates(
+      cfcLabelViewForResolvedTarget(cell),
+      this.#nameWrittenForCell(cell),
+    );
+  }
+
+  /**
+   * Helper for `#representedPrincipalsForCell()`, which returns whether the
+   * `name` field of `cell`'s value, followed through its links, holds a name
+   * its owner wrote. A name whose read fails is not one this can count as
+   * written, so it returns `false`, which reads the label as a value with no
+   * written name.
+   */
+  #nameWrittenForCell(cell: Cell<unknown>): boolean {
+    try {
+      return isWrittenProfileName(
+        cell.key(PROFILE_NAME_FIELD).resolveAsCell().getRaw(),
+      );
+    } catch {
+      return false;
+    }
   }
 
   #staticCellProp(

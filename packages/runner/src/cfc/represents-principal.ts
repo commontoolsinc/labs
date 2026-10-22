@@ -123,19 +123,20 @@ export const representsPrincipalSubjects = (
 /**
  * The DIDs that could be the principal the value labeled by `view` represents,
  * as an author claim is checked against: each distinct DID a
- * `represents-principal` atom names at the root or on a top-level field, in
- * order of first appearance. A profile's owner-protected fields carry their
- * owner's atom at their own top-level paths. Atoms deeper down come from
- * documents the value links, and an entry a link carried (`followRef`) at any
- * path describes the linked document; neither is counted. One DID is the
- * principal.
- * None means the label names no principal. More than one means it names no
- * single principal, and a claim resting on it must not verify.
+ * `represents-principal` atom names in the entries
+ * {@link representsPrincipalEntries} reads, in order of first appearance.
+ * `nameWritten` says whether the value holds a name its owner wrote, as
+ * {@link isWrittenProfileName} decides it. One DID is the principal. None means
+ * the label names no principal. More than one means it names no single
+ * principal, and a claim resting on it must not verify.
  */
 export const authorPrincipalCandidates = (
   view: CfcLabelView | undefined,
+  nameWritten: boolean,
 ): string[] => [
-  ...new Set(representsPrincipalSubjects(principalClaimEntries(view))),
+  ...new Set(
+    representsPrincipalSubjects(representsPrincipalEntries(view, nameWritten)),
+  ),
 ];
 
 /**
@@ -155,22 +156,69 @@ export const principalClaimEntries = (
       entry.path.length <= 1 && entry.observes !== "followRef"
     );
 
+/** The field of a profile whose written value says whose the profile is. */
+export const PROFILE_NAME_FIELD = "name";
+
+/**
+ * Whether `name`, the value of a profile's `name` field, is a name its owner
+ * wrote: a string holding something besides whitespace. A field left at its
+ * default holds an empty string or nothing.
+ */
+export const isWrittenProfileName = (name: unknown): boolean =>
+  typeof name === "string" && name.trim() !== "";
+
+/**
+ * The entries of `view` a `represents-principal` claim is read from.
+ *
+ * When the value holds a name its owner wrote (`nameWritten`), they are the
+ * entries that label that name: the root's and the `name` field's own. A
+ * written name is its owner's own claim about whose the value is. Any other
+ * field still at its default can carry the principal of whichever runtime set
+ * that default up, beside the owner's or in its place, so those fields do not
+ * count. Otherwise they are every entry {@link principalClaimEntries} names,
+ * so a value whose fields name two principals names no single one, and never
+ * someone else.
+ *
+ * Either way an entry a link carried (`followRef`), or one deeper than a
+ * top-level field, is not counted.
+ */
+export const representsPrincipalEntries = (
+  view: CfcLabelView | undefined,
+  nameWritten: boolean,
+): CfcLabelView["entries"] =>
+  principalClaimEntries(view).filter((entry) =>
+    !nameWritten || entry.path.length === 0 ||
+    entry.path[0] === PROFILE_NAME_FIELD
+  );
+
 /**
  * The principals `view` attests with claims of `kind`, in exactly the form a
- * runtime mints, read from the entries {@link principalClaimEntries} names, or
- * `undefined` when a claim of `kind` there names a principal in another form,
- * or any claim there is in the string form. A runtime binds a
- * `{ kind, subject }` atom's subject to its acting principal and refuses a
- * literal DID only in that form, so the string form, a padded subject, or an
- * atom with another key may have been written by someone other than the
- * principal it names. A caller that must know who wrote the attestation,
- * rather than whom a claim is about, refuses those.
+ * runtime mints, or `undefined` when a claim of `kind` in the entries
+ * {@link principalClaimEntries} names is in another form, or any claim there
+ * is in the string form. A runtime binds a `{ kind, subject }` atom's subject
+ * to its acting principal and refuses a literal DID only in that form, so the
+ * string form, a padded subject, or an atom with another key may have been
+ * written by someone other than the principal it names. A caller that must
+ * know who wrote the attestation, rather than whom a claim is about, refuses
+ * those.
+ *
+ * An `authored-by` principal is counted from every one of those entries. A
+ * `represents-principal` one is counted from the entries
+ * {@link representsPrincipalEntries} reads for `nameWritten`, which says
+ * whether the value holds a name its owner wrote; `nameWritten` has no effect
+ * on an `authored-by` claim. The refusal reads every entry either way.
  */
 export const exactPrincipalAttestations = (
   view: CfcLabelView | undefined,
   kind: PrincipalClaimKind,
+  nameWritten: boolean,
 ): DID[] | undefined => {
   const principals = new Set<DID>();
+  const counted = new Set(
+    kind === REPRESENTS_PRINCIPAL
+      ? representsPrincipalEntries(view, nameWritten)
+      : principalClaimEntries(view),
+  );
   for (const entry of principalClaimEntries(view)) {
     for (const atom of entry.label.integrity ?? []) {
       const spelling = principalClaimSpelling(atom);
@@ -185,7 +233,7 @@ export const exactPrincipalAttestations = (
       ) {
         return undefined;
       }
-      principals.add(subject);
+      if (counted.has(entry)) principals.add(subject);
     }
   }
   return [...principals];
