@@ -67,19 +67,22 @@ describe("ownerPrincipalFromLabel", () => {
     expect(ownerPrincipalFromLabel(label, false)).toBeUndefined();
   });
 
-  it("names no owner from an atom below the top-level fields", () => {
+  it("names the owner an atom below the top-level fields names, only when no name is written", () => {
     // A document holding a link to Bob's profile deeper down carries that
-    // profile's label there; it is not the owner of this document.
+    // profile's label there. With no written name every entry counts, so a
+    // value whose own fields name no one represents whoever that names; a
+    // written name says whose the value is instead.
     const label = view([
       {
         path: ["elements", "0", "cell"],
         label: { integrity: [{ kind: "represents-principal", subject: DID }] },
       },
     ]);
-    expect(ownerPrincipalFromLabel(label, false)).toBeUndefined();
+    expect(ownerPrincipalFromLabel(label, false)).toBe(DID);
+    expect(ownerPrincipalFromLabel(label, true)).toBeUndefined();
   });
 
-  it("names no owner from an entry a link carries", () => {
+  it("names the owner an entry a link carries names, only when no name is written", () => {
     const label = view([
       {
         path: ["friend"],
@@ -87,7 +90,8 @@ describe("ownerPrincipalFromLabel", () => {
         observes: "followRef",
       },
     ]);
-    expect(ownerPrincipalFromLabel(label, false)).toBeUndefined();
+    expect(ownerPrincipalFromLabel(label, false)).toBe(DID);
+    expect(ownerPrincipalFromLabel(label, true)).toBeUndefined();
   });
 
   it("names no owner when top-level atoms name two principals", () => {

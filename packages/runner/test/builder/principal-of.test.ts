@@ -379,16 +379,42 @@ describe("principalOf()", () => {
       }
     });
 
-    it("returns `undefined` for a claim below the top-level fields, or one a link carries", async () => {
+    it("returns the principal a deeper or link-carried claim names, for a value whose own fields name no one", async () => {
+      // A value with no written name is read from every entry it stores,
+      // deeper ones and ones a link carried included. Its `name` here is not
+      // a string, so nothing is written to it.
+
       const deep = await seed("deep", [
         claimsAt(["name", "first"], claim("represents-principal", bob.did())),
       ], { name: { first: "Bob" } });
       const carried = await seed("carried", [{
-        ...claimsAt(["name"], claim("represents-principal", bob.did())),
+        ...claimsAt(["friend"], claim("represents-principal", bob.did())),
         observes: "followRef",
-      }]);
-      expect(callIn(edit(), deep, "represents-principal")).toBeUndefined();
-      expect(callIn(edit(), carried, "represents-principal")).toBeUndefined();
+      }], { friend: "linked" });
+      expect(callIn(edit(), deep, "represents-principal")).toBe(bob.did());
+      expect(callIn(edit(), carried, "represents-principal")).toBe(bob.did());
+    });
+
+    it("returns `undefined` for a value with no written name whose own field and a deeper claim name different principals", async () => {
+      const profile = await seed("profile", [
+        claimsAt(["bio"], claim("represents-principal", bob.did())),
+        claimsAt(
+          ["elements", "0", "cell"],
+          claim("represents-principal", alice.did()),
+        ),
+      ], { bio: "hello" });
+      expect(callIn(edit(), profile, "represents-principal")).toBeUndefined();
+    });
+
+    it("returns the principal a link carried onto a written name names", async () => {
+      const profile = await seed("profile", [
+        {
+          ...claimsAt(["name"], claim("represents-principal", bob.did())),
+          observes: "followRef",
+        },
+        claimsAt(["bio"], claim("represents-principal", alice.did())),
+      ], { name: "Bob", bio: "hello" });
+      expect(callIn(edit(), profile, "represents-principal")).toBe(bob.did());
     });
 
     it("throws for a label stored in a form this build cannot read", async () => {

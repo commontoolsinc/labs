@@ -24,13 +24,16 @@ import { cellOfTarget } from "./space-access.ts";
 /**
  * Returns the one principal that the label on `target`'s value attests with a
  * claim of `kind`: for `represents-principal`, whom the value stands for, as a
- * profile's label says; for `authored-by`, who wrote it. The claim is read at
- * the value's root and on its top-level fields, in exactly the form a runtime
- * mints, as `exactPrincipalAttestations()` reads it, and never from what a
- * link the value holds carries. A `represents-principal` claim on a value
- * holding a name its owner wrote is read from the root and the `name` field
- * alone: the written name says whose the value is, and a field still at its
- * default may carry another runtime's principal.
+ * profile's label says; for `authored-by`, who wrote it. The claim is read in
+ * exactly the form a runtime mints, as `exactPrincipalAttestations()` reads
+ * it. An `authored-by` claim is read at the value's root and on its top-level
+ * fields, and never from what a link the value holds carries. A
+ * `represents-principal` claim is read as `representsPrincipalEntries()`
+ * chooses: on a value holding a name its owner wrote, from the root and the
+ * `name` field alone, since the written name says whose the value is and a
+ * field still at its default may carry another runtime's principal; on any
+ * other value, from every entry its label holds, deeper ones and those a link
+ * carries included.
  *
  * Returns `undefined` when the label names no verified single principal of
  * that kind: when it attests none, when it attests more than one, when a claim
@@ -63,7 +66,8 @@ import { cellOfTarget } from "./space-access.ts";
  * its value is not. That reads what the runtime stamped on a field holding a
  * link, such as who wrote the link, where `"resolved"` reads the document the
  * link leads to. The claims a link carries from that document are not counted
- * either way.
+ * for an `authored-by` claim; for a `represents-principal` one they count
+ * where every entry does.
  *
  * The DID returned is data. Written into a label as a claim's subject, it is a
  * literal like any other, which the runtime refuses from a pattern unless the

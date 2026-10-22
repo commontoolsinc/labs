@@ -3440,14 +3440,18 @@ export type PrincipalClaimKind = "authored-by" | "represents-principal";
 /**
  * Returns the one principal that the label on `target`'s value attests with a
  * claim of `kind`: the DID a profile represents, or the author of a record.
- * The claim is read at the value's root and on its top-level fields, and only
- * in the form the runtime writes when it resolves `RepresentsCurrentUser`,
- * `AuthoredByCurrentUser` or `ownerPrincipal`, which a pattern cannot write
- * for anyone but the principal it runs for. For a `represents-principal` claim
- * on a value whose owner wrote a name (a `name` field holding more than
- * whitespace), only the root and the `name` field count: the written name says
- * whose the value is, and a field still at its default may carry the
- * principal of another runtime.
+ * Only the form the runtime writes when it resolves `RepresentsCurrentUser`,
+ * `AuthoredByCurrentUser` or `ownerPrincipal` counts, which a pattern cannot
+ * write for anyone but the principal it runs for. An `authored-by` claim is
+ * read at the value's root and on its top-level fields. A
+ * `represents-principal` claim on a value whose owner wrote a name (a `name`
+ * field holding more than whitespace) is read from the root and the `name`
+ * field alone: the written name says whose the value is, and a field still at
+ * its default may carry the principal of another runtime. On any other value
+ * it is read from every label entry the value holds, deeper ones and those a
+ * link carries included. A claim in another form on the root, on a top-level
+ * field, or on an entry that is read makes the result `undefined`, whatever
+ * else counts.
  *
  * `undefined` means the label names no verified single principal of that kind:
  * none, more than one, or a claim in some other form. It also means that

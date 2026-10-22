@@ -32,28 +32,40 @@ claim for both sides: the check `prepare.ts` makes on a write, and the readers.
 
 `principalOf()` reads a claim as `exactPrincipalAttestations()` in that module
 does, in exactly the form a runtime mints: an object of `kind` and `subject`
-and nothing else, with a subject that is a well-formed DID as written. It reads
-the claims on the value's root and on its top-level fields, where a profile's
-owner-protected fields carry their owner's claim. It does not read a claim
-deeper down, which describes a document the value links to, nor one that a
-link carries from the document it points to (an entry observed as `followRef`).
+and nothing else, with a subject that is a well-formed DID as written. Which
+label entries it reads depends on the kind.
 
-A `represents-principal` claim on a value whose owner wrote a name is read from
-fewer places. When the value's `name` field, followed through its links, holds
-a string with something besides whitespace in it, only the claims on the root
-and on `name` count. A written name is its owner's own claim about whose the
-value is. A field still at its default can carry the principal of whichever
-runtime set that default up, beside the owner's or in its place, so a profile
-whose untouched fields carry another runtime's principal still names its owner.
-A value with no written name is read from every top-level field, so one whose
-fields name two principals names neither, and never someone else. The written
-name narrows which claims are counted, not which are checked: a claim in a form
-a runtime does not mint, on any of those fields, gives `undefined` either way.
-An `authored-by` claim is read from every top-level field whatever the name
-holds. `isWrittenProfileName()` and `representsPrincipalEntries()` in
+An `authored-by` claim is read from the value's root and its top-level fields.
+It is not read from deeper down, which describes a document the value links
+to, nor from an entry a link carries from the document it points to (one
+observed as `followRef`).
+
+A `represents-principal` claim depends on whether the value holds a name its
+owner wrote: whether its `name` field, followed through its links, holds a
+string with something besides whitespace in it.
+
+- **With a written name**, only the entries on `name`, of any observation class,
+  and the root's own count. A written name is its owner's own claim about whose
+  the value is. A field still at its default can carry the principal of
+  whichever runtime set that default up, beside the owner's or in its place, so
+  a profile whose untouched fields carry another runtime's principal still
+  names its owner.
+- **With no written name**, every entry the value's label holds counts: every
+  path at or beneath the root, and every observation class, the entries a link
+  carried included. A value whose entries name two principals names neither,
+  and a value whose own fields name no one represents whoever a deeper or a
+  link-carried entry names.
+
+This is the reading an earlier reader of profiles in this system already
+applied, so the two read a profile alike. The entries counted are checked for a
+claim in a form a runtime does not mint, and so are the root and every
+top-level field whatever is counted: such a claim on any of them gives
+`undefined`. `isWrittenProfileName()` and `representsPrincipalEntries()` in
 `represents-principal.ts` decide this for every reader of a profile's
-principal: `principalOf()`, the profile badge, the authorship check and the
-worker's text-integrity boundary.
+principal: `principalOf()` and `principalsOf()`, the host's
+`attestedPrincipalsAt()` (the pieces controller's root check and the
+profile-space root repair), the custody seal's seats, the profile badge, the
+authorship check, and the worker's text-integrity boundary.
 
 `target` is followed through any links it holds first, so a cell holding a
 link to a profile returns the profile's principal.
@@ -73,9 +85,11 @@ the profile's label names its owner while the field's names who acted.
 reads the label on the document the field's value resolves to. Links on the
 way to `target` are followed, and so is a redirect stored there, which is where
 a write to `target` would land; a link `target` holds as its value is not. The
-claims are read in the same places relative to that field, and the copies of
-the linked document's claims that the link carries are not counted, as in the
-default read. For a field holding no link, the two reads are the same.
+claims are read in the same places relative to that field as in the default
+read. For an `authored-by` claim, the copies of the linked document's claims
+that the link carries are not counted. For a `represents-principal` claim they
+count when the linked value holds no written name, as every entry does then.
+For a field holding no link, the two reads are the same.
 `options` throws when it is not an object, or when its `label` is neither
 `"written"`, `"resolved"` nor absent; an absent `label` means `"resolved"`, and
 other keys are not read.
@@ -156,7 +170,8 @@ runtime uses for label metadata, and the name through the same kind of verifier
 read, both in the calling code's own transaction. So reading the name adds no
 confidentiality to the transaction. Each read is a dependency like any other,
 so a computation that called `principalOf()` runs again when the label or the
-name changes. An `authored-by` claim reads no part of the value.
+name changes. An `authored-by` claim reads no field of the value beyond the
+pointers that resolve the target.
 
 A document whose load is still in flight has no label to read yet, and that is
 not its state. A computation needs nothing for it, since the load's arrival

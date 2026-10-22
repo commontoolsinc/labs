@@ -35,6 +35,7 @@ import {
   type JSONSchema,
   KeepAsCell,
   parseLink,
+  profileNameWrittenAt,
   type SinkConsumedLabel,
   sinkProjected,
   type Stream,
@@ -49,11 +50,7 @@ import {
   type NestedRenderPath,
   NestedRenderReferenceSchema,
 } from "@commonfabric/runner/component-read-contract";
-import {
-  authorPrincipalCandidates,
-  isWrittenProfileName,
-  PROFILE_NAME_FIELD,
-} from "@commonfabric/runner/cfc/represents-principal";
+import { authorPrincipalCandidates } from "@commonfabric/runner/cfc/represents-principal";
 import {
   type CfcLabelView,
   cfcLabelViewForCell,
@@ -1833,26 +1830,34 @@ export class WorkerReconciler {
    * none when that label cannot be read.
    */
   #representedPrincipalsForCell(cell: Cell<unknown>): string[] {
-    return authorPrincipalCandidates(
+    const nameWritten = this.#nameWrittenForCell(cell);
+    // A name whose read failed settles neither reading of the label, so the
+    // author represents no one here, and the boundary holds the text back.
+    return nameWritten === undefined ? [] : authorPrincipalCandidates(
       cfcLabelViewForResolvedTarget(cell),
-      this.#nameWrittenForCell(cell),
+      nameWritten,
     );
   }
 
   /**
    * Helper for `#representedPrincipalsForCell()`, which returns whether the
    * `name` field of `cell`'s value, followed through its links, holds a name
-   * its owner wrote. A name whose read fails is not one this can count as
-   * written, so it returns `false`, which reads the label as a value with no
-   * written name.
+   * its owner wrote, read as `profileNameWrittenAt()` reads it, as a verifier
+   * read; `undefined` when that read fails.
    */
-  #nameWrittenForCell(cell: Cell<unknown>): boolean {
+  #nameWrittenForCell(cell: Cell<unknown>): boolean | undefined {
+    const runtime = cellRuntime(cell);
+    const tx = runtime.edit();
     try {
-      return isWrittenProfileName(
-        cell.key(PROFILE_NAME_FIELD).resolveAsCell().getRaw(),
+      return profileNameWrittenAt(
+        runtime,
+        tx,
+        cell.withTx(tx).resolveAsCell().getAsNormalizedFullLink(),
       );
     } catch {
-      return false;
+      return undefined;
+    } finally {
+      tx.abort();
     }
   }
 

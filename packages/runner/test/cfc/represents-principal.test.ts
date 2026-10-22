@@ -83,12 +83,13 @@ describe("represents-principal", () => {
       expect(authorPrincipalCandidates(label, true)).toEqual([DID, OTHER_DID]);
     });
 
-    it("does not count what a link carried onto `name` for a value whose owner wrote a name", () => {
+    it("counts what a link carried onto `name` for a value whose owner wrote a name, and nothing a link carried onto the root", () => {
       const label = view([
         { ...representsAt(["name"], OTHER_DID), observes: "followRef" },
+        { ...representsAt([], DID), observes: "followRef" },
         representsAt(["bio"], DID),
       ]);
-      expect(authorPrincipalCandidates(label, true)).toEqual([]);
+      expect(authorPrincipalCandidates(label, true)).toEqual([OTHER_DID]);
     });
 
     it("returns the DID a profile's field atoms name when the root has none", () => {
@@ -134,15 +135,24 @@ describe("represents-principal", () => {
       expect(authorPrincipalCandidates(label, false)).toEqual([DID, OTHER_DID]);
     });
 
-    it("does not count atoms below the top-level fields", () => {
+    it("counts atoms below the top-level fields for a value with no written name", () => {
       // A profile that pins a piece owned by someone else holds a copy of that
-      // piece's label below the field that links it.
+      // piece's label below the field that links it. With a written name only
+      // the name counts.
       const label = view([
         representsAt(["name"], DID),
         representsAt(["elements"], DID),
         representsAt(["elements", "0", "cell"], OTHER_DID),
       ]);
-      expect(authorPrincipalCandidates(label, false)).toEqual([DID]);
+      expect(authorPrincipalCandidates(label, false)).toEqual([DID, OTHER_DID]);
+      expect(authorPrincipalCandidates(label, true)).toEqual([DID]);
+    });
+
+    it("returns the DID a deeper atom names for a value with no written name whose own fields name no one", () => {
+      const label = view([
+        representsAt(["elements", "0", "cell"], OTHER_DID),
+      ]);
+      expect(authorPrincipalCandidates(label, false)).toEqual([OTHER_DID]);
     });
 
     it("returns no DID for a string-form atom", () => {
@@ -167,16 +177,17 @@ describe("represents-principal", () => {
       expect(authorPrincipalCandidates(label, false)).toEqual([]);
     });
 
-    it("does not count an entry a link carries from another document", () => {
+    it("counts an entry a link carries from another document for a value with no written name", () => {
       // A document linking Bob's profile at a top-level field holds a copy of
-      // that profile's label there, marked as a link's; it says what the link
-      // points to, not whom this document represents.
+      // that profile's label there, marked as a link's. With no written name
+      // every entry counts; with one, only the name's.
       const label = view([
         representsAt(["name"], DID),
         { ...representsAt(["friend"], OTHER_DID), observes: "followRef" },
         { ...representsAt([], OTHER_DID), observes: "followRef" },
       ]);
-      expect(authorPrincipalCandidates(label, false)).toEqual([DID]);
+      expect(authorPrincipalCandidates(label, false)).toEqual([DID, OTHER_DID]);
+      expect(authorPrincipalCandidates(label, true)).toEqual([DID]);
     });
 
     it("returns no DID for a label with no represents-principal atom", () => {
@@ -193,7 +204,7 @@ describe("represents-principal", () => {
   });
 
   describe("exactPrincipalAttestations", () => {
-    it("returns each DID the root and top-level fields attest in the minted form", () => {
+    it("returns each DID the entries attest in the minted form, deeper ones included for a value with no written name", () => {
       const label = view([
         representsAt([], DID),
         representsAt(["name"], DID),
@@ -204,7 +215,7 @@ describe("represents-principal", () => {
           label: { integrity: [{ kind: "authored-by", subject: OTHER_DID }] },
         },
         // Below the top-level fields, as authorPrincipalCandidates reads it.
-        representsAt(["elements", "0"], "did:key:deeper"),
+        representsAt(["elements", "0"], DID),
       ]);
       expect(exactPrincipalAttestations(label, "represents-principal", false))
         .toEqual(
@@ -274,19 +285,28 @@ describe("represents-principal", () => {
       ]);
     });
 
-    it("skips what a link carries and a claim of another kind", () => {
+    it("skips a claim of another kind, and counts what a link carries for a value with no written name", () => {
       const label = view([
         representsAt([], DID),
-        { ...representsAt(["name"], OTHER_DID), observes: "followRef" },
+        { ...representsAt(["friend"], OTHER_DID), observes: "followRef" },
         {
           path: [],
           label: { integrity: [{ kind: "authored-by", subject: OTHER_DID }] },
         },
       ]);
       expect(exactPrincipalAttestations(label, "represents-principal", false))
-        .toEqual(
-          [DID],
-        );
+        .toEqual([DID, OTHER_DID]);
+    });
+
+    it("refuses a claim in a form the runtime does not mint on a deeper entry it counts", () => {
+      const label = view([
+        representsAt(["name"], DID),
+        representsAt(["elements", "0"], "did:key:not well formed"),
+      ]);
+      expect(exactPrincipalAttestations(label, "represents-principal", false))
+        .toBeUndefined();
+      expect(exactPrincipalAttestations(label, "represents-principal", true))
+        .toEqual([DID]);
     });
 
     it("returns each DID an `authored-by` claim attests when asked for that kind", () => {

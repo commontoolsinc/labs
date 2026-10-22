@@ -664,11 +664,13 @@ class AuthorshipObservationState {
       const profile = await readLabelView(author, "represents-principal");
       unloadedCell = profile.unloadedCell;
       // A profile whose owner wrote a name attests by that name, so the value
-      // read above, when there is one, says which of its fields count.
+      // read above, when there is one, says which of its fields count. A name
+      // the value holds as a handle is read through it.
+      const name = isObjectNotArray(valueClaim) ? valueClaim.name : undefined;
       const candidates = authorPrincipalCandidates(
         profile.view,
         isWrittenProfileName(
-          isObjectNotArray(valueClaim) ? valueClaim.name : undefined,
+          hasReadableClaim(name) ? await readClaimValue(name) : name,
         ),
       );
       // A label naming more than one principal names none, and the claim's

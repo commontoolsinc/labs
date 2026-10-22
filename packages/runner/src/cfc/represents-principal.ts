@@ -135,7 +135,12 @@ export const authorPrincipalCandidates = (
   nameWritten: boolean,
 ): string[] => [
   ...new Set(
-    representsPrincipalSubjects(representsPrincipalEntries(view, nameWritten)),
+    representsPrincipalEntries(view, nameWritten).flatMap((entry) =>
+      (entry.label.integrity ?? []).flatMap((atom) => {
+        const subject = representsPrincipalSubject(atom);
+        return subject === undefined ? [] : [subject];
+      })
+    ),
   ),
 ];
 
@@ -171,42 +176,49 @@ export const isWrittenProfileName = (name: unknown): boolean =>
  * The entries of `view` a `represents-principal` claim is read from.
  *
  * When the value holds a name its owner wrote (`nameWritten`), they are the
- * entries that label that name: the root's and the `name` field's own. A
+ * entries on its `name` field, of any observation class, and the root's own. A
  * written name is its owner's own claim about whose the value is. Any other
  * field still at its default can carry the principal of whichever runtime set
  * that default up, beside the owner's or in its place, so those fields do not
- * count. Otherwise they are every entry {@link principalClaimEntries} names,
- * so a value whose fields name two principals names no single one, and never
- * someone else.
+ * count.
  *
- * Either way an entry a link carried (`followRef`), or one deeper than a
- * top-level field, is not counted.
+ * Otherwise they are every entry `view` holds: every path at or beneath the
+ * root, and every observation class, an entry a link carried (`followRef`)
+ * among them. A value whose entries name two principals names no single one,
+ * and a value whose own fields name no one represents whoever a deeper or a
+ * link-carried entry names. A view holds payload entries only, so no
+ * label-metadata entry is among them.
  */
 export const representsPrincipalEntries = (
   view: CfcLabelView | undefined,
   nameWritten: boolean,
 ): CfcLabelView["entries"] =>
-  principalClaimEntries(view).filter((entry) =>
-    !nameWritten || entry.path.length === 0 ||
-    entry.path[0] === PROFILE_NAME_FIELD
-  );
+  view === undefined
+    ? []
+    : nameWritten
+    ? view.entries.filter((entry) =>
+      (entry.path.length === 1 && entry.path[0] === PROFILE_NAME_FIELD) ||
+      (entry.path.length === 0 && entry.observes !== "followRef")
+    )
+    : view.entries;
 
 /**
  * The principals `view` attests with claims of `kind`, in exactly the form a
- * runtime mints, or `undefined` when a claim of `kind` in the entries
- * {@link principalClaimEntries} names is in another form, or any claim there
- * is in the string form. A runtime binds a `{ kind, subject }` atom's subject
- * to its acting principal and refuses a literal DID only in that form, so the
- * string form, a padded subject, or an atom with another key may have been
- * written by someone other than the principal it names. A caller that must
- * know who wrote the attestation, rather than whom a claim is about, refuses
- * those.
+ * runtime mints, or `undefined` when a claim it reads is in another form, or
+ * any claim there is in the string form. A runtime binds a `{ kind, subject }`
+ * atom's subject to its acting principal and refuses a literal DID only in
+ * that form, so the string form, a padded subject, or an atom with another key
+ * may have been written by someone other than the principal it names. A
+ * caller that must know who wrote the attestation, rather than whom a claim is
+ * about, refuses those.
  *
- * An `authored-by` principal is counted from every one of those entries. A
- * `represents-principal` one is counted from the entries
- * {@link representsPrincipalEntries} reads for `nameWritten`, which says
- * whether the value holds a name its owner wrote; `nameWritten` has no effect
- * on an `authored-by` claim. The refusal reads every entry either way.
+ * An `authored-by` principal is counted from the entries
+ * {@link principalClaimEntries} names. A `represents-principal` one is counted
+ * from the entries {@link representsPrincipalEntries} reads for `nameWritten`,
+ * which says whether the value holds a name its owner wrote; `nameWritten`
+ * has no effect on an `authored-by` claim. Every entry
+ * {@link principalClaimEntries} names is checked for a claim in another form
+ * whatever is counted, and so is every entry counted.
  */
 export const exactPrincipalAttestations = (
   view: CfcLabelView | undefined,
@@ -219,7 +231,8 @@ export const exactPrincipalAttestations = (
       ? representsPrincipalEntries(view, nameWritten)
       : principalClaimEntries(view),
   );
-  for (const entry of principalClaimEntries(view)) {
+  const checked = new Set([...principalClaimEntries(view), ...counted]);
+  for (const entry of checked) {
     for (const atom of entry.label.integrity ?? []) {
       const spelling = principalClaimSpelling(atom);
       if (spelling === undefined) continue;
