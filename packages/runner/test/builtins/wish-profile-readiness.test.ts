@@ -583,6 +583,77 @@ describe("wish-profile-readiness", () => {
     });
   }
 
+  it("reports a load error, rather than answering with the first listed profile, when the retired list fails to load", async () => {
+    // The retired list is never stored here, so its load is one the runtime
+    // makes, and the provider reports that load failed. Without the list,
+    // which profiles are retired is unknown, so no profile is answered.
+    const manager = EmulatedStorageManager.emulate({ as: user });
+    const runtime = makeRuntime(manager);
+    const cancels: (() => void)[] = [];
+    const home = runtime.getHomeSpaceCell().asSchema(undefined);
+    const defaultPattern = runtime.getCell(user.did(), "retired-default");
+    const roster = runtime.getCell(user.did(), "retired-roster");
+    const retired = runtime.getCell(user.did(), "retired-list");
+    const first = runtime.getCell(persona.did(), "retired-first");
+    const provider = manager.open(user.did());
+    const originalSync = provider.sync.bind(provider);
+    let reportedFailures = 0;
+    try {
+      const owner = runtime.getCell(board.did(), "retired-consumer");
+      const inputs = runtime.getCell(board.did(), "retired-wish-inputs");
+      let tx = runtime.edit();
+      first.withTx(tx).set({ name: "First", avatar: "" });
+      runtime.prepareTxForCommit(tx);
+      expect((await tx.commit().settled).error).toBeUndefined();
+      tx = runtime.edit();
+      home.withTx(tx).setRaw({ defaultPattern: defaultPattern.getAsLink() });
+      defaultPattern.withTx(tx).setRaw({
+        profiles: roster.getAsLink(),
+        retiredProfiles: retired.getAsLink(),
+      });
+      roster.withTx(tx).setRaw([first.getAsLink()]);
+      runtime.prepareTxForCommit(tx);
+      expect((await tx.commit().settled).error).toBeUndefined();
+      tx = runtime.edit();
+      owner.withTx(tx).set({});
+      inputs.withTx(tx).set({ query: "#profile", headless: true });
+      runtime.prepareTxForCommit(tx);
+      expect((await tx.commit().settled).error).toBeUndefined();
+      await manager.synced();
+      provider.sync = (id, ...rest) => {
+        if (id !== retired.getAsNormalizedFullLink().id) {
+          return originalSync(id, ...rest);
+        }
+        reportedFailures++;
+        return Promise.resolve({ error: new Error("Provider load failed") });
+      };
+      let output: Cell<unknown> | undefined;
+      const result = wish(
+        inputs as Cell<[unknown, unknown]>,
+        (_tx, value) => output = value as Cell<unknown>,
+        (cancel) => cancels.push(cancel),
+        [owner],
+        owner,
+        runtime,
+      );
+      result.onActionRegistered?.(result.action);
+      cancels.push(
+        runtime.scheduler.subscribe(result.action, { isEffect: true }),
+      );
+      await runtime.idle();
+      expect(reportedFailures).toBeGreaterThan(0);
+      const state = output!.withTx(undefined);
+      expect(state.key("result").key("name").get()).toBeUndefined();
+      expect(state.key("error").get()).toBe("Error: Could not load document");
+    } finally {
+      provider.sync = originalSync;
+      cancels.forEach((cancel) => cancel());
+      await manager.synced();
+      await runtime.idle();
+      await runtime.dispose();
+    }
+  });
+
   it("retires cancelled readiness subscriptions when storage has no unsubscribe", async () => {
     const manager = EmulatedStorageManager.emulate({ as: user });
     const runtime = makeRuntime(manager);

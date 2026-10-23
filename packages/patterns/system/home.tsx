@@ -29,6 +29,7 @@ import SharedSpaceCollection, {
 import {
   sharedSpaceCollectionViewOf,
   type SharedSpaceInterface,
+  sharedSpaceProfileViewOf,
   sharedSpaceReceiptViewOf,
 } from "./shared-space-interface.ts";
 import {
@@ -44,14 +45,20 @@ import {
   type SharedSpaceRegistrationResult,
   type SharedSpaceRemoval,
   type SharedSpaceRemovalResult,
+  type TrustedSharedSpaceProfiles,
 } from "./shared-space-catalog.ts";
 import {
   type CreateProfileEvent,
+  profileLinkSpace,
+  type ProfileRetirementEvent,
+  restoreProfile,
+  retireProfile,
   seedProfileName,
   submitProfileCreation,
   type TrustedDefaultProfile,
   type TrustedProfileList,
   type TrustedProfileMru,
+  type TrustedRetiredProfileList,
 } from "./profile-create.tsx";
 import ProfilePicker from "./profile-picker.tsx";
 import { refusalReasonText } from "./private-inbox-refusal-text.ts";
@@ -134,6 +141,10 @@ export type HomeOutput = {
   defaultProfile?: TrustedDefaultProfile;
   legacyDefaultProfile?: BackwardsCompatibleProfile;
   mru: Default<TrustedProfileMru, []>;
+  // The profiles the user retired, appended by `retireProfile` and removed
+  // by `restoreProfile`. A retired profile stays in `profiles`, and is not
+  // one of the user's profiles: `#profile` and the picker leave it out.
+  retiredProfiles: Default<TrustedRetiredProfileList, []>;
   // The user's agent queue: the index of their agent runs and their
   // registered runner. `wish({ query: "#agent_queue" })` resolves to it, and
   // the `agent` builtin appends to its `entries`.
@@ -173,10 +184,20 @@ export type HomeOutput = {
   // notice. No `replacement` before the first.
   privateInboxReplacement: Writable<PrivateInboxReplacementHolder>;
   // Independent roles for product consumers. Select `commands` for writes,
-  // `view` for collection lists, and `receipts` for offer admission evidence.
+  // `view` for collection lists, `receipts` for offer admission evidence, and
+  // `profiles` for which of the person's profiles acts in each space.
   sharedSpaces: SharedSpaceInterface;
   // Flat aliases address the same catalog and command streams.
   sharedSpaceCatalog: SharedSpaceCatalog;
+  // Which of the person's profiles acts in each space, by the space's DID, as
+  // `registerSharedSpace` records it and `removeSharedSpace` removes it, and
+  // no other handler writes it. `sharedSpaces.profiles` reads it for a
+  // reader, saying also which records it cannot read and which name a
+  // retired profile.
+  sharedSpaceProfiles: TrustedSharedSpaceProfiles;
+  // Registers a space the caller vetted, and records the profile the
+  // registration names as the one acting in the space, unless Home records
+  // one already (see `registerSharedSpaceIn`).
   registerSharedSpace: Stream<
     SharedSpaceRegistration,
     SharedSpaceRegistrationResult
@@ -192,6 +213,11 @@ export type HomeOutput = {
   // a shared space away.
   removeSharedSpace: Stream<SharedSpaceRemoval, SharedSpaceRemovalResult>;
   createProfile: Stream<CreateProfileEvent>;
+  // Retires the profile the event links, as the picker's Remove does, unless
+  // it is the one `#profile` returns (see `retireProfile`).
+  retireProfile: Stream<ProfileRetirementEvent>;
+  // Restores the retired profile the event links.
+  restoreProfile: Stream<ProfileRetirementEvent>;
   // Gives Home the private inbox the deciding profile advertises: it adopts the
   // one the host vetted and names, with that profile, when the profile is in
   // Home's list and still points at it, or creates one when Home holds none
@@ -373,6 +399,10 @@ const Home = pattern(
       entries: {},
       offers: {},
     }).for("sharedSpaceCatalog");
+    // Which of the person's profiles acts in each space the catalog holds,
+    // written by `registerSharedSpace` and `removeSharedSpace` alone.
+    const sharedSpaceProfiles = new Writable<TrustedSharedSpaceProfiles>({})
+      .for("sharedSpaceProfiles");
     const defaultAppUrl = new Writable("").for("defaultAppUrl");
     // NOTE(CT-1628): the `as any` casts around the profile cells below are
     // required because the CFC wrapper types (TrustedProfile*) don't yet compose
@@ -400,6 +430,8 @@ const Home = pattern(
       BackwardsCompatibleProfile | undefined
     >(undefined).for("defaultProfile");
     const mru = new Writable<BackwardsCompatibleProfile[]>([]).for("mru");
+    const retiredProfiles = new Writable<TrustedRetiredProfileList>([])
+      .for("retiredProfiles");
     // Home's private inbox, which a profile is pointed at when it is created
     // and when the host ensures the inbox.
     const privateInbox = new Writable<PrivateInboxHolder>({}).for(
@@ -465,6 +497,7 @@ const Home = pattern(
       legacyDefaultProfile: legacyDefaultProfile as any,
       offersSetDefault: true,
       mru: mru as any,
+      retiredProfiles: retiredProfiles as any,
       privateInbox,
     });
 
@@ -507,6 +540,19 @@ const Home = pattern(
     const sharedSpaces = {
       view: computed(() => sharedSpaceCollectionViewOf(catalog.get())),
       receipts: computed(() => sharedSpaceReceiptViewOf(catalog.get())),
+      // The builder numbers unnamed nodes in the order it reaches them, and
+      // it reaches whatever Home's cells lead to from the first place it
+      // visits them, such as the profile tab. This reads Home's own result,
+      // which leads nowhere, so that every unnamed node keeps its number.
+      // The retired list's elements are links, read as links.
+      profiles: computed(() => {
+        const retired = home.retiredProfiles;
+        return sharedSpaceProfileViewOf(
+          home.sharedSpaces.view,
+          home.sharedSpaceProfiles,
+          Array.isArray(retired) ? retired.map(profileLinkSpace) : undefined,
+        );
+      }),
       commands: {
         register: home.registerSharedSpace,
         changeMembership: home.changeSharedSpaceMembership,
@@ -702,6 +748,7 @@ const Home = pattern(
       defaultProfile: defaultProfile as any,
       legacyDefaultProfile: legacyDefaultProfile as any,
       mru: mru as any,
+      retiredProfiles: retiredProfiles as any,
       agentQueue,
       chatManager,
       privateInbox,
@@ -711,11 +758,16 @@ const Home = pattern(
 
       sharedSpaces,
       sharedSpaceCatalog: computed(() => readSharedSpaceCatalog(catalog)),
+      sharedSpaceProfiles: sharedSpaceProfiles as any,
 
       // Exported handlers
-      registerSharedSpace: registerSharedSpace({ catalog }),
+      registerSharedSpace: registerSharedSpace({
+        catalog,
+        sharedSpaceProfiles,
+        profiles: home.profiles,
+      }),
       changeSharedSpaceMembership: changeSharedSpaceMembership({ catalog }),
-      removeSharedSpace: removeSharedSpace({ catalog }),
+      removeSharedSpace: removeSharedSpace({ catalog, sharedSpaceProfiles }),
       addFavorite: addFavorite({ favorites }),
       removeFavorite: removeFavorite({ favorites }),
       addJournalEntry: addJournalEntry({ journal }),
@@ -724,6 +776,16 @@ const Home = pattern(
       adoptSpace: adoptSpaceHandler({ spaces }),
       renameSpace: renameSpaceHandler({ spaces }),
       createProfile: createProfileStream,
+      retireProfile: retireProfile({
+        profiles: profiles as any,
+        mru: mru as any,
+        retiredProfiles: retiredProfiles as any,
+        defaultProfile: defaultProfile as any,
+        legacyDefaultProfile: legacyDefaultProfile as any,
+      }),
+      restoreProfile: restoreProfile({
+        retiredProfiles: retiredProfiles as any,
+      }),
       ensurePrivateInbox: ensurePrivateInboxStream,
       requestPrivateInbox: requestPrivateInbox({
         profiles: profiles as any,

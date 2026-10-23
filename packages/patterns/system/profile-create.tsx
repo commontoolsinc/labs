@@ -10,10 +10,12 @@ import {
   type VNode,
   Writable,
   WriteAuthorizedBy,
+  type WritePolicyAnyOf,
 } from "commonfabric";
 import ProfileHome, {
   type BackwardsCompatibleProfile,
   type InboxPointable,
+  nameHasControlCharacter,
   pointAtInboxIfUnset,
   type ProfileHomeOutput,
   type ProfileInbox,
@@ -50,6 +52,29 @@ export const profileLinkSchema = (): any => ({
   type: "unknown",
   asCell: ["cell"],
 });
+
+/**
+ * The space `cell` lives in: for a profile link, the profile's own space,
+ * which is what identifies a profile. `undefined` when `cell` is not a
+ * resolvable link. The pattern-facing `Cell` has no typed space accessor, so
+ * the link is read through `any`.
+ */
+export const profileLinkSpace = (cell: unknown): string | undefined => {
+  try {
+    // deno-lint-ignore no-explicit-any
+    return (cell as any)?.getAsNormalizedFullLink?.()?.space;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * The links the profile list `list` holds, read as link cells
+ * (`profileLinkListSchema()`).
+ */
+export const profileLinks = (list: unknown): unknown[] =>
+  // deno-lint-ignore no-explicit-any
+  (list as any).asSchema(profileLinkListSchema()).get() ?? [];
 
 export type CreateProfileEvent = {
   detail?: { message?: string };
@@ -173,6 +198,9 @@ export const submitProfileCreation = handler<
   // in the DOM after submit, with no durable write to clobber.
   const name = (event.name ?? event.detail?.message ?? event.target?.value ??
     "").trim();
+  if (nameHasControlCharacter(name)) {
+    throw new Error("A profile name cannot contain control characters.");
+  }
   if (name) {
     const profile = ProfileHome.inSpace(undefined, {
       grants: { "*": "WRITE" },
@@ -236,10 +264,182 @@ export const setMruProfile = handler<
   // Read existing entries as link cells (not inlined values) so an entry that
   // links into an unloaded space doesn't collapse the whole read to `undefined`
   // and silently wipe MRU history. Dedup by link identity via `equals`.
-  const current = ((mru as any).asSchema(profileLinkListSchema()).get() ??
-    []) as BackwardsCompatibleProfile[];
+  const current = profileLinks(mru) as BackwardsCompatibleProfile[];
   const filtered = current.filter((entry) => !equals(entry, profile));
   mru.set([profile, ...filtered] as any);
+});
+
+/**
+ * The profile a retire or a restore acts on, as a link. A picker row binds
+ * its own profile to the handler instead; Home's streams take it from the
+ * event.
+ */
+export type ProfileRetirementEvent = {
+  profile?: Cell<BackwardsCompatibleProfile>;
+};
+
+/**
+ * The space of the profile a home's default names: the link under `profile`
+ * in its slot `defaultProfile`, or, while the slot names none, the link
+ * `legacyDefaultProfile` holds at its root. A link into `homeSpace` names
+ * none, and so does a home with neither.
+ */
+export const defaultProfileSpace = (
+  defaultProfile: unknown,
+  legacyDefaultProfile: unknown,
+  homeSpace: string | undefined,
+): string | undefined => {
+  const named = (space: string | undefined) =>
+    space !== undefined && space !== homeSpace ? space : undefined;
+  return named(
+    profileLinkSpace(
+      // deno-lint-ignore no-explicit-any
+      (defaultProfile as any)?.key("profile").asSchema(profileLinkSchema())
+        .get(),
+    ),
+  ) ?? named(
+    profileLinkSpace(
+      // deno-lint-ignore no-explicit-any
+      (legacyDefaultProfile as any)?.asSchema(profileLinkSchema()).get(),
+    ),
+  );
+};
+
+/** Home's profile lists, as `liveProfileSpaces()` reads them. */
+export type ProfileLists = {
+  /** Home's `profiles` list. */
+  profiles: unknown;
+
+  /** Home's default profile slot, `DefaultProfileSlot`, if bound. */
+  defaultProfile?: unknown;
+
+  /** The cell a home keeps an earlier default in, if bound. */
+  legacyDefaultProfile?: unknown;
+
+  /** Home's `mru` list. */
+  mru: unknown;
+
+  /** Home's `retiredProfiles` list, if bound. */
+  retiredProfiles?: unknown;
+};
+
+/**
+ * The spaces of the user's live profiles, the ones in `profiles` that are not
+ * in `retiredProfiles`, in the order `#profile` returns them for a runtime
+ * that names no preferred profile: the default first, unless it is retired,
+ * then by rank in `mru`, then in list order. The first is the profile
+ * `#profile` returns. Profiles are compared by their own space, and a link
+ * into `homeSpace` names none. This is the order the runner's
+ * `orderProfileCandidates()` decides `#profile` by, which pattern code cannot
+ * import.
+ */
+export const liveProfileSpaces = (
+  lists: ProfileLists,
+  homeSpace: string | undefined,
+): string[] => {
+  const spaces = (list: unknown): (string | undefined)[] =>
+    list === undefined ? [] : profileLinks(list).map(profileLinkSpace);
+  const retired = new Set(spaces(lists.retiredProfiles));
+  const live = spaces(lists.profiles).filter((space): space is string =>
+    space !== undefined && space !== homeSpace && !retired.has(space)
+  );
+  const preferred = defaultProfileSpace(
+    lists.defaultProfile,
+    lists.legacyDefaultProfile,
+    homeSpace,
+  );
+  const mru = spaces(lists.mru);
+  const rank = (space: string): number => {
+    if (space === preferred) return -1;
+    const index = mru.indexOf(space);
+    return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+  };
+  // `sort()` is stable, so profiles of equal rank keep their list order.
+  return live.sort((a, b) => rank(a) - rank(b));
+};
+
+// Retires one of the user's profiles: appends its link to Home's
+// `retiredProfiles` list. A retired profile is not one of the user's
+// profiles: `#profile` never answers with it and leaves it out of its
+// candidates, and the picker lists it only among the removed profiles it can
+// restore. Its link stays in `profiles`, and its space and data stay on the
+// host, so a link to it held elsewhere still shows it, and `restoreProfile`
+// makes it one of the user's profiles again. A profile already retired,
+// compared by its own space as `#profile` compares profiles, is left as it
+// is.
+//
+// Any pattern that reaches Home's streams can send this handler's event, as
+// it can a profile's rename, so the handler refuses the profile `#profile`
+// returns for a runtime that names no preferred profile, the first of
+// `liveProfileSpaces()`: retiring it would quietly move `#profile` to another
+// profile. That is the default when one is set, and otherwise the most
+// recently used live profile, or the first listed. The person sets another
+// profile as the default first. The last live profile is always that
+// profile, so it is never retired.
+export const retireProfile = handler<
+  ProfileRetirementEvent,
+  {
+    profiles: Writable<BackwardsCompatibleProfile[]>;
+    mru: Writable<BackwardsCompatibleProfile[]>;
+    retiredProfiles: Writable<Cell<BackwardsCompatibleProfile>[]>;
+    defaultProfile?: Writable<DefaultProfileSlot>;
+    legacyDefaultProfile?: Writable<BackwardsCompatibleProfile | undefined>;
+    profile?: Cell<BackwardsCompatibleProfile>;
+  }
+>((
+  event,
+  {
+    profiles,
+    mru,
+    retiredProfiles,
+    defaultProfile,
+    legacyDefaultProfile,
+    profile,
+  },
+) => {
+  const target = profile ?? event.profile;
+  const space = profileLinkSpace(target);
+  if (target === undefined || space === undefined) {
+    throw new Error("Cannot retire a profile: the event names no profile.");
+  }
+  const live = liveProfileSpaces(
+    { profiles, defaultProfile, legacyDefaultProfile, mru, retiredProfiles },
+    profileLinkSpace(retiredProfiles),
+  );
+  if (live[0] === space) {
+    throw new Error(
+      live.length === 1
+        ? "Cannot retire the user's only profile."
+        : "Cannot retire the profile `#profile` returns: set another " +
+          "profile as the default first.",
+    );
+  }
+  const retired = profileLinks(retiredProfiles);
+  if (retired.some((entry) => profileLinkSpace(entry) === space)) return;
+  // The list links the profile's own document, which carries the labels a
+  // link into the protected list is checked against, rather than whatever
+  // link the event or the row holds on the way to it.
+  retiredProfiles.set([...retired, target.resolveAsCell()] as any);
+});
+
+// Restores a retired profile: removes every link in Home's `retiredProfiles`
+// list into the space of the profile the row binds or the event names, so it
+// is one of the user's profiles again. A profile that is not retired is left
+// as it is.
+export const restoreProfile = handler<
+  ProfileRetirementEvent,
+  {
+    retiredProfiles: Writable<Cell<BackwardsCompatibleProfile>[]>;
+    profile?: Cell<BackwardsCompatibleProfile>;
+  }
+>((event, { retiredProfiles, profile }) => {
+  const space = profileLinkSpace(profile ?? event.profile);
+  if (space === undefined) {
+    throw new Error("Cannot restore a profile: the event names no profile.");
+  }
+  const retired = profileLinks(retiredProfiles);
+  const kept = retired.filter((entry) => profileLinkSpace(entry) !== space);
+  if (kept.length !== retired.length) retiredProfiles.set(kept as any);
 });
 
 // A single owner-protected link to a profile pattern in its own space, created
@@ -312,6 +512,31 @@ export type TrustedProfileMru = Cfc<
       typeof TRUSTED_PROFILE_SET_MRU_ACTION
     >[],
     typeof setMruProfile
+  >,
+  { addIntegrity: ["profile-link"] }
+>;
+
+// The home `retiredProfiles` list. The container and each element are
+// written by `retireProfile` and `restoreProfile` and no other handler: the
+// element policy gates adding or replacing a link, and the container policy
+// gates the structural changes (truncation / removal / reorder) the element
+// policy misses, for the reason `TrustedProfileList` gives. Neither asks for a
+// gesture, so any pattern that reaches Home's streams can retire or restore a
+// profile by sending their events, as it can rename one; what the policies
+// rule out is a write by anything else.
+export type TrustedRetiredProfileList = Cfc<
+  WritePolicyAnyOf<
+    Cfc<
+      WritePolicyAnyOf<Cell<BackwardsCompatibleProfile>, [
+        WriteAuthorizedBy<unknown, typeof retireProfile>,
+        WriteAuthorizedBy<unknown, typeof restoreProfile>,
+      ]>,
+      { addIntegrity: ["profile-link"] }
+    >[],
+    [
+      WriteAuthorizedBy<unknown, typeof retireProfile>,
+      WriteAuthorizedBy<unknown, typeof restoreProfile>,
+    ]
   >,
   { addIntegrity: ["profile-link"] }
 >;

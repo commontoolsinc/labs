@@ -124,6 +124,13 @@ export interface OfferEvent {
 
   /** When the sender shared the offer, in milliseconds since the epoch. */
   sharedAt?: number;
+
+  /**
+   * The recipient's profile the offer is for, by its space DID. Every profile
+   * of one principal points at the same inbox, so this is what tells the
+   * recipient which of their profiles was offered the thing.
+   */
+  toProfile?: { space?: string };
 }
 
 /** An offer as the inbox holds it: every field of the envelope, and more. */
@@ -168,6 +175,13 @@ export interface Offer {
    * handler's clock reads to the second, so two offers can share it.
    */
   receivedAt: number;
+
+  /**
+   * The recipient's profile the offer names as the one it is for, by its space
+   * DID, when the sender named a well-formed one. Like `from`, it is the
+   * sender's claim; a reader acts on it only for a profile that is its own.
+   */
+  toProfile?: { space: string };
 }
 
 /** The inbox's offers, oldest first. */
@@ -344,8 +358,9 @@ function trimmedText(value: unknown, max: number): string {
  * well-formed DIDs, by `isWellFormedDID()`, and `host` is an origin, by
  * {@link isOrigin}. An event with no `kind` is kept as
  * {@link OFFER_DEFAULT_KIND}, one with no `id` as `<space>@<sharedAt>`, one
- * with no positive `sharedAt` as shared at `now`, and an `ownerOrigin` that is
- * not an origin is kept empty.
+ * with no positive `sharedAt` as shared at `now`, an `ownerOrigin` that is not
+ * an origin is kept empty, and a `toProfile` whose `space` is not a well-formed
+ * DID is left out.
  */
 function admissibleOffer(event: OfferEvent, now: number): Offer | undefined {
   const space = trimmedText(event?.space, OFFER_ADDRESS_MAX_LENGTH);
@@ -361,6 +376,10 @@ function admissibleOffer(event: OfferEvent, now: number): Offer | undefined {
     ? Math.floor(claimed)
     : Math.floor(now);
   const ownerOrigin = trimmedText(event?.ownerOrigin, OFFER_ADDRESS_MAX_LENGTH);
+  const toProfile = trimmedText(
+    event?.toProfile?.space,
+    OFFER_ADDRESS_MAX_LENGTH,
+  );
   return {
     kind: trimmedText(event?.kind, OFFER_KIND_MAX_LENGTH) || OFFER_DEFAULT_KIND,
     id: trimmedText(event?.id, OFFER_ID_MAX_LENGTH) || `${space}@${sharedAt}`,
@@ -371,6 +390,7 @@ function admissibleOffer(event: OfferEvent, now: number): Offer | undefined {
     from,
     sharedAt,
     receivedAt: Math.floor(now),
+    ...(isWellFormedDID(toProfile) ? { toProfile: { space: toProfile } } : {}),
   };
 }
 

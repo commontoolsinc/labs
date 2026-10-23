@@ -77,6 +77,21 @@ export const NO_CANDIDATES = new Map<string, string>([
   ["acl set:capability", "a capability string, composed rather than chosen"],
   ["piece search:query", "a search query"],
   ["profile create:name", "a display name the caller is coining"],
+  ["profile rename:name", "the same"],
+  // A profile's space DID: the profiles are the caller's own, listed by
+  // `cf profile list`, and reading them takes a connection completion never
+  // opens.
+  ["profile rename:space", "a profile space DID, from `cf profile list`"],
+  ["profile restore:space", "the same"],
+  // `cf profile list` leaves out the profile this one attests, so nothing
+  // the caller can list names it.
+  [
+    "profile attest-name:space",
+    "the space of a profile whose name is unattested",
+  ],
+  ["profile retire:space", "the same"],
+  ["profile set-picture:space", "the same"],
+  ["profile get-picture:space", "the same"],
   [
     "piece follow:origin",
     "a source origin the caller names, such as a `system:` ref",

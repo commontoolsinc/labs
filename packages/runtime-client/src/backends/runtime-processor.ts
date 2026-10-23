@@ -550,6 +550,9 @@ export function browserWorkerParamsFromInitializationData(
     ...(data.cfcReadOnExceed !== undefined
       ? { cfcReadOnExceed: data.cfcReadOnExceed }
       : {}),
+    ...(data.preferredProfileSpace !== undefined
+      ? { preferredProfileSpace: data.preferredProfileSpace }
+      : {}),
     ...(data.cfcTrustConfig !== undefined
       ? { cfcTrustConfig: data.cfcTrustConfig }
       : {}),
@@ -857,6 +860,7 @@ export function securityContextFrom(
     cfcFlowLabels: data.cfcFlowLabels,
     cfcReadMaxConfidentiality: data.cfcReadMaxConfidentiality,
     cfcReadOnExceed: data.cfcReadOnExceed,
+    preferredProfileSpace: data.preferredProfileSpace,
     cfcTrustConfig: data.cfcTrustConfig,
     renderDeclassificationPolicy: data.renderDeclassificationPolicy,
     renderConfidentialityCeiling: data.renderConfidentialityCeiling,

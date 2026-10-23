@@ -2,8 +2,9 @@
  * Home's shared-space collection. Registration retains the first accepted
  * route; explicit membership choices compare the revision the user observed,
  * and so does a removal. A retitle refreshes an entry's display title and
- * nothing else. Handler results describe the action, while the catalog
- * carries membership.
+ * nothing else. Registration also records which of the person's profiles
+ * acts in the space, once, beside the catalog. Handler results describe the
+ * action, while the catalog and those records carry membership.
  */
 
 import {
@@ -13,6 +14,8 @@ import {
   isWellFormedDID,
   toSchema,
   type Writable,
+  type WriteAuthorizedBy,
+  type WritePolicyAnyOf,
 } from "commonfabric";
 
 /** Collection membership, independent of access to the space. */
@@ -46,13 +49,42 @@ export interface SharedSpaceOfferReceipt {
   space: string;
   host: string;
   kind: string;
+
+  /**
+   * Why the profile the offer's registration named was not recorded as the
+   * one acting in the space, when it was not: Home records another profile
+   * for the space, or holds a record it cannot read (`profile`), or the
+   * profile is not one Home lists (`unknown-profile`).
+   */
+  profileConflict?: SharedSpaceProfileConflict;
 }
+
+/** Why a registration did not record the profile it named. */
+export type SharedSpaceProfileConflict = "profile" | "unknown-profile";
 
 /** A collection keyed by space DID and receipts keyed by sender and offer ID. */
 export interface SharedSpaceCatalog {
   entries: Record<string, SharedSpaceEntry>;
   offers: Record<string, SharedSpaceOfferReceipt>;
 }
+
+/**
+ * Which of the person's profiles acts in one social space: the profile's own
+ * space, which identifies it. It belongs to the space's membership, filed
+ * under the space as the space's entry is, and so outlasts any root the space
+ * has.
+ */
+export interface SharedSpaceProfileRecord {
+  space: string;
+  profile: string;
+}
+
+/**
+ * Home's records of the profile acting in each social space, keyed by the
+ * space's DID. The validating reader selects every stored field, for the
+ * reason {@link SharedSpaceCatalogStorage} gives.
+ */
+export type SharedSpaceProfileStorage = Record<string, any>;
 
 /** A target whose root, access, and kind the registering application vetted. */
 export interface SharedSpaceRegistration {
@@ -63,12 +95,30 @@ export interface SharedSpaceRegistration {
   since?: number;
   initialState?: SharedSpaceMembership;
   offer?: { from: string; id: string };
+
+  /**
+   * The space DID of the person's profile that acts in the space, recorded
+   * when Home records none for the space. A recorded profile is never
+   * replaced.
+   */
+  profile?: string;
 }
 
-/** Registration's outcome, independent of subsequent membership changes. */
+/**
+ * Registration's outcome, independent of subsequent membership changes. A
+ * conflict over the route or the offer wrote nothing. A conflict over the
+ * profile registered the space all the same, and `registration` says whether
+ * that admitted a new entry or found one.
+ */
 export type SharedSpaceRegistrationResult =
   | { status: "registered" | "existing"; space: string }
-  | { status: "conflict"; reason: "host" | "kind" | "offer" };
+  | { status: "conflict"; reason: "host" | "kind" | "offer" }
+  | {
+    status: "conflict";
+    reason: SharedSpaceProfileConflict;
+    space: string;
+    registration: "registered" | "existing";
+  };
 
 /** A membership action's outcome, carried by its normal handler receipt. */
 export type SharedSpaceMembershipResult =
@@ -114,6 +164,36 @@ export type SharedSpaceCatalogStorage = Record<string, any>;
 /** The catalog's writable binding, held by Home and its handlers. */
 export interface SharedSpaceCatalogState {
   catalog: Writable<SharedSpaceCatalogStorage>;
+}
+
+/**
+ * What a binding of {@link registerSharedSpace} holds: the catalog, and, to
+ * record the profile a registration names, Home's records of the profile
+ * acting in each space and Home's `profiles` list.
+ */
+export interface SharedSpaceRegistrationState extends SharedSpaceCatalogState {
+  sharedSpaceProfiles?: Writable<SharedSpaceProfileStorage>;
+  profiles?: Cell<Cell<unknown>[]>;
+}
+
+/**
+ * What a binding of {@link removeSharedSpace} holds: the catalog, and Home's
+ * records of the profile acting in each space, which lose the removed
+ * space's record with its entry.
+ */
+export interface SharedSpaceRemovalState extends SharedSpaceCatalogState {
+  sharedSpaceProfiles?: Writable<SharedSpaceProfileStorage>;
+}
+
+/**
+ * Where a registration naming a profile records it: Home's records of the
+ * profile acting in each space, and what returns the spaces of the profiles
+ * Home lists, among which the named profile must be. A registration naming
+ * no profile reads neither.
+ */
+export interface SharedSpaceProfileRecorder {
+  records: Writable<SharedSpaceProfileStorage>;
+  listed: () => readonly (string | undefined)[];
 }
 
 /** Returns the offer identity shared by all collection consumers. */
@@ -170,6 +250,50 @@ export function isSharedSpaceCatalog(
     return plainObject(entry) && entry.host === receipt.host &&
       entry.kind === receipt.kind;
   });
+}
+
+/**
+ * Whether `value` is a readable record of the profile acting in `space`:
+ * one filed under that space, naming a profile by a well-formed DID. Extra
+ * fields are retained.
+ */
+export function isSharedSpaceProfileRecord(
+  value: unknown,
+  space: string,
+): value is SharedSpaceProfileRecord {
+  return plainObject(value) && value.space === space &&
+    isWellFormedDID(value.profile);
+}
+
+/**
+ * Whether `value` has the shape Home's records of the profile acting in each
+ * space take: a record keyed by space, whose values may each be readable or
+ * not ({@link isSharedSpaceProfileRecord}).
+ */
+export function isSharedSpaceProfileStorage(
+  value: unknown,
+): value is Record<string, unknown> {
+  return plainObject(value);
+}
+
+/**
+ * Reads Home's records of the profile acting in each space, refusing an
+ * unavailable or malformed value. A single unreadable record leaves the rest
+ * readable, so it is returned as it is stored.
+ *
+ * @throws When `records` holds something other than a record of records.
+ */
+function readSharedSpaceProfiles(
+  records: Cell<SharedSpaceProfileStorage>,
+): Record<string, unknown> {
+  const value = records.get();
+  if (!isSharedSpaceProfileStorage(value)) {
+    throw new Error(
+      "The records of the profile acting in each social space are " +
+        "unavailable or malformed.",
+    );
+  }
+  return value;
 }
 
 /** Whether a value has the record shape a catalog accepts. */
@@ -251,7 +375,8 @@ function normalizeRegistration(
     typeof value.host !== "string" || !boundedString(value.kind, 32) ||
     (value.initialState !== undefined && !membership(value.initialState)) ||
     (value.title !== undefined && !boundedString(value.title, 200, true)) ||
-    (value.since !== undefined && !admissionTime(value.since))
+    (value.since !== undefined && !admissionTime(value.since)) ||
+    (value.profile !== undefined && !isWellFormedDID(value.profile))
   ) throw new TypeError("Invalid shared-space registration.");
   if (value.offer !== undefined) {
     if (!plainObject(value.offer)) {
@@ -277,21 +402,37 @@ function membershipAction(
  * Insert-if-absent: an entry already present for the space keeps its title,
  * membership and revision, and an archived one stays archived. A registration
  * naming an offer records a receipt keyed by the offer's sender and ID, beside
- * the entry, unless one is already there. Returns `conflict` without writing
- * anything when the space is already registered with another host or kind, or
- * the offer's receipt names another target. Call it only from a handler,
- * since a new entry's revision names the handler's event.
+ * the entry, unless one is already there. A registration naming a profile
+ * records it in `recorder.records` as the profile acting in the space, unless
+ * a record is already there, which is never replaced, whether or not the
+ * space already has an entry. Returns `conflict` without writing anything
+ * when the space is already registered with another host or kind, or the
+ * offer's receipt names another target. When the named profile is not among
+ * `recorder.listed` (`unknown-profile`), or the space's profile record names
+ * another profile or is one this writer cannot read (`profile`), it registers
+ * the space and the offer's receipt as it would for a registration naming no
+ * profile, records no profile, writes the reason into a new receipt as its
+ * `profileConflict`, and returns `conflict` with that reason. Call it only
+ * from a handler, since a new entry's revision names the handler's event.
  *
- * @throws When `input` is not a valid registration, or `catalog` holds
- *   something other than a valid catalog.
+ * @throws When `input` is not a valid registration, when it names a profile
+ *   and there is no `recorder`, when `catalog` holds something other than a
+ *   valid catalog, or when `recorder.records` holds something other than a
+ *   record keyed by space.
  */
 export function registerSharedSpaceIn(
   catalog: Writable<SharedSpaceCatalogStorage>,
   input: SharedSpaceRegistration,
+  recorder?: SharedSpaceProfileRecorder,
 ): SharedSpaceRegistrationResult {
   const registration = normalizeRegistration(input);
+  const { space, host, kind, title, offer, profile } = registration;
+  if (profile !== undefined && recorder === undefined) {
+    throw new TypeError(
+      "This registration names a profile, which nothing here can record.",
+    );
+  }
   const stored = readSharedSpaceCatalog(catalog);
-  const { space, host, kind, title, offer } = registration;
   const current = stored.entries[space];
   if (current && current.host !== host) {
     return {
@@ -312,6 +453,21 @@ export function registerSharedSpaceIn(
     (receipt.space !== space || receipt.host !== host ||
       receipt.kind !== kind)
   ) return { status: "conflict", reason: "offer" };
+  let recordProfile: (() => void) | undefined;
+  let profileConflict: SharedSpaceProfileConflict | undefined;
+  if (profile !== undefined && recorder !== undefined) {
+    const held = readSharedSpaceProfiles(recorder.records)[space];
+    if (!recorder.listed().includes(profile)) {
+      profileConflict = "unknown-profile";
+    } else if (
+      held !== undefined &&
+      !(isSharedSpaceProfileRecord(held, space) && held.profile === profile)
+    ) {
+      profileConflict = "profile";
+    } else if (held === undefined) {
+      recordProfile = () => recorder.records.key(space).set({ space, profile });
+    }
+  }
   if (!current) {
     catalog.key("entries", space).set({
       space,
@@ -331,9 +487,38 @@ export function registerSharedSpaceIn(
       space,
       host,
       kind,
+      ...(profileConflict === undefined ? {} : { profileConflict }),
     });
   }
-  return { status: current ? "existing" : "registered", space };
+  recordProfile?.();
+  return profileConflict === undefined
+    ? { status: current ? "existing" : "registered", space }
+    : {
+      status: "conflict",
+      reason: profileConflict,
+      space,
+      registration: current ? "existing" : "registered",
+    };
+}
+
+/**
+ * The spaces of the profiles Home's `profiles` list links, each read off the
+ * link without loading the profile, as `profile-create.tsx` reads them, or
+ * `undefined` for an element that is no link. The pattern-facing `Cell` has
+ * no typed space accessor, so each link is read through `any`.
+ */
+function listedProfileSpaces(
+  profiles: Cell<Cell<unknown>[]>,
+): (string | undefined)[] {
+  const links = profiles.get();
+  return (Array.isArray(links) ? links : []).map((link) => {
+    try {
+      // deno-lint-ignore no-explicit-any
+      return (link as any)?.getAsNormalizedFullLink?.()?.space;
+    } catch {
+      return undefined;
+    }
+  });
 }
 
 // Retain every event field for validation, including linked payloads whose
@@ -342,16 +527,28 @@ const eventSchema = toSchema<Record<string, any>>();
 
 /**
  * Registers an admitted space without changing any existing membership, as
- * {@link registerSharedSpaceIn} does.
+ * {@link registerSharedSpaceIn} does, recording the profile it names in
+ * `sharedSpaceProfiles`, which must be one of the profiles `profiles` lists.
+ * A binding missing either throws for a registration naming a profile.
  */
 export const registerSharedSpace = handler<
   SharedSpaceRegistration,
-  SharedSpaceCatalogState,
+  SharedSpaceRegistrationState,
   SharedSpaceRegistrationResult
 >(
   eventSchema,
-  toSchema<SharedSpaceCatalogState>(),
-  (input, { catalog }) => registerSharedSpaceIn(catalog, input),
+  toSchema<SharedSpaceRegistrationState>(),
+  (input, { catalog, sharedSpaceProfiles, profiles }) =>
+    registerSharedSpaceIn(
+      catalog,
+      input,
+      sharedSpaceProfiles === undefined || profiles === undefined
+        ? undefined
+        : {
+          records: sharedSpaceProfiles,
+          listed: () => listedProfileSpaces(profiles),
+        },
+    ),
 );
 
 /**
@@ -474,7 +671,9 @@ export function retitleSharedSpaceIn(
  * the revision its caller observed, so a membership choice made since is never
  * lost, and only when no offer receipt names the space: removing such an entry
  * alone leaves an invalid receipt, and removing the receipt as well forgets the
- * offer that it refuses to replay. Removal grants and revokes no access.
+ * offer that it refuses to replay. It removes the record of the profile acting
+ * in the space from `sharedSpaceProfiles` with the entry. Removal grants and
+ * revokes no access.
  *
  * The rest of a safe undo is the caller's, since only the caller knows it:
  * - remove only entries it can show it registered itself;
@@ -487,12 +686,12 @@ export function retitleSharedSpaceIn(
  */
 export const removeSharedSpace = handler<
   SharedSpaceRemoval,
-  SharedSpaceCatalogState,
+  SharedSpaceRemovalState,
   SharedSpaceRemovalResult
 >(
   eventSchema,
-  toSchema<SharedSpaceCatalogState>(),
-  (removal, { catalog }) => {
+  toSchema<SharedSpaceRemovalState>(),
+  (removal, { catalog, sharedSpaceProfiles }) => {
     if (
       !plainObject(removal) || !isWellFormedDID(removal.space) ||
       !boundedString(removal.expectedRevision, 320)
@@ -510,16 +709,49 @@ export const removeSharedSpace = handler<
         receipt.space === removal.space
       )
     ) return { status: "conflict", reason: "offer" };
+    const records = sharedSpaceProfiles === undefined
+      ? undefined
+      : readSharedSpaceProfiles(sharedSpaceProfiles);
     // Writing the entries without this one deletes its slot and leaves the
     // others unwritten. `undefined` written at the slot itself would be stored
     // as its value, which the validating reader refuses.
-    catalog.key("entries").set(
-      Object.fromEntries(
-        Object.entries(stored.entries).filter(([space]) =>
-          space !== removal.space
-        ),
-      ),
-    );
+    catalog.key("entries").set(without(stored.entries, removal.space));
+    if (records !== undefined && Object.hasOwn(records, removal.space)) {
+      sharedSpaceProfiles?.set(without(records, removal.space));
+    }
     return { status: "removed", space: removal.space };
   },
 );
+
+/** `record` without its value for `key`. */
+function without<T>(record: Record<string, T>, key: string): Record<string, T> {
+  return Object.fromEntries(
+    Object.entries(record).filter(([each]) => each !== key),
+  );
+}
+
+/**
+ * Home's records of the profile acting in each social space, with their
+ * write policy. `registerSharedSpace`, which adds a record, and
+ * `removeSharedSpace`, which takes one out with its space's entry, write
+ * them and no other handler does. The policy on each record gates adding,
+ * replacing or taking out a record, and the policy on the whole gates the
+ * structural changes the record policy misses, for the reason
+ * `TrustedProfileList` gives for a list. Neither asks for a gesture, so any
+ * pattern that reaches Home's streams can record a profile for a space that
+ * has none by registering the space; what the policies rule out is a write
+ * by anything else.
+ */
+export type TrustedSharedSpaceProfiles = WritePolicyAnyOf<
+  Record<
+    string,
+    WritePolicyAnyOf<SharedSpaceProfileRecord, [
+      WriteAuthorizedBy<unknown, typeof registerSharedSpace>,
+      WriteAuthorizedBy<unknown, typeof removeSharedSpace>,
+    ]>
+  >,
+  [
+    WriteAuthorizedBy<unknown, typeof registerSharedSpace>,
+    WriteAuthorizedBy<unknown, typeof removeSharedSpace>,
+  ]
+>;
