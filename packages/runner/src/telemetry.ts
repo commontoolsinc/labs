@@ -264,6 +264,24 @@ export type RuntimeTelemetryMarker = {
   space: string;
   entryIdentity: string;
 } | {
+  // Emitted as the pattern manager begins a cold compile of the verified
+  // source closure rooted at `entryIdentity`, resolving fabric imports in
+  // `space`. Every space loading that identity while it runs shares it.
+  type: "pattern.cold-compile.start";
+  space: string;
+  entryIdentity: string;
+} | {
+  // Emitted as a by-identity load in `space` joins a cold compile of
+  // `entryIdentity` already in flight instead of compiling on its own.
+  type: "pattern.cold-compile.join";
+  space: string;
+  entryIdentity: string;
+} | {
+  // Emitted as a cold compile settles, whichever way it settled. Pairs
+  // one-to-one with `pattern.cold-compile.start`.
+  type: "pattern.cold-compile.complete";
+  entryIdentity: string;
+} | {
   // Emitted each time the scheduler decides an action's materializer
   // registration, on subscribe and on resubscribe. `writes` are the compacted
   // write envelopes the action is registered under, as `space/id/path`
