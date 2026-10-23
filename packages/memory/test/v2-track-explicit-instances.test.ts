@@ -120,6 +120,13 @@ describe("v2-track-explicit-instances", () => {
           [...tracked.state.entities.values()].map((entity) => entity.id)
             .toSorted(),
         ).toEqual(["of:root", "of:y"]);
+        // The traversal of Alice's instance recorded the root under the
+        // session's own key as well, attributed to Alice's instance, so
+        // that record went with it.
+        expect(
+          [...tracked.state.tracker.values(`${space}/${serviceKey}/of:root`)]
+            .map((selector) => selector.schema),
+        ).toEqual([true]);
       });
     });
   });

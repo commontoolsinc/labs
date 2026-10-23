@@ -87,12 +87,17 @@ holds it.
 
 The server attributes each document it tracks to what reached it: a watch's
 root to the watch, a document reached through a link to the document holding
-the link. A removal releases the removed watches' roots. A document whose last
-reaching watch or link lets go leaves the session, together with what only it
-reached, and the answer names each in `removes`. A document another watch or
-link still reaches stays, and nothing is walked for it. A watch whose root a
-permissive watch already covered was never walked; when that cover goes, the
-server walks the root on its own, so the documents it names stay delivered.
+the link, a schema document to the document whose selector or `cfc` envelope
+names it, and the schema closure a delivered document's content refers to, to
+that document. A removal releases the removed watches' roots. A document whose
+last reaching watch, link, or schema reference lets go leaves the session,
+together with what only it reached, and the answer names each in `removes`. A
+document another watch or link still reaches stays. One that lost a record and
+keeps another is walked again under the records it keeps once the retirements
+have settled, so that what only the lost record's walk reached is released; a
+document that lost nothing is not walked. A watch whose root a permissive watch
+already covered was never walked; when that cover goes, the server walks the
+root on its own, so the documents it names stay delivered.
 
 A write that edits a link away retracts in the same way: the refresh that
 re-walks the changed document releases what the walk no longer reaches, and the

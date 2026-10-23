@@ -1263,8 +1263,8 @@ Semantics:
 
 - each listed watch is removed from the session watch set; an id the set does
   not hold is ignored
-- the server recomputes the union of watched entities from the watches that
-  remain
+- the server releases what the removed watches alone reached (section 4.6.3):
+  the union of watched entities is what the watches that remain reach
 - the response carries the difference between what the session has been
   delivered and the new union: an entity the union no longer covers is sent
   in `removes`, and an entity it still covers is not resent unless it changed

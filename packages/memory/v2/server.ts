@@ -6849,6 +6849,7 @@ export class Server {
             cacheKeyForEntity(entry.branch, entry.id, entry.scopeKey),
             entry,
           );
+          changedInterests.add(toDirtyKey(entry.id, entry.scopeKey));
         }
         for (const docKey of result.removed) retract(docKey);
         for (const key of result.changedMisses) {

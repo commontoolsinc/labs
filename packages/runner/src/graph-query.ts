@@ -295,15 +295,13 @@ export class GraphQueryWalk {
         },
       undefined,
       undefined,
+      // A record is reported under the key the tracker holds it under,
+      // the derived one, so that its attribution names a record that
+      // exists; the override reaches the referrer side alone.
       onTrackedDoc === undefined
         ? undefined
         : (key, selector, source, kind) =>
-          onTrackedDoc(
-            this.#keyOverrides.get(key) ?? key,
-            selector,
-            referrerKeyOf(source),
-            kind,
-          ),
+          onTrackedDoc(key, selector, referrerKeyOf(source), kind),
     );
     // The manager serves stored documents and nothing is handed back to be
     // written elsewhere, so an inline array element is walked where it is

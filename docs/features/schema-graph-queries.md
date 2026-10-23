@@ -67,13 +67,16 @@ caller keeps them, walks them under a schema, and records what it reached.
   that site for what gates enabling it.
 - A walk reports each tracker record it makes, or finds the tracker already
   holding, to the `onTrackedDoc` hook of its options, with the document whose
-  walk needed it: the document holding the link that was followed, or the
+  walk needed it: the document holding the link that was followed, the
+  document whose schema or `cfc` envelope named a schema document, or the
   referrer `visit()` was given for a root. `memory` attributes its tracker
   with that, so a document nothing reaches any more can leave a session's
   result (`../specs/memory-v2/04-protocol.md`, section 4.6.3). A visit a
-  memory server makes to a document it already tracks asks for a `rewalk`,
-  which traverses the document itself even where the shared memo holds it,
-  so that its links are reported again.
+  memory server's incremental passes make to a document it already tracks,
+  for a root added again, a covered root walked on its own, or a document
+  walked again for its attributions, asks for a `rewalk`, which traverses
+  the document itself even where the shared memo holds it, so that its links
+  are reported again; a graph's first evaluation does not.
 - The rest is vocabulary the two sides name in common:
   `MapSetStringToPathSelectors` (the tracker), `schemaTrackerCoversSelector`
   and `coveringSelector` (whether a tracker already covers a selector, and
