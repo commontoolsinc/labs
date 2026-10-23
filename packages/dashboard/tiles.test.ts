@@ -287,6 +287,12 @@ Deno.test("labs and loom ci trust: a cancelled run is left out of the share only
     { annotations: REASONS.stopped, color: "var(--status-bad)" },
     { annotations: [RUNNER_NOTICE], color: "var(--status-bad)" },
     { annotations: [], color: "var(--status-bad)" },
+    // GitHub's annotations may carry no message.
+    { annotations: [{ message: null }], color: "var(--status-bad)" },
+    {
+      annotations: [{ message: null }, ...REASONS.replaced],
+      color: "var(--status-unknown)",
+    },
   ];
   for (const { tile, repo } of cases) {
     for (const { annotations, color } of reasons) {
@@ -374,12 +380,17 @@ Deno.test("labs ci trust: annotations GitHub does not return fail the collection
     {
       name: "answer that is not an array",
       answer: NO_JOBS,
-      message: "is not an array of objects each with a string `message`",
+      message: "is not an array of objects each with a string or null",
     },
     {
       name: "annotation without a message",
+      answer: [{}],
+      message: "is not an array of objects each with a string or null",
+    },
+    {
+      name: "annotation whose message is not a string",
       answer: [{ message: 7 }],
-      message: "is not an array of objects each with a string `message`",
+      message: "is not an array of objects each with a string or null",
     },
   ];
   for (const { name, answer, message } of cases) {

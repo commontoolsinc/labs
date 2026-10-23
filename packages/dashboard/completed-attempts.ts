@@ -36,14 +36,16 @@ const REPLACED_ANNOTATION = "Canceling since a higher priority waiting request f
 /** How many annotations GitHub returns on each page of a check run's list. */
 const ANNOTATIONS_PER_PAGE = 100;
 
-/** Whether `value` is an annotation with a string `message`. */
-function isAnnotation(value: unknown): value is { readonly message: string } {
-  return isObjectNotArray(value) && typeof value.message === "string";
-}
-
 /** Whether `value` is a string or `null`. */
 function isStringOrNull(value: unknown): value is string | null {
   return value === null || typeof value === "string";
+}
+
+/** Whether `value` is an annotation with a string or `null` `message`. */
+function isAnnotation(
+  value: unknown,
+): value is { readonly message: string | null } {
+  return isObjectNotArray(value) && isStringOrNull(value.message);
 }
 
 /** How many of an attempt's jobs ran, and how many were skipped. */
@@ -237,7 +239,7 @@ export class CompletedAttempts {
    * of its check run's annotations starts with REPLACED_ANNOTATION, requesting
    * each page of the annotations only until one does. Rejects when a request
    * fails, or when GitHub returns a page that is not an array of objects each
-   * with a string `message`.
+   * with a string or `null` `message`.
    */
   async #replaced(job: ListedJob): Promise<boolean> {
     for (let page = 1;; page++) {
@@ -249,12 +251,12 @@ export class CompletedAttempts {
       if (!Array.isArray(annotations) || !annotations.every(isAnnotation)) {
         throw new Error(
           `GitHub check run ${job.id} annotations page ${page} is not an ` +
-            "array of objects each with a string `message`",
+            "array of objects each with a string or null `message`",
         );
       }
       if (
         annotations.some((annotation) =>
-          annotation.message.startsWith(REPLACED_ANNOTATION)
+          annotation.message?.startsWith(REPLACED_ANNOTATION)
         )
       ) {
         return true;
