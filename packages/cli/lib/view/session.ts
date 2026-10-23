@@ -14,7 +14,7 @@ import type {
   TokenClass,
   ViewMode,
 } from "./model.ts";
-import type { Key } from "./keys.ts";
+import type { Key, MouseButton } from "./keys.ts";
 import { cpLen } from "./ansi.ts";
 import {
   blameKey,
@@ -25,6 +25,7 @@ import {
 import {
   blameColumnWidth,
   type DialogButton,
+  dialogButtonAt,
   type DialogState,
   DIFF_MARGIN_WIDTH,
   type DiffAnnotation,
@@ -136,6 +137,12 @@ export interface BlameLoad {
 interface BlameEntry {
   readonly load: BlameLoad;
   lines: readonly BlameLine[] | null;
+}
+
+/** A prompt button the mouse went down on, by its prompt and shortcut letter. */
+interface HeldButton {
+  readonly mode: Mode;
+  readonly hotkey: string;
 }
 
 type Mode =
@@ -454,6 +461,14 @@ export class Session {
    * button row. Space and Enter activate it; it is reset to the default button
    * each time a prompt opens. */
   #dialogFocus = 0;
+
+  /**
+   * The button the mouse went down on and has not yet come up from, drawn pushed
+   * until it does; null when none is held. A button its prompt no longer shows
+   * is no longer held, as when Close replaces Abort once a push ends, or an
+   * interrupt opens the save prompt.
+   */
+  #held: HeldButton | null = null;
 
   /** What the active save prompt does on confirm. */
   #savePromptThen: "quit" | null = null;
@@ -1222,7 +1237,7 @@ export class Session {
     const focus = this.#dialogFocus < 0
       ? -1
       : clamp(this.#dialogFocus, 0, Math.max(0, dialog.buttons.length - 1));
-    return { ...dialog, focus };
+    return { ...dialog, focus, pushed: this.#indexOfHeld(dialog, this.#held) };
   }
 
   /** Rest the current prompt's Tab focus on its default button, called as each
@@ -1373,6 +1388,14 @@ export class Session {
     this.pendingReveal = null;
     this.pendingPush = null;
     this.expireMessage();
+    // Every key but the release itself lets go of a held button.
+    const held = this.#held;
+    this.#held = null;
+    if (key.mouse) {
+      this.#chord = null;
+      this.#handleClick(key.mouse, held, beforeButtonAction);
+      return;
+    }
     if (key.name === "wheel-up" || key.name === "wheel-down") {
       this.#chord = null;
       this.#handleWheel(key.name === "wheel-up" ? -1 : 1);
@@ -4082,6 +4105,37 @@ export class Session {
     }
     if (index < 0 || index >= n) return; // an unbound key leaves the prompt up
     this.#activateButton(dialog, index, beforeButtonAction);
+  }
+
+  /**
+   * Focuses a prompt's button and holds it pushed when the mouse goes down on
+   * it, and activates it when the mouse comes up on the button it went down on.
+   * The mouse going down or coming up anywhere else does nothing.
+   */
+  #handleClick(
+    mouse: MouseButton,
+    held: HeldButton | null,
+    beforeButtonAction?: () => void,
+  ): void {
+    const dialog = this.#promptDialog();
+    if (!dialog) return;
+    const index = dialogButtonAt(this, dialog, mouse.x, mouse.y);
+    if (index < 0) return;
+    if (mouse.down) {
+      this.#dialogFocus = index;
+      this.#held = { mode: this.#mode, hotkey: dialog.buttons[index].hotkey };
+    } else if (index === this.#indexOfHeld(dialog, held)) {
+      this.#activateButton(dialog, index, beforeButtonAction);
+    }
+  }
+
+  /**
+   * Returns the index of `held` among the buttons of `dialog`, the prompt now
+   * up, or -1 when that prompt does not show it.
+   */
+  #indexOfHeld(dialog: DialogState, held: HeldButton | null): number {
+    if (held?.mode !== this.#mode) return -1;
+    return dialog.buttons.findIndex((b) => b.hotkey === held.hotkey);
   }
 
   /** Capture a prompt button's pushed frame, let the driver paint it, then run

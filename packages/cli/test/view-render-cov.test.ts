@@ -1,10 +1,17 @@
 import { assert, assertEquals } from "@std/assert";
-import { bgCode, fgCode, parseDocument, SAMPLE } from "./view-helpers.ts";
+import {
+  bgCode,
+  cellOf,
+  fgCode,
+  parseDocument,
+  SAMPLE,
+} from "./view-helpers.ts";
 import { ui } from "../lib/view/theme.ts";
 import {
   _internal,
   cursorScreenPos,
   dialogBox,
+  dialogButtonAt,
   type DialogState,
   type Match,
   overlayBox,
@@ -637,6 +644,71 @@ Deno.test("dialog: a button-less dialog still frames its body", () => {
   const joined = rows.map(stripAnsi).join("\n");
   assert(joined.includes("Note"), "title");
   assert(joined.includes("Nothing to do."), "body");
+});
+
+Deno.test("dialog: a button is hit exactly where it is drawn, at rest or pushed", () => {
+  const view = baseView({ width: 60, height: 18, color: false });
+  const drawn = (pushed: number) =>
+    renderFrame(parseDocument("x\n"), {
+      ...view,
+      dialog: { ...SAVE_DIALOG, pushed },
+    }).map(stripAnsi);
+  const box = dialogBox(view, SAVE_DIALOG);
+  const atRest = drawn(-1);
+  const buttonRow = atRest.findIndex((row, y) =>
+    y > box.y && y < box.y + box.boxH && row.includes(" Discard ")
+  );
+  // The columns each button's face covers, at rest and pushed.
+  const faces = SAVE_DIALOG.buttons.map((b, i) =>
+    [atRest, drawn(i)].map((rows) => {
+      const from = rows[buttonRow].indexOf(` ${b.label} `);
+      return { from, to: from + b.label.length + 2 };
+    })
+  );
+  for (let y = 0; y < view.height; y++) {
+    for (let x = 0; x < view.width; x++) {
+      const expected = y !== buttonRow
+        ? -1
+        : faces.findIndex((spans) =>
+          spans.some((f) => x >= f.from && x < f.to)
+        );
+      assertEquals(
+        dialogButtonAt(view, SAVE_DIALOG, x, y),
+        expected,
+        `cell ${x}, ${y}`,
+      );
+    }
+  }
+});
+
+Deno.test("dialog: no button is hit where the box has no room to draw it", () => {
+  // Too short for the body and the buttons both: the body is drawn instead.
+  const short = baseView({ width: 60, height: 8, color: false });
+  const dialog = { ...SAVE_DIALOG, body: ["one", "two", "three"] };
+  const rows = renderFrame(parseDocument("x\n"), { ...short, dialog });
+  const { y: top, boxH } = dialogBox(short, dialog);
+  assert(
+    !rows.slice(top, top + boxH).some((row) =>
+      stripAnsi(row).includes("Discard")
+    ),
+    "the box shows no buttons",
+  );
+  for (let y = 0; y < short.height; y++) {
+    for (let x = 0; x < short.width; x++) {
+      assertEquals(dialogButtonAt(short, dialog, x, y), -1, `cell ${x}, ${y}`);
+    }
+  }
+
+  // Too narrow for the button row: Cancel is cut off at the border.
+  const narrow = baseView({ width: 30, height: 18, color: false });
+  const box = dialogBox(narrow, SAVE_DIALOG);
+  const { y } = cellOf(
+    renderFrame(parseDocument("x\n"), { ...narrow, dialog: SAVE_DIALOG }),
+    " Discard ",
+  );
+  const border = box.x + box.boxW - 1;
+  assertEquals(dialogButtonAt(narrow, SAVE_DIALOG, border - 1, y), 2);
+  assertEquals(dialogButtonAt(narrow, SAVE_DIALOG, border, y), -1);
 });
 
 Deno.test("dialog: collapses on a terminal too narrow to frame", () => {
