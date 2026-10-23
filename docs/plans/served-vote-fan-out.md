@@ -356,8 +356,36 @@ Before a push: repo-wide `deno fmt --check`, `deno lint`, `deno task check`,
    - [x] A drain whose event view lags the feed reads the entries document
          from the store under the read-through, rather than awaiting a
          response the space's connection carries nothing on; the send
-         burst, which had stalled in four of six benchmark runs, completes
+         burst on the read-through arm, which had stalled in four of six
+         benchmark runs, completes
          ([read-through record](../history/development/performance/2026-10-22-served-chat-burst-event-view-under-read-through.md)).
+         A rarer stall remains on either arm: one probe room in about a
+         dozen waits for its creator's first join, which the store never
+         receives
+         ([chat record](../history/development/performance/2026-10-23-served-chat-burst-per-session-rows.md)).
+   - [x] One rendered vote, which the bursts do not isolate, on the lunch
+         read-scale benchmark at 296 votes: every accepted plan re-proved
+         each adopted computation's whole producer ancestry once per node,
+         and two memory-server paths ran a full view evaluation per vote, a
+         selection that dropped a delivery root and a flush naming a space
+         whose batch the refresh had already sent. A wake proves each
+         producer once, a dropped root rebuilds the support graphs alone,
+         and a clean flush returns, for a vote of 1.2 to 1.6 s with the flag
+         on in the worker where it was 1.8 to 4.6 s, against 0.64 to 0.76 s
+         with the loop off
+         ([three-realm record](../history/development/performance/2026-10-23-one-served-vote-across-three-realms.md)).
+   - [x] The plan's read index is held per selected producer and keeps a
+         producer's part while its lists recur, and a selection is resolved
+         over the roots the installed one does not deliver: the serving
+         worker's plan from 531 to 307 ms a vote at 296 votes, its render
+         from 130 to 21 ms, the main thread's selection handling from 147
+         to 41 ms, the vote's time unmoved
+         ([plan and selection record](../history/development/performance/2026-10-23-served-vote-plan-and-selection.md)).
+   - [ ] What that record leaves: the browser's runtime worker, busy about a
+         second a vote re-proving, at each committing run's read
+         validation, producers whose basis documents have not changed; and
+         each vote's selection swapping two of its 3,269 roots, which
+         rebuilds every support graph.
    - [ ] What those records leave: the plan's size (548 roots, the same 548
          as inputs, 1,058 producer bases, to each session at each quiescent
          settlement) and a plan per session; a room's creating space running
