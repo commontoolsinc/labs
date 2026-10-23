@@ -2372,7 +2372,9 @@ export class CellImpl<T extends FabricValue>
         }
         {
           const eventId = firedEventId;
+          let fired = false;
           const fire = (): Promise<EventAppendDeliveryOutcome> => {
+            fired = true;
             this.#runtime.trackEventIntent(space, sidecarId, eventId);
             // Read after the tracking call, which installs the overlay when
             // this fire is the first thing the runtime does.
@@ -2510,6 +2512,14 @@ export class CellImpl<T extends FabricValue>
             const callerOnCommit = onCommit;
             onCommit = (echoTx: IExtendedStorageTransaction) => {
               void outcome.then(async (delivery) => {
+                // A send whose transaction did not commit never happened,
+                // and the sender hears nothing of it: the attempt that
+                // commits sends again and reports for itself, so a sender
+                // retrying its edit, as the webhook forwarder does, is told
+                // of the event once.
+                if (!fired) {
+                  return;
+                }
                 // An echo that withdrew aborted without the handler
                 // failing, so its append is reported as a clean one; the
                 // served handling decides the outcome below.

@@ -9,11 +9,16 @@
 
 import type { SessionDemand } from "@commonfabric/memory/v2/server";
 
-/** A session as the cache needs to see it: its id and its principal. */
+/** A session as the cache needs to see it, beside the id it is keyed by. */
 export type SessionOfShare = {
   readonly principal: string | undefined;
 };
 
+/**
+ * The demand share of each space's sessions, read from the server once and
+ * handed out as the same object until the server reports that session's
+ * demand changed.
+ */
 export class DemandShareCache {
   readonly #shares = new Map<string, Map<string, SessionDemand>>();
   /** Per space, the sessions whose share is stale. */

@@ -1930,10 +1930,12 @@ the per-epic implementation notes).
   under "Ordering and failure"), so a successor's writes to the documents the
   predecessor wrote rebase rather than conflict, and a write the sink refuses
   rolls back while the successor's settle is still open, which re-runs what
-  read it before the successor commits. A cycle that ran a lifecycle verb
-  commits inline, since the verb's receipt reads the outcome, and a park with
-  a commit in flight waits for its seals to settle before disposing the
-  runtime.
+  read it before the successor commits. The successor waits the commit out
+  inside its own flush deadline, so a round trip slower than the deadline
+  cuts that settle and grows the next deadline as any cut does. A cycle that
+  ran a lifecycle verb commits inline, since the verb's receipt reads the
+  outcome, and a park with a commit in flight waits for its seals to settle
+  before disposing the runtime.
 - **Current default and planned end state.** Off by default. The end state is
   on under the worker, where the measurement decides it, then the knob and the
   inline arm go.
@@ -1982,8 +1984,9 @@ the per-epic implementation notes).
   it goes; and the events that arrive while a longer settle runs are drained
   together by the next cycle, so one wave carries several events and the
   commit, flush pass, frames and client integrations behind a wave are paid
-  once for all of them. The scheduler still derives from each event as it is
-  drained.
+  once for all of them. The serving runtime's scheduler runs every event it
+  holds ready before one derivation pass, so those events are derived from
+  together as well.
 - **Current default and planned end state.** Off by default: every settle
   takes the base deadline. The end state is a default cap, chosen from the
   vote burst's and the seed's counts of waves, flush passes, frames and

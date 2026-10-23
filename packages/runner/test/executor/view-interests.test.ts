@@ -36,7 +36,7 @@ const reader = (list: () => SessionViewInterest[]) => {
 };
 
 describe("view-interests", () => {
-  it("reads the list once and answers later publishes from what it holds", async () => {
+  it("reads the list once and returns what it holds to later publishes", async () => {
     const cache = new ViewInterestCache();
     const r = reader(() => [interest("a", "did:key:alice")]);
 
@@ -116,6 +116,41 @@ describe("view-interests", () => {
 
     expect(await cache.interestsFor(space, undefined, r.read)).toHaveLength(2);
     expect(r.state.reads).toBe(2);
+  });
+
+  it("reads again after a change noted while a read was in flight", async () => {
+    const cache = new ViewInterestCache();
+    const pending = Promise.withResolvers<SessionViewInterest[]>();
+    const reading = cache.interestsFor(space, undefined, () => pending.promise);
+    cache.noteChanged(space);
+    pending.resolve([interest("a", undefined)]);
+    await reading;
+
+    const r = reader(
+      () => [interest("a", undefined), interest("b", undefined)],
+    );
+    expect(await cache.interestsFor(space, undefined, r.read)).toHaveLength(2);
+    expect(r.state.reads).toBe(1);
+  });
+
+  it("holds the list of the read that started last when two reads settle out of order", async () => {
+    const cache = new ViewInterestCache();
+    const older = Promise.withResolvers<SessionViewInterest[]>();
+    const first = cache.interestsFor(space, undefined, () => older.promise);
+    cache.noteChanged(space);
+    const second = cache.interestsFor(
+      space,
+      undefined,
+      () =>
+        Promise.resolve([interest("a", undefined), interest("b", undefined)]),
+    );
+    expect(await second).toHaveLength(2);
+    older.resolve([interest("a", undefined)]);
+    expect(await first).toHaveLength(1);
+
+    const r = reader(() => []);
+    expect(await cache.interestsFor(space, undefined, r.read)).toHaveLength(2);
+    expect(r.state.reads).toBe(0);
   });
 
   it("ignores a selection for a handle the held list does not carry", async () => {

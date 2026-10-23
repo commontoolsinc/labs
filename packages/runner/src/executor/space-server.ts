@@ -7450,6 +7450,9 @@ export class SpaceServer implements TransactionSealDestination {
       this.#options.retainParkedRuntime !== undefined;
     this.#active = false;
     this.#parkRequested = true;
+    // A tenure activated on this server again starts its first burst at the
+    // base deadline, as one after a quiet loop does.
+    this.#grownFlushDeadlineMs = undefined;
     this.#structureLoadAbort.abort();
     if (wasActive) {
       this.#options.stats.activeSpaces = Math.max(

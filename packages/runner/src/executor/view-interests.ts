@@ -10,10 +10,16 @@
 
 import type { SessionViewInterest } from "@commonfabric/memory/v2";
 
+/**
+ * The view interests of each space's sessions, read from the server once and
+ * held until the server reports a change that can move them.
+ */
 export class ViewInterestCache {
   readonly #interests = new Map<string, SessionViewInterest[]>();
   /** The spaces whose held list may no longer be the server's. */
   readonly #stale = new Set<string>();
+  /** How many reads of each space's list have started. */
+  readonly #reads = new Map<string, number>();
 
   /** Notes that `space`'s interests may have changed. */
   noteChanged(space: string): void {
@@ -57,15 +63,20 @@ export class ViewInterestCache {
       // list read may or may not carry, so it stays noted for the next read;
       // a read that fails leaves the space noted, so the next publish reads
       // again rather than publishing over a list the server has moved on
-      // from.
+      // from. Of two reads in flight at once, the list the later one
+      // started is the one held, whichever settles last.
       this.#stale.delete(space);
+      const started = (this.#reads.get(space) ?? 0) + 1;
+      this.#reads.set(space, started);
       try {
         interests = await read();
       } catch (error) {
         this.#stale.add(space);
         throw error;
       }
-      this.#interests.set(space, interests);
+      if (this.#reads.get(space) === started) {
+        this.#interests.set(space, interests);
+      }
     }
     return excludePrincipal === undefined ? [...interests] : interests.filter((
       interest,

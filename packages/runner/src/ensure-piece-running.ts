@@ -1,3 +1,4 @@
+import { isKeyableObjectOrArray } from "@commonfabric/data-model";
 import { getLogger } from "@commonfabric/utils/logger";
 import type { Cell } from "./cell.ts";
 import {
@@ -73,9 +74,12 @@ async function followResultCellChain(
  * level, in `owner`'s space, other than `owner` and the roots in `visited`,
  * that are not already running. A nested pattern's instance links its inputs
  * into the instance enclosing it, so for one of those this starts the
- * enclosing instance, whose graph sets the nested one up as its child. Each
- * source's own sources start first, so an instance nested more than one level
- * deep starts from the outermost.
+ * enclosing instance, whose graph sets the nested one up as its child; a link
+ * to the enclosing instance's own argument starts it too, for that reason,
+ * though the input it names is current without it. Each source's own sources
+ * start first, so an instance nested more than one level deep starts from
+ * the outermost. An argument whose links cannot be read leaves `owner` to
+ * start on its own, as a source that cannot start does.
  */
 async function startInputSources(
   runtime: Runtime,
@@ -83,7 +87,18 @@ async function startInputSources(
   signal: AbortSignal | undefined,
   visited: Set<string>,
 ): Promise<void> {
-  for (const source of await inputSourcesOf(runtime, owner, signal)) {
+  let sources: NormalizedFullLink[];
+  try {
+    sources = await inputSourcesOf(runtime, owner, signal);
+  } catch (error) {
+    signal?.throwIfAborted();
+    logger.debug("ensure-piece", () => [
+      `Could not read the input sources of ${owner.id}`,
+      error,
+    ]);
+    return;
+  }
+  for (const source of sources) {
     if (visited.has(source.id)) continue;
     visited.add(source.id);
     if (runtime.runner.isRunning(runtime.getCellFromLink(source))) continue;
@@ -121,7 +136,7 @@ async function inputSourcesOf(
     await argument.sync();
     signal?.throwIfAborted();
     const value = argument.getRaw();
-    if (value === null || typeof value !== "object") return [];
+    if (!isKeyableObjectOrArray(value)) return [];
     const sources = new Map<string, NormalizedFullLink>();
     for (const field of Object.values(value)) {
       const link = parseLink(field, argument);

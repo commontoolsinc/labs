@@ -168,6 +168,37 @@ describe("stream-send-origin-transaction", () => {
     expect(runtime.speculationOverlay?.pendingIntentCount).toBe(1);
   });
 
+  it("reports nothing to the sender for an attempt whose transaction did not commit", async () => {
+    // Stands in for the webhook forwarder, whose every `editWithRetry`
+    // attempt sends with the same callbacks: the aborted attempt sent
+    // nothing, so only the one that commits reports its append. Its served
+    // outcome never comes here, with no server to consequence the event.
+    const settled: string[] = [];
+    const delivered: boolean[] = [];
+    const appendedOnce = Promise.withResolvers<void>();
+    for (const commit of [false, true]) {
+      const tx = runtime.edit();
+      sendEvent(
+        stream.withTx(tx),
+        { n: 11 },
+        (settledTx) => settled.push(settledTx.status().status),
+        {
+          onAppended: (delivery) => {
+            delivered.push(delivery.delivered);
+            if (delivery.delivered) appendedOnce.resolve();
+          },
+        },
+      );
+      if (commit) await tx.commit().settled;
+      else tx.abort("the attempt runs again");
+    }
+    await appendedOnce.promise;
+    await runtime.idle();
+    expect(appended).toEqual([{ n: 11 }]);
+    expect(delivered).toEqual([true]);
+    expect(settled).toEqual([]);
+  });
+
   it("adds no pending commit while the sending transaction is open", async () => {
     const tx = runtime.edit();
     stream.withTx(tx).send({ n: 10 });

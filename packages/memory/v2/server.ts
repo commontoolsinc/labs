@@ -714,8 +714,8 @@ const readAclState = (engine: Engine.Engine, space: string): AclState => {
  * The owner of `space` as the access list `engine` stores resolves it: the
  * space itself when its list names it `OWNER`, else the first other concrete
  * `OWNER` in sorted order, and `undefined` for a space whose list is missing
- * or invalid. {@link Server.resolveSpaceOwner} answers with this, and a
- * serving loop holding its own connection to the store reads it directly.
+ * or invalid. {@link Server.resolveSpaceOwner} returns this, and a serving
+ * loop holding its own connection to the store reads it directly.
  */
 export const resolveSpaceOwnerOf = (
   engine: Engine.Engine,
