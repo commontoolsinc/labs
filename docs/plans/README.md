@@ -26,7 +26,7 @@ a record: archive it to `docs/history/plans/` following the procedure in
   carries the served-vote investigation on from where its records leave it:
   the memory server's per-session walk and encode on the main thread, the
   four measurements that decide which change to make, the recipes for taking
-  them, and how the branch's overlapped commit is validated.
+  them, and how the overlapped commit is validated.
 - [The serving loop off the request thread](serving-loop-worker.md) moves the
   server-execution host into a Web Worker of the toolshed process: the worker
   reads the store on its own SQLite connections, sends wave commits and

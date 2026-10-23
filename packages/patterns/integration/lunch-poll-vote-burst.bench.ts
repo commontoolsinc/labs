@@ -36,10 +36,11 @@
  * write at all rather than timing one.
  *
  * Sample count is the weak point, and it is inherent. An iteration takes
- * seconds on a four-core CI host, so a run collects about a dozen samples. The 75th percentile the
- * dashboard trend reads discards only the slowest quarter of those, so a runner
- * that stalls twice moves this line without any code changing. Read it for the
- * shape of a move across several windows, not for one window against the last.
+ * seconds on a four-core CI host, so a run collects about a dozen samples. The
+ * 75th percentile the dashboard trend reads discards only the slowest quarter
+ * of those, so a runner that stalls twice moves this line without any code
+ * changing. Read it for the shape of a move across several windows, not for
+ * one window against the last.
  *
  * The setup — ten Deno workers, ten joins, ten options, and a warm-up burst —
  * runs once at module scope, outside every measurement, because it costs some
@@ -308,10 +309,9 @@ console.error(
 /**
  * The serving loop's side of one burst: how many waves it took and what a
  * wave's phases cost, from the loop's own counters and timing rows, read
- * before and after the burst. The rows are the loop's realm's, so under the
- * worker they are the loop's alone, while on this thread the scheduler rows
- * count the voters' runs as well. Nothing on the OFF arm, which serves
- * nothing.
+ * before and after the burst. The rows are the loop's realm's, and the voters
+ * run in Deno workers of their own, so on either thread they are the serving
+ * runtimes' alone. Nothing on the OFF arm, which serves nothing.
  */
 async function loopCost(run: () => Promise<void>): Promise<string> {
   const rows = [

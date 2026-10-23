@@ -21,11 +21,6 @@ import { patternCoverageCollector } from "@commonfabric/integration/pattern-cove
 import { rowKeyOf } from "@commonfabric/integration/row-key";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import {
-  clearTimingMeasures,
-  getLoggerCountsBreakdown,
-  TIMING_MEASURE_PREFIX,
-} from "@commonfabric/utils/logger";
-import {
   debugVDOMSchema,
   rendererVDOMSchema,
 } from "@commonfabric/runner/schemas";
@@ -94,6 +89,11 @@ import {
   type WorkerResponse,
 } from "./multi-runtime-ipc.ts";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
+import {
+  clearTimingMeasures,
+  getLoggerCountsBreakdown,
+  TIMING_MEASURE_PREFIX,
+} from "@commonfabric/utils/logger";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import { holdWorkerLifetimeLock } from "@commonfabric/utils/worker-lifetime";
 import { authenticatedOwnerFromLabel } from "../../ui/src/v2/components/cf-owner-view/owner-predicate.ts";
@@ -112,6 +112,7 @@ let watchPaths: readonly (readonly (string | number)[])[] = [[]];
  * paths read, and the view's own derivations never run on this client.
  */
 let renderView = false;
+
 let viewMountCancel: (() => void) | undefined;
 let viewMounts = 0;
 
@@ -193,8 +194,8 @@ function addressKey(address: PieceAddress): string {
 }
 
 /**
- * The value `path` reaches inside `value`, reading through any cell met on
- * the way, so a field held as a link resolves to what it links to.
+ * The value `path` reaches inside `value`, reading through every cell along
+ * it, so a field held as a link resolves to what it links to.
  */
 function valueAt(value: unknown, path: readonly (string | number)[]): unknown {
   let current = value;

@@ -1,19 +1,20 @@
 /**
  * Measures a vote burst through five independent browser profiles, ending when
  * every page renders every voter's current swatch for every option. The real
- * poll's profile creation and joins, two warmups, and browser startup are outside
- * the samples. The authoring controller is disposed before browsers open.
+ * poll's profile creation and joins, two warmups, and browser startup are
+ * outside the samples. The authoring controller is disposed before browsers
+ * open.
  *
  * Run with `deno run -A` against a source toolshed and a matching shell build,
  * using `API_URL` and `FRONTEND_URL`. `CF_LUNCH_POLL_VOTERS` and
- * `CF_LUNCH_POLL_OPTIONS` default to five; `CF_LUNCH_POLL_BROWSER_ROUNDS` defaults
- * to three measured rounds. `CF_LUNCH_POLL_BROWSER_OUT` optionally saves the
- * samples, client logger rows, and serving health snapshots as JSON.
+ * `CF_LUNCH_POLL_OPTIONS` default to five; `CF_LUNCH_POLL_BROWSER_ROUNDS`
+ * defaults to three measured rounds. `CF_LUNCH_POLL_BROWSER_OUT` optionally
+ * saves the samples, client logger rows, and serving health snapshots as JSON.
  *
  * This is a separate series from the worker benchmark. It includes browser
- * control preparation and CDP click dispatch, with no intervening settle between
- * a page's clicks. Its endpoint is settled DOM followed by a paint opportunity,
- * not a measurement of pixels presented by a physical display.
+ * control preparation and CDP click dispatch, with no intervening settle
+ * between a page's clicks. Its endpoint is settled DOM followed by a paint
+ * opportunity, not a measurement of pixels presented by a physical display.
  */
 
 import { Identity } from "@commonfabric/identity";
@@ -69,7 +70,10 @@ const colors = ["green", "yellow", "red"] as const;
 const colorOf = (voter: number, option: number, round: number) =>
   colors[(voter + option + round) % colors.length];
 
-/** Checks exact option/name/color rows; a stale color or duplicate cannot pass. */
+/**
+ * Checks exact option, name and color rows; a stale color or a duplicate
+ * cannot pass.
+ */
 async function votesRendered(
   probe: ProbeApi,
   expected: readonly (readonly [string, string, string])[],
@@ -143,6 +147,12 @@ async function clientStats(page: Page): Promise<unknown> {
   });
 }
 
+/**
+ * Times one burst: once every page's runtime is idle, every voter clicks
+ * `round`'s color on every option, and each page is timed until it renders
+ * every vote and two animation frames pass. Returns the slowest page's time,
+ * the driver's own, and each page's.
+ */
 async function burst(
   round: number,
 ): Promise<{ totalMs: number; driverMs: number; clientMs: number[] }> {

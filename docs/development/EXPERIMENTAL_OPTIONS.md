@@ -1996,7 +1996,7 @@ the per-epic implementation notes).
   thread rather than 68 and 7 in the worker rather than 31; on the main
   thread flush passes fall from 76 to 17, session walks from 330 to 75,
   frames from 660 to 202 and each client's runs from 643 to 315, the serving
-  scheduler's own runs do not move, and the browser benchmark's `vote burst 5x5`
+  scheduler's own runs do not move, and the worker benchmark's `vote burst 5x5`
   goes from 5.8 s to 4.7 s on the main thread and 4.6 s to 4.1 s in the
   worker
   ([record](../history/development/performance/2026-10-22-served-vote-wave-costs.md)).

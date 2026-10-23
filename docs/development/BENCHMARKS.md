@@ -865,8 +865,9 @@ that is every page's rendered swatches. A burst ends when every page holds the
 exact option, name and color tuple for every voter on every option, with no
 duplicate row, and two animation frames have passed since the last change, so
 the endpoint is a paint opportunity in every browser rather than a runtime's
-quiescence. The driver's own completion, from the first click's dispatch until
-it has seen every page converge, is reported apart from that headline, and the
+quiescence. Both are timed from the moment every page's runtime is idle, before
+the clicks are prepared and dispatched. The driver's own completion, until it
+has seen every page converge, is reported apart from that headline, and the
 browsers' teardown comes after both and is not timed. Two warmup bursts precede
 the measured rounds.
 
@@ -881,9 +882,10 @@ by hand, against a source toolshed and a shell build whose
 `CF_LUNCH_POLL_BROWSER_OUT` names a JSON file for the samples, every client's
 logger rows and the server's health snapshots, all captured outside the timed
 intervals. The rows a page shows may include that page's own speculation, so a
-converged DOM is not a proof of durable serving coverage; the consequence and
-settle checks run after the timed burst, as the worker benchmark's do. Arms
-compare only within one sitting, for the reason the worker benchmark gives.
+converged DOM is not a proof of durable serving coverage, and the script, unlike
+the worker benchmark, checks none after a burst: the next waits only for every
+page's runtime to go idle. Arms compare only within one sitting, for the reason
+the worker benchmark gives.
 
 ## Rendered lunch-poll read scaling
 

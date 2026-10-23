@@ -75,11 +75,11 @@ import type {
   ServingLoopHandle,
 } from "@commonfabric/runner/executor/serving-worker-host";
 import type { ServingLoopStats } from "@commonfabric/runner/executor/stats";
+import { PatternsRoute } from "@commonfabric/runner/patterns-route.deno";
 import {
   getLoggerCountsBreakdown,
   getTimingStatsBreakdown,
 } from "@commonfabric/utils/logger";
-import { PatternsRoute } from "@commonfabric/runner/patterns-route.deno";
 import { terminateWorker } from "@commonfabric/utils/worker-lifetime";
 import {
   type CommitRejection,

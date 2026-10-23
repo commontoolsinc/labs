@@ -111,9 +111,9 @@ worker installs updates the held interest's generation itself.
 A publish over unchanged interests then asks the server nothing, where the
 request alone waited for the server's thread's turn, however empty the list.
 
-**Lifecycle verbs run in the worker, from a descriptor.** A verb reaches the
-host today as closures over a `PiecesController`. The route sends the verb's
-name and its request instead, and the worker builds the closures from the same
+**Lifecycle verbs run in the worker, from a descriptor.** The route sends a
+verb as its name and its request, on either arm, and whichever thread runs the
+loop builds the verb's closures over a `PiecesController` from the same
 functions in `@commonfabric/piece`'s served lifecycle. The receipt comes back
 as data.
 
