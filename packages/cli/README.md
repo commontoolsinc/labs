@@ -32,9 +32,9 @@ write a link into its `profiles` list, so a profile Home lists may be someone
 else's. A profile is the identity's own when the label on its `name` value
 attests the identity, and no one else, as the principal it represents, which a
 rename through the profile's own `setName` mints for whoever made it. A name
-stored before names were labeled carries no label at all, and a profile with
-such a name is the identity's own when the access list of the profile's space
-names the identity as `OWNER`. A name attested to anyone else is never the
+stored before names were labeled carries no label at all, as does one written
+other than through `setName`, and a profile with such a name is the identity's
+own when the access list of the profile's space names the identity as `OWNER`. A name attested to anyone else is never the
 identity's, whoever owns the space. A profile Home lists that is not the
 identity's own is not listed, no row is marked `current` when `#profile` answers
 with such a profile, and every command below that names a profile by its space

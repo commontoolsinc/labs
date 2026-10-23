@@ -387,9 +387,9 @@ space using the runtime's configured routing.
 Home also records which of the person's profiles acts in each space, as part of
 their membership in it: `sharedSpaceProfiles` holds one record per space, keyed
 by the space's DID, naming the profile by its own space DID. A registration
-that names a profile records it when Home records none for the space: an
-explicit join or socialize names the profile the person acts as, and the share
-intake names the profile an offer's `toProfile` addresses. Home never replaces a
+that names a profile records it when Home records none for the space: a host
+that joins a space or makes one social names the profile the person acts as,
+and the share intake names the profile an offer's `toProfile` addresses. Home never replaces a
 record; a registration naming another profile is a `conflict`, and so is one
 naming a profile Home does not list. The record outlasts the space's root, and
 archive and restore leave it, while `removeSharedSpace` takes it out with the

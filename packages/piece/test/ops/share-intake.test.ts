@@ -1180,6 +1180,17 @@ describe("share-intake", () => {
       });
     });
 
+    it("is not registered, and is logged, when its `toProfile` names no `space`", async () => {
+      const space = await offeredSpace({ [sender]: "WRITE" });
+
+      expect(await refuse(offerOf(space, "bad profile", { toProfile: {} })))
+        .toEqual({
+          ids: ["barrier"],
+          logged: 1,
+          decisions: ["offer-malformed"],
+        });
+    });
+
     it("is not registered, and is logged, when its `toProfile` is not a record", async () => {
       const space = await offeredSpace({ [sender]: "WRITE" });
 

@@ -285,8 +285,9 @@ it is.
 
 A registration naming `profile` records it when Home records no profile for
 the space, whether the registration admits a new entry or names one already
-there. That is how an explicit join or socialize records the profile it acts
-as, and how the share intake records the profile an offer's `toProfile` names
+there. A host that joins a space, or makes one social, records the profile the
+person acts as there by naming it in its registration, and the share intake
+records the profile an offer's `toProfile` names
 ([the private inbox](private-inbox.md#the-share-intake)). Repeating the
 profile Home records is a replay: the result is the one the registration
 would have without it, and nothing about the record changes. A registration
@@ -326,9 +327,11 @@ which holds, for each space the catalog has an entry for, one of:
 | `retired` | The record names `profile`, a profile the person retired |
 
 A space the catalog has no entry for has no key in `spaces`. None of the four
-states means the person's default profile: a host that needs to know which
-profile acts in a space and reads `unrecorded`, `unreadable`, or `retired`
-waits for the person, or for a registration, to settle it. A host reads it as
+states means the person's default profile. A host that needs to know which
+profile acts in a space does not act in it as any profile while it reads
+`unrecorded`, `unreadable`, or `retired`. A registration naming a profile
+settles `unrecorded`. Restoring the retired profile settles `retired`. Nothing
+replaces an `unreadable` record, so a space holding one stays unsettled. A host reads it as
 `home.key("sharedSpaces").key("profiles").asSchema(sharedSpaceProfileViewSchema)`,
 and gets an `undefined` value, as for the collection view, until Home has
 produced it.

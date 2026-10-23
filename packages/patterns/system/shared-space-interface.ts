@@ -68,8 +68,8 @@ export type SharedSpaceReceiptView = SharedSpaceUnavailable | {
 
 /**
  * Which of the person's profiles acts in one social space, as Home records
- * it. `unrecorded`: Home records none, as for a space registered before
- * profiles were recorded or by a registration that named none. `unreadable`:
+ * it. `unrecorded`: Home records none, as for a space a registration naming
+ * no profile admitted. `unreadable`:
  * Home holds a record this reader cannot read. `live`: the record names
  * `profile`, one of the person's profiles. `retired`: the record names
  * `profile`, which the person has retired. None of the four means the

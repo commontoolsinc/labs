@@ -109,7 +109,7 @@ export interface CreateProfileDeps {
 // The list read as link cells, never inlined values: a `.get()` that follows
 // each link collapses to `undefined` the moment one element lives in a space
 // this runtime has not loaded, which a freshly created profile's always is.
-// Mirrors `profileLinkListSchema()` in profile-create.tsx.
+// Mirrors `profileLinkListSchema()` in the patterns' profile-links.ts.
 const profileLinkListSchema = {
   type: "array",
   items: { type: "unknown", asCell: ["cell"] },
@@ -532,9 +532,10 @@ function attestsOnly(
  * the value of its `name` carries a label, it is `owner`'s when that label
  * attests `owner`, and no one else, as the principal it represents
  * (`attestsOnly()`), which a write through the profile's own `setName` mints
- * for whoever made it. A name stored before names were labeled carries no
- * label at all, and then the profile is `owner`'s when the access list of its
- * space, read as `ACLManager` reads one, names `owner` as `OWNER`.
+ * for whoever made it. When the value of its `name` carries no label at all,
+ * as a name written other than through `setName` does, the profile is
+ * `owner`'s when the access list of its space, read as `ACLManager` reads
+ * one, names `owner` as `OWNER`.
  *
  * @throws Error when the label, or that access list, cannot be read.
  */

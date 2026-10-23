@@ -517,15 +517,14 @@ export class ShareIntake {
     const row = rowKey(raw);
     if (this.#settled.has(row)) return;
     const receipt = offerIdentity(raw.from, raw.id);
+    const offer = wellFormedOffer(raw);
     if (
       receipts.received.has(receipt) &&
-      !(raw.toProfile !== undefined && typeof raw.space === "string" &&
-        receipts.unrecorded.has(raw.space))
+      !(offer?.profile !== undefined && receipts.unrecorded.has(offer.space))
     ) {
       this.#decide(row, raw, "received");
       return;
     }
-    const offer = wellFormedOffer(raw);
     let refusal: OfferRefusal | undefined;
     let root: Cell<unknown> | undefined;
     try {
@@ -760,7 +759,7 @@ function wellFormedOffer(
   const profile = raw.toProfile === undefined
     ? undefined
     : isObjectNotArray(raw.toProfile)
-    ? raw.toProfile.space
+    ? raw.toProfile.space ?? null
     : null;
   if (
     origin === undefined ||
