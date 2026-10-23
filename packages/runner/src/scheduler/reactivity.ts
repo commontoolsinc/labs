@@ -163,6 +163,7 @@ function sameAddresses(
       left.space !== right.space || left.id !== right.id ||
       left.type !== right.type ||
       normalizeCellScope(left.scope) !== normalizeCellScope(right.scope) ||
+      left.scopeKey !== right.scopeKey ||
       left.path.length !== right.path.length ||
       left.path.some((segment, position) => segment !== right.path[position])
     ) return false;
