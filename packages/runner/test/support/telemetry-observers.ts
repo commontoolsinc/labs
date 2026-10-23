@@ -111,7 +111,7 @@ export function observeColdCompiles(runtime: Runtime): {
   /** Each load that joined a compile already in flight, in order. */
   joins(): readonly ColdCompileSite[];
 
-  /** How many cold compiles have started and not yet settled. */
+  /** How many cold compiles have started and are still joinable. */
   inFlight(): number;
 
   /** Resolves once `count` cold compiles have started. */
@@ -119,6 +119,9 @@ export function observeColdCompiles(runtime: Runtime): {
 
   /** Resolves once `count` loads have joined a compile in flight. */
   whenJoined(count: number): Promise<void>;
+
+  /** Resolves once `count` cold compiles have stopped being joinable. */
+  whenCompleted(count: number): Promise<void>;
 
   /** Stops listening. */
   restore(): void;
@@ -156,6 +159,7 @@ export function observeColdCompiles(runtime: Runtime): {
     inFlight: () => starts.length - completed,
     whenStarted: (count) => once(() => starts.length >= count),
     whenJoined: (count) => once(() => joins.length >= count),
+    whenCompleted: (count) => once(() => completed >= count),
     restore,
   };
 }

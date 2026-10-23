@@ -913,6 +913,8 @@ describe("load by module identity (warm + version-bump recovery)", () => {
       expect(new Set(observed.joins().map((join) => join.space))).toEqual(
         new Set(followerSpaces),
       );
+      // Once every load has settled, the finished compile is gone.
+      await observed.whenCompleted(1);
       expect(observed.inFlight()).toBe(0);
       observed.restore();
       expect(coldLoads("compiled")).toBe(1);
@@ -987,6 +989,7 @@ describe("load by module identity (warm + version-bump recovery)", () => {
         { space, entryIdentity: importer.entryIdentity },
         { space: spaceB, entryIdentity: importer.entryIdentity },
       ]);
+      await observed.whenCompleted(2);
       expect(observed.inFlight()).toBe(0);
       observed.restore();
       expect(coldLoads("compile-failed")).toBe(1);
@@ -1025,6 +1028,80 @@ describe("load by module identity (warm + version-bump recovery)", () => {
       expect(compiles()).toBe(1);
       expect(observed.starts()).toHaveLength(1);
       observed.restore();
+    });
+
+    it("share an evaluation failure rather than compiling again", async () => {
+      const spaceB = (await Identity.fromPassphrase("cold share eval")).did();
+      const fixture = await engine.compileToRecordGraph(PROGRAM);
+      await storeSourceIn(fixture, [space, spaceB]);
+
+      // Evaluation reads no space, so a follower gains nothing by redoing the
+      // compile whose evaluation failed.
+      const observed = observeColdCompiles(runtime);
+      const release = Promise.withResolvers<void>();
+      const compiles = countColdCompiles({ gate: release.promise });
+      engine.evaluateCachedModules = (() =>
+        Promise.reject(
+          new Error("evaluation refused"),
+        )) as typeof engine.evaluateCachedModules;
+      const leader = load(fixture.entryIdentity, space);
+      await observed.whenStarted(1);
+      const follower = load(fixture.entryIdentity, spaceB);
+      await observed.whenJoined(1);
+      release.resolve();
+
+      expect(await leader).toBeUndefined();
+      expect(await follower).toBeUndefined();
+      expect(compiles()).toBe(1);
+      expect(coldLoads("eval-failed")).toBe(2);
+      expect(coldLoads("compile-failed")).toBe(0);
+      expect(observed.starts()).toHaveLength(1);
+      observed.restore();
+    });
+
+    it("keep a finished compile for a load that was in flight when it finished", async () => {
+      const spaceB = (await Identity.fromPassphrase("cold share late")).did();
+      const spaceC = (await Identity.fromPassphrase("cold share later")).did();
+      const fixture = await engine.compileToRecordGraph(PROGRAM);
+      const { entryIdentity } = fixture;
+      await storeSourceIn(fixture, [space, spaceB, spaceC]);
+      const internals = runtime.patternManager.accessForTestingOnly;
+
+      // A load of this identity is in flight in space B (its slot is held by
+      // hand, under the preview key so B's ordinary load below is not its
+      // follower) while space A's load compiles and finishes.
+      const observed = observeColdCompiles(runtime);
+      const compiles = countColdCompiles();
+      const inFlightInB = Promise.withResolvers<undefined>();
+      const slot = `${spaceB}\0${entryIdentity}\0preview`;
+      internals.inProgressByIdentityLoads.set(slot, inFlightInB.promise);
+      expect(typeof await load(entryIdentity, space)).toBe("function");
+      expect(compiles()).toBe(1);
+      expect(observed.inFlight()).toBe(1);
+
+      // B's load checked the in-memory index before A's evaluation filled
+      // it, and reaches the cold path only now: it finds A's result waiting.
+      const forgetEvaluation = () => {
+        internals.addressableByIdentity.delete(entryIdentity);
+        internals.modulesByIdentity.delete(entryIdentity);
+      };
+      forgetEvaluation();
+      expect(typeof await load(entryIdentity, spaceB)).toBe("function");
+      expect(compiles()).toBe(1);
+      expect(coldLoads("shared")).toBe(1);
+      expect(observed.joins()).toEqual([{ space: spaceB, entryIdentity }]);
+
+      // Once the in-flight load settles, the result leaves, and a load that
+      // reaches the cold path afterwards compiles for itself.
+      inFlightInB.resolve(undefined);
+      internals.inProgressByIdentityLoads.delete(slot);
+      await observed.whenCompleted(1);
+      forgetEvaluation();
+      expect(typeof await load(entryIdentity, spaceC)).toBe("function");
+      expect(compiles()).toBe(2);
+      await observed.whenCompleted(2);
+      observed.restore();
+      await runtime.patternManager.flushCompileCacheWrites();
     });
   });
 });

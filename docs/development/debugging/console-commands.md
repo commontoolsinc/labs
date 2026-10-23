@@ -362,9 +362,9 @@ await commonfabric.rt.getLoggerCounts()
 // timing rows `compile-cache/load-by-identity/<outcome>` (hit, entry-absent,
 // entry-unverified, closure-refused, coverage-missing, eval-failed,
 // no-version) and `compile-cache/cold-load/<outcome>` (compiled, shared —
-// the load reused a compile another space had in flight — source-unavailable,
-// compile-failed, eval-failed) name the pattern in each row's `slowest`
-// details
+// the load reused a compile of the same identity already in flight —
+// source-unavailable, compile-failed, eval-failed) name the pattern in each
+// row's `slowest` details
 
 // Counts of the worker's live structures right now: scheduler nodes and
 // queues, storage documents and subscriptions (`storage` is `null`, not zeros,

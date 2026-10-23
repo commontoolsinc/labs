@@ -548,11 +548,16 @@ export class PatternManager {
   /**
    * Cold compiles in flight, keyed by entry identity and compile-cache runtime
    * version. A verified source closure is content-addressed and the bytes it
-   * compiles to are a function of it and the compiler alone, so every space
-   * loading one identity at once shares the leader's compile and SES
-   * evaluation through this map and writes the result back into its own
-   * space, as `#inProgressCompilations` lets program compiles do. Each entry
-   * runs inside a by-identity load registered in `#inProgressByIdentityLoads`,
+   * compiles to are a function of it and the compiler alone, so every load of
+   * one identity that misses while another's compile runs — in another space,
+   * or the preview and ordinary loads of one space — shares the leader's
+   * compile and SES evaluation through this map and writes the result back
+   * into its own space, as `#inProgressCompilations` lets program compiles
+   * do. A finished compile stays until every by-identity load of its identity
+   * that was in flight when it finished has settled, so a load whose storage
+   * reads outlast the compile still finds it; a failed one leaves at once, so
+   * a load retrying on its own behalf never meets it again. Each entry runs
+   * inside a by-identity load registered in `#inProgressByIdentityLoads`,
    * which is where the durability barrier sees it.
    */
   readonly #inProgressColdCompiles = new Map<string, ColdCompilation>();
@@ -2763,13 +2768,17 @@ export class PatternManager {
         }
         return pattern;
       } catch (error) {
-        // A follower whose leader failed outside the deterministic marker — on
-        // a fabric import the leader's space could not resolve, say — compiles
-        // on its own behalf; each pass consumes a settled leader, so the loop
-        // is bounded by the number of concurrent callers. A deterministic
-        // failure is a function of the shared bytes, so it is this space's
-        // failure too.
-        if (inFlight !== undefined && !isDeterministicCompileFailure(error)) {
+        // A follower whose leader failed before its compile step finished, and
+        // outside the deterministic marker — on a fabric import the leader's
+        // space could not resolve, say — compiles on its own behalf; each pass
+        // consumes a settled leader, so the loop is bounded by the number of
+        // concurrent callers. A deterministic failure is a function of the
+        // shared bytes, and evaluation reads no space, so either is this
+        // space's failure too.
+        if (
+          inFlight !== undefined && !compilation.compiled &&
+          !isDeterministicCompileFailure(error)
+        ) {
           continue;
         }
         record(compilation.compiled ? "eval-failed" : "compile-failed");
@@ -2803,33 +2812,54 @@ export class PatternManager {
   /**
    * Helper for `#tryColdLoadByIdentity()`, which compiles and evaluates one
    * verified source closure, registering the work in `#inProgressColdCompiles`
-   * under `key` until it settles.
+   * under `key` for as long as that map's contract keeps it there.
    */
   #startColdCompilation(
     key: string,
     input: ColdCompilationInput,
   ): ColdCompilation {
+    const { entryIdentity } = input;
     const compilation: ColdCompilation = {
       compiled: false,
       promise: this.#compileAndEvaluateClosure(input, () => {
         compilation.compiled = true;
-      }).finally(() => {
-        if (this.#inProgressColdCompiles.get(key) === compilation) {
-          this.#inProgressColdCompiles.delete(key);
-        }
-        this.#runtime.telemetry.submit({
-          type: "pattern.cold-compile.complete",
-          entryIdentity: input.entryIdentity,
-        });
       }),
     };
+    const drop = () => {
+      if (this.#inProgressColdCompiles.get(key) === compilation) {
+        this.#inProgressColdCompiles.delete(key);
+      }
+      this.#runtime.telemetry.submit({
+        type: "pattern.cold-compile.complete",
+        entryIdentity,
+      });
+    };
+    compilation.promise.then(
+      // The loads of this identity in flight now may still be reading their
+      // own space; the result waits for them, then leaves.
+      () => {
+        Promise.allSettled(this.#byIdentityLoadsOf(entryIdentity)).then(drop);
+      },
+      // A failed compile leaves at once, ahead of the followers that awaited
+      // it, so one retrying on its own behalf never meets it again.
+      drop,
+    );
     this.#inProgressColdCompiles.set(key, compilation);
     this.#runtime.telemetry.submit({
       type: "pattern.cold-compile.start",
       space: input.space,
-      entryIdentity: input.entryIdentity,
+      entryIdentity,
     });
     return compilation;
+  }
+
+  /** The by-identity loads of `entryIdentity` in flight now, in every space. */
+  #byIdentityLoadsOf(entryIdentity: string): Promise<unknown>[] {
+    const loads: Promise<unknown>[] = [];
+    for (const [key, load] of this.#inProgressByIdentityLoads) {
+      if (key.split("\0")[1] === entryIdentity) loads.push(load);
+    }
+    return loads;
   }
 
   /**

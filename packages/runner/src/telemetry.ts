@@ -277,7 +277,8 @@ export type RuntimeTelemetryMarker = {
   space: string;
   entryIdentity: string;
 } | {
-  // Emitted as a cold compile settles, whichever way it settled. Pairs
+  // Emitted as a cold compile stops being joinable: it failed, or it finished
+  // and every load that could still have joined it has settled. Pairs
   // one-to-one with `pattern.cold-compile.start`.
   type: "pattern.cold-compile.complete";
   entryIdentity: string;
