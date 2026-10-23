@@ -105,6 +105,7 @@ import {
   resolveCfcSchemaRefs,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
+import { releaseCellConfidentiality } from "@commonfabric/runner/cfc/confidentiality-release";
 import { entityKindOfIdString } from "@commonfabric/runner/entity-kind";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
@@ -4980,21 +4981,54 @@ export async function getCellCfcLabel(
 }
 
 /**
+ * Helper for {@link setCellCfcLabel}, which returns the clauses a lowering
+ * update keeps: its `confidentiality` list, which a lowering requires and
+ * which is the whole of what one says.
+ */
+const confidentialityToKeep = (
+  update: CellCfcLabelUpdate,
+): NonNullable<CellCfcLabelUpdate["confidentiality"]> => {
+  if (update.confidentiality === undefined) {
+    throw new Error(
+      "Lowering confidentiality needs a `confidentiality` list: it names " +
+        "every clause the path keeps.",
+    );
+  }
+  if (update.integrity !== undefined || update.observes !== undefined) {
+    throw new Error(
+      "Lowering confidentiality takes `confidentiality` alone; set " +
+        "`integrity` or `observes` in an update without " +
+        "`--dangerously-allow-lowering-confidentiality`.",
+    );
+  }
+  return update.confidentiality;
+};
+
+/**
  * Update the declared CFC label at one piece data path.
  *
  * This updates the label through the same checked write path used by ordinary
  * runtime operations. The stored schema merge and CFC preparation rules
  * therefore reject changes that weaken confidentiality or strengthen
- * integrity. Raw label-map metadata is never written by the CLI.
+ * integrity, and raw label-map metadata is not written.
+ *
+ * With `lowerConfidentiality`, the update is instead an owner's release
+ * (`releaseCellConfidentiality()`): every confidentiality clause stored at the
+ * path that `input.confidentiality` does not name is removed from every label
+ * there, which rewrites the stored metadata. The input then holds
+ * `confidentiality` alone, naming only clauses the path already stores.
  */
 export async function setCellCfcLabel(
   config: PieceConfig,
   addressedPath: (string | number)[],
   input: unknown,
-  options: { input?: boolean } = {},
+  options: { input?: boolean; lowerConfidentiality?: boolean } = {},
   deps: PieceOperationDependencies = {},
 ): Promise<CfcLabelView | null> {
   const update = parseCellCfcLabelUpdate(input);
+  const keep = options.lowerConfidentiality === true
+    ? confidentialityToKeep(update)
+    : undefined;
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
   const { config: resolvedConfig, path } = await resolvePieceTargetWithPieces(
     config,
@@ -5022,6 +5056,15 @@ export async function setCellCfcLabel(
   if (value === undefined) {
     const location = path.length === 0 ? "<root>" : path.join("/");
     throw new Error(`Cannot set a CFC label on absent path "${location}".`);
+  }
+
+  if (keep !== undefined) {
+    const release = await releaseCellConfidentiality(targetCell, keep);
+    if (release.receipt !== undefined) {
+      await pieces.synced();
+      noteWroteTo(release.receipt.space);
+    }
+    return cfcLabelViewForCommand(targetCell, path);
   }
 
   const { observes: requestedObserves, ...label } = update;

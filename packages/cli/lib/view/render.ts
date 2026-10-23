@@ -1476,7 +1476,10 @@ export interface DialogBox {
 /** Geometry of the centered dialog box, sized to its content (title, body and
  * button row) or to the body's fixed width, and clamped to leave two cells for
  * the drop shadow. */
-export function dialogBox(view: ViewState, dialog: DialogState): DialogBox {
+export function dialogBox(
+  view: Pick<ViewState, "width" | "height">,
+  dialog: DialogState,
+): DialogBox {
   const titleW = cpLen(dialog.title) + 4; // the padding spaces and some fill
   const bodyW = dialog.width ??
     dialog.body.reduce((m, l) => Math.max(m, cpLen(l)), 0);
@@ -1528,6 +1531,37 @@ function layoutButtons(
   return out;
 }
 
+/**
+ * Returns the inner row of a dialog box of `innerH` rows that the buttons are
+ * drawn on, or -1 when the box is too short to show them below the body.
+ */
+function buttonRowOf(dialog: DialogState, innerH: number): number {
+  const row = innerH - 2; // the buttons' shadow takes the last row
+  return row > dialog.body.length ? row : -1;
+}
+
+/**
+ * Returns the index of the button drawn at the zero-based screen cell `x`, `y`,
+ * at rest or pushed one column right, or -1 when no button is drawn there.
+ */
+export function dialogButtonAt(
+  view: Pick<ViewState, "width" | "height">,
+  dialog: DialogState,
+  x: number,
+  y: number,
+): number {
+  const box = dialogBox(view, dialog);
+  const buttonRow = buttonRowOf(dialog, box.innerH);
+  const col = x - box.x - 1;
+  if (
+    box.boxW < 2 || buttonRow < 0 || y !== box.y + 1 + buttonRow ||
+    col >= box.innerW
+  ) return -1;
+  return layoutButtons(dialog.buttons, box.innerW).findIndex((
+    { start, faceW },
+  ) => col >= start && col <= start + faceW);
+}
+
 /** The face index of the highlighted shortcut letter, or -1 if the hotkey does
  * not appear in the label. Offset by one for the leading pad space. */
 function hotkeyFaceIndex(b: DialogButton): number {
@@ -1560,8 +1594,7 @@ function applyDialog(
   );
 
   const layout = layoutButtons(dialog.buttons, innerW);
-  const buttonRow = innerH - 2;
-  const shadowRow = innerH - 1;
+  const buttonRow = buttonRowOf(dialog, innerH);
   // The focused button is drawn highlighted; without an explicit focus, the
   // default button is. A pushed button is drawn mid-press.
   const focusIdx = dialog.focus ??
@@ -1575,7 +1608,7 @@ function applyDialog(
       placeText(cells, dialog.body[bodyIdx], textStyle, dialog.output);
     } else if (i === buttonRow) {
       placeButtonFaces(cells, layout, view.color, panelBg, focusIdx, pushedIdx);
-    } else if (i === shadowRow && view.color) {
+    } else if (buttonRow >= 0 && i === buttonRow + 1 && view.color) {
       placeButtonShadows(cells, layout, panelBg, pushedIdx);
     }
     const rowText = paintIf("║", border, view.color) +
