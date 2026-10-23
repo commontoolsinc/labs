@@ -9508,7 +9508,10 @@ export class SpaceReplica
    * instance with no such report is not asked, nor is one while a frame is
    * being applied, as a read-through on a miss is not; either returns
    * `undefined`, as does a read the store gives no answer to, which leaves
-   * the report standing.
+   * the report standing. A re-read the store answers is a frame like any
+   * other: its storage notification reaches the subscribers before this
+   * returns, and the scheduler's subscriber marks the readers of what changed
+   * and queues a pass, so none of them runs inside the caller.
    */
   readStoreAbsenceAgain(
     address: { id: URI; scope?: CellScope },
