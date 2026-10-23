@@ -180,6 +180,40 @@ describe("sync crossings", () => {
     expect(followedAgain.crossings).toEqual([farLeaf]);
   });
 
+  it("retracts nothing of this space when the record a link into another space made retires, under an id this space holds too", async () => {
+    // The link's target records under the far space's key, which this
+    // space never delivers; the document of the same id here is delivered
+    // on its own watch, and outlives the link.
+    await writer.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:far-leaf",
+        value: { value: { name: "here" } },
+      }],
+    });
+    await server.flushSessions();
+    await reader.watchAddSync([
+      followingWatch("of:crossing-top"),
+      {
+        id: "of:far-leaf",
+        kind: "graph",
+        query: {
+          roots: [{ id: "of:far-leaf", selector: { path: [], schema: false } }],
+        },
+      },
+    ]);
+    const removal = await reader.watchRemoveSync(["of:crossing-top"]);
+    expect(removal.sync.removes.map((entry) => entry.id)).toEqual([
+      "of:crossing-top",
+    ]);
+    const added = await reader.watchAddSync([followingWatch("of:local-top")]);
+    expect(added.sync.upserts.map((entry) => entry.id)).not.toContain(
+      "of:far-leaf",
+    );
+  });
+
   it("delivers a document a same-space link named once it is written, retiring the miss", async () => {
     // The same walk that reports a crossing records a same-space dead-end as
     // a miss attributed to the referrer; the document's arrival retires it

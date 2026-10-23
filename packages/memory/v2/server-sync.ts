@@ -15,11 +15,7 @@ import {
   type SessionSyncUpsert,
   type WatchSpec,
 } from "../v2.ts";
-import {
-  isGraphQueryCoveredByState,
-  toDirtyKey,
-  type TrackedGraphState,
-} from "./query.ts";
+import { toDirtyKey } from "./query.ts";
 
 /**
  * A session's cached snapshot of one tracked doc INSTANCE. `scopeKey` is
@@ -264,29 +260,6 @@ export const unionQuery = (
   branch,
   roots: watches.flatMap((watch) => watch.query.roots),
 });
-
-/**
- * Splits `watches`, all on the branch `state` tracks, by whether `state`
- * already covers every root of theirs. Walking a covered watch would add
- * nothing to the graph, so a caller leaves it unwalked and records it as
- * covered (`SessionState.coveredWatchIds`), and walks the rest.
- */
-export const partitionWatchesByCoverage = (
-  space: string,
-  state: TrackedGraphState,
-  watches: readonly GraphQueryWatchSpec[],
-): { covered: GraphQueryWatchSpec[]; uncovered: GraphQueryWatchSpec[] } => {
-  const covered: GraphQueryWatchSpec[] = [];
-  const uncovered: GraphQueryWatchSpec[] = [];
-  for (const watch of watches) {
-    if (isGraphQueryCoveredByState(space, state, watch.query)) {
-      covered.push(watch);
-    } else {
-      uncovered.push(watch);
-    }
-  }
-  return { covered, uncovered };
-};
 
 export const mergeWatchesById = (
   current: readonly WatchSpec[],
