@@ -1781,6 +1781,20 @@ the per-epic implementation notes).
   record. What stands between it and a default is soak with the posture forced
   on. The end state is on by default, then the session read path for the home
   space goes.
+- **Status on 2026-10-23.** Implemented, off by default. The replica reports
+  which instances the read-through found nothing at
+  (`IStorageProvider.storeReportedAbsent`), and the gate before a piece's run
+  holds no start for a name-sync over such a document, since the name-sync
+  would ask the store the same question. A start held only for defaults such
+  documents owe seeds them without the pre-sync walk. A transaction's read of
+  one still reaches commit unexamined, so a commit that read it absent after
+  the store gained it is refused and the run repeated
+  (`packages/runner/test/engine-read-through.test.ts`). On the served FabriChat
+  send burst no row start ran a pre-sync, where a burst's ran 2 to 24, and the
+  burst's time did not move; over three rooms of the chat probe the serving
+  worker spent 1.1 s in piece-start pre-syncs against 6.2 s without the change,
+  and 7% less time busy. The record is
+  [`docs/history/development/performance/2026-10-23-start-gate-confirmed-absence.md`](../history/development/performance/2026-10-23-start-gate-confirmed-absence.md).
 - **Status on 2026-09-25.** Implemented, off by default. The feed's refresh
   re-reads the stream sidecars the serving loop's own commits touch: admission
   stamps each appended entry's seq and advances the stream's `eventWatermark`
