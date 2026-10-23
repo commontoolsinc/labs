@@ -31,16 +31,23 @@ Only the identity's own profiles are listed. Any code that reaches Home can
 write a link into its `profiles` list, so a profile Home lists may be someone
 else's. A profile is the identity's own when the label on its `name` value
 attests the identity, and no one else, as the principal it represents, which a
-rename through the profile's own `setName` mints for whoever made it. A name
-stored before names were labeled carries no label at all, as does one written
-other than through `setName`, and a profile with such a name is the identity's
-own when the access list of the profile's space names the identity as `OWNER`. A
-name attested to anyone else is never the identity's, whoever owns the space. A
-profile Home lists that is not the identity's own is not listed, no row is
-marked `current` when `#profile` answers with such a profile, and every command
-below that names a profile by its space refuses it. A label or an access list
-that cannot be read fails the listing, or the command, rather than being taken
-for someone else's.
+rename through the profile's own `setName` mints for whoever made it. A profile
+Home lists that is not the identity's own is not listed, no row is marked
+`current` when `#profile` answers with such a profile, and every command below
+that names a profile by its space refuses it. A label that cannot be read fails
+the listing, or the command, rather than being taken for someone else's.
+
+A name stored before names were labeled carries no label at all, so a profile
+with such a name is not listed until its owner attests it.
+`cf profile attest-name <space>` does that for the profile Home lists in
+`<space>`: it accepts the stored name, unchanged, under the profile's own owner
+policy for its name, as the identity running the command, as
+`cf profile repair-name-protection` does once its inspection is reviewed, and
+the name's value is then labeled as that identity's. It attests whatever name is
+stored, so name a space that holds your own profile; `cf profile list` does not
+list it. It refuses a name attested to anyone else, a profile whose name policy
+names another owner, and a retired profile, and says so, changing nothing, for a
+name already attested to the identity.
 
 `cf profile get-picture <space> <file>` writes the bytes of the picture of the
 profile that lives in `<space>` to `<file>`, or to standard output when `<file>`

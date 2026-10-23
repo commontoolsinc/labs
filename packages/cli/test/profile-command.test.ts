@@ -14,6 +14,7 @@ import { decode } from "@commonfabric/utils/encoding";
 import {
   dataUrlByteLength,
   profile,
+  profileAttestNameAction,
   type ProfileCommandDeps,
   profileCreateAction,
   profileGetPictureAction,
@@ -74,7 +75,10 @@ type Target = ProfileTargetConfig & {
   keepCurrent?: true;
 };
 
-function stubDeps(wish: WishReadResult = { result: null }): {
+function stubDeps(
+  wish: WishReadResult = { result: null },
+  attested: "attested" | "already" = "attested",
+): {
   deps: ProfileCommandDeps;
   creates: ProfileCreateConfig[];
   reads: WishReadConfig[];
@@ -89,6 +93,10 @@ function stubDeps(wish: WishReadResult = { result: null }): {
   };
   return {
     deps: {
+      attestProfileName: (config) => {
+        targets.push(config);
+        return Promise.resolve(attested);
+      },
       createProfile: (config) => {
         creates.push(config);
         return Promise.resolve(CREATED);
@@ -271,6 +279,48 @@ describe("cf profile command actions", () => {
         expect(targets[0].space).toBe(key.did);
         expect(targets[0].profileSpace).toBe(CREATED.space);
         expect(JSON.parse(out)).toEqual({ restored: CREATED.space });
+      } finally {
+        await Deno.remove(key.path);
+      }
+    });
+  });
+
+  describe("profileAttestNameAction()", () => {
+    it("attests the name of the profile in the space named, from the identity's home", async () => {
+      const key = await makeTempKeyFile();
+      try {
+        const { deps, targets } = stubDeps();
+        const out = await captureStdout(() =>
+          profileAttestNameAction(
+            { apiUrl: "http://127.0.0.1:8000", identity: key.path, json: true },
+            CREATED.space,
+            deps,
+          )
+        );
+        expect(targets).toHaveLength(1);
+        expect(targets[0].space).toBe(key.did);
+        expect(targets[0].profileSpace).toBe(CREATED.space);
+        expect(JSON.parse(out)).toEqual({
+          attested: CREATED.space,
+          already: false,
+        });
+      } finally {
+        await Deno.remove(key.path);
+      }
+    });
+
+    it("says so when the name was already attested", async () => {
+      const key = await makeTempKeyFile();
+      try {
+        const { deps } = stubDeps({ result: null }, "already");
+        const out = await captureStdout(() =>
+          profileAttestNameAction(
+            { apiUrl: "http://127.0.0.1:8000", identity: key.path },
+            CREATED.space,
+            deps,
+          )
+        );
+        expect(out).toContain("already attested");
       } finally {
         await Deno.remove(key.path);
       }

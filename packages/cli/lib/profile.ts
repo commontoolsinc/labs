@@ -20,7 +20,6 @@
 import type { CellScope, JSONSchema } from "@commonfabric/api";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
-  ACLManager,
   type Cell,
   cellRuntime,
   getMetaLink,
@@ -37,6 +36,7 @@ import { exactPrincipalAttestations } from "@commonfabric/runner/cfc/represents-
 
 import { canonicalAddress } from "./callable.ts";
 import { loadPieces, type SpaceConfig } from "./piece.ts";
+import { profileNameProtection } from "./profile-name-protection.ts";
 import { buildActionEvent } from "./trusted-action-event.ts";
 
 /**
@@ -411,8 +411,9 @@ function pictureBytes(value: unknown): Uint8Array | undefined {
  * (`loadProfileCandidates()`) that are the identity's own: a retired
  * profile, or one whose document is absent, is not listed, and neither is
  * one that is not the identity's (`isOwnProfile()`): one whose `name` is
- * attested to anyone else, or carries no label and lives in a space whose
- * access list does not name the identity as `OWNER`. Any code that reaches
+ * attested to anyone else, or carries no label, as a name stored before
+ * names were labeled does, until its owner attests it
+ * (`attestProfileName()`). Any code that reaches
  * Home can write a link into its `profiles` list, so a profile Home lists may
  * be someone else's. The one `#profile` answers with is marked `current`,
  * which no listed profile is when `#profile` answers with a profile that is
@@ -422,9 +423,8 @@ function pictureBytes(value: unknown): Uint8Array | undefined {
  * started, and no profile runs.
  *
  * @throws Error when a listed profile failed to load, or the label on its
- * `name`, or the access list of its space where that name carries no label,
- * cannot be read, since leaving it out would report a profile that could not
- * be read as one that is not there or is not the identity's.
+ * `name` cannot be read, since leaving it out would report a profile that
+ * could not be read as one that is not there or is not the identity's.
  */
 export async function listProfiles(
   config: SpaceConfig,
@@ -528,39 +528,48 @@ function attestsOnly(
 }
 
 /**
- * Whether `profile`, a profile Home lists, is the identity `owner`'s own. When
- * the value of its `name` carries a label, it is `owner`'s when that label
- * attests `owner`, and no one else, as the principal it represents
- * (`attestsOnly()`), which a write through the profile's own `setName` mints
- * for whoever made it. When the value of its `name` carries no label at all,
- * as a name written other than through `setName` does, the profile is
- * `owner`'s when the access list of its space, read as `ACLManager` reads
- * one, names `owner` as `OWNER`.
+ * What the label on the value of a profile's `name` says of whose the name
+ * is: `own` when it attests the owner, and no one else, as the principal the
+ * name represents (`attestsOnly()`), which a write through the profile's own
+ * `setName` mints for whoever made it; `unattested` when the value carries
+ * no label at all, as a name stored before names were labeled, or written
+ * other than through `setName`, does; and `foreign` for any other label.
+ */
+type NameAttestation = "own" | "unattested" | "foreign";
+
+/**
+ * What the label on the value of the `name` of `profile`, a profile Home
+ * lists, says of whose it is, for `owner` (`NameAttestation`).
  *
- * @throws Error when the label, or that access list, cannot be read.
+ * @throws Error when the label cannot be read.
+ */
+async function nameAttestation(
+  profile: Cell<unknown>,
+  owner: string,
+): Promise<NameAttestation> {
+  await profile.asSchema(profileFieldsSchema).sync();
+  const label = valueLabel(profile.key("name"));
+  return label === undefined
+    ? "unattested"
+    : attestsOnly(label, owner)
+    ? "own"
+    : "foreign";
+}
+
+/**
+ * Whether `profile`, a profile Home lists, is the identity `owner`'s own: the
+ * label on the value of its `name` attests `owner`, and no one else
+ * (`nameAttestation()`). A profile whose name carries no label, or whose
+ * name another principal set, is not `owner`'s; `attestProfileName()` has
+ * its owner attest a name that carries none.
+ *
+ * @throws Error when the label cannot be read.
  */
 async function isOwnProfile(
   profile: Cell<unknown>,
   owner: string,
 ): Promise<boolean> {
-  await profile.asSchema(profileFieldsSchema).sync();
-  const label = valueLabel(profile.key("name"));
-  if (label !== undefined) return attestsOnly(label, owner);
-  const { space } = profile.getAsNormalizedFullLink();
-  let acl;
-  try {
-    acl = await new ACLManager(cellRuntime(profile), space).get();
-  } catch (error) {
-    throw new Error(`Cannot read the access list of ${space}.`, {
-      cause: error,
-    });
-  }
-  if (acl === null) {
-    throw new Error(`Cannot read the access list of ${space}: it has none.`);
-  }
-  return Object.entries(acl).some(([user, capability]) =>
-    user === owner && capability === "OWNER"
-  );
+  return await nameAttestation(profile, owner) === "own";
 }
 
 /** What the profile commands that act on one profile need. */
@@ -573,16 +582,19 @@ export interface ProfileTargetConfig extends SpaceConfig {
  * The profile of `config.identity` whose space is `config.profileSpace`, as
  * a link from the list `root`, the home root, holds under `profiles`.
  * `retired` says whether the profile must be one the home retired, or one it
- * has not.
+ * has not. `accepted` names what the label on its name may say of it
+ * (`nameAttestation()`), only that it is the identity's own by default.
  *
- * @throws Error when the home lists no such profile, when the profile it
- * lists there is not the identity's own (`isOwnProfile()`) or what says so
- * cannot be read, or when its retirement is not what `retired` asks for.
+ * @throws Error when the home lists no such profile, when the label on the
+ * name of the profile it lists there says something `accepted` does not
+ * name, or cannot be read, or when its retirement is not what `retired` asks
+ * for.
  */
 async function listedProfile(
   root: Cell<unknown>,
   config: ProfileTargetConfig,
   retired: boolean,
+  accepted: readonly NameAttestation[] = ["own"],
 ): Promise<Cell<unknown>> {
   await root.sync();
   await root.key("retiredProfiles").resolveAsCell().sync();
@@ -592,10 +604,15 @@ async function listedProfile(
       `No profile of ${config.space} lives in ${config.profileSpace}.`,
     );
   }
-  if (!await isOwnProfile(profile, config.space)) {
+  const attestation = await nameAttestation(profile, config.space);
+  if (!accepted.includes(attestation)) {
     throw new Error(
-      `The profile in ${config.profileSpace} is not one of ` +
-        `${config.space}'s own.`,
+      attestation === "unattested"
+        ? `The name of the profile in ${config.profileSpace} carries no ` +
+          `label, so it is not one of ${config.space}'s own until its ` +
+          `owner attests it with \`cf profile attest-name\`.`
+        : `The profile in ${config.profileSpace} is not one of ` +
+          `${config.space}'s own.`,
     );
   }
   if (isRetired(root, config) !== retired) {
@@ -718,6 +735,9 @@ interface ProfileSend {
  * handlers exist, and waits for the commits to reach storage. The home root
  * is read and not started. `doing` names the act in a failure's message.
  *
+ * `accepted` is what the label on the profile's name may say of it, as
+ * `listedProfile()` takes it.
+ *
  * @throws Error when the home lists no such profile or retired it, when a
  * commit fails, or when `landed`, given the profile's stored name, picture
  * and avatar once the commits have reached storage, says the writes did not
@@ -732,6 +752,7 @@ async function sendToProfile(
     stored: { name?: string; picture?: unknown; avatar?: string },
   ) => boolean,
   deps: CreateProfileDeps,
+  accepted?: readonly NameAttestation[],
 ): Promise<void> {
   const load = deps.loadPieces ?? loadPieces;
   const home = await load(config);
@@ -745,6 +766,7 @@ async function sendToProfile(
       root.withTx().asSchema(undefined),
       config,
       false,
+      accepted,
     );
     const resolved = profile.withTx();
     await resolved.sync();
@@ -801,6 +823,68 @@ export async function renameProfile(
     (stored) => stored.name === name,
     deps,
   );
+}
+
+/**
+ * Has the identity attest the name of its profile whose space is
+ * `config.profileSpace`, when the value of that name carries no label at
+ * all, as one stored before names were labeled does. It accepts the stored
+ * name, unchanged, under the profile's own owner policy for its name, as the
+ * identity running the call, the way `cf profile repair-name-protection`
+ * does once its inspection is reviewed (`profileNameProtection()`), and the
+ * value is then labeled as that identity's. The profile is then one of the
+ * identity's own (`listProfiles()`). It accepts whatever name is stored, so
+ * its caller names a space it knows holds its own profile. Returns
+ * `attested`, or `already` for a name already attested to the identity,
+ * which it leaves as it is.
+ *
+ * @throws Error when the home lists no such profile or has retired it, when
+ * the name is attested to anyone else, when the profile's name policy names
+ * another owner or a layout the repair does not support, or when the name is
+ * still unattested afterward.
+ */
+export async function attestProfileName(
+  config: ProfileTargetConfig,
+  deps: CreateProfileDeps = {},
+): Promise<"attested" | "already"> {
+  const load = deps.loadPieces ?? loadPieces;
+  const home = await load(config);
+  let cell: string;
+  try {
+    const root = await home.getDefaultPattern(false);
+    if (root === undefined) {
+      throw new Error(`${config.space} has no home, so it has no profiles.`);
+    }
+    const profile = await listedProfile(
+      root.withTx().asSchema(undefined),
+      config,
+      false,
+      ["own", "unattested"],
+    );
+    if (await nameAttestation(profile, config.space) === "own") {
+      return "already";
+    }
+    const link = profile.withTx().resolveAsCell().getAsNormalizedFullLink();
+    cell = canonicalAddress({ space: link.space, id: link.id, scope: "space" });
+  } finally {
+    await home.dispose();
+  }
+  const inspection = await profileNameProtection({ ...config, cell }, load);
+  await profileNameProtection(
+    { ...config, cell, expectedInspection: inspection.inspection },
+    load,
+  );
+  if (
+    !(await listProfiles(config, deps)).some((each) =>
+      each.space === config.profileSpace
+    )
+  ) {
+    throw new Error(
+      `Attesting the name of profile ${config.profileSpace} committed, but ` +
+        "the name is still unattested.",
+    );
+  }
+  return "attested";
 }
 
 /**

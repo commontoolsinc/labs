@@ -1,6 +1,6 @@
 /**
- * `cf profile`: create, list, rename, picture, retire, restore, locate, or
- * inspect and repair a person's profiles. The create path is the CLI
+ * `cf profile`: create, list, rename, picture, attest, retire, restore,
+ * locate, or inspect and repair a person's profiles. The create path is the CLI
  * equivalent of the shell's create form; `lib/profile.ts` says how it stands
  * in for that form's gesture.
  */
@@ -12,6 +12,7 @@ import { parseCellSelectionOptions } from "../lib/cell-selection.ts";
 import { cliText } from "../lib/cli-name.ts";
 import { getDidFromFile } from "../lib/identity.ts";
 import {
+  attestProfileName,
   createProfile,
   type ListedProfile,
   listProfiles,
@@ -43,6 +44,7 @@ export interface ProfileCommandOptions {
 
 /** Injectable effects so the action bodies are unit-testable in-process. */
 export interface ProfileCommandDeps {
+  attestProfileName: typeof attestProfileName;
   createProfile: typeof createProfile;
   listProfiles: typeof listProfiles;
   renameProfile: typeof renameProfile;
@@ -53,6 +55,7 @@ export interface ProfileCommandDeps {
 }
 
 const defaultDeps: ProfileCommandDeps = {
+  attestProfileName,
   createProfile,
   listProfiles,
   renameProfile,
@@ -304,6 +307,27 @@ export async function profileRenameAction(
     options.json
       ? { renamed: profileSpace, name: trimmed }
       : `Renamed profile ${profileSpace} to "${trimmed}"`,
+    { json: !!options.json },
+  );
+}
+
+/** The `cf profile attest-name <space>` action body. */
+export async function profileAttestNameAction(
+  options: ProfileCommandOptions,
+  profileSpace: string,
+  deps: ProfileCommandDeps = defaultDeps,
+): Promise<void> {
+  setQuietMode(!!options.quiet);
+  const outcome = await deps.attestProfileName({
+    ...(await connection(options)),
+    profileSpace,
+  });
+  render(
+    options.json
+      ? { attested: profileSpace, already: outcome === "already" }
+      : outcome === "already"
+      ? `The name of profile ${profileSpace} was already attested to you`
+      : `Attested the name of profile ${profileSpace}`,
     { json: !!options.json },
   );
 }
@@ -564,6 +588,28 @@ the profile's own name handler.`,
           await profileRenameAction(options, space, name);
         },
       ),
+  )
+  .command(
+    "attest-name",
+    connected(
+      cliText(
+        `Attest the name of the profile that lives in space <space> as yours,
+when the name carries no label, as a name stored before names were labeled
+does: the stored name is accepted, unchanged, under the profile's own owner
+policy for its name, as you. Until then the profile is not listed as yours,
+and the other commands refuse it. It attests whatever name is stored, so name
+a space you know holds your profile. A name attested to anyone else is
+refused.`,
+      ),
+    )
+      .arguments("<space:string>")
+      .example(
+        cliText(`cf profile attest-name did:key:z6Mk… -i ./ada.key -a <url>`),
+        "Attest an older profile's name.",
+      )
+      .action(async (options: ProfileCommandOptions, space: string) => {
+        await profileAttestNameAction(options, space);
+      }),
   )
   .command(
     "get-picture",

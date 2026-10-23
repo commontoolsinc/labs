@@ -83,6 +83,12 @@ export const NO_CANDIDATES = new Map<string, string>([
   // opens.
   ["profile rename:space", "a profile space DID, from `cf profile list`"],
   ["profile restore:space", "the same"],
+  // `cf profile list` leaves out the profile this one attests, so nothing
+  // the caller can list names it.
+  [
+    "profile attest-name:space",
+    "the space of a profile whose name is unattested",
+  ],
   ["profile retire:space", "the same"],
   ["profile set-picture:space", "the same"],
   ["profile get-picture:space", "the same"],
