@@ -68,7 +68,8 @@ export function expandClientMessageLabels(message: unknown): unknown {
 
 /**
  * Detects tables requiring commit-label negotiation. A number at a whole-field
- * position without its table is stored data, which commit admission refuses;
+ * position without its table is stored data, which commit admission refuses in
+ * a label map the commit changes;
  * numeric application values and numeric components inside labels are ordinary data.
  */
 export function hasClientMessageLabelMetadata(message: unknown): boolean {

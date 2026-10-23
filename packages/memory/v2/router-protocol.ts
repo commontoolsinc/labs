@@ -328,7 +328,12 @@ export class RouterAssembler {
   }
 }
 
-/** Yields bounded records around a body already owned by an endpoint. */
+/**
+ * Yields bounded records around a body already owned by an endpoint. Only a
+ * router's private request header carries `requestOrdinal`; the router adds it
+ * when it forwards a request, and refuses one on a public header, so the SDK
+ * and a toolshed's responses omit it.
+ */
 export function* routerRecords(
   route: Record<string, unknown>,
   payload: string | Uint8Array,

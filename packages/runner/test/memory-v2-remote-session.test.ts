@@ -1865,6 +1865,20 @@ describe("WebSocketTransport failure signaling", () => {
     });
   });
 
+  it("counts no message lost before its socket opens", async () => {
+    await withTransport(async (transport, socket) => {
+      const send = transport.send("abc");
+      socket().readyState = DrivableWebSocket.CLOSED;
+      socket().dispatchEvent(new Event("close"));
+
+      await expect(send).rejects.toThrow();
+      expect(transport.getSizes()).toMatchObject({
+        messagesSent: 0,
+        bytesSent: 0,
+      });
+    });
+  });
+
   it("counts a streamed message once in `messagesSent` and every record in `bytesSent`", async () => {
     const space = (await Identity.fromPassphrase("streaming-sizes")).did();
     await withTransport(async (transport, socket) => {

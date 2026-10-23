@@ -30,7 +30,10 @@ export function compressSessionSyncLabels(sync: unknown): unknown {
     : sync;
 }
 
-/** Validates references and returns a deeply frozen expanded sync. */
+/**
+ * Validates references and expands them. A sync that carried a dictionary is
+ * returned deeply frozen; one without is returned as it was.
+ */
 export function expandSessionSyncLabels(sync: SessionSync): SessionSync;
 export function expandSessionSyncLabels(sync: unknown): unknown;
 export function expandSessionSyncLabels(sync: unknown): unknown {

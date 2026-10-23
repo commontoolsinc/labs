@@ -8,7 +8,14 @@
 
 import { assertEquals, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
-import { applyCommit, close, type Engine, open, read } from "../v2/engine.ts";
+import {
+  applyCommit,
+  close,
+  type Engine,
+  evictDocumentCacheEntries,
+  open,
+  read,
+} from "../v2/engine.ts";
 import {
   CODEMIRROR_CHANGESET_CODEC,
   encodeMemoryBoundary,
@@ -1731,6 +1738,100 @@ Deno.test("refuses a document whose CFC label map holds a numeric whole-field la
       path: "/cfc/labelMap/entries/0/label",
       value: { confidentiality: ["repaired"], integrity: [] },
     }]);
+  });
+});
+
+Deno.test("keeps a document stored with a numeric label writable while a write leaves its label map as stored", async () => {
+  await withEngine((engine) => {
+    const inline = { confidentiality: ["secret"], integrity: [] };
+    const document = (
+      version: number,
+      ...labels: (number | typeof inline)[]
+    ) => ({
+      value: { n: 1 },
+      cfc: {
+        version,
+        labelMap: {
+          version: 1,
+          entries: labels.map((label, i) => ({ path: [`f${i}`], label })),
+        },
+      },
+    });
+    let localSeq = 1;
+    const write = (operation: Record<string, unknown>) =>
+      applyCommit(engine, {
+        sessionId: "s:a",
+        commit: commit(localSeq++, { operations: [operation as never] }),
+      });
+    const id = "of:stored-numeric-label";
+    const cid = `cid:${taggedHashStringOf({ n: 1 })}`;
+    for (const target of [id, cid]) {
+      write({ op: "set", id: target, value: document(1, inline) });
+      // Rewritten in place to stand for a number stored before commit
+      // admission refused one.
+      engine.database.prepare(
+        `UPDATE revision SET data = :data WHERE id = :id`,
+      ).run({ data: encodeMemoryBoundary(document(1, 3)), id: target });
+    }
+    evictDocumentCacheEntries(engine, Number.MAX_SAFE_INTEGER);
+    // Writes that leave the label map as stored are admitted: a set of the
+    // content-addressed document as stored, a set that changes only other
+    // fields, and a metadata patch beside the label map.
+    write({ op: "set", id: cid, value: document(1, 3) });
+    write({ op: "set", id, value: document(2, 3) });
+    write({
+      op: "patch",
+      id,
+      patches: [{ op: "replace", path: "/cfc/version", value: 3 }],
+    });
+    // A write that changes the label map is checked whole, the stored
+    // number included.
+    for (
+      const operation of [
+        { op: "set", id, value: document(4, 3, inline) },
+        {
+          op: "patch",
+          id,
+          patches: [{
+            op: "add",
+            path: "/cfc/labelMap/entries/-",
+            value: { path: ["f1"], label: inline },
+          }],
+        },
+      ]
+    ) {
+      assertThrows(
+        () => write(operation),
+        ProtocolError,
+        "numeric CFC label-map label",
+      );
+    }
+    // Within one commit, a set is compared with what an earlier operation
+    // staged: here a repair, so the number the set restores is refused.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(localSeq++, {
+            operations: [
+              {
+                op: "patch",
+                id,
+                patches: [{
+                  op: "replace",
+                  path: "/cfc/labelMap/entries/0/label",
+                  value: inline,
+                }],
+              },
+              { op: "set", id, value: document(5, 3) },
+            ] as never,
+          }),
+        }),
+      ProtocolError,
+      "numeric CFC label-map label",
+    );
+    // A write that replaces the number repairs the document.
+    write({ op: "set", id, value: document(6, inline) });
   });
 });
 

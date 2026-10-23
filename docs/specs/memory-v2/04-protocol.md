@@ -1122,11 +1122,14 @@ when the commit carries the corresponding dictionary, even under an unsupported
 version, with a missing sibling field, or at a numeric key in a malformed
 `entries` record; it must then resolve through that dictionary. This rule also
 applies at document-rooted patch positions. Without the dictionary the number is
-not transport metadata: the request parses, and commit admission refuses every
+not transport metadata: the request parses, and commit admission refuses a
 resulting document whose whole entry `label` or `path` is a number, including
 one a `move` or `increment` patch produces from application data, because no
 dictionary is stored with a document and a stored number could never be
-resolved.
+resolved. The one exception keeps a document stored with such a number before
+this rule existed writable: admission accepts a resulting document whose
+`cfc.labelMap` equals the one the write replaces, so only a write that changes
+the label map must leave no number in it.
 
 The client compacts a temporary outgoing message before Fabric encoding and
 transport byte/node validation. It retains the original inline commit for

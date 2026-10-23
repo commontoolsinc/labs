@@ -671,6 +671,16 @@ host validates watch mutations and forwards them to the backend without building
 watch-ID sets or reserving mirrored mutations. The backend still maintains the
 functional watches and views that deliver data to sessions.
 
+A mirror holds what the backend has answered. The host hands each request to
+the backend without waiting for the turns before it, so while mirrors are kept
+it dispatches a session's watch mutations, resumptions (`session.open` of an
+existing session) and close one at a time: each waits until the turn of the one
+before it has ended, and then reads or changes the answered mirrors. The infra
+router already holds a session's requests behind its unanswered watch mutation,
+but holds neither a resumption behind a watch mutation nor the reverse, so the
+host rarely waits; while it does, the socket's later requests wait behind it in
+order.
+
 For a quota-free rehearsal, set every quota, including `max_frame_slots` and
 `frameSlots`, in both the router and toolshed policy to `null`. Byte, nesting and
 unambiguous-JSON bounds remain active. Changing only the

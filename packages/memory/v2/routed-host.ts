@@ -1981,6 +1981,9 @@ export class RoutedMemoryHost {
         }>()
         : undefined;
     const closes = new Map<string, string>();
+    // By session, a promise that settles when the turn of the session's last
+    // dispatched watch mutation, resumption or close ends; see `accountingKey`.
+    const accounting = new Map<string, Promise<void>>();
     let chain = Promise.resolve();
     // Retained output pauses reads of new requests and their dispatch at the
     // high mark, half the socket's queued-output bound (half the 8 MiB message
@@ -2409,7 +2412,10 @@ export class RoutedMemoryHost {
       let handedOver = false;
       // The expanded size this body has charged, once the chain reaches it.
       let expanded = 0;
+      // Lets the session's next watch mutation or resumption be dispatched.
+      let settleAccounting: (() => void) | undefined;
       const release = (): void => {
+        settleAccounting?.();
         if (
           refusedRequest !== undefined &&
           dispatchRoutes.get(refusedRequest) === dispatchedRoute
@@ -2668,6 +2674,35 @@ export class RoutedMemoryHost {
         dispatchedRoute = routerRoute(body);
         dispatchRoutes.set(body.requestId, dispatchedRoute);
         refusedRequest = body.requestId;
+        // While quota mirrors are kept, a session's watch mutations,
+        // resumptions and close are dispatched one at a time, each once the
+        // turn of the one before it has ended: each reads or changes the
+        // session's mirrors, which change only when that one is answered. The
+        // router holds a session's requests behind its unanswered watch
+        // mutation, but holds neither a resumption behind a watch mutation nor
+        // the reverse, so this waits rarely. While it waits, this socket's
+        // later requests wait with it, in order. Only the chain's head waits,
+        // so one request at most is waiting for a key.
+        const key = mutations === undefined
+          ? undefined
+          : accountingKey(body, parsed.space);
+        if (key !== undefined) {
+          while (accounting.has(key)) {
+            await accounting.get(key);
+            // The earlier request's answer may have filled the output.
+            if (outputPaused) await awaitOutputCapacity();
+            requireRouted(
+              !failed && socket.readyState === WebSocket.OPEN &&
+                !ticket.link.closed && !ticket.context.closed,
+            );
+          }
+          const settled = Promise.withResolvers<void>();
+          accounting.set(key, settled.promise);
+          settleAccounting = () => {
+            if (accounting.get(key) === settled.promise) accounting.delete(key);
+            settled.resolve();
+          };
+        }
         if (body.type === "session.open") {
           requireRouted(typeof body.principal === "string");
           // The router forwards an open only for a principal it holds, so
@@ -2887,6 +2922,31 @@ export class RoutedMemoryHost {
       });
     });
   }
+}
+
+/**
+ * The session whose quota mirrors `body` reads or changes: a watch
+ * mutation's or a close's, or the one a `session.open` resumes. Undefined for
+ * any other request, and for an open that starts a new session.
+ */
+function accountingKey(
+  body: Record<string, unknown>,
+  space: string,
+): string | undefined {
+  if (
+    body.type === "session.watch.set" || body.type === "session.watch.add" ||
+    body.type === "session.watch.remove" || body.type === "session.close"
+  ) {
+    return typeof body.sessionId === "string"
+      ? `${space} ${body.sessionId}`
+      : undefined;
+  }
+  if (body.type !== "session.open" || !isPlainObject(body.session)) {
+    return undefined;
+  }
+  return typeof body.session.sessionId === "string"
+    ? `${space} ${body.session.sessionId}`
+    : undefined;
 }
 
 /**

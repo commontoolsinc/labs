@@ -446,7 +446,6 @@ export class WebSocketTransport implements MemoryClient.Transport {
       const selection = this.#uploadCredits === undefined
         ? 'fvj1:{"type":"router.transport","version":1}'
         : 'fvj1:{"type":"router.transport","version":1,"uploadCredits":true}';
-      this.#messagesSent++;
       const send = this.#sending.then(async () => {
         const connection = await opening;
         if (this.#socket !== connection.socket) {
@@ -454,6 +453,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
             "Memory websocket changed before transport selection",
           );
         }
+        this.#messagesSent++;
         await this.#write(connection, selection);
       });
       // `#write()` reports a failure on the current socket. A stale selection
@@ -497,7 +497,6 @@ export class WebSocketTransport implements MemoryClient.Transport {
     const streaming = this.#routerStreaming;
     const routedCompression = this.#routedCompression;
     const credits = this.#uploadCredits;
-    this.#messagesSent++;
     const send = this.#sending.then(async () => {
       const connection = await opening;
       const decoded = streaming
@@ -529,6 +528,9 @@ export class WebSocketTransport implements MemoryClient.Transport {
           "Memory websocket changed before send",
         );
       }
+      // Counted as its first frame is handed to `#write`, which counts that
+      // frame's bytes.
+      this.#messagesSent++;
       if (decoded !== undefined && (!control || credits !== undefined)) {
         for (const record of routerRecords(routerRoute(decoded.body), frame)) {
           if (this.#socket !== connection.socket) {
@@ -843,7 +845,6 @@ export class WebSocketTransport implements MemoryClient.Transport {
       }
     }
     const opening = this.#open();
-    this.#messagesSent++;
     const send = this.#sending.then(async () => {
       const connection = await opening;
       if (this.#socket !== connection.socket) {
@@ -851,6 +852,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
           "Memory websocket changed before compression control",
         );
       }
+      this.#messagesSent++;
       await this.#write(
         connection,
         this.#routedMessages

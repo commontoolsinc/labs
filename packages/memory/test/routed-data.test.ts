@@ -639,6 +639,99 @@ async function refusalReasons(run: () => Promise<void>): Promise<string[]> {
 }
 
 /**
+ * A further data socket on `f` whose requests reach the Memory server only
+ * when the test releases them, as on a busy toolshed whose turns are still
+ * running when the router sends more.
+ */
+async function heldTurns(f: Awaited<ReturnType<typeof fixture>>) {
+  const stubs = new DisposableStack();
+  const held: (() => void)[] = [];
+  const entered = new Set<string>();
+  let hold = false;
+  const connect = f.server.connectRouted.bind(f.server);
+  stubs.use(stub(f.server, "connectRouted", (send, ...args) => {
+    const backend = connect(send, ...args);
+    const receive = backend.receive.bind(backend);
+    stubs.use(stub(backend, "receive", async (payload) => {
+      if (hold) {
+        const { requestId } =
+          decodeRoutedFrame(payload, true, FRAME_SLOTS).body;
+        if (typeof requestId === "string") entered.add(requestId);
+        await new Promise<void>((resolve) => held.push(resolve));
+      }
+      await receive(payload);
+    }));
+    return backend;
+  }));
+  const socket = await f.dataSocket(await f.issueTicket());
+  assertEquals(
+    decodeRoutedFrame(await socket.take(), true, FRAME_SLOTS).body.type,
+    "hello.ok",
+  );
+  hold = true;
+  let requests = 0;
+  const answers = new Map<string, Record<string, unknown>>();
+  const drain = async () => {
+    while (socket.output.length > 0) {
+      const message =
+        decodeRoutedFrame(await socket.take(), true, FRAME_SLOTS).body;
+      if (typeof message.requestId === "string") {
+        answers.set(message.requestId, message);
+      }
+    }
+  };
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 1));
+  /** Sends every body at once and returns their request IDs. */
+  const send = (bodies: Record<string, unknown>[]) =>
+    bodies.map((body) => {
+      const requestId = `held${++requests}`;
+      socket.receive(
+        encodeRoutedFrame(
+          `fvj1:${JSON.stringify({ ...body, requestId })}`,
+          FRAME_SLOTS,
+        ),
+      );
+      return requestId;
+    });
+  /** Whether `id` has reached the server or been answered without it. */
+  const dispatched = async (id: string) => {
+    for (let i = 0; i < 10; i++) await tick();
+    await drain();
+    return entered.has(id) || answers.has(id);
+  };
+  /** Lets the server take each held request as it comes; answers `ids`. */
+  const settle = async (ids: string[]) => {
+    for (let i = 0; !ids.every((id) => answers.has(id)); i++) {
+      assert(i < 2000, "requests were not all answered");
+      for (const resolve of held.splice(0)) resolve();
+      await drain();
+      await tick();
+    }
+    return ids.map((id) => answers.get(id)!);
+  };
+  const pipelined = (bodies: Record<string, unknown>[]) => settle(send(bodies));
+  return {
+    send,
+    dispatched,
+    settle,
+    pipelined,
+    request: async (body: Record<string, unknown>) =>
+      (await pipelined([body]))[0],
+    open: async () => {
+      const [opened] = await pipelined([{
+        type: "session.open",
+        space: f.space.did(),
+        principal: f.principal.did(),
+        session: {},
+      }]);
+      assert(opened.ok !== undefined, JSON.stringify(opened));
+      return opened.ok as { sessionId: string; sessionToken: string };
+    },
+    [Symbol.dispose]: () => stubs.dispose(),
+  };
+}
+
+/**
  * What the toolshed does to `socket` next: the type of the frame it sends,
  * or "closed" once it has closed the socket.
  */
@@ -1651,6 +1744,214 @@ Deno.test("a session's watch IDs are bounded by configuration, and a mutation pa
       });
       assertEquals(reasons, ["frame-limit"]);
       assertEquals(f.socket.readyState, 1);
+    } finally {
+      await f.close();
+    }
+  });
+});
+
+Deno.test("a session's watch mutations, resumptions and close are dispatched one at a time, each once the turn of the one before it has ended", async (t) => {
+  const watches = (prefix: string, length: number) =>
+    Array.from(
+      { length },
+      (_, i) => ({ id: `${prefix}${i}`, kind: "graph", query: { roots: [] } }),
+    );
+  const change = (
+    f: Awaited<ReturnType<typeof fixture>>,
+    session: { sessionId: string },
+    type: string,
+    fields: Record<string, unknown>,
+  ) => ({
+    type,
+    space: f.space.did(),
+    sessionId: session.sessionId,
+    ...fields,
+  });
+  const admitted = (answers: Record<string, unknown>[]) =>
+    answers.map((answer) => answer.error === undefined);
+  await t.step("a session's changes sent together", async () => {
+    // The session's own bound is the only quota, so the host keeps watch
+    // mirrors and no aggregate usage.
+    const f = await fixture("watches-sent-together", {
+      limits: routedHostLimits({
+        ...Object.fromEntries(
+          Object.keys(DEFAULT_ROUTED_HOST_LIMITS).map((key) => [key, null]),
+        ),
+        watchesPerSession: 2,
+      }),
+    });
+    try {
+      using held = await heldTurns(f);
+      const session = await held.open();
+      const add = (prefix: string) =>
+        change(f, session, "session.watch.add", {
+          watches: watches(prefix, 1),
+        });
+      // All five are sent before the first is answered. Each is checked
+      // against the IDs the ones before it left: the third would make three
+      // and is refused, and the removal makes room for the fifth.
+      let answers: Record<string, unknown>[] = [];
+      const reasons = await refusalReasons(async () => {
+        answers = await held.pipelined([
+          add("a"),
+          add("b"),
+          add("c"),
+          change(f, session, "session.watch.remove", { watchIds: ["a0"] }),
+          add("c"),
+        ]);
+      });
+      assertEquals(admitted(answers), [true, true, false, true, true]);
+      assertEquals(reasons, ["frame-limit"]);
+      // The session holds b0 and c0, as the server does.
+      const after = await refusalReasons(async () => {
+        assert((await held.request(add("d"))).error !== undefined);
+      });
+      assertEquals(after, ["frame-limit"]);
+      assert((await held.request(add("b"))).ok);
+    } finally {
+      await f.close();
+    }
+  });
+  await t.step(
+    "a context's usage, with changes from two sessions",
+    async () => {
+      const f = await fixture("watches-context-sent-together", {
+        limits: { watchesPerContext: 3, watchesPerSession: 2 },
+      });
+      try {
+        using held = await heldTurns(f);
+        const first = await held.open(), second = await held.open();
+        const third = await held.open();
+        const add = (session: { sessionId: string }, prefix: string) =>
+          change(f, session, "session.watch.add", {
+            watches: watches(prefix, 1),
+          });
+        const answered = async (bodies: Record<string, unknown>[]) => {
+          let answers: Record<string, unknown>[] = [];
+          const reasons = await refusalReasons(async () => {
+            answers = await held.pipelined(bodies);
+          });
+          return { admitted: admitted(answers), reasons };
+        };
+        assertEquals(await answered([add(first, "a"), add(first, "b")]), {
+          admitted: [true, true],
+          reasons: [],
+        });
+        // y0 would make four in the context. Its refusal takes back its own
+        // count and not x0's.
+        assertEquals(await answered([add(second, "x"), add(second, "y")]), {
+          admitted: [true, false],
+          reasons: ["watch-limit"],
+        });
+        // The sessions hold a0, b0 and x0, which fill the context.
+        assertEquals(await answered([add(third, "z")]), {
+          admitted: [false],
+          reasons: ["watch-limit"],
+        });
+        // Removing a0 makes room for c0 and no more.
+        assertEquals(
+          await answered([
+            change(f, first, "session.watch.remove", { watchIds: ["a0"] }),
+            add(first, "c"),
+            add(second, "y"),
+          ]),
+          { admitted: [true, true, false], reasons: ["watch-limit"] },
+        );
+      } finally {
+        await f.close();
+      }
+    },
+  );
+  await t.step("a resumption and a watch change on one session", async () => {
+    const f = await fixture("watches-resumed", {
+      limits: { watchesPerContext: 3, watchesPerSession: 2 },
+    });
+    try {
+      using held = await heldTurns(f);
+      const session = await held.open(), other = await held.open();
+      const add = (target: { sessionId: string }, prefix: string) =>
+        change(f, target, "session.watch.add", {
+          watches: watches(prefix, 1),
+        });
+      const resume = (token: string) => ({
+        type: "session.open",
+        space: f.space.did(),
+        principal: f.principal.did(),
+        session: { sessionId: session.sessionId, sessionToken: token },
+      });
+      assert((await held.request(add(session, "x"))).ok);
+      assert((await held.request(add(other, "o"))).ok);
+      // The resumption waits for y0's answer, and so counts x0 and y0: the
+      // context is then full.
+      const [y, resumed] = held.send([
+        add(session, "y"),
+        resume(session.sessionToken),
+      ]);
+      assert(await held.dispatched(y));
+      assert(!await held.dispatched(resumed));
+      const [yAnswer, resumedAnswer] = await held.settle([y, resumed]);
+      assert(yAnswer.ok, JSON.stringify(yAnswer));
+      assert(resumedAnswer.ok, JSON.stringify(resumedAnswer));
+      assertEquals(
+        await refusalReasons(async () => {
+          assert((await held.request(add(other, "w"))).error !== undefined);
+        }),
+        ["watch-limit"],
+      );
+      // A removal sent behind a second resumption waits for it, and then
+      // leaves room for p0.
+      const [again, removal] = held.send([
+        resume((resumedAnswer.ok as { sessionToken: string }).sessionToken),
+        change(f, session, "session.watch.remove", { watchIds: ["y0"] }),
+      ]);
+      assert(await held.dispatched(again));
+      assert(!await held.dispatched(removal));
+      const answers = await held.settle([again, removal]);
+      assert(answers.every((answer) => answer.ok), JSON.stringify(answers));
+      assert((await held.request(add(other, "p"))).ok);
+    } finally {
+      await f.close();
+    }
+  });
+  await t.step("a failed resumption and a watch change behind it", async () => {
+    const f = await fixture("watches-failed-resumption", {
+      limits: { watchesPerContext: 3, watchesPerSession: 2 },
+    });
+    try {
+      using held = await heldTurns(f);
+      const session = await held.open(), other = await held.open();
+      const add = (target: { sessionId: string }, prefix: string) =>
+        change(f, target, "session.watch.add", {
+          watches: watches(prefix, 1),
+        });
+      assert((await held.request(add(session, "x"))).ok);
+      assert((await held.request(add(other, "o"))).ok);
+      // The server refuses the resumption, whose token is not the session's,
+      // and the session stays open. y0 waits for that refusal, so the usage
+      // the refusal restores is not counted over y0's: the context is full.
+      const [resumed, y] = held.send([
+        {
+          type: "session.open",
+          space: f.space.did(),
+          principal: f.principal.did(),
+          session: {
+            sessionId: session.sessionId,
+            sessionToken: "invalid-resume-token",
+          },
+        },
+        add(session, "y"),
+      ]);
+      assert(await held.dispatched(resumed));
+      assert(!await held.dispatched(y));
+      const [resumedAnswer, yAnswer] = await held.settle([resumed, y]);
+      assert(resumedAnswer.error !== undefined, JSON.stringify(resumedAnswer));
+      assert(yAnswer.ok, JSON.stringify(yAnswer));
+      assertEquals(
+        await refusalReasons(async () => {
+          assert((await held.request(add(other, "w"))).error !== undefined);
+        }),
+        ["watch-limit"],
+      );
     } finally {
       await f.close();
     }

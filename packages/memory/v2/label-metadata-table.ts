@@ -209,8 +209,8 @@ export function expandLabelMetadata(
 /**
  * Detects dictionaries without validating inline CFC semantics. A number at a
  * whole-field position needs no negotiation on its own: without a dictionary it
- * is stored data, which commit admission refuses to write and delivery passes
- * through inline.
+ * is stored data, which commit admission refuses to write into a label map
+ * the write changes and delivery passes through inline.
  */
 export function hasLabelMetadata(
   envelope: Record<string, unknown>,
@@ -222,8 +222,9 @@ export function hasLabelMetadata(
 /**
  * Reports the first whole-field label or path holding a number in a document,
  * visiting exactly the positions compression and expansion visit. Commit
- * admission refuses such a document: no dictionary is stored beside it, so the
- * number could never be resolved, and a sync carrying it cannot be compressed.
+ * admission refuses a write that leaves such a number in a label map it
+ * changes: no dictionary is stored beside it, so the number could never be
+ * resolved, and a sync carrying it cannot be compressed.
  */
 export function findNumericLabelField(
   document: unknown,
