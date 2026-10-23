@@ -233,9 +233,13 @@ describe("serving-worker-recovery", () => {
       "setTimeout",
       (() => 7) as unknown as typeof setTimeout,
     );
-    using _clear = stub(globalThis, "clearTimeout", (id?: number) => {
-      cleared.push(id);
-    });
+    using _clear = stub(
+      globalThis,
+      "clearTimeout",
+      (id?: Parameters<typeof clearTimeout>[0]) => {
+        cleared.push(id);
+      },
+    );
     using _init = stub(
       ServingPortBridge.prototype,
       "init",
