@@ -197,7 +197,7 @@ certificate private key, compromise exposes that key too.
    `stableExpressionResultIds` is not refused by the router: it receives a
    context, a ticket and a data socket, and the toolshed answers each of its
    `session.open` requests with the final `SessionRevokedError` refusal. Private transport compatibility is independently versioned;
-   `routerEncodingNegotiation` and `routerRequestAdmission` are required on
+   `routerEncodingNegotiation` and `routerRequestCredit` are required on
    authenticated private peers and excluded from public and effective Memory
    capabilities. The signed binary `rpc1` asserts request-admission support with
    exactly one `0x01` byte after its nonce; the host requires it and end-of-record

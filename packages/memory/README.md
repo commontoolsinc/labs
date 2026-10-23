@@ -96,8 +96,8 @@ assembles admission controls before validating them; ordinary application bodies
 continue to forward incrementally.
 
 Private peers require signed-link `routerEncodingNegotiation: true` and
-`routerRequestAdmission: true`. The router's signed binary `rpc1` appends one
-byte `0x01` after the nonce; the host requires that exact byte and end-of-record
+`routerRequestCredit: true`. The router's signed binary `rpc1` appends one byte
+`0x01` after the nonce; the host requires that exact byte and end-of-record
 before registering the control link. `rpo1` remains four bytes. A data
 `router.hello` carries original client `memoryFlags` and separate
 `negotiatedMemoryFlags`, selected from the client and the router's frozen
@@ -113,21 +113,24 @@ Private request headers carry consecutive per-socket `requestOrdinal` values
 starting at `1`, without wrapping past `2^53 - 1`. Admission is by credit: once
 the data socket is ready the host grants its whole 4 MiB pending-input budget as
 an 8-byte binary `mri\x02` record, the router sends a header only within the
-credit it holds and the body right behind it, and the host returns each
+credit it holds and the body immediately after it, and the host returns each
 request's declared bytes when its turn ends. This covers streamed requests,
 buffered controls and legacy uploads. Both private `router.hello` and
-`router.ready` require `routerRequestAdmission: true`; that flag is excluded
-from public and effective Memory descriptors. Public upload and private response
+`router.ready` require `routerRequestCredit: true`; that flag is excluded from
+public and effective Memory descriptors. Public upload and private response
 headers must not carry request ordinals.
 
-The host's assembler refuses a header past its budget, so a router that ignores
-its credit closes its socket. One sender counter lets credit interleave between
-response records, coalesced, without releasing logical output-body counts. The
-router consumes credit before response assembly and public ownership checks; a
-blocked public downstream may delay credit without unbounded read-ahead.
-Malformed credit or out-of-order records close the connection, and cancellation
-releases each owned reservation exactly once. Request credit is independent of
-public `mrc\x01` credits.
+The credit counts bodies as sent. The host refuses a header past the credit the
+router has received or past its budget, so a router that ignores its credit
+closes its socket; it expands a compressed body only while the expanded bodies
+being decoded or waiting for their turns fit the same budget, and closes the
+socket on a body whose declared expansion alone exceeds it. One sender counter
+lets credit interleave between response records, coalesced, without releasing
+logical output-body counts. The router consumes credit before response assembly
+and public ownership checks; a blocked public downstream may delay credit
+without unbounded read-ahead. Malformed credit or out-of-order records close the
+connection, and cancellation releases each owned reservation exactly once.
+Request credit is independent of public `mrc\x01` credits.
 
 The measured savings behind the label tables (3,930,754 to 669,274 bytes and
 211,817 to 58,476 values on a rehearsal sync) were taken before labs #8767,

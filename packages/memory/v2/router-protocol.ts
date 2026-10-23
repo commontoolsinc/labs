@@ -477,6 +477,10 @@ export class RouterSender {
   #drained: PromiseWithResolvers<boolean> | undefined;
   /** Request credit to return, coalesced into the next record boundary. */
   #credit = 0;
+  /** Request credit returned and not yet written to the socket. */
+  get unsentCredit(): number {
+    return this.#credit;
+  }
 
   /**
    * Constructs an instance with a socket-completion callback and the bound on

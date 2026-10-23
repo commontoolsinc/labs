@@ -634,6 +634,8 @@ export class WebSocketTransport implements MemoryClient.Transport {
               throw new Error("Unsupported memory websocket frame type");
             }
             let payload: string;
+            // A routed body's type, which its decode has already parsed.
+            let routedType: unknown;
             const decodeStart = performance.now();
             if (this.#routedMessages) {
               const routedFrame = typeof frame === "string"
@@ -672,6 +674,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
                 throw new Error("Unexpected text router credit");
               }
               payload = decoded.payload;
+              routedType = decoded.body.type;
             } else if (this.#receiveCompressionEnabled) {
               payload = await decodeCompressedMemoryMessage(frame);
             } else {
@@ -684,9 +687,13 @@ export class WebSocketTransport implements MemoryClient.Transport {
             }
             logger.time(decodeStart, "receive", "decodeFrame");
             if (this.#socket !== socket) return;
-            const control = parseMemoryCompressionControlMessage(
-              this.#routedMessages ? payload.slice(5) : payload,
-            );
+            // Only a routed control is parsed again; a legacy frame is parsed
+            // to find out whether it is one.
+            const control = routedType === undefined
+              ? parseMemoryCompressionControlMessage(payload)
+              : routedType === "memory.compression"
+              ? parseMemoryCompressionControlMessage(payload.slice(5))
+              : null;
             if (control) {
               const pending = this.#compressionRequests.get(control.requestId);
               if (pending) {

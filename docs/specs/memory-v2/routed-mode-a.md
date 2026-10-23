@@ -35,13 +35,19 @@ clients use its `hello`, `connection.challenge`, `connection.auth`,
   Version 1 has no routing hint and is refused. Uncompressed `fvj1` text still
   uses the Fabric codec after strict JSON validation. When the client
   negotiated both `messageCompressionV1` and `routedCompressionV1`, its streamed
-  uploads and the toolshed's responses carry messages of 1 KiB or more in this
-  envelope, end to end: the
-  record header says `binary:true`, the toolshed or the SDK expands the body,
+  uploads and the toolshed's responses carry messages of 1 KiB or more that
+  gzip makes smaller in this envelope, end to end: the record header says
+  `binary:true`, the toolshed or the SDK expands the body,
   and the router expands only the controls it reads (`connection.*`,
   `memory.compression`, `session.open`, `session.watch.*`). The sender keeps a
-  message as text when it is under 1 KiB, over the 16 MiB expanded bound, or
-  would pass the 32-times expansion bound. `routedCompressionV1` is a public
+  message as text when it is under 1 KiB, over the 16 MiB expanded bound,
+  would pass the 32-times expansion bound, or gzip would not make it smaller.
+  The router answers `memory.compression` itself, for every toolshed on the
+  connection, and its reply governs only the client's uploads: `enabled` is
+  what the client asked for, if the compression its framing uses was
+  negotiated. Toolsheds keep compressing their bodies to a client that
+  negotiated both capabilities whatever it asks, and the client expands them
+  either way; a direct host's reply also sets its own send mode. `routedCompressionV1` is a public
   capability the SDK offers only with streaming, toolsheds advertise on their
   signed link, and the router's offer carries; a client without it, such as an
   SDK that predates it, receives text bodies, since it would take a binary body
@@ -68,7 +74,8 @@ clients use its `hello`, `connection.challenge`, `connection.auth`,
   outstanding sent bytes. Unsolicited or invalid credits close the connection.
   Text `router.credit` messages cannot grant credit and close the connection.
   The router forwards a private upstream body with `binary:true` only to a
-  client that negotiated compression, and only once its first record opens with
+  client that negotiated both `messageCompressionV1` and
+  `routedCompressionV1`, and only once its first record opens with
   the envelope's `mcmp\x02`; otherwise it fails the upstream before emitting a
   public fragment. Binary public frames are therefore credit or a compression
   envelope, told apart by their first bytes, and no body can impersonate a
@@ -250,7 +257,7 @@ are refused. No field accepts a Fabric tagged-value interpretation.
 | `mrc1` signed by router   | deployment text, router text, epoch ID, context ID, challenge, issued time, expires time                                                     |
 | `mrr1` signed by router   | SHA-256 of signed issuance, principal text, SHA-256 of exact signed statement, received time                                                 |
 | `mrp1`                    | statement blob, signed issuance blob, signed receipt blob                                                                                    |
-| `rph1` signed by toolshed | toolshed DID text, nonce, issued time, supported flags blob including required private `routerEncodingNegotiation: true` and `routerRequestAdmission: true` |
+| `rph1` signed by toolshed | toolshed DID text, nonce, issued time, supported flags blob including required private `routerEncodingNegotiation: true` and `routerRequestCredit: true` |
 | `rpc1` signed by router | deployment text, router DID text, toolshed DID text, epoch ID, nonce, one byte `0x01` asserting request-admission support |
 | `rpo1` | authenticated private protocol v1 acknowledgement; no fields |
 | `mlq1`                    | strictly increasing sequence time, operation byte, payload blob                                                                              |
@@ -269,7 +276,7 @@ peer. A single-use 15-second ticket is owned by that link epoch and context. The
 data socket first receives `rdh1`; the worker obtains `rdb1` over its own agent
 capability, then sends plain JSON `router.hello` with `version:1`, the original
 client's `memoryFlags`, a separate `negotiatedMemoryFlags` descriptor,
-`routerRequestAdmission: true`, `routerTicket` hex and `routerBinding` base64url.
+`routerRequestCredit: true`, `routerTicket` hex and `routerBinding` base64url.
 Both flag hashes in `rdb1` are
 mandatory, in the order above: the original-flag hash precedes the selected
 descriptor's hash, followed by the signature. Each hashes compact UTF-8 JSON
@@ -298,9 +305,9 @@ refused. The `rpo1` acknowledgment remains exactly four ASCII bytes.
 
 A successful data handshake returns
 plain JSON `router.ready` with `version:1`, the endpoint's `memoryFlags`,
-`routerEncodingNegotiation: true`, `routerRequestAdmission: true`, and an exact
+`routerEncodingNegotiation: true`, `routerRequestCredit: true`, and an exact
 echo of `negotiatedMemoryFlags`. The host requires
-`routerRequestAdmission: true` in the private `router.hello` as well.
+`routerRequestCredit: true` in the private `router.hello` as well.
 The router requires the acknowledgment and exact descriptor equality before
 using the data socket; a different subset or superset is refused. It also checks
 that the endpoint's flags still support the frozen public offer.
@@ -311,7 +318,7 @@ The link agent checks authenticated Memory capabilities before issuing a ticket
 or binding. An incompatible endpoint receives a retriable admission refusal;
 sessions on compatible endpoints of that public connection remain usable. At
 startup, only endpoints whose signed `rph1` descriptor includes both
-`routerEncodingNegotiation: true` and `routerRequestAdmission: true` and matches
+`routerEncodingNegotiation: true` and `routerRequestCredit: true` and matches
 the deployment's cell mode
 contribute to the public snapshot. The link lifecycle remains active while
 waiting for one to become available. This snapshot is fixed for the router
@@ -326,7 +333,7 @@ Their public intersection uses logical AND and set intersection, including names
 the router has never seen. `modernCellRep` is a wire mode and must match the
 deployment; absence means false and a present value must be boolean.
 `serverExecution` (the posture described below) and the private
-`routerEncodingNegotiation` and `routerRequestAdmission` flags are excluded from
+`routerEncodingNegotiation` and `routerRequestCredit` flags are excluded from
 the public offer and selected descriptor. Unknown well-formed capabilities do
 not require a router release.
 
@@ -372,8 +379,8 @@ Every data record is one complete binary WebSocket message. It starts with bytes
 
 There is one active body per source socket, with at most 512 data records. The router verifies routing bindings
 before forwarding a chunk. Private responses become public WebSocket fragments;
-the final `FIN` is withheld until valid completion. Private admission grants may
-interleave between response records and are consumed by the router; only
+the final `FIN` is withheld until valid completion. Private request credit may
+interleave between response records and is consumed by the router; only
 WebSocket control frames may interleave with the resulting public fragments.
 Other upstreams pause while one owns public message output; local
 responses wait in a queue. Blocked output stops source reads and resumes
@@ -387,9 +394,9 @@ these records too; the router assembles them, checks that their routing
 projection matches the header, then parses and admits the complete control
 message. A refused request's body is discarded within its declared bound. Held
 control messages cannot interleave an admitted upload. The toolshed reserves
-its assembly budget and grants private request admission before the router sends
-body bytes, requires completion,
-validates the payload, and compares its routing projection with the header before
+its assembly budget against the request credit it granted when the header
+arrives, requires completion, validates the payload, and compares its routing
+projection with the header before
 backend execution. Endpoint-generated response headers come from the same
 structured message as the payload. Application decoding belongs to the endpoints.
 
@@ -406,12 +413,18 @@ right after `router.ready`, the endpoint grants its whole 4 MiB pending-input
 budget (`ROUTER_REQUEST_WINDOW`, infra `REQUEST_WINDOW`). The router sends a
 request header only when the credit it holds covers the header's declared
 bytes, spends them as it sends the header, and sends the body and completion
-record right behind it. A header the credit does not cover waits at the router,
-and so does the client's input behind it, bounded like the router's other
-pauses (`admission-timeout`). When a request's turn ends, answered or refused,
-the endpoint releases its reservation and returns its declared bytes as credit.
-So requests are pipelined up to the budget with no round trip per request, and
-the budget still bounds what the endpoint buffers. This applies to ordinary
+record immediately after it. A header the credit does not cover waits at the
+router, and so does the client's input behind it, bounded like the router's
+other pauses (`admission-timeout`). When a request's turn ends, answered or
+refused, the endpoint releases its reservation and returns its declared bytes
+as credit. So requests are pipelined up to the budget with no round trip per
+request. The credit counts bodies as sent. The endpoint refuses a header past
+the credit the router has received (what it granted, less what the router
+spent and what the endpoint has not yet written) or past its budget. It
+expands a compressed body only while the expanded bodies being decoded or
+waiting for their turns fit the same 4 MiB budget, and closes the data socket
+(`data-queue-limit`) on a body whose declared expansion alone exceeds it, so a
+routed request is at most 4 MiB expanded. This applies to ordinary
 streamed requests, buffered control messages and legacy public envelopes
 forwarded over the private socket.
 
@@ -457,8 +470,8 @@ closes the socket with an `output-limit` verdict classified `single-message`
 (over 8 MiB) or `queued-output`. Toolshed output passes records to the socket,
 in order, while the record bytes awaiting write callbacks are below a 256 KiB
 send window (`ROUTER_SEND_WINDOW_BYTES`, local to the toolshed), and resumes
-from the callback that brings them back under it; an admission grant may go out
-between any two records. Negotiated public uploads wait for the peer's byte
+from the callback that brings them back under it; returned request credit goes
+out before the next body record, between any two records. Negotiated public uploads wait for the peer's byte
 credit before each record. Browser output also checks the native
 `bufferedAmount` against a 4 MiB cap when streaming without credit; exhaustion
 terminates the connection rather than polling for drain. Session-open and

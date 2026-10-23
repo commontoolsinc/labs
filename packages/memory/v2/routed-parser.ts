@@ -301,6 +301,18 @@ function routedEnvelope(
 }
 
 /**
+ * The UTF-8 size a compressed routed frame declares it expands to, checked as
+ * its decoders check it, so a receiver can charge the expansion before it
+ * spends the work and memory of decoding.
+ */
+export function routedDeclaredExpansion(
+  frame: Uint8Array,
+  compression: boolean,
+): number {
+  return routedEnvelope(frame, compression).expanded;
+}
+
+/**
  * Decodes one gzip member, enforcing header, expansion, size and JSON bounds.
  * `maxSlots` is the receiver's frame cap: the toolshed's `limits.frameSlots`
  * or the SDK's cap learned from the public hello; `null` disables counting.
@@ -419,10 +431,15 @@ export async function decodeRoutedFrameAsync(
 /** Below this UTF-8 size a routed message stays text, as on the direct path. */
 const ROUTED_COMPRESSION_THRESHOLD = 1024;
 
+/** One gzip member at the fastest level, in JavaScript so browsers can run it. */
+const fastGzip = (bytes: Uint8Array): Uint8Array =>
+  gzipSync(bytes, { level: 1 });
+
 /**
  * The wire form of a routed message for a peer that negotiated
- * `messageCompressionV1`: the `mcmp` version 2 envelope (the frame's own space
- * as the cleartext hint and one gzip member at the fastest level), or the text
+ * `messageCompressionV1` and `routedCompressionV1`: the `mcmp` version 2
+ * envelope (the frame's own space as the cleartext hint and one gzip member
+ * from `compress`, by default {@link fastGzip}), or the text
  * itself when it is under 1 KiB, over the {@link ROUTED_EXPANDED_LIMIT}
  * expanded bound, when gzip would not make it smaller, or when the expansion
  * would pass the receiver's 32× ratio bound. `bytes` is `payload`'s UTF-8
@@ -433,12 +450,13 @@ export function compressRoutedPayload(
   payload: string,
   bytes: Uint8Array,
   space: string | undefined,
+  compress: (bytes: Uint8Array) => Uint8Array = fastGzip,
 ): string | Uint8Array<ArrayBuffer> {
   if (
     bytes.length < ROUTED_COMPRESSION_THRESHOLD ||
     bytes.length > ROUTED_EXPANDED_LIMIT
   ) return payload;
-  const gzip = gzipSync(bytes, { level: 1 });
+  const gzip = compress(bytes);
   if (bytes.length > gzip.length * 32) return payload;
   const hint = encoder.encode(space ?? "");
   requireRouted(hint.length <= 64);

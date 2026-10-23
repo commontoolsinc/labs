@@ -364,6 +364,19 @@ describe("routed untrusted parsers", () => {
         new Uint8Array([...seed, ...gzipSync(new TextEncoder().encode("x"))]),
       ),
     ).toEqual({ refused: true });
+    // The same two, ending in the declared size, so that the trailer check
+    // is not what refuses them: the platform decoder refuses data after the
+    // member.
+    const expanded = new TextEncoder().encode(payload).length;
+    const size = new Uint8Array(4);
+    new DataView(size.buffer).setUint32(0, expanded, true);
+    expect(await both(new Uint8Array([...seed, 1, 2, 3, 4, ...size])))
+      .toEqual({ refused: true });
+    expect(
+      await both(
+        new Uint8Array([...seed, ...gzipSync(new Uint8Array(expanded))]),
+      ),
+    ).toEqual({ refused: true });
     // A declared size one more or one less than the content.
     for (const delta of [1, -1]) {
       const lying = seed.slice();

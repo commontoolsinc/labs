@@ -102,7 +102,7 @@ Deno.test("toolshed independently refuses context/epoch/proof replay and isolate
     expect(JSON.parse(new TextDecoder().decode(hello.blob())))
       .toMatchObject({
         routerEncodingNegotiation: true,
-        routerRequestAdmission: true,
+        routerRequestCredit: true,
       });
     hello.end();
     expect(
@@ -110,7 +110,7 @@ Deno.test("toolshed independently refuses context/epoch/proof replay and isolate
     )
       .toBe(false);
     expect(
-      Object.hasOwn(server.memoryProtocolFlags(), "routerRequestAdmission"),
+      Object.hasOwn(server.memoryProtocolFlags(), "routerRequestCredit"),
     )
       .toBe(false);
     socket.receive(

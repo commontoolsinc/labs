@@ -131,7 +131,7 @@ class FramedSocket extends EventTarget {
       const ready = JSON.parse(bytes);
       expect(ready.version).toBe(1);
       expect(ready.routerEncodingNegotiation).toBe(true);
-      expect(ready.routerRequestAdmission).toBe(true);
+      expect(ready.routerRequestCredit).toBe(true);
       expect(ready.negotiatedMemoryFlags).toEqual(this.negotiatedMemoryFlags);
       expect(ready.memoryFlags).toMatchObject({
         connectionAuth: true,
@@ -139,7 +139,7 @@ class FramedSocket extends EventTarget {
       });
       expect(Object.hasOwn(ready.memoryFlags, "routerEncodingNegotiation"))
         .toBe(false);
-      expect(Object.hasOwn(ready.memoryFlags, "routerRequestAdmission"))
+      expect(Object.hasOwn(ready.memoryFlags, "routerRequestCredit"))
         .toBe(false);
       bytes = `fvj1:${
         JSON.stringify({
@@ -176,7 +176,7 @@ class FramedSocket extends EventTarget {
             type: "router.hello",
             version: 1,
             memoryFlags: flags,
-            routerRequestAdmission: true,
+            routerRequestCredit: true,
           });
           this.deliver(bytes);
           return;
@@ -1349,6 +1349,11 @@ Deno.test("a request past a capacity limit is denied, and the context goes on", 
     );
     // A capacity refusal passes, so the client holds the session.
     assertEquals((third.error as { retriable?: boolean }).retriable, true);
+    // The refused request's credit comes back as an answered one's does.
+    for (let i = 0; i < 100 && f.socket.credit !== ROUTER_REQUEST_WINDOW; i++) {
+      await setImmediate();
+    }
+    assertEquals(f.socket.credit, ROUTER_REQUEST_WINDOW);
     assertEquals(f.socket.readyState, 1);
   } finally {
     await f.close();
@@ -3653,6 +3658,183 @@ describe("private request credits", () => {
     }
   });
 
+  /** Waits for the toolshed to close `socket`, failing after five seconds. */
+  const closes = async (socket: FramedSocket) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        socket.closed.promise,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("the socket stayed open")),
+            5000,
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  /** Hex digits, which gzip compresses about twice: inside the ratio bound. */
+  const hex = (length: number, seed: number) => {
+    const words: string[] = [];
+    for (let i = 0; i < length; i += 8) {
+      seed ^= seed << 13;
+      seed ^= seed >>> 17;
+      seed ^= seed << 5;
+      words.push((seed >>> 0).toString(16).padStart(8, "0"));
+    }
+    return words.join("").slice(0, length);
+  };
+
+  it("expands a compressed body only while the expanded bodies in their turns fit the input budget", async () => {
+    const release = Promise.withResolvers<void>();
+    const f = await routedRequestFixture("credit-expanded", async () => {
+      await release.promise;
+    });
+    try {
+      const state = f.host.accessForTestingOnly.dataSocket(
+        f.socket as unknown as WebSocket,
+      )!;
+      await creditReaches(f.socket, ROUTER_REQUEST_WINDOW);
+      const payloads = Array.from(
+        { length: 10 },
+        (_, i) =>
+          encodeMemoryBoundary({
+            type: "session.open",
+            requestId: `expanded-${i}`,
+            space: f.space.did(),
+            principal: f.principal.did(),
+            session: {},
+            padding: hex(500 * 1024, i + 1),
+          }),
+      );
+      const sizes = payloads.map((payload) =>
+        new TextEncoder().encode(payload).length
+      );
+      // The bodies that fit the budget expanded, in order.
+      let fits = 0;
+      for (let total = sizes[0]; total <= ROUTER_REQUEST_WINDOW;) {
+        total += sizes[++fits] ?? Infinity;
+      }
+      expect(fits).toBe(8);
+      let sent = 0;
+      for (const payload of payloads) {
+        const frame = encodeRoutedFrame(payload, FRAME_SLOTS);
+        assert(frame instanceof Uint8Array);
+        sent += frame.length;
+        f.socket.receive(frame);
+      }
+      // All ten fit the credit as sent.
+      expect(sent).toBeLessThan(ROUTER_REQUEST_WINDOW);
+      for (let i = 0; i < 1000 && f.handled.length < fits; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(f.handled.length).toBe(fits);
+      expect(state.expandedBytes).toBe(
+        sizes.slice(0, fits).reduce((a, b) => a + b),
+      );
+      expect(state.pendingBytes).toBe(sent);
+      release.resolve();
+      await state.settled;
+      expect(f.handled.length).toBe(10);
+      expect(state.expandedBytes).toBe(0);
+      expect(state.pendingBytes).toBe(0);
+      await creditReaches(f.socket, ROUTER_REQUEST_WINDOW);
+      expect(f.socket.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      release.resolve();
+      await f.close();
+    }
+  });
+
+  it("refuses a compressed body that alone expands past the input budget", async () => {
+    const f = await routedRequestFixture("credit-expanded-over", () => {});
+    try {
+      const frame = encodeRoutedFrame(
+        encodeMemoryBoundary({
+          type: "session.open",
+          requestId: "over",
+          space: f.space.did(),
+          principal: f.principal.did(),
+          session: {},
+          padding: hex(ROUTER_REQUEST_WINDOW, 7),
+        }),
+        FRAME_SLOTS,
+      );
+      assert(frame instanceof Uint8Array);
+      expect(frame.length).toBeLessThan(ROUTER_REQUEST_WINDOW);
+      f.socket.receive(frame);
+      await closes(f.socket);
+      expect(f.handled).toEqual([]);
+      expect(f.link.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("refuses a header past the credit the router has received, though the budget has room", async () => {
+    const f = await routedRequestFixture(
+      "credit-unsent",
+      (requestId, send) => {
+        send({ type: "response", requestId, ok: "x".repeat(300000) });
+      },
+    );
+    const send = f.socket.send.bind(f.socket);
+    // The peer assembles the response but acknowledges none of it, so the
+    // send window stays full and returned credit waits behind it.
+    using _send = stubOutput(f.socket, (bytes, done) => {
+      assert(done);
+      send(bytes);
+    });
+    try {
+      const state = f.host.accessForTestingOnly.dataSocket(
+        f.socket as unknown as WebSocket,
+      )!;
+      await creditReaches(f.socket, ROUTER_REQUEST_WINDOW);
+      const request = f.request("first");
+      const requestBytes = new TextEncoder().encode(request).length;
+      f.socket.receive(request);
+      await state.settled;
+      expect(state.pendingBytes).toBe(0);
+      expect(f.socket.credit).toBe(ROUTER_REQUEST_WINDOW - requestBytes);
+      // A router that spends the credit it has not received: the input
+      // budget has room for it, the credit does not.
+      f.socket.deliver(encodeRouterHeader({
+        route: { type: "transact", requestId: "over" },
+        bytes: ROUTER_REQUEST_WINDOW - requestBytes + 1,
+        binary: false,
+        requestOrdinal: f.socket.requestOrdinal + 1,
+      }));
+      await closes(f.socket);
+      expect(f.handled).toEqual(["first"]);
+      expect(f.link.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("closes the socket and returns no credit when a turn handed to the connection fails", async () => {
+    const f = await routedRequestFixture("credit-turn-failure", () => {
+      throw new Error("backend failed");
+    });
+    try {
+      await creditReaches(f.socket, ROUTER_REQUEST_WINDOW);
+      const request = f.request("failing");
+      f.socket.receive(request);
+      await closes(f.socket);
+      expect(f.handled).toEqual(["failing"]);
+      expect(f.socket.credit).toBe(
+        ROUTER_REQUEST_WINDOW - new TextEncoder().encode(request).length,
+      );
+      expect(f.link.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      await f.close();
+    }
+  });
+
   it("refuses a header past the credit it granted", async () => {
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
@@ -3690,7 +3872,7 @@ describe("private request credits", () => {
   });
 
   for (const capability of [undefined, false]) {
-    it(`rejects private hello admission capability \`${capability}\` before replacing the live socket or consuming its ticket`, async () => {
+    it(`rejects private hello request-credit capability \`${capability}\` before replacing the live socket or consuming its ticket`, async () => {
       const f = await fixture(`hello-admission-${capability}`);
       try {
         const ticket = await f.issueTicket();
@@ -3705,7 +3887,7 @@ describe("private request credits", () => {
           routerBinding: hello.routerBinding,
           ...(capability === undefined
             ? {}
-            : { routerRequestAdmission: capability }),
+            : { routerRequestCredit: capability }),
         }));
         await pending.socket.closed.promise;
         expect(f.socket.readyState).toBe(WebSocket.OPEN);
@@ -5647,7 +5829,7 @@ Deno.test("private TLS listener accepts bounded binary links and rejects HTTP, O
       version: 1,
       memoryFlags: JSON.parse(new TextDecoder().decode(f.flags)),
       negotiatedMemoryFlags: f.encodingFlags,
-      routerRequestAdmission: true,
+      routerRequestCredit: true,
       routerTicket: routedHex(ticket),
       routerBinding: routedBase64(binding),
     }));
@@ -5656,7 +5838,7 @@ Deno.test("private TLS listener accepts bounded binary links and rejects HTTP, O
       version: 1,
       memoryFlags: { routedAuthV1: true },
       routerEncodingNegotiation: true,
-      routerRequestAdmission: true,
+      routerRequestCredit: true,
       negotiatedMemoryFlags: f.encodingFlags,
     });
     const opened = new Promise<Record<string, unknown>>((resolve) =>

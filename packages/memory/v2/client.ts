@@ -1805,17 +1805,17 @@ export class Client {
       .withResolvers<void>();
     this.#helloPending = ack;
     // `sessionReportV1` and `watchRemoveV1` are the server's capabilities
-    // alone: the client reads them from `hello.ok` and never offers them,
-    // since an older routed host refuses a hello carrying a flag it does not
-    // know.
+    // alone: the client reads them from `hello.ok` and never offers them.
+    // Other flags an endpoint does not know are ignored there, since the
+    // routed flag allowlists were removed (infra DEVIATIONS row 41).
     const {
       sessionReportV1: _reportsServerOnly,
       watchRemoveV1: _removalServerOnly,
       ...expectedFlags
     } = getMemoryProtocolFlags();
-    const offerRoutedCompression = expectedFlags.messageCompressionV1 &&
-      this.#transport.supportsMessageCompression === true &&
-      this.#transport.supportsRouterStreaming === true;
+    const offerRoutedCompression = this.#offersRoutedCompression(
+      expectedFlags,
+    );
     try {
       const hello = {
         type: "hello",
@@ -1840,6 +1840,18 @@ export class Client {
     } finally {
       this.#helloPending = null;
     }
+  }
+
+  /**
+   * Whether this client's hello offers `routedCompressionV1`: it compresses
+   * and streams, so it can tell a compressed body from router credit.
+   */
+  #offersRoutedCompression(
+    flags: { readonly messageCompressionV1: boolean },
+  ): boolean {
+    return flags.messageCompressionV1 &&
+      this.#transport.supportsMessageCompression === true &&
+      this.#transport.supportsRouterStreaming === true;
   }
 
   #onMessage(payload: string): void {
@@ -1968,10 +1980,8 @@ export class Client {
             : undefined,
           helloOk.routerUploadWindow,
           routed ? helloOk.routerFrameSlots : undefined,
-          // Offered in this hello and in the router's: the same expression.
-          routed && expectedFlags.messageCompressionV1 &&
-            this.#transport.supportsMessageCompression === true &&
-            this.#transport.supportsRouterStreaming === true &&
+          // Offered in this hello and in the router's.
+          routed && this.#offersRoutedCompression(expectedFlags) &&
             helloOk.flags.messageCompressionV1 &&
             helloOk.flags.routedCompressionV1 === true,
         );
