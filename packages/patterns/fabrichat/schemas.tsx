@@ -20,6 +20,7 @@ import {
   FabricEpochNsec,
   isWellFormedDID,
 } from "commonfabric";
+import type { FileStoreRecord } from "../fabrifile/store.tsx";
 import type { ProfileInbox } from "../system/profile-home.tsx";
 
 //
@@ -405,10 +406,20 @@ export interface ChatRoomLink {
   roster?: ManagerProfileCell[];
 }
 
-/** A container's explicit declaration of the conversation it holds. */
+/**
+ * A container's explicit declaration of the conversation it holds, and where
+ * it keeps the store of its space's files, which a room in its space that
+ * isn't its root uses as its own. It offers the record rather than a stream
+ * to create the store with: a stream declared here reads as present whether or
+ * not the container has one, and an event sent to one it lacks is dropped, so
+ * only a value can say whether the container keeps a store.
+ */
 export interface ChatContainer {
   /** The declared conversation, wherever its room lives. */
   chatRoom?: Cell<ChatRoomLink>;
+
+  /** Where the container keeps its space's file store. */
+  fileStoreRecord?: FileStoreRecord;
 }
 
 /** One room in a user's chat manager. */
