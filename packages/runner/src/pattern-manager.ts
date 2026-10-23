@@ -587,15 +587,17 @@ export class PatternManager {
   /**
    * Spaces a closure persist is in flight into, by module identity — every
    * identity of the persisting set, as `#persistedClosureSpaces` records
-   * them once the persist is durable. A load served from memory consults
-   * both (`#copyClosureForLoadFromMemory()`): a space in either needs no
-   * copy, and a space in either can be a copy's origin, since a replication
-   * awaits the in-flight persists before it reads. An entry leaves as its
-   * persist settles, whichever way. A persist settling while another into
-   * the same space is in flight under a shared identity can cost one
-   * redundant copy, never a wrong one.
+   * them once the persist is durable — with the count of persists into each.
+   * A load served from memory consults both (`#copyClosureForLoadFromMemory()`):
+   * a space in either needs no copy, and a space in either can be a copy's
+   * origin, since a replication awaits the in-flight persists before it
+   * reads. A space leaves an identity's entry when the last persist into it
+   * under that identity settles, whichever way it settled.
    */
-  readonly #closurePersistsInFlight = new Map<string, Set<MemorySpace>>();
+  readonly #closurePersistsInFlight = new Map<
+    string,
+    Map<MemorySpace, number>
+  >();
 
   /**
    * Copies issued for loads served from memory, by `(space, identity)` for
@@ -1290,7 +1292,7 @@ export class PatternManager {
     if (durable?.has(space) || inFlight?.has(space)) return;
     // A durable origin ahead of one still writing, whose write may yet fail.
     const origin = durable?.values().next().value ??
-      inFlight?.values().next().value;
+      inFlight?.keys().next().value;
     if (origin === undefined) return;
     const key = (identity: string) => stringTupleKey([space, identity]);
     if (this.#closureCopiesIssued.has(key(entryIdentity))) return;
@@ -3030,6 +3032,26 @@ export class PatternManager {
   }
 
   /**
+   * Like `artifactFromIdentitySync()`, except that a hit is a load served
+   * from memory in `space`, as `loadPatternByIdentity()`'s in-memory hit is:
+   * when `space` is due the closure, it is copied there
+   * (`#copyClosureForLoadFromMemory()`). For the paths that start or follow
+   * a piece in `space` and resolve its pattern synchronously while the
+   * module is live, loading asynchronously only on a miss.
+   */
+  artifactFromIdentitySyncInSpace(
+    identity: string,
+    symbol: string,
+    space: MemorySpace,
+  ): unknown {
+    const artifact = this.artifactFromIdentitySync(identity, symbol);
+    if (artifact !== undefined) {
+      this.#copyClosureForLoadFromMemory(identity, space, {});
+    }
+    return artifact;
+  }
+
+  /**
    * Best-effort authored program for a live pattern by its content
    * `{ identity, symbol }` — the source-viewing debug surface
    * (`getPatternSources`). Returns the program rather than its files, so a
@@ -3189,8 +3211,9 @@ export class PatternManager {
 
   /**
    * Helper for the write-back steps, which enters `write` into both in-flight
-   * sets, records `space` as a persist in flight under each of `identities`,
-   * and emits the `pattern.cache-write-back.start` marker for it.
+   * sets, counts it as a persist in flight into `space` under each of
+   * `identities`, and emits the `pattern.cache-write-back.start` marker for
+   * it.
    */
   #trackCacheWriteBack(
     space: MemorySpace,
@@ -3203,10 +3226,10 @@ export class PatternManager {
     for (const identity of identities) {
       let spaces = this.#closurePersistsInFlight.get(identity);
       if (spaces === undefined) {
-        spaces = new Set();
+        spaces = new Map();
         this.#closurePersistsInFlight.set(identity, spaces);
       }
-      spaces.add(space);
+      spaces.set(space, (spaces.get(space) ?? 0) + 1);
     }
     this.#runtime.telemetry.submit({
       type: "pattern.cache-write-back.start",
@@ -3217,8 +3240,8 @@ export class PatternManager {
 
   /**
    * Helper for the write-back steps, which removes `write` from both
-   * in-flight sets once it has settled, drops `space` from the persists in
-   * flight under each of `identities`, and emits the
+   * in-flight sets once it has settled, uncounts it from the persists in
+   * flight into `space` under each of `identities`, and emits the
    * `pattern.cache-write-back.complete` marker for it.
    */
   #untrackCacheWriteBack(
@@ -3231,7 +3254,12 @@ export class PatternManager {
     this.#pendingCacheWriteBacks.delete(write);
     for (const identity of identities) {
       const spaces = this.#closurePersistsInFlight.get(identity);
-      if (spaces === undefined) continue;
+      const count = spaces?.get(space);
+      if (spaces === undefined || count === undefined) continue;
+      if (count > 1) {
+        spaces.set(space, count - 1);
+        continue;
+      }
       spaces.delete(space);
       if (spaces.size === 0) this.#closurePersistsInFlight.delete(identity);
     }

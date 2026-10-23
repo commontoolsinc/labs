@@ -938,6 +938,244 @@ describe("load by module identity (warm + version-bump recovery)", () => {
       }
     });
 
+    it("copies nothing into a space while any persist into it is still in flight", async () => {
+      // Two persists into `spaceB` overlap under the child's identity: the
+      // parent program's closure carries the child, and a persist of the
+      // child's own closure runs beside it and fails. While the parent's
+      // write still runs, a load of the child served from memory in `spaceB`
+      // copies nothing, since the space is being supplied. The child is live
+      // from a compile into no space, and `space` holds the closure, so the
+      // copy is otherwise due.
+      const program: RuntimeProgram = {
+        main: "/parent.tsx",
+        files: [
+          {
+            name: "/parent.tsx",
+            contents: [
+              'import { pattern } from "commonfabric";',
+              'import Child from "./child.tsx";',
+              "export default pattern<{ value: number }>(({ value }) => ({",
+              "  child: Child({ value }),",
+              "}));",
+            ].join("\n"),
+          },
+          {
+            name: "/child.tsx",
+            contents: [
+              'import { pattern } from "commonfabric";',
+              "export default pattern<{ value: number }>(({ value }) => ({",
+              "  doubled: value * 2,",
+              "}));",
+            ].join("\n"),
+          },
+        ],
+      };
+      const compiled = await engine.compileToRecordGraph(program);
+      const child = compiled.modules.find((module) =>
+        module.filename === "/child.tsx"
+      );
+      if (child === undefined) throw new Error("No child module");
+      await runtime.patternManager.compileOrGetPattern(program);
+      const manager = runtime.patternManager.accessForTestingOnly;
+      const runtimeVersion = await getCompileCacheRuntimeVersion();
+      if (runtimeVersion === undefined) throw new Error("No runtime version");
+      const release = Promise.withResolvers<void>();
+      let writes = 0;
+      // The manager's write, with the parent's write into `spaceB` held open
+      // until `release` resolves and the child's own write into it failing.
+      manager.compileCacheWriter = async (
+        target,
+        modules,
+        entry,
+        opts,
+        moduleDelegations,
+      ) => {
+        writes++;
+        if (target === spaceB && entry === compiled.entryIdentity) {
+          await release.promise;
+        }
+        if (target === spaceB && entry === child.identity) {
+          throw new Error("the child's own persist fails");
+        }
+        const writeTx = runtime.edit();
+        writeSourceAndCompiledDocs(
+          runtime,
+          target,
+          modules,
+          entry,
+          { ...opts, moduleDelegations },
+          writeTx,
+        );
+        runtime.prepareTxForCommit(writeTx);
+        expect((await writeTx.commit().settled).error).toBeUndefined();
+      };
+      try {
+        await manager.persistCompileCacheTracked(
+          space,
+          compiled.modules,
+          compiled.entryIdentity,
+          { runtimeVersion },
+        );
+        const parentIntoB = manager.persistCompileCacheTracked(
+          spaceB,
+          compiled.modules,
+          compiled.entryIdentity,
+          { runtimeVersion },
+        );
+        await expect(
+          manager.persistCompileCacheTracked(
+            spaceB,
+            [child],
+            child.identity,
+            { runtimeVersion },
+          ),
+        ).rejects.toThrow("the child's own persist fails");
+        expect(typeof await load(child.identity, spaceB)).toBe("function");
+        release.resolve();
+        await parentIntoB;
+        await flushed();
+        expect(writes).toBe(3);
+        expect(await holdsClosure(spaceB, child.identity)).toBe(true);
+      } finally {
+        release.resolve();
+        manager.compileCacheWriter = undefined;
+      }
+    });
+
+    it("copies the closure into the space of a piece the runtime starts from memory", async () => {
+      // The runner resolves a live pattern synchronously when it starts a
+      // piece, without the asynchronous loader, so that path is a load
+      // served from memory in the piece's space too. A piece created in
+      // `spaceB` with the source stored there and no compiled closure: a
+      // fresh runtime compiles the identity cold in `space` first, then
+      // starts the piece from memory, and `spaceB` receives the closure.
+      const fixture = await engine.compileToRecordGraph(PROGRAM);
+      const { entryIdentity } = fixture;
+      const created = await runtime.patternManager.compileOrGetPattern(
+        PROGRAM,
+      );
+      const piece = runtime.getCell<{ result: number }>(
+        spaceB,
+        "piece started from memory",
+        undefined,
+        tx,
+      );
+      const run = runtime.run(tx, created, { value: 4 }, piece);
+      await tx.commit().settled;
+      tx = runtime.edit();
+      await run.pull();
+      await runtime.idle();
+      await storeSourceIn(fixture, [space, spaceB]);
+      const pieceLink = piece.getAsNormalizedFullLink();
+
+      const starter = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      try {
+        let compiles = 0;
+        const original = starter.harness.compileResolvedToRecordGraph.bind(
+          starter.harness,
+        );
+        starter.harness.compileResolvedToRecordGraph = (...args) => {
+          compiles++;
+          return original(...args);
+        };
+        expect(
+          typeof await starter.patternManager.loadPatternByIdentity(
+            entryIdentity,
+            "default",
+            space,
+          ),
+        ).toBe("function");
+        await starter.patternManager.flushCompileCacheWrites();
+        await starter.storageManager.synced();
+        expect(compiles).toBe(1);
+        expect(await holdsClosure(spaceB, entryIdentity)).toBe(false);
+
+        const started = starter.getCellFromLink(pieceLink);
+        await started.sync();
+        expect(await starter.start(started)).toBe(true);
+        await starter.idle();
+        await starter.patternManager.flushCompileCacheWrites();
+        await starter.storageManager.synced();
+        expect(compiles).toBe(1);
+        expect(await holdsClosure(spaceB, entryIdentity)).toBe(true);
+      } finally {
+        await starter.dispose({ closeStorage: false });
+      }
+    });
+
+    it("copies from a space whose failed persist left another one in flight", async () => {
+      // Two persists of one closure into `space` share a storage slot and
+      // run in turn; the first fails and the second is still writing. A load
+      // served from memory in `spaceB` while it writes names `space` as the
+      // copy's origin all the same: the copy waits for that write, and the
+      // closure reaches `spaceB` from it.
+      const fixture = await engine.compileToRecordGraph(PROGRAM);
+      const { entryIdentity } = fixture;
+      await runtime.patternManager.compileOrGetPattern(PROGRAM);
+      const manager = runtime.patternManager.accessForTestingOnly;
+      const runtimeVersion = await getCompileCacheRuntimeVersion();
+      if (runtimeVersion === undefined) throw new Error("No runtime version");
+      const release = Promise.withResolvers<void>();
+      let writes = 0;
+      // The manager's write: the first into `space` fails, the second into
+      // it is held open until `release` resolves.
+      manager.compileCacheWriter = async (
+        target,
+        modules,
+        entry,
+        opts,
+        moduleDelegations,
+      ) => {
+        const write = ++writes;
+        if (target === space && write === 1) {
+          throw new Error("the first persist fails");
+        }
+        if (target === space && write === 2) await release.promise;
+        const writeTx = runtime.edit();
+        writeSourceAndCompiledDocs(
+          runtime,
+          target,
+          modules,
+          entry,
+          { ...opts, moduleDelegations },
+          writeTx,
+        );
+        runtime.prepareTxForCommit(writeTx);
+        expect((await writeTx.commit().settled).error).toBeUndefined();
+      };
+      try {
+        // Distinct delegations give the two persists distinct closure
+        // signatures, so the second queues behind the first instead of
+        // joining it.
+        const first = manager.persistCompileCacheTracked(
+          space,
+          fixture.modules,
+          entryIdentity,
+          { runtimeVersion },
+          new Map([[entryIdentity, new Set([entryIdentity])]]),
+        );
+        const second = manager.persistCompileCacheTracked(
+          space,
+          fixture.modules,
+          entryIdentity,
+          { runtimeVersion },
+        );
+        await expect(first).rejects.toThrow("the first persist fails");
+        expect(typeof await load(entryIdentity, spaceB)).toBe("function");
+        release.resolve();
+        await second;
+        await flushed();
+        expect(writes).toBe(3);
+        expect(await holdsClosure(spaceB, entryIdentity)).toBe(true);
+      } finally {
+        release.resolve();
+        manager.compileCacheWriter = undefined;
+      }
+    });
+
     it("copies once into a space, however many loads it serves there", async () => {
       const { entryIdentity, loaded } = await coldLoadedInSpace();
       const { compileCacheWrites } =
