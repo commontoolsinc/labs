@@ -1978,6 +1978,17 @@ memo, which names a space once for the life of the process.
 - The launcher spawns the child CLI with `deno run --quiet` so Deno's own
   warnings (npm "Ignored build scripts" banner) never reach users.
 
+### What a read waits for under server execution
+
+With server execution on, a read first waits until the serving runtime has
+reacted to every authored commit at or below the server's head as it stands when
+the read begins. The serving runtime runs the handlers and derives what a read
+returns. A `cf cell set` that sends an event returns with the event committed
+and that run still ahead, and a `cf piece call` returns that way under
+`--no-wait`, so the wait is what makes a `cf cell get` that follows one, from
+the same process or another, read what the run stored. With server execution
+off, this runtime runs what it reads, and no such wait occurs.
+
 ### What a call refuses before it dispatches
 
 When ordinary callable lookup finds no verb, `cf piece call` checks the deployed
@@ -2076,15 +2087,6 @@ the piece and waits for asynchronous work, including session-scoped store
 queries and their reactive updates, to settle before reading. Its execution can
 demand inputs beyond the selected output. Missing-path diagnostics can require a
 broader root read.
-
-With server execution on, a read first waits until the serving runtime has
-reacted to every authored commit at or below the server's head as it stands when
-the read begins. The serving runtime runs the handlers and derives what a read
-returns. A `cf set` that sends an event returns with the event committed and
-that run still ahead, and a `cf call` returns that way under `--no-wait`, so the
-wait is what makes a `cf get` that follows one, from the same process or
-another, read what the run stored. With server execution off, this runtime runs
-what it reads, and no such wait occurs.
 
 `cf piece call` writes them **past the `--` that closes the callable's
 section**. The callable name opens that section, so everything between the two

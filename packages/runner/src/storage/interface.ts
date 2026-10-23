@@ -142,6 +142,20 @@ export type ReplicaLoadFailure = {
   permanentEvidence: boolean;
 };
 
+/**
+ * Thrown by `IStorageProvider.serverAuthoredSeq()` against a server that
+ * advertises server execution without reporting authored commit boundaries,
+ * as one built before it reported them does: what a read would wait for to
+ * see the serving runtime's runs cannot be known from it.
+ */
+export class UnreportedAuthoredBoundaryError extends Error {
+  override readonly name = "UnreportedAuthoredBoundaryError";
+
+  constructor() {
+    super("The serving server does not report authored commit boundaries");
+  }
+}
+
 export class ReplicaLoadFailureError extends Error {
   override readonly name = "ReplicaLoadFailureError";
 
@@ -1057,6 +1071,8 @@ export interface IStorageProvider {
   /**
    * Highest authored commit at or below `head`, or undefined when the server
    * does not advertise server execution. Bookkeeping commits are excluded.
+   * Rejects with `UnreportedAuthoredBoundaryError` against a server that
+   * serves without reporting the boundary.
    */
   serverAuthoredSeq?(head: number): Promise<number | undefined>;
 

@@ -88,6 +88,7 @@ import {
   settingsForDeployedClient,
   SpaceNotFoundError,
   UI,
+  UnreportedAuthoredBoundaryError,
   VNode,
 } from "@commonfabric/runner";
 import {
@@ -5158,6 +5159,8 @@ async function loadPieceForRead(
  * that follows a send, from this process or another, reads what the serving
  * runtime stored for it. Resolves at once in the OFF arm, where this runtime
  * runs what it reads, and against a server that advertises no serving loop.
+ * Against one that serves without reporting authored commit boundaries, the
+ * read goes ahead without the wait, and says so on stderr.
  */
 async function waitForServedHead(pieces: PiecesController): Promise<void> {
   if (pieces.runtime.experimental.serverExecution !== true) return;
@@ -5165,7 +5168,15 @@ async function waitForServedHead(pieces: PiecesController): Promise<void> {
   const head = await pieces.runtime.storageManager.open(space)
     .serverHeadSeq?.();
   if (head === undefined) return;
-  await waitForSettledThroughHead(pieces.runtime, space, head);
+  try {
+    await waitForSettledThroughHead(pieces.runtime, space, head);
+  } catch (error) {
+    if (!(error instanceof UnreportedAuthoredBoundaryError)) throw error;
+    console.warn(
+      `${error.message}; reading without waiting for the serving runtime, ` +
+        "so a run a send just started may not show yet.",
+    );
+  }
 }
 
 export async function getCellValue(

@@ -190,6 +190,7 @@ import {
   toReplicaLoadFailureError,
   UnexaminedAbsence,
   Unit,
+  UnreportedAuthoredBoundaryError,
   type ViewInterestLease,
 } from "./interface.ts";
 import {
@@ -6209,11 +6210,7 @@ export class SpaceReplica
       atSeq: head,
       includeAuthoredSeq: true,
     });
-    if (authoredSeq === undefined) {
-      throw new Error(
-        "The serving server does not report authored commit boundaries",
-      );
-    }
+    if (authoredSeq === undefined) throw new UnreportedAuthoredBoundaryError();
     return authoredSeq;
   }
 
