@@ -27,7 +27,6 @@ import {
   emptyEntityDocument,
   PatchApplyError,
   patchOpChangesParentKeySet,
-  patchOpIsStructural,
   touchedPointerPaths,
 } from "./patch.ts";
 import {
@@ -4785,79 +4784,6 @@ const validateApplyOperation = (operation: BasedApplyOpOperation): void => {
   }
 };
 
-/**
- * Whether `commit` stands as the base of its `apply-op` at `opIndex`, which
- * names none: it carries a recursive read, confirmed or pending, of the field
- * or of a path above it on the commit's own branch, and no operation ahead of
- * this one writes the field. Reads are validated before any operation applies,
- * so the field then holds exactly what that read saw. A shallow read sees only
- * the shape at its path, and a read of another branch says nothing about this
- * one, so neither counts.
- */
-const commitReadIsFieldBase = (
-  commit: ClientCommit,
-  branch: BranchName,
-  opIndex: number,
-  operation: ApplyOpOperation,
-): boolean => {
-  const fieldPath = ["value", ...operation.path];
-  const scope = normalizeScope(operation.scope);
-  const covers = (
-    read: {
-      id: string;
-      scope?: CellScope;
-      path: readonly string[];
-      nonRecursive?: boolean;
-    },
-  ) =>
-    read.id === operation.id && normalizeScope(read.scope) === scope &&
-    read.nonRecursive !== true && isPrefixPath(read.path, fieldPath);
-  const read =
-    commit.reads.confirmed.some((read) =>
-      (read.branch ?? branch) === branch && covers(read)
-    ) || commit.reads.pending.some(covers);
-  if (!read) return false;
-  return commit.operations.slice(0, opIndex).every((earlier) => {
-    if (earlier.op === "sqlite" || earlier.id !== operation.id) return true;
-    if (normalizeScope(earlier.scope) !== scope) return true;
-    switch (earlier.op) {
-      case "patch":
-        return earlier.patches.every((patch) =>
-          touchedPointerPaths(patch).every((path) =>
-            !pathsOverlap(path, fieldPath) &&
-            !shiftsArrayAbove(patch, path, fieldPath)
-          )
-        );
-      case "apply-op":
-      case "release-op-field":
-        return !pathsOverlap(["value", ...earlier.path], fieldPath);
-      default:
-        // A `set` or `delete` replaces the whole document.
-        return false;
-    }
-  });
-};
-
-/**
- * Whether `patch`, touching `path`, adds, removes, or moves an element of an
- * array at or above `fieldPath`. That shifts the elements after it, so the
- * value at `fieldPath` can become a different one without any path of the
- * patch overlapping it. Adding or removing an object's key moves none of its
- * other keys. Any index counts, one after the field's included, and so does a
- * numeric key of an object; both only refuse an edit that would have been
- * sound.
- */
-const shiftsArrayAbove = (
-  patch: PatchOp,
-  path: readonly string[],
-  fieldPath: readonly string[],
-): boolean => {
-  if (!patchOpIsStructural(patch) || path.length === 0) return false;
-  const key = path[path.length - 1];
-  return (key === "-" || /^(0|[1-9][0-9]*)$/.test(key)) &&
-    isPrefixPath(parentPath(path), fieldPath);
-};
-
 /** An `apply-op` whose base is stated, as the engine applies one. */
 type BasedApplyOpOperation = ApplyOpOperation & { base: OpCursor | null };
 
@@ -4877,30 +4803,27 @@ class StaleOperationBaselineError extends OpFieldBaselineMismatchError {
 }
 
 /**
- * Returns `operation` with its base stated. One that names none was computed
- * from the field's value as it stands, which its `baselineHash` names or, with
- * no hash, its commit's read of the field stands for
- * (`commitReadIsFieldBase()`). Either way it applies at the field's current
- * version with nothing to rebase over: its base is the current cursor, or, for
- * a field with no active epoch, `null` with the hash of the value the field
- * holds.
+ * Returns `operation` with its base stated. One that names none applies at the
+ * field's current version with nothing to rebase over: its base is the current
+ * cursor, or, for a field with no active epoch, `null` with the hash of the
+ * value the field holds. Its `baselineHash`, when it carries one, names the
+ * value it was computed from, and it applies only while the field holds that
+ * value. Without one it is a blind write, as a `set` or `patch` is, and what
+ * guards it is whatever reads its commit carries, which are validated before
+ * any operation applies.
  *
  * @throws StaleOperationBaselineError when the field no longer holds the value
  *   the hash names.
- * @throws OpCursorMismatchError when, with no hash, the commit does not stand
- *   as the base.
  */
 const withStatedBase = (
   engine: Engine,
   options: {
     branch: BranchName;
-    commit: ClientCommit;
-    opIndex: number;
     operation: ApplyOpOperation;
     scopeKey: string;
   },
 ): BasedApplyOpOperation => {
-  const { branch, commit, opIndex, operation, scopeKey } = options;
+  const { branch, operation, scopeKey } = options;
   if (operation.base !== undefined) {
     return { ...operation, base: operation.base };
   }
@@ -4916,8 +4839,8 @@ const withStatedBase = (
     valueAtOperationPath(document, operation.path),
   );
   // TODO(ubik2): Drop the hash form once a served handler's reads reach its
-  // wave commit, so that the commit's read is the edit's base on every path.
-  // A wave drops the reads of what it seals, and the hash is what still says
+  // wave commit, so that the commit's read guards the edit on every path. A
+  // wave drops the reads of what it seals, and the hash is what still says
   // which value the edit was computed from.
   if (baselineHash !== undefined) {
     if (typeof baselineHash !== "string" || baselineHash.length === 0) {
@@ -4928,11 +4851,6 @@ const withStatedBase = (
     if (baselineHash !== currentHash) {
       throw new StaleOperationBaselineError(`${operation.id} ${scopeKey}`);
     }
-  } else if (!commitReadIsFieldBase(commit, branch, opIndex, operation)) {
-    throw new OpCursorMismatchError(
-      "an apply-op without a base needs a baseline hash, or the commit's " +
-        "recursive read of the field and no earlier operation writing it",
-    );
   }
   const field = selectOperationField(
     engine,
@@ -6679,8 +6597,6 @@ const applyCommitTransaction = (
         opIndex,
         operation: withStatedBase(engine, {
           branch,
-          commit,
-          opIndex,
           operation,
           scopeKey: scopeKeyOverride ??
             resolveScopeKey(operation.scope, {

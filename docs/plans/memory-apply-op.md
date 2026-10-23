@@ -559,13 +559,13 @@ Purpose: let a handler edit an active collaborative string, which an ordinary
 write may not change (§7.6), with an edit the open editors merge like any
 other.
 
-- [x] Let `apply-op` name no base: it was computed from the field's current
-      value and applies at the current version with nothing to rebase over,
-      and activates an inactive field from that value. A `baselineHash` names
-      the value, or, without one, the commit's recursive read of the field
-      stands for it; the engine states the base before applying it, so the
-      apply path itself is unchanged (§7.6, §7.7.1). A stale hash in a wave
-      commit is a conflict on that document.
+- [x] Let `apply-op` name no base: it applies at the field's current version
+      with nothing to rebase over, and activates an inactive field from its
+      value. With a `baselineHash` it applies only while the field holds that
+      value, and a stale hash in a wave commit is a conflict on that document;
+      without one it is a blind write, guarded by its commit's reads as a
+      `set` is. The engine states the base before applying it, so the apply
+      path itself is unchanged (§7.6, §7.7.1).
 - [x] Add `Writable<string>.applyChanges()`, taking changes in the shape of a
       CodeMirror change spec against the value the handler read. The handler's
       transaction records them and writes the changed text, so CFC, its later
@@ -588,11 +588,10 @@ other.
 
 Required tests:
 
-- [x] An `apply-op` without a base applies at the current version beside a
-      read of the field or of the document, activates an inactive field,
-      replays with its commit, and is rejected without a recursive read, after
-      an earlier write to the field in the commit, or under its submission id
-      in a later commit.
+- [x] An `apply-op` without a base applies at the current version, blind or
+      beside a read of the field, activates an inactive field, replays with
+      its commit, and is rejected by a stale read in its commit or under its
+      submission id in a later commit.
 - [x] A stale confirmed read of the field refuses the commit as a
       `ConflictError` before the operation applies.
 - [x] A handler's edit commits beside an ordinary write to another field of the

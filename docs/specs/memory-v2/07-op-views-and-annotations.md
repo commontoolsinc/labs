@@ -199,8 +199,7 @@ baseline hash is interpreted as version zero of that epoch and rebased over the
 operations already accepted there. A different codec or baseline is rejected.
 
 An `apply-op` with no base activates an inactive field from its current
-value, which its `baselineHash` names or the commit's own read of the field
-saw (§7.7.1).
+value (§7.7.1).
 
 Within an active epoch:
 
@@ -208,8 +207,8 @@ Within an active epoch:
 - `apply-op` may use an older version in the same epoch and is rebased over the
   intervening integrated suffix
 - `apply-op` may name no base, and then applies at the current version with
-  no suffix to rebase over, against the value its `baselineHash` names or the
-  commit's read of the field
+  no suffix to rebase over: while the field holds the value its
+  `baselineHash` names, or blind without one
 - a future version or different epoch is rejected
 - a submission id is unique within the epoch
 
@@ -243,7 +242,7 @@ ApplyOpOperation {
   path: ValuePath
   codec: OpCodecId
   submissionId: string
-  base?: OpCursor | null      // absent: the field's current value
+  base?: OpCursor | null      // absent: the field's current version
   baselineHash?: string       // required when base is null; optional when
                               // absent; not allowed with a cursor
   payload: JSONValue          // codec-defined submitted batch
@@ -286,25 +285,21 @@ cursor is the field-specific concurrency precondition, and stale bases are
 mergeable through the codec. Other reads in the commit retain normal Memory
 conflict semantics.
 
-An `apply-op` with no base was computed from the field's value as it stands,
-and applies at the current version, so step 5 rebases over nothing. What
-establishes that the field still holds that value takes one of two forms:
+An `apply-op` with no base applies at the field's current version, so step 5
+rebases over nothing:
 
-- **A `baselineHash`.** The engine compares the hash of the field's value, as it
+- **With a `baselineHash`**, it applies only while the field holds the value
+  the hash names. The engine compares the hash of the field's value, as it
   stands at that point in the commit, with `baselineHash`, and rejects a
   mismatch with `OpFieldBaselineMismatchError`. In a wave commit
   (serving-loop.md §3d), the mismatch is a `WaveCommitConflictError` naming the
   document, so that only the contributions writing it are requeued.
-- **No hash: the commit's read.** The commit must carry a recursive read,
-  confirmed or pending, of the field or of a path above it on the commit's
-  branch, and no operation ahead of the `apply-op` in the commit may write the
-  field, nor add, remove, or move an element of an array at or above it, which
-  would move another value into it; otherwise the engine rejects it with
-  `OpCursorMismatchError`. Reads
-  are validated before operations apply, so where the field moved since the
-  read, the read refuses the whole commit as an ordinary `ConflictError` before
-  the `apply-op` is considered. Where it did not, the field holds exactly what
-  the read saw.
+- **Without one**, it is a blind write, as a `set` or `patch` is. What guards it
+  is whatever reads its commit carries: they are validated before any
+  operation applies, so a read of the field that went stale refuses the whole
+  commit as an ordinary `ConflictError` before the `apply-op` is considered. A
+  commit carrying neither a read of the field nor a hash has asked for the edit
+  to land on whatever the field holds.
 
 Pattern code's `applyChanges()` sends the hash form, beside its handler's read
 of the field. Outside server execution, that read refuses a stale edit first,

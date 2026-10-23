@@ -1875,28 +1875,6 @@ describe("v2-operation-engine", () => {
       }
     });
 
-    it("applies beside a read of the whole document", async () => {
-      const { engine, path } = await openTestEngine();
-      try {
-        const seededSeq = seed(engine);
-        applyCommit(engine, {
-          sessionId: "session:agent",
-          commit: {
-            localSeq: 1,
-            reads: readAt(seededSeq, ["value"]),
-            operations: [unbased("agent:1", "abcd", "!")],
-          },
-        });
-
-        expect(read(engine, { id: "of:collaborative" })).toEqual({
-          value: { body: "abcd!" },
-        });
-      } finally {
-        close(engine);
-        await Deno.remove(path);
-      }
-    });
-
     it("throws `ConflictError` from a stale read of the field before the operation is considered", async () => {
       const { engine, path } = await openTestEngine();
       try {
@@ -1926,45 +1904,22 @@ describe("v2-operation-engine", () => {
       }
     });
 
-    it("throws `OpCursorMismatchError` without a read of the field", async () => {
+    it("applies blind at the field's current version without a read or a hash", async () => {
       const { engine, path } = await openTestEngine();
       try {
         seed(engine);
-
-        expect(() =>
-          applyCommit(engine, {
-            sessionId: "session:agent",
-            commit: {
-              localSeq: 1,
-              reads: { confirmed: [], pending: [] },
-              operations: [unbased("agent:1", "abcd", "!")],
-            },
-          })
-        ).toThrow(OpCursorMismatchError);
-        expect(read(engine, { id: "of:collaborative" })).toEqual({
-          value: { body: "abcd" },
+        applyCommit(engine, {
+          sessionId: "session:agent",
+          commit: {
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            operations: [unbased("agent:1", "abcd", "!")],
+          },
         });
-      } finally {
-        close(engine);
-        await Deno.remove(path);
-      }
-    });
 
-    it("throws `OpCursorMismatchError` when the only read of the field is non-recursive", async () => {
-      const { engine, path } = await openTestEngine();
-      try {
-        const seededSeq = seed(engine);
-
-        expect(() =>
-          applyCommit(engine, {
-            sessionId: "session:agent",
-            commit: {
-              localSeq: 1,
-              reads: readAt(seededSeq, ["value"], true),
-              operations: [unbased("agent:1", "abcd", "!")],
-            },
-          })
-        ).toThrow(OpCursorMismatchError);
+        expect(read(engine, { id: "of:collaborative" })).toEqual({
+          value: { body: "abcd!" },
+        });
       } finally {
         close(engine);
         await Deno.remove(path);
@@ -2008,73 +1963,6 @@ describe("v2-operation-engine", () => {
       }
     });
 
-    it("throws `OpCursorMismatchError` when the only read of the field is a shallow pending read", async () => {
-      const { engine, path } = await openTestEngine();
-      try {
-        const seededSeq = seed(engine);
-        applyCommit(engine, {
-          sessionId: "session:agent",
-          commit: {
-            localSeq: 1,
-            reads: readAt(seededSeq),
-            operations: [unbased("agent:1", "abcd", "!")],
-          },
-        });
-
-        expect(() =>
-          applyCommit(engine, {
-            sessionId: "session:agent",
-            commit: {
-              localSeq: 2,
-              reads: {
-                confirmed: [],
-                pending: [{
-                  id: "of:collaborative",
-                  path: toDocumentPath(["value"]),
-                  localSeq: 1,
-                  nonRecursive: true,
-                }],
-              },
-              operations: [unbased("agent:2", "abcd!", "?")],
-            },
-          })
-        ).toThrow(OpCursorMismatchError);
-      } finally {
-        close(engine);
-        await Deno.remove(path);
-      }
-    });
-
-    it("throws `OpCursorMismatchError` when the only read of the field is of another branch", async () => {
-      const { engine, path } = await openTestEngine();
-      try {
-        const seededSeq = seed(engine);
-        createBranch(engine, "feature");
-
-        expect(() =>
-          applyCommit(engine, {
-            sessionId: "session:agent",
-            commit: {
-              localSeq: 1,
-              reads: {
-                confirmed: [{
-                  id: "of:collaborative",
-                  branch: "feature",
-                  path: toDocumentPath(["value", "body"]),
-                  seq: seededSeq,
-                }],
-                pending: [],
-              },
-              operations: [unbased("agent:1", "abcd", "!")],
-            },
-          })
-        ).toThrow(OpCursorMismatchError);
-      } finally {
-        close(engine);
-        await Deno.remove(path);
-      }
-    });
-
     it("applies after an earlier write to another field of the document", async () => {
       const { engine, path } = await openTestEngine();
       try {
@@ -2104,175 +1992,7 @@ describe("v2-operation-engine", () => {
       }
     });
 
-    describe("beside an earlier write to the document's arrays or keys", () => {
-      // The field is `items[1]` of `["zero", "ac", "xy"]`, which no epoch
-      // holds yet, read recursively. An earlier operation in the commit that
-      // shifts the array moves another value into the field without touching
-      // its path.
-
-      const seedItems = (engine: Awaited<ReturnType<typeof open>>): number =>
-        applyCommit(engine, {
-          sessionId: "session:setup",
-          commit: {
-            localSeq: 1,
-            reads: { confirmed: [], pending: [] },
-            operations: [{
-              op: "set",
-              id: "of:collaborative",
-              value: { value: { items: ["zero", "ac", "xy"] } },
-            }],
-          },
-        }).seq;
-
-      const itemEdit: ApplyOpOperation = {
-        op: "apply-op",
-        id: "of:collaborative",
-        path: toValuePath(["items", "1"]),
-        codec: CODEMIRROR_CHANGESET_CODEC,
-        submissionId: "agent:1",
-        payload: {
-          updates: [{ clientId: "agent", changes: changes(2, 1, "b") }],
-        },
-      };
-
-      it("throws `OpCursorMismatchError` after an earlier removal from the array above the field", async () => {
-        const { engine, path } = await openTestEngine();
-        try {
-          const setupSeq = seedItems(engine);
-
-          expect(() =>
-            applyCommit(engine, {
-              sessionId: "session:agent",
-              commit: {
-                localSeq: 1,
-                reads: readAt(setupSeq, ["value", "items", "1"]),
-                operations: [
-                  {
-                    op: "patch",
-                    id: "of:collaborative",
-                    patches: [{ op: "remove", path: "/value/items/0" }],
-                  },
-                  itemEdit,
-                ],
-              },
-            })
-          ).toThrow(OpCursorMismatchError);
-          expect(read(engine, { id: "of:collaborative" })).toEqual({
-            value: { items: ["zero", "ac", "xy"] },
-          });
-        } finally {
-          close(engine);
-          await Deno.remove(path);
-        }
-      });
-
-      for (
-        const { end, patch } of [
-          {
-            end: "from",
-            patch: { op: "move", from: "/value/items/0", path: "/value/moved" },
-          },
-          {
-            end: "path",
-            patch: { op: "move", from: "/value/spare", path: "/value/items/0" },
-          },
-        ] as const
-      ) {
-        it(`throws \`OpCursorMismatchError\` after an earlier move whose \`${end}\` is in the array above the field`, async () => {
-          const { engine, path } = await openTestEngine();
-          try {
-            const setupSeq = applyCommit(engine, {
-              sessionId: "session:setup",
-              commit: {
-                localSeq: 1,
-                reads: { confirmed: [], pending: [] },
-                operations: [{
-                  op: "set",
-                  id: "of:collaborative",
-                  value: { value: { items: ["zero", "ac", "xy"], spare: "s" } },
-                }],
-              },
-            }).seq;
-
-            expect(() =>
-              applyCommit(engine, {
-                sessionId: "session:agent",
-                commit: {
-                  localSeq: 1,
-                  reads: readAt(setupSeq, ["value", "items", "1"]),
-                  operations: [
-                    { op: "patch", id: "of:collaborative", patches: [patch] },
-                    itemEdit,
-                  ],
-                },
-              })
-            ).toThrow(OpCursorMismatchError);
-          } finally {
-            close(engine);
-            await Deno.remove(path);
-          }
-        });
-      }
-
-      it("throws `OpFieldWriteConflictError` for a removal from the array above the field after the edit", async () => {
-        const { engine, path } = await openTestEngine();
-        try {
-          const setupSeq = seedItems(engine);
-
-          expect(() =>
-            applyCommit(engine, {
-              sessionId: "session:agent",
-              commit: {
-                localSeq: 1,
-                reads: readAt(setupSeq, ["value", "items", "1"]),
-                operations: [
-                  itemEdit,
-                  {
-                    op: "patch",
-                    id: "of:collaborative",
-                    patches: [{ op: "remove", path: "/value/items/0" }],
-                  },
-                ],
-              },
-            })
-          ).toThrow(OpFieldWriteConflictError);
-        } finally {
-          close(engine);
-          await Deno.remove(path);
-        }
-      });
-
-      it("applies after an earlier addition of a key to an object above the field", async () => {
-        const { engine, path } = await openTestEngine();
-        try {
-          const setupSeq = seedItems(engine);
-          applyCommit(engine, {
-            sessionId: "session:agent",
-            commit: {
-              localSeq: 1,
-              reads: readAt(setupSeq, ["value", "items", "1"]),
-              operations: [
-                {
-                  op: "patch",
-                  id: "of:collaborative",
-                  patches: [{ op: "add", path: "/value/title", value: "T" }],
-                },
-                itemEdit,
-              ],
-            },
-          });
-
-          expect(read(engine, { id: "of:collaborative" })).toEqual({
-            value: { items: ["zero", "abc", "xy"], title: "T" },
-          });
-        } finally {
-          close(engine);
-          await Deno.remove(path);
-        }
-      });
-    });
-
-    it("activates an inactive field from the value the commit read", async () => {
+    it("activates an inactive field from the value it holds", async () => {
       const { engine, path } = await openTestEngine();
       try {
         const setup = applyCommit(engine, {
@@ -2316,7 +2036,7 @@ describe("v2-operation-engine", () => {
       }
     });
 
-    it("throws `OpCursorMismatchError` when an earlier operation in the commit writes the field", async () => {
+    it("applies blind to the value an earlier operation in the commit left at the field", async () => {
       const { engine, path } = await openTestEngine();
       try {
         const setup = applyCommit(engine, {
@@ -2332,31 +2052,30 @@ describe("v2-operation-engine", () => {
           },
         });
 
-        // The field is inactive, so the patch is allowed, and leaves the field
-        // holding something the read never saw.
-        expect(() =>
-          applyCommit(engine, {
-            sessionId: "session:agent",
-            commit: {
-              localSeq: 1,
-              reads: readAt(setup.seq),
-              operations: [
-                {
-                  op: "patch",
-                  id: "of:collaborative",
-                  patches: [{
-                    op: "replace",
-                    path: "/value/body",
-                    value: "wxyz",
-                  }],
-                },
-                unbased("agent:1", "abcd", "!"),
-              ],
-            },
-          })
-        ).toThrow(OpCursorMismatchError);
+        // The read holds, since nothing moved the field before the commit;
+        // the edit was computed from `abcd`, and lands on what the patch left.
+        applyCommit(engine, {
+          sessionId: "session:agent",
+          commit: {
+            localSeq: 1,
+            reads: readAt(setup.seq),
+            operations: [
+              {
+                op: "patch",
+                id: "of:collaborative",
+                patches: [{
+                  op: "replace",
+                  path: "/value/body",
+                  value: "wxyz",
+                }],
+              },
+              unbased("agent:1", "abcd", "!"),
+            ],
+          },
+        });
+
         expect(read(engine, { id: "of:collaborative" })).toEqual({
-          value: { body: "abcd" },
+          value: { body: "wxyz!" },
         });
       } finally {
         close(engine);
