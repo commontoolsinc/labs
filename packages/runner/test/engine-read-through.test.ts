@@ -711,7 +711,7 @@ describe("engine-read-through", () => {
       const provider = manager.open(space);
       const id = "of:asked-again" as URI;
       // An address nothing reported absent is not asked.
-      expect(provider.readStoreAbsenceAgain?.({ id })).toBe(false);
+      expect(provider.readStoreAbsenceAgain?.({ id })).toBeUndefined();
       expect(reads).toBe(0);
       expect(provider.replica.getDocument(id)).toBeUndefined();
       expect(reads).toBe(1);

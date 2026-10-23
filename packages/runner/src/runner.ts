@@ -7733,13 +7733,13 @@ export class Runner {
     // result linking to it, so with that result here a report that the store
     // held nothing at the argument predates the write. The store is asked
     // again, which nothing else does before the feed reports the write: a
-    // name-sync asks the replica, which answers that report. An argument the
-    // store still holds nothing at is one no name-sync could deliver, and the
-    // run reads it missing as it would after one.
+    // name-sync asks the replica, which answers that report. Whatever the
+    // store answers, the run reads what it holds now; an argument the store
+    // still holds nothing at is one no name-sync could deliver. An argument
+    // the store was not asked for holds the run.
     if (
       !present(argumentLink) &&
-      !this.#readStoreAbsenceAgain(argumentLink, identity) &&
-      !this.#storeReportedAbsent(argumentLink, identity)
+      this.#readStoreAbsenceAgain(argumentLink, identity) === undefined
     ) {
       return hold("the argument document");
     }
@@ -7826,17 +7826,17 @@ export class Runner {
    * Asks the store read-through again for the document `link` names, in the
    * instance `identity` resolves it to, when it reported holding nothing
    * there (`IStorageProvider.readStoreAbsenceAgain`). Returns whether the
-   * store holds it now.
+   * store holds it now, or `undefined` when the store was not asked.
    */
   #readStoreAbsenceAgain(
     link: NormalizedFullLink,
     identity: ScopeKeyIdentity | undefined,
-  ): boolean {
+  ): boolean | undefined {
     return this.#runtime.storageManager.open(link.space)
       .readStoreAbsenceAgain?.(
         { id: link.id, ...(link.scope !== undefined && { scope: link.scope }) },
         identity,
-      ) === true;
+      );
   }
 
   /**

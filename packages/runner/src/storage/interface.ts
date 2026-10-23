@@ -1001,12 +1001,14 @@ export interface IStorageProvider {
    * Asks the store read-through again for an instance it reported holding
    * nothing at (`storeReportedAbsent()`), as the feed's report of a write
    * would, and integrates what it holds now. Returns whether the store holds
-   * the document now. Optional, as `storeReportedAbsent()` is.
+   * the document now, or `undefined` when it was not asked: no such report
+   * stands, or a frame is being applied. Optional, as `storeReportedAbsent()`
+   * is.
    */
   readStoreAbsenceAgain?(
     address: { id: URI; scope?: CellScope },
     identity?: ScopeKeyIdentity,
-  ): boolean;
+  ): boolean | undefined;
 
   /** INBOUND settlement only (server-execution v2 stage F): outstanding
    * watch refreshes/pulls, EXCLUDING commit settlement AND update
