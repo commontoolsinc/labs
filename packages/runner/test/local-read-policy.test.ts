@@ -248,6 +248,34 @@ describe("local-read-policy", () => {
     expect((await committed.settled).error).toBeUndefined();
   });
 
+  it("checks a transaction again when a producer leaves the scheduler between its pre-commit validation and the next", async () => {
+    // A producer's currency is scheduler state, which no frame or commit
+    // changes, so the registry ends the stretch when it removes a node.
+
+    const producer: Action = () => {};
+    const cancel = runtime.scheduler.subscribe(producer, { isEffect: true });
+    const tx = runtime.edit();
+    restrictToLocalReads(
+      tx.tx,
+      () => () => runtime.scheduler.isEffect(producer),
+    );
+    try {
+      assertLocalReadAvailable(tx.tx, {
+        space,
+        id: "of:produced",
+        type: "application/json",
+        path: ["value"],
+      }, () => true);
+      expect(validateLocalReadBasisForCommit(tx)).toBeUndefined();
+      cancel();
+      expect(validateLocalReadBasis(tx)).toBeInstanceOf(LocalReadUnavailable);
+    } finally {
+      tx.abort();
+      cancel();
+      await runtime.idle();
+    }
+  });
+
   it("fails validation for a read its shared checker let through before the state changed", () => {
     const tx = runtime.edit();
     let allowed = true;

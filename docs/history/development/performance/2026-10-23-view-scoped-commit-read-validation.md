@@ -95,7 +95,7 @@ and was not measured on its own.
 
 ## After review
 
-Two changes came after the measurements above, and each only makes a
+Three changes came after the measurements above, and each only makes a
 validation check again in a case the measured votes did not reach.
 
 - A pre-commit pass that applies a frame itself, as a store read-through can on
@@ -105,6 +105,12 @@ validation check again in a case the measured votes did not reach.
   handed nothing over, refused before storage, leaves the stretch open, and
   its commit callbacks can have changed what the pre-commit pass proved, so the
   fifth pass now checks again whatever the commit did.
+- The stretch also ends where the scheduler state a producer's currency rests
+  on changes: when an action begins a run, which revokes its adoption, and when
+  the node registry removes a node or sets one to anything but clean. None of
+  these happens inside a commit, so the argument above already kept them out of
+  a stretch; the ends put that where the state changes.
 
-`local-read-policy.test.ts` holds both, and the hand-off's own end, each with a
-case that fails without it.
+`local-read-policy.test.ts` holds the first two and the hand-off's own end, each
+with a case that fails without it, and the third through a producer the
+registry removes, whose case fails without the end at a removal.
