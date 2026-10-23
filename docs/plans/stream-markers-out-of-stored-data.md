@@ -58,8 +58,9 @@ the `$event` input through write redirects and reads the terminal value.
 Anything but the sentinel becomes a "Handler used as lift" failure
 (`runner.ts:10492`, `:10902`, `describeHandlerStreamFailure` at `:11806`). That
 failure class is the trigger for the cold-start repairs, whose causes are
-structural (a setup marker naming another version, a manifest missing an
-internal cell) and which therefore outlive the sentinel; only the keying goes:
+structural (a stored setup that disagrees with the build: a manifest missing
+an internal cell or naming one the build lacks, a build digest that is not
+this build's) and which therefore outlive the sentinel; only the keying goes:
 
 - `isMissingStreamMarkerFailure` (`runner.ts:11862`) and the cold-start
   nested-piece setup repair keyed on it (`runner.ts:4942`).

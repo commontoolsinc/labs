@@ -118,7 +118,17 @@ scheme onto the tagged hash — historically always `of:`.
 
 The manifest of materialized internal cells is stored in result-cell
 metadata and matched by partial cause plus kind
-(`packages/runner/src/runner.ts`, `materializeDerivedInternalCells`).
+(`packages/runner/src/runner.ts`, `materializeDerivedInternalCells`). Setup
+also stamps `patternSetupBuild`, the digest of the build it staged: its derived
+internal cells in build order, each by partial cause, kind, scope and schema.
+Because a positional cause is a place in the build, two builds of one pattern
+source can name different cells by one cause, and the result projection links
+each slot to the cell of the build that wrote it. A start therefore re-stages
+the internal cells and the projection when the stored setup disagrees with the
+build it loads: a manifest missing one of the build's cells or naming one the
+build lacks, or a stamped digest that is not this build's
+(`Runner.#storedSetupAgrees`, the trigger of the start repair in
+`Runner.#startCore`).
 
 ### Sub-pattern instance identity
 
