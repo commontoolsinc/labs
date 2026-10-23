@@ -4,6 +4,7 @@ import { describe, it } from "@std/testing/bdd";
 import { HARNESS_RUN_DEPTHS } from "../src/contracts/run-depth.ts";
 import {
   PROMPT_SECTIONS,
+  type PromptSection,
   type RunShape,
   sendsSection,
 } from "../src/prompt-sections.ts";
@@ -103,5 +104,33 @@ describe("prompt sections", () => {
       expect(sendsSection("material-bar", shape)).toBe(deep);
       expect(sendsSection("critique", shape)).toBe(deep);
     }
+  });
+
+  it("sends a deep run that was never classified the deep sections for every domain, as it does the fabric's opening research", () => {
+    const sections: PromptSection[] = [
+      "personal-exhaustive",
+      "web-research",
+      "material-bar",
+      "critique",
+    ];
+    const deepStrategy = (shape: RunShape) =>
+      sections.filter((section) => sendsSection(section, shape));
+
+    // Unknown domains pass every domain condition, as for opening research.
+    expect(deepStrategy({ depth: "deep" })).toEqual([
+      "personal-exhaustive",
+      "web-research",
+      "material-bar",
+      "critique",
+    ]);
+    expect(sendsSection("opening-research", { depth: "deep" })).toBe(true);
+    // A classification that found no domain is known, and gets neither.
+    expect(
+      deepStrategy({
+        tags: new Set<HarnessTaskTag>(["find"]),
+        domains: new Set<HarnessTaskDomain>(),
+        depth: "deep",
+      }),
+    ).toEqual(["material-bar", "critique"]);
   });
 });
