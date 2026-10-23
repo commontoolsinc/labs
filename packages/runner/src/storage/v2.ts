@@ -4257,6 +4257,14 @@ class Provider
     return this.replica.presentCount(absences);
   }
 
+  /** See {@link SpaceReplica.storeReportedAbsent}. */
+  storeReportedAbsent(
+    address: { id: URI; scope?: CellScope },
+    identity?: ScopeKeyIdentity,
+  ): boolean {
+    return this.replica.storeReportedAbsent(address, identity);
+  }
+
   async #replaySync(
     replica: SpaceReplica,
     uri: URI,
@@ -9437,6 +9445,21 @@ export class SpaceReplica
       if ((this.#docs.get(key)?.confirmed.seq ?? 0) > 0) present += 1;
     }
     return present;
+  }
+
+  /**
+   * Whether the store read-through, asked for the instance `address` names
+   * under `identity`, reported holding nothing there, with no write to it
+   * reported since (see `#storeAbsences`). Without a read-through installed
+   * it never has.
+   */
+  storeReportedAbsent(
+    address: { id: URI; scope?: CellScope },
+    identity?: ScopeKeyIdentity,
+  ): boolean {
+    const instance = this.instanceKey(address.scope, identity);
+    return isScopeKey(instance) &&
+      this.#storeAbsences.has(docKey(address.id, instance));
   }
 
   #buildReads(

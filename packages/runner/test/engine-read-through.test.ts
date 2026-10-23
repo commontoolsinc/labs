@@ -646,6 +646,45 @@ describe("engine-read-through", () => {
     }
   });
 
+  it("reports an address the store had nothing at as store-reported absent until the feed reports a write to it", async () => {
+    const store = new Map<
+      string,
+      { seq: number; doc: { value: FabricValue } }
+    >();
+    const manager = SharedServerStorageManager.connectTo(server, {
+      as: serviceSigner,
+    });
+    try {
+      manager.installStoreReadThrough(space, ({ id, scopeKey }) => {
+        const entry = store.get(id);
+        return {
+          branch: "",
+          id,
+          scope: "space",
+          scopeKey,
+          ...(entry === undefined
+            ? { seq: 0, deleted: true as const }
+            : { seq: entry.seq, doc: entry.doc }),
+        };
+      });
+      const provider = manager.open(space);
+      const id = "of:reported-absent" as URI;
+      // Nothing is reported before the store has been asked.
+      expect(provider.storeReportedAbsent?.({ id })).toBe(false);
+      expect(provider.replica.getDocument(id)).toBeUndefined();
+      expect(provider.storeReportedAbsent?.({ id })).toBe(true);
+      // The feed's refresh asks again, and a document now there clears it.
+      store.set(id, { seq: 1, doc: { value: { made: true } } });
+      expect(
+        manager.integrateStoreWrites(space, [{ id, scopeKey: "space" }]),
+      ).toBe(1);
+      expect(provider.storeReportedAbsent?.({ id })).toBe(false);
+      expect(provider.replica.getDocument(id)?.value).toEqual({ made: true });
+    } finally {
+      await manager.close();
+    }
+  });
+
   it("integrates a feed refresh at the seq a local commit already confirmed, since the store's document may carry what the commit merged", async () => {
     // A commit of this replica's own write promotes its record to the
     // commit's seq with the value it materialized locally; the store's
