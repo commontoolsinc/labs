@@ -3,17 +3,20 @@ import {
   type FabricPlainObject,
   type FabricValue,
   hashOf,
+  hashStringOf,
   type MutableFabricPlainObjectLayer,
   shallowMutableClone,
   taggedHashStringOf,
   valueEqual,
 } from "@commonfabric/data-model";
+import { internSchema } from "@commonfabric/data-model-schema";
 import {
   classifySchemaMeta,
   collectSchemaMetaRefHashes,
   MalformedSchemaMetaError,
   SCHEMA_META_MEMBER,
 } from "@commonfabric/data-model-schema/schema-refs";
+import { isDID } from "@commonfabric/identity/did";
 import { aclDocId } from "@commonfabric/memory/acl";
 import {
   type CommitPrecondition,
@@ -28,12 +31,20 @@ import { isObjectOrArray, isPlainObject } from "@commonfabric/utils/types";
 
 import type { CellScope } from "../builder/types.ts";
 import {
+  type CfcConfidentialityRelease,
+  type CfcConfidentialityReleaseInput,
+  CONFIDENTIALITY_RELEASE_WRITER,
+  planConfidentialityRelease,
+} from "../cfc/confidentiality-release-plan.ts";
+import {
+  canonicalizeCfcMetadata,
   canonicalizeDocumentPath,
   canonicalizeLogicalPath,
   CFC_ENFORCEMENT_MODES,
   CFC_ENFORCING_STRICTNESS,
   CFC_GRANT_ID_PREFIX,
   type CfcAddress,
+  cfcCanonicalClauseDigest,
   type CfcContentAddressedLabels,
   type CfcDeclaredMonotonicityMode,
   type CfcDeclaredWideningExemption,
@@ -48,6 +59,7 @@ import {
   type CfcGrantWriteInput,
   type CfcLabelMetadataObservation,
   type CfcLabelMetadataProtectionMode,
+  type CfcMetadata,
   cfcMetadataPresent,
   type CfcPolicyEvaluationMode,
   type CfcPrefixProvenanceSummary,
@@ -88,7 +100,12 @@ import {
   type WritePolicyInput,
 } from "../cfc/mod.ts";
 import { withoutEnvelopeStabilityToken } from "../cfc/envelope-stability-reason.ts";
-import { prepareBoundaryCommitSteps } from "../cfc/prepare.ts";
+import {
+  ensureSchemaDocument,
+  loadStoredCfcEnvelope,
+  prepareBoundaryCommitSteps,
+  writeStoredCfcEnvelope,
+} from "../cfc/prepare.ts";
 import { CFC_POLICY_MANIFEST_ID_PREFIX } from "../cfc/policy.ts";
 import {
   runtimeOwnedStoreKey,
@@ -2606,6 +2623,107 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return { space: prepared.space, id: prepared.id };
   }
 
+  releaseCfcConfidentiality(
+    input: CfcConfidentialityReleaseInput,
+  ): CfcConfidentialityRelease {
+    this.#assertWritable("releaseCfcConfidentiality()");
+    // A release lowers a stored label in place, which is durable release
+    // state like a grant, so authoring one takes the release writer's own
+    // builtin identity. Pattern and handler code runs under a `verified`
+    // identity or none, and is refused.
+    const identity = this.#cfcState.implementationIdentity;
+    if (
+      identity?.kind !== "builtin" ||
+      identity.builtinId !== CONFIDENTIALITY_RELEASE_WRITER
+    ) {
+      throw new Error(
+        "cfc-confidentiality-release: `releaseCfcConfidentiality()` requires " +
+          `the \`${CONFIDENTIALITY_RELEASE_WRITER}\` builtin implementation ` +
+          "identity",
+      );
+    }
+    const actor = this.#cfcState.trustSnapshot?.actingPrincipal;
+    if (!isDID(actor)) {
+      throw new Error(
+        "cfc-confidentiality-release: lowering confidentiality requires an " +
+          "authenticated acting principal",
+      );
+    }
+    // The space whose DID is the acting principal's is the one space that
+    // principal owns by construction, with no membership to consult.
+    if (input.space !== actor) {
+      throw new Error(
+        `Cannot lower confidentiality in ${input.space}: ${actor} may lower ` +
+          "it only in their own space, the one whose DID is theirs.",
+      );
+    }
+    const target = {
+      space: input.space,
+      id: input.id,
+      scope: normalizeCellScope(input.scope),
+    };
+    const stored = loadStoredCfcEnvelope(this, target);
+    if (stored.status === "unreadable") {
+      throw new Error(
+        `Cannot lower confidentiality in ${input.id}: ${stored.reason}`,
+      );
+    }
+    const existing = stored.status === "loaded" ? stored.metadata : undefined;
+    const storedSchema = stored.status === "loaded" ? stored.schema : undefined;
+    const plan = planConfidentialityRelease({
+      actor,
+      path: input.path,
+      entries: existing?.labelMap.entries ?? [],
+      schema: storedSchema,
+      keep: input.keep,
+    });
+    const priorEnvelopeDigest = hashStringOf(
+      existing === undefined ? null : canonicalizeCfcMetadata(existing),
+    );
+    if (
+      existing === undefined || plan.released.length === 0 ||
+      plan.schema === undefined
+    ) {
+      return {
+        actor,
+        released: [],
+        releasedDigests: [],
+        priorEnvelopeDigest,
+        envelopeDigest: priorEnvelopeDigest,
+      };
+    }
+    const lowered = plan.schema;
+    // Deliberately NOT marked CFC-relevant, like a grant write: the plan above
+    // is the whole of the verification, and a throw leaves nothing written.
+    const metadata = this.#runPrivilegedSystemWrite((): CfcMetadata => {
+      let schemaHash = existing.schemaHash;
+      if (lowered !== storedSchema) {
+        const interned = internSchema(lowered, true);
+        ensureSchemaDocument(
+          this,
+          target.space,
+          interned.taggedHashString,
+          interned.schema,
+        );
+        schemaHash = interned.taggedHashString;
+      }
+      const metadata: CfcMetadata = {
+        ...existing,
+        schemaHash,
+        labelMap: { ...existing.labelMap, entries: [...plan.entries] },
+      };
+      writeStoredCfcEnvelope(this, target, metadata);
+      return metadata;
+    });
+    return {
+      actor,
+      released: plan.released,
+      releasedDigests: plan.released.map(cfcCanonicalClauseDigest),
+      priorEnvelopeDigest,
+      envelopeDigest: hashStringOf(canonicalizeCfcMetadata(metadata)),
+    };
+  }
+
   setCfcDeclaredWideningExemption(
     exemption: CfcDeclaredWideningExemption,
   ): void {
@@ -4867,6 +4985,12 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string } {
     return this.#wrapped.writeCfcGrant(input);
+  }
+
+  releaseCfcConfidentiality(
+    input: CfcConfidentialityReleaseInput,
+  ): CfcConfidentialityRelease {
+    return this.#wrapped.releaseCfcConfidentiality(input);
   }
 
   noteCfcSinkReleaseReject(
