@@ -356,6 +356,53 @@ describe("view plan publisher", () => {
     expect(fixture.publications.calls[2].args[1].sessionId).toBe("other");
   });
 
+  it("walks the UI again for a second session once publishing the first one's selection changed what the walk read", async () => {
+    // Publishing a selection yields to the runtime, and a walk shared with
+    // another session serves only while nothing it read has changed.
+    const second: SessionViewInterest = {
+      ...fixture.interest,
+      handle: {
+        ...fixture.interest.handle,
+        sessionId: "other",
+        sessionEpoch: "other-session",
+      },
+    };
+    fixture.interests.restore();
+    fixture.interests = stub(
+      fixture.server,
+      "viewInterestsForSpace",
+      () => [fixture.interest, second],
+    );
+    fixture.publications.restore();
+    let published = 0;
+    fixture.publications = stub(
+      fixture.server,
+      "setViewSelection",
+      async () => {
+        if (published++ === 0) {
+          await fixture.runtime.editWithRetry((tx) =>
+            fixture.root.withTx(tx).set({
+              $UI: {
+                type: "vnode",
+                name: "div",
+                props: {},
+                children: [fixture.hidden],
+              },
+            })
+          );
+        }
+        return true;
+      },
+    );
+    await publish();
+    const hidden = fixture.hidden.getAsNormalizedFullLink().id;
+    const [first, other] = fixture.publications.calls.map((call) =>
+      call.args[2].inputs?.map((input) => input.id)
+    );
+    expect(first).not.toContain(hidden);
+    expect(other).toContain(hidden);
+  });
+
   it("re-walks changed visible values and new view lifetimes", async () => {
     await publish();
     await fixture.runtime.editWithRetry((tx) =>

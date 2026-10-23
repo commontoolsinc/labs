@@ -143,8 +143,13 @@ export class ViewPlanPublisher {
     const shared: SharedSelection[] = [];
     // One UI walk serves every session viewing the same roots when it read
     // no user- or session-scoped document: such a walk resolves nothing by
-    // identity, so it reads the same addresses under any.
-    const sharedRenders = new Map<string, ViewRenderReads>();
+    // identity, so it reads the same addresses under any. It serves while
+    // the cache of the view that walked it still holds it, since a document
+    // it read can change while an earlier view's selection is published.
+    const sharedRenders = new Map<string, {
+      render: ViewRenderReads;
+      cache: ViewReadCache<ViewRenderReads>;
+    }>();
     const identityFree = (render: ViewRenderReads): boolean =>
       [...render.reads, ...render.shallowReads, ...render.bindings].every((
         address,
@@ -211,8 +216,10 @@ export class ViewPlanPublisher {
         let render = cache.render.value;
         if (render === undefined) {
           const rootsKey = `${view.mode}\n${JSON.stringify(view.query.roots)}`;
-          render = sharedRenders.get(rootsKey);
-          if (render === undefined) {
+          const walked = sharedRenders.get(rootsKey);
+          if (walked !== undefined && walked.cache.value === walked.render) {
+            render = walked.render;
+          } else {
             const renderStart = performance.now();
             render = collectViewRenderReads(
               runtime,
@@ -222,7 +229,9 @@ export class ViewPlanPublisher {
               cache.walk,
             );
             logger.time(renderStart, "render");
-            if (identityFree(render)) sharedRenders.set(rootsKey, render);
+            if (identityFree(render)) {
+              sharedRenders.set(rootsKey, { render, cache: cache.render });
+            }
           }
           cache.render.set(render, render);
         }

@@ -469,6 +469,59 @@ describe("view interests", () => {
       .not.toContain("of:shared");
   });
 
+  it("keeps delivering a document the rendered graph stops reaching in the pass that grows the support graph to it", async () => {
+    // The support graph grows in the same refresh that retires the document
+    // from the rendered graph, and what is retracted is judged against the
+    // graphs as they grew.
+    const linkSchema = {
+      type: "object",
+      properties: {
+        primary: { type: "object", properties: { label: { type: "string" } } },
+      },
+    } as const;
+    const linked = (id: string) => ({
+      primary: { "/": { "link@1": { id, path: [], space } } },
+    });
+    const following = (id: string) => ({
+      roots: [{ id, selector: { path: [], schema: linkSchema } }],
+    });
+    await server.writeDocument(space, "of:shared", { label: "shared" });
+    await server.writeDocument(space, "of:render", linked("of:shared"));
+    await set([], [{ ...view(), query: following("of:render") }]);
+    const [{ handle }] = server.viewInterestsForSpace(space);
+    await server.setViewSelection(space, handle, {
+      generation: 1,
+      delivery: [query("of:support")],
+    });
+    await server.flushSessions();
+    messages.length = 0;
+    await server.writeDocument(space, "of:other", { label: "other" });
+    await server.writeDocument(space, "of:render", linked("of:other"));
+    await server.setViewSelection(space, handle, {
+      generation: 2,
+      delivery: [query("of:support"), query("of:shared")],
+    });
+    await server.flushSessions();
+    const effects = messages.flatMap((message) =>
+      message.type === "session/effect" ? [message.effect] : []
+    );
+    expect(effects.flatMap((effect) => effect.upserts.map((entry) => entry.id)))
+      .toContain("of:other");
+    expect(effects.flatMap((effect) => effect.removes.map((entry) => entry.id)))
+      .not.toContain("of:shared");
+    // The grown graph keeps the document current.
+    messages.length = 0;
+    await server.writeDocument(space, "of:shared", { label: "updated" });
+    await server.flushSessions();
+    expect(
+      messages.flatMap((message) =>
+        message.type === "session/effect"
+          ? message.effect.upserts.map((entry) => entry.id)
+          : []
+      ),
+    ).toEqual(["of:shared"]);
+  });
+
   it("ignores unrelated commits without rebuilding queries or resending a manifest", async () => {
     await set([], [view()]);
     await server.flushSessions();
@@ -670,6 +723,41 @@ describe("view interests", () => {
     } finally {
       evaluations.restore();
     }
+  });
+
+  it("delivers the support growth a selection owed when an ordinary watch is added before the pass that grows it", async () => {
+    await server.writeDocument(space, "of:extra", { label: "extra" });
+    await set([], [view()]);
+    const [{ handle }] = server.viewInterestsForSpace(space);
+    await server.setViewSelection(space, handle, {
+      generation: 1,
+      delivery: [query("of:support")],
+    });
+    await server.flushSessions();
+    await server.setViewSelection(space, handle, {
+      generation: 2,
+      delivery: [query("of:support"), query("of:ordinary")],
+    });
+    const added = await server.watchAdd({
+      type: "session.watch.add",
+      requestId: "add-before-growth",
+      space,
+      sessionId,
+      watches: [watch("of:extra")],
+    });
+    expect(added.error).toBeUndefined();
+    expect(added.ok?.sync.upserts.map((entry) => entry.id)).toEqual([
+      "of:extra",
+    ]);
+    messages.length = 0;
+    await server.flushSessions();
+    expect(
+      messages.flatMap((message) =>
+        message.type === "session/effect"
+          ? message.effect.upserts.map((entry) => entry.id)
+          : []
+      ),
+    ).toEqual(["of:ordinary"]);
   });
 
   it("adds a watch on another branch while retaining the active view", async () => {

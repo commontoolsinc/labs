@@ -7290,6 +7290,10 @@ export class Server {
           if (!kept.has(id)) nextOperationCursors.delete(id);
         }
       }
+      // An addition to a view session extends the graphs it holds; every
+      // other watch set evaluates them whole.
+      const extended = views.length > 0 && incremental &&
+        !session.forceFullResync;
       const evaluated: Awaited<ReturnType<Server["evaluateWatchSet"]>> & {
         demandGraphs?: typeof session.graphs;
         demandEntities?: typeof session.entities;
@@ -7303,7 +7307,7 @@ export class Server {
             sessionId: message.sessionId,
           },
         )
-        : incremental && !session.forceFullResync
+        : extended
         ? await this.#extendViewWatchSet(session, message.watches, aclEngine)
         : await this.#evaluateViewWatchSet(
           session,
@@ -7409,9 +7413,13 @@ export class Server {
         ),
       );
       session.forceFullResync = false;
-      // The full evaluation installed every view's whole support graph, so
-      // a growth an earlier selection owed is already in it.
-      session.viewSupportGrown = false;
+      // A full evaluation installed every view's whole support graph, so a
+      // growth or a rebuild an earlier selection owed is already in it; an
+      // extension leaves both owed to the next pass.
+      if (!extended) {
+        session.viewSupportGrown = false;
+        session.viewSupportReplaced = false;
+      }
       session.viewDemandGraphs = demandGraphs;
       session.viewDemandEntities = demandEntities;
       session.watches = [...message.watches];
@@ -8794,22 +8802,6 @@ export class Server {
                     retired.push({ docKey, branch: graph.branch });
                   }
                 }
-                // A session with views holds a demand graph and a support
-                // graph over one branch, so a document one of them retired
-                // can still be one the other reaches. Only what no graph of
-                // the session over that branch tracks any more is retracted.
-                for (const { docKey, branch } of retired) {
-                  if (
-                    [...session.graphs.values()].some((other) =>
-                      other.branch === branch && other.tracker.has(docKey)
-                    )
-                  ) continue;
-                  const { id, scopeKey } = fromDocKey(docKey);
-                  const key = cacheKeyForEntity(branch, id, scopeKey);
-                  const entry = session.entities.get(key);
-                  if (entry !== undefined) removed.set(key, entry);
-                  changedInterests.add(toDirtyKey(id, scopeKey));
-                }
               } finally {
                 timing.time(
                   walkStartedAt,
@@ -8837,6 +8829,24 @@ export class Server {
                   changedInterests.add(toDirtyKey(entry.id, entry.scopeKey));
                   updates.set(key, entry);
                 }
+              }
+              // A session with views holds a demand graph and a support
+              // graph over one branch, so a document one of them retired can
+              // still be one the other reaches, the support graph as it grew
+              // above included. Only what no graph of the session over that
+              // branch tracks any more is retracted.
+              const frameGraphs = [...(grownGraphs ?? session.graphs).values()];
+              for (const { docKey, branch } of retired) {
+                if (
+                  frameGraphs.some((other) =>
+                    other.branch === branch && other.tracker.has(docKey)
+                  )
+                ) continue;
+                const { id, scopeKey } = fromDocKey(docKey);
+                const key = cacheKeyForEntity(branch, id, scopeKey);
+                const entry = session.entities.get(key);
+                if (entry !== undefined) removed.set(key, entry);
+                changedInterests.add(toDirtyKey(id, scopeKey));
               }
               if (
                 updates.size === 0 && changedInterests.size === 0 &&
@@ -8981,10 +8991,11 @@ export class Server {
               };
               const toSeq = Engine.serverSeq(engine);
               // A re-walk that followed a link out of the space for the
-              // first time has a crossing to tell of, upserts or none.
+              // first time has a crossing to tell of, upserts or none, and so
+              // does the support graph's growth.
               const newCrossings = this.#undeliveredCrossings(
                 session,
-                session.graphs.values(),
+                frameGraphs,
               );
               if (
                 upserts.length === 0 && removed.size === 0 &&
