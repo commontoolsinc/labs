@@ -334,7 +334,7 @@ export class Scheduler {
   #dependencies = new WeakMap<Action, ReactivityLog>();
   #viewConsumers = new Map<MemorySpace, Set<string>>();
 
-  /** Active view nodes by node id in each space, as of a registry membership. */
+  /** Each space's active view nodes by node id, as of a registry membership. */
   #viewNodeIndex:
     | {
       membership: number;
