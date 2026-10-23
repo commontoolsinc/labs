@@ -128,9 +128,12 @@ parent's internal cell for the instance's partial cause. Everything the child
 holds hangs off that result cell, so the partial cause is the child's
 identity.
 
-An instance given a name by `nameInstance(Child(...), "child")`
-(`packages/runner/src/builder/instance-name.ts`) is a **named instance**. The
-builder takes that name as the instance's partial cause,
+In a runtime with the `instanceNames` experimental flag on
+(`docs/development/EXPERIMENTAL_OPTIONS.md`, off by default), an instance bound
+to a `const` is a **named instance**. The transformer wraps it in
+`__cfHelpers.nameInstance(Child(...), "child")`
+(`docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md` §13.2),
+and the builder takes that name as the instance's partial cause,
 `{ $instance: "child" }`, wherever no result key, node input or authored
 `.for()` names it already. The name sits under the reserved `$instance` key,
 so no authored cause can equal it, and the cause carries no `$generated`, the
