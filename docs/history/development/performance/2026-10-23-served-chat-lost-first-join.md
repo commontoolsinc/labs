@@ -55,8 +55,8 @@ one that consumed the message. The run that stalled in its first room
 4. The handler ran and refused: "Your profile hasn't loaded yet." A
    handler's throw is its event's consequence (events.md §5), so the entry
    was sealed with that error and the message was gone.
-5. The room's own three wishes registered afterwards, once the creator's
-   view demand started the room.
+5. The room's own three wishes registered afterwards, once the room itself
+   started.
 
 `hunt14` stalled in its eighth room with the same sequence: the four wishes
 together, one alone, the preflight finding that one wish never run, the
@@ -108,6 +108,25 @@ Two tests pin it, each red before:
   enclosing pattern's per-user `echo` has no value. Before, the entry was
   sealed with the handler's refusal, as the room's was. After, it is
   consequenced clean and the actor's `saved` holds `saved:echo:A`.
+
+## Measured after the fix
+
+The same probe, from worktrees holding no runtime probes:
+
+| Code | Store read-through | Rooms | Stalls |
+| --- | --- | ---: | ---: |
+| `6d32c59bc`, without its tests | off, the hunts' arm | 16 | 0 |
+| `6d32c59bc`, without its tests | on | 8 | 0 |
+| `78320a68a` | off, the hunts' arm | 40 | 0 |
+| `78320a68a` | on | 40 | 0 |
+
+At the hunts' rate of 7 in 87, the 56 rooms on their arm would all have
+come out clean about one time in a hundred. The hunts before the fix ran with
+runtime probes in their worktree, and these ran without them. A stall also
+came without them before the fix: one of four send-burst benchmark runs at
+`b21ced957` timed out waiting for the room's rows, though that benchmark cannot
+say which wait it was ([chat record](2026-10-23-served-chat-burst-per-session-rows.md),
+"Stalls"). `78320a68a` carries the fix with `main` merged in after it.
 
 ## What remains
 
