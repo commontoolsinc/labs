@@ -279,7 +279,7 @@ ambient-state one.
   receipt/result write, as that is indeed what i said before"):** the
   subsumption above retires the receipt's EXACTLY-ONCE role only — its
   RESULT-CARRIAGE role (verb contract WS-C/D readback:
-  `tx.handlingReceiptLink`, `plainResultReceipts`, `cf call`'s
+  `tx.handlingReceiptLink`, `plainResultReceipts`, `cf piece call`'s
   `.result`/`.receipt`) is replaced by a SERVING-SIDE write. Every
   served handler completion writes the handling's receipt/result cell —
   even when the declared value is undefined, so the `{}` existence
