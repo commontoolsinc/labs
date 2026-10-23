@@ -22,17 +22,19 @@ used a toolshed and shell built from source, on a four-core container.
 
 A probe kept out of the tree seeded the lunch poll's read-scale fixture at 296
 votes, warmed one viewer, and diffed the browser runtime worker's timing
-statistics (`rt.getLoggerCounts()`) around four timed votes.
+statistics (`rt.getLoggerCounts()`) around four timed votes. A figure written
+`n × t` is the difference across the votes, divided by the four: `n` calls of a
+row a vote, `t` ms each on average.
 
 ## What one vote cost the browser
 
-Per vote, the browser's runtime worker spent 5.25 × 267 ms applying frames and
-6.25 × 160 ms executing. Every accepted plan, and every change of local
-coverage, revalidated every adopted computation, and each computation's proof
-walked its whole producer ancestry on its own: it matched every basis value,
-checked its piece's source, and then resubscribed the computation even when
-nothing it proved had changed. The plan carried 973 producers with 8,478 read
-fingerprints.
+Per vote, the browser's runtime worker spent 1.4 s applying frames, as 5.25 ×
+267 ms, and 1.0 s executing, as 6.25 × 160 ms. Every accepted plan, and every
+change of local coverage, revalidated every adopted computation, and each
+computation's proof walked its whole producer ancestry on its own: it matched
+every basis value, checked its piece's source, and then resubscribed the
+computation even when nothing it proved had changed. The plan carried 973
+producers with 8,478 read fingerprints.
 
 ## The change
 
