@@ -53,6 +53,11 @@ const UNPROVEN: ServerProof = { current: false, closure: [] };
  * changes neither, so a producer's proof, a basis value's match, and a
  * piece's source check are the same for every computation that reaches
  * them, and each is made once.
+ *
+ * A pass lives for one synchronous wake and no longer. Its maps are cleared
+ * when a newer plan is accepted, but nothing clears them when the replica
+ * changes, as it can across any await, so a pass held across one would
+ * answer from documents the replica no longer holds.
  */
 export type ViewProofPass = {
   /** The plan version the pass's proofs were made under. */
