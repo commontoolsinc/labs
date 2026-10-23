@@ -7283,7 +7283,9 @@ export class SpaceReplica
       // A document something began to hold while the removal was on its way
       // keeps its value and is watched again on its own; the answer to that
       // watch brings it up to date.
-      const { sync: applied, held } = this.#keepHeld(sync);
+      const { sync: applied, held } = this.#keepHeld(
+        this.#withoutLocalSessionDocuments(sync),
+      );
       this.#integrateWatchMutation(view, precedingSyncs, applied);
       this.#forgetRemoved(applied.removes);
       for (const remove of held) this.#watchAgain(remove);
@@ -8205,15 +8207,20 @@ export class SpaceReplica
         // the replica holds keeps its value for its holder until the pass
         // after the holder lets go; the rest are emptied and dropped, so a
         // later read loads them again.
-        const { sync, held } = this.#keepHeld(next.value);
-        this.#applySessionSync(sync, "integrate");
-        if (sync.removes.length > 0) this.#forgetRemoved(sync.removes);
+        const { sync, held } = this.#keepHeld(
+          this.#withoutLocalSessionDocuments(next.value),
+        );
+        // Recorded before the frame applies, so a frame that fails to
+        // apply leaves no held document kept without the pass that drops
+        // it.
         for (const remove of held) {
           this.#retractedHeld.set(
             this.#docKeyOf(removedAddress(remove)),
             remove,
           );
         }
+        this.#applySessionSync(sync, "integrate");
+        if (sync.removes.length > 0) this.#forgetRemoved(sync.removes);
       } catch (error) {
         // The background consumer must never die wholesale on one bad
         // frame (OW61: a validation throw here was an unhandled rejection
@@ -8237,6 +8244,28 @@ export class SpaceReplica
         logger.time(applyStart, "watchPush", "applySessionSync");
       }
     }
+  }
+
+  /**
+   * `sync` without the entries for documents held only in this replica,
+   * which a server frame has nothing to say about: a frame is read through
+   * this before anything acts on its entries, the application of it and the
+   * drop or keeping of what it removes alike.
+   */
+  #withoutLocalSessionDocuments(sync: SessionSync): SessionSync {
+    if (!this.#localSessionDocuments()) return sync;
+    return {
+      ...sync,
+      upserts: sync.upserts.filter((entry) =>
+        !this.#isLocalSessionDocument(entry)
+      ),
+      removes: sync.removes.filter((entry) =>
+        !this.#isLocalSessionDocument(entry)
+      ),
+      crossings: sync.crossings?.filter((entry) =>
+        !this.#isLocalSessionDocument(entry)
+      ),
+    };
   }
 
   /** Returns whether an address is held only in this replica. */
@@ -9962,21 +9991,10 @@ export class SpaceReplica
     // that would integrate a second frame from inside this one.
     this.#frameApplyDepth += 1;
     try {
-      if (this.#localSessionDocuments()) {
-        sync = {
-          ...sync,
-          upserts: sync.upserts.filter((entry) =>
-            !this.#isLocalSessionDocument(entry)
-          ),
-          removes: sync.removes.filter((entry) =>
-            !this.#isLocalSessionDocument(entry)
-          ),
-          crossings: sync.crossings?.filter((entry) =>
-            !this.#isLocalSessionDocument(entry)
-          ),
-        };
-      }
-      this.#applySessionSyncFrame(sync, type);
+      this.#applySessionSyncFrame(
+        this.#withoutLocalSessionDocuments(sync),
+        type,
+      );
     } catch (error) {
       this.#completeThroughLost = true;
       throw error;

@@ -3333,17 +3333,28 @@ function loadSchemaDocClosure(
       context.scopeKeyIdentity,
     );
   // A closure this context loaded for an earlier referrer is this one's
-  // too: each document in it is attributed to the referrer, through the
-  // registry's copy, since the walk below settles at the first document
-  // it finds loaded and descends no further.
-  const attributeLoaded = (hash: string, seen: Set<string>): void => {
-    if (seen.has(hash)) return;
-    seen.add(hash);
-    context.onTrackedDoc?.(keyOf(hash), REJECTING_SELECTOR, referrer, "walked");
-    const registered = lookupSchemaDocument(hash);
-    if (registered === undefined) return;
-    for (const ref of collectExternalSchemaRefHashes(registered)) {
-      attributeLoaded(ref, seen);
+  // too: each document in it the registry holds is attributed to the
+  // referrer, through the registry's copy, since the walk below settles at
+  // the first document it finds loaded and descends no further. One the
+  // registry lacks was loaded and failed, and has no record to attribute.
+  const attributeLoaded = (root: string): void => {
+    const seen = new Set<string>();
+    const pending = [root];
+    while (pending.length > 0) {
+      const hash = pending.pop()!;
+      if (seen.has(hash)) continue;
+      seen.add(hash);
+      const registered = lookupSchemaDocument(hash);
+      if (registered === undefined) continue;
+      context.onTrackedDoc?.(
+        keyOf(hash),
+        REJECTING_SELECTOR,
+        referrer,
+        "walked",
+      );
+      for (const ref of collectExternalSchemaRefHashes(registered)) {
+        pending.push(ref);
+      }
     }
   };
   walkSchemaDocumentClosure({
@@ -3357,7 +3368,7 @@ function loadSchemaDocClosure(
       };
       const key = keyOf(hash);
       if (context.schemaDocsLoaded.has(key)) {
-        attributeLoaded(hash, new Set());
+        attributeLoaded(hash);
         return { kind: "settled" };
       }
       // A document the registry lacks is read from the space the referrer is
