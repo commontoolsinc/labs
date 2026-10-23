@@ -842,12 +842,12 @@ takes 1,044 seconds and peaks at 8.73GB resident**, more than half of a default
 hosted runner's 15.6GB. The runner group this workflow uses is a larger machine
 than that one, so the share it takes there is smaller.
 
-Read that peak as a working set rather than as a requirement. Over clients that
-hold no view, the same run under `--max-old-space-size=512` completes in 3.5GB
-at roughly double the per-iteration time, and a developer machine with far more
-memory peaks higher, at 5.4GB. So the absolute figure rises with the headroom
-the heap is offered while the fraction of the host falls, and it is the
-fraction that decides whether this belongs beside the other benchmarks.
+Read that peak as a working set rather than as a requirement. A run over
+clients that hold no view completed in 3.5GB under `--max-old-space-size=512`,
+at roughly double the per-iteration time, and peaked higher, at 5.4GB, on a
+developer machine with far more memory. So the absolute figure rises with the
+headroom the heap is offered while the fraction of the host falls, and it is
+the fraction that decides whether this belongs beside the other benchmarks.
 
 That peak is a floor under everything measured after it. The workers are
 released at process exit — `Deno.bench` offers no seam for "this file's
