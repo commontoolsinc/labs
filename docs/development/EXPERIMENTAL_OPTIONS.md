@@ -953,10 +953,13 @@ holds the measurements and the conditions for revisiting.
   ([`docs/specs/computed-cell-identity.md`](../specs/computed-cell-identity.md),
   "Sub-pattern instance identity"). With the flag on, the reactive-variable
   transformer stage wraps `const child = Child(...)` in
-  `nameInstance(..., "child")`, so the child's identity is its name rather than
-  its position among its parent's anonymous roots, and an unrelated sibling
-  inserted ahead of it no longer moves it onto another child's state. With the
-  flag off, the compile is the positional one and nothing names an instance.
+  `nameInstance(..., "child")`, and the builder takes that name as the
+  instance's identity wherever no result key, node input or authored `.for()`
+  names the instance already, in place of its position among its parent's
+  anonymous roots. An unrelated sibling inserted ahead of such a child then no
+  longer moves it onto another child's state. With the flag off, the
+  transformer names no instance, so an instance nothing else names keeps its
+  positional identity.
 - **Current default and planned end state.** Off by default. The end state is
   on, with the flag and the positional compile of `const`-bound instances
   deleted.
