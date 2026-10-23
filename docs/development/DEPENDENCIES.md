@@ -232,11 +232,6 @@ through with `gh api repos/OWNER/REPO/git/tags/SHA --jq '.object.sha'`.
 Because the comments name releases, how far behind a pin is reads off the
 line itself, and the releases page says what is newer.
 
-Two actions are in use at two versions, which has to be decided when either is
-rolled: `google-github-actions/auth` at v1.3.0 on the deploy path and v3.0.0
-elsewhere, and `actions/cache` at v4.3.0 in four `deno.yml` steps and v6.1.0
-everywhere else.
-
 The `setup-deno` pin touches the Deno toolchain pin in one place.
 `deno task check-deno-pins` rejects any version literal in
 `.github/actions/deno-setup/action.yml` that disagrees with `mise.toml`, so

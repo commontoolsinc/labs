@@ -215,3 +215,6 @@ yet.
 - **Showing a blob.** A rendering shows an entry's blob with `cf-image` and
   offers it with `cf-blob-link`, which each take the blob reference and ask the
   runtime for the URL its space's host serves it at.
+- **A root's store.** `FileStoreRecord`, `FileStoreRecordCell` and
+  `ensureFileStore` are what a root keeps its store with
+  ([`FileStore.md`](FileStore.md#where-it-lives)); no root uses them yet.

@@ -90,7 +90,12 @@ import {
 import { isTrustedPattern, setPatternProgram } from "./pattern-metadata.ts";
 import { pattern } from "./pattern.ts";
 import { principalOf, principalsOf } from "./principal-of.ts";
-import { spaceAccess, spaceAccessOf, spaceOf } from "./space-access.ts";
+import {
+  spaceAccess,
+  spaceAccessOf,
+  spaceMembers,
+  spaceOf,
+} from "./space-access.ts";
 import { grantSpaceAccess, revokeSpaceAccess } from "./space-access-change.ts";
 import type {
   BuilderFunctionsAndConstants,
@@ -317,6 +322,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     // Access
     spaceAccess,
     spaceAccessOf,
+    spaceMembers,
     spaceOf,
     grantSpaceAccess,
     revokeSpaceAccess,

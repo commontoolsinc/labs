@@ -12,7 +12,13 @@ import {
 } from "../lib/view/push.ts";
 import { dialogBox } from "../lib/view/render.ts";
 import { Session } from "../lib/view/session.ts";
-import { parseDocument } from "./view-helpers.ts";
+import {
+  cellOf,
+  drawnRows,
+  frameRows,
+  mouseKey,
+  parseDocument,
+} from "./view-helpers.ts";
 
 /** Query answers for a checkout of `feature` whose `origin` has `main` as its
  * default branch. */
@@ -148,6 +154,24 @@ function editableSession(): Session {
     undefined,
     source,
   );
+}
+
+/**
+ * Returns the cell a running push dialog's Abort label starts at, on the 80 by
+ * 12 screen that {@link editableSession} and the pager harness share.
+ */
+function abortCell(): { x: number; y: number } {
+  const session = editableSession();
+  session.beginBranchPush(() => {});
+  return cellOf(drawnRows(session), "Abort");
+}
+
+/**
+ * Returns the SGR mouse report of the primary button going down or coming up
+ * at a zero-based cell.
+ */
+function mouseReport(down: boolean, at: { x: number; y: number }): string {
+  return `\x1b[<0;${at.x + 1};${at.y + 1}${down ? "M" : "m"}`;
 }
 
 /** A promise and the function that resolves it. */
@@ -807,6 +831,56 @@ describe("view-push", () => {
       expect(session.quit).toBe(true);
     });
 
+    it("lets go of a held Abort when the push ends, so a release on Close closes nothing", () => {
+      const session = editableSession();
+      session.beginBranchPush(() => {});
+
+      session.handleKey(mouseKey(true, abortCell()));
+      expect(session.view().dialog!.pushed).toBe(0);
+      session.finishBranchPush("Pushed feature to origin.");
+      expect(session.view().dialog!.pushed).toBe(-1);
+      session.handleKey(mouseKey(false, cellOf(drawnRows(session), "Close")));
+
+      expect(session.view().dialog?.title).toBe("Push");
+    });
+
+    it("lets go of a held Close when an interrupt opens the save prompt, so a release on its Cancel cancels nothing", () => {
+      const session = editableSession();
+      session.handleKey({ name: "e", char: "e" });
+      session.handleKey({ name: "X", char: "X" });
+      session.handleKey({ name: "escape" });
+      session.beginBranchPush(() => {});
+      session.finishBranchPush("Pushed feature to origin.");
+
+      session.handleKey(mouseKey(true, cellOf(drawnRows(session), "Close")));
+      session.requestQuitFromSignal();
+      expect(session.view().dialog?.title).toBe("Save Changes");
+      expect(session.view().dialog!.pushed).toBe(-1);
+      session.handleKey(mouseKey(false, cellOf(drawnRows(session), "Cancel")));
+
+      expect(session.view().dialog?.title).toBe("Save Changes");
+    });
+
+    it("closes on a click on Close once the push ends, and quits on a click on Quit", () => {
+      const session = editableSession();
+      session.beginBranchPush(() => {});
+      session.finishBranchPush("Pushed feature to origin.");
+      const close = cellOf(drawnRows(session), "Close");
+      const quit = cellOf(drawnRows(session), "Quit");
+
+      session.handleKey(mouseKey(true, close));
+      session.handleKey(mouseKey(false, close));
+      expect(session.view().dialog).toBeNull();
+      expect(session.view().message).toBe("Pushed feature to origin.");
+      expect(session.quit).toBe(false);
+
+      session.beginBranchPush(() => {});
+      session.finishBranchPush("Pushed feature to origin.");
+      session.handleKey(mouseKey(true, quit));
+      session.handleKey(mouseKey(false, quit));
+      expect(session.quit).toBe(true);
+    });
+
     it("asks to save unsaved edits before Quit quits", () => {
       const session = editableSession();
       session.handleKey({ name: "e", char: "e" });
@@ -873,6 +947,44 @@ describe("view-push", () => {
 
       await harness.run(["P", () => running, "a", () => closable, "c"]);
 
+      expect(harness.signals[0].aborted).toBe(true);
+      expect(harness.writes.at(-2)).toContain("Push aborted.");
+    });
+
+    it("stops the push when Abort is clicked, on the release and not the press", async () => {
+      const harness = pagerHarness((signal) => ({
+        ...fakeIo().io,
+        run: () =>
+          new Promise((resolve) =>
+            signal.addEventListener(
+              "abort",
+              () => resolve({ success: false, output: "" }),
+            )
+          ),
+      }));
+      const at = abortCell();
+      const running = harness.frame((text) => text.includes(" Abort "));
+      const pressed = harness.frame((text) =>
+        text.includes(" Abort ") &&
+        cellOf(frameRows(text), "Abort").x === at.x + 1
+      );
+      const closable = harness.frame((text) => text.includes(" Close "));
+      let abortedWhilePressed: boolean | undefined;
+
+      await harness.run([
+        "P",
+        () => running,
+        mouseReport(true, at),
+        async () => {
+          await pressed;
+          abortedWhilePressed = harness.signals[0].aborted;
+        },
+        mouseReport(false, at),
+        () => closable,
+        "c",
+      ]);
+
+      expect(abortedWhilePressed).toBe(false);
       expect(harness.signals[0].aborted).toBe(true);
       expect(harness.writes.at(-2)).toContain("Push aborted.");
     });
