@@ -3847,7 +3847,11 @@ finally:
           expect(held.blocked).toBe(true);
           expect(held.released).toBe(false);
           expect(held.closed).toBe(false);
-          expect(held.backendRequests).toBe(1);
+          // Every assembled body is handed to the connection, which orders
+          // the held session's turns itself; the host holds only the input
+          // budget, so the body that would exceed it waits at its header.
+          expect(held.backendRequests).toBe(held.completed);
+          expect(held.backendRequests).toBeGreaterThan(1);
           expect(held.declaredBytes).toBeGreaterThan(fourMiB);
           expect(held.declaredBytes).toBeLessThan(
             activeConfig.max_in_flight_bytes_per_connection,
