@@ -47,6 +47,10 @@ describe("strategy", () => {
     expect(quick).toContain(
       "the one tool call that best matches what they asked",
     );
+    expect(quick).toContain(
+      "Chain further calls, delegate or research only where their words ask for that work.",
+    );
+    expect(quick).not.toContain("without chaining further calls");
     expect(quick).not.toContain("Search every source");
     expect(quick).not.toContain("Before you finish");
   });
@@ -56,8 +60,10 @@ describe("strategy", () => {
     const web = prompt("deep", ["web"]);
 
     expect(personal).toContain("Search every source of the person's own data");
+    expect(personal).toContain("name only the sources you actually read");
     expect(personal).not.toContain("several independent sources");
     expect(web).toContain("several independent sources");
+    expect(web).toContain("cite only those you read");
     expect(web).not.toContain("Search every source of the person's own data");
   });
 

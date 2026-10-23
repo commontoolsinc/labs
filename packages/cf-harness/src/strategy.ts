@@ -6,13 +6,13 @@ import { type RunShape, sendsSection } from "./prompt-sections.ts";
  */
 
 const FAST_REPLY_GUIDANCE =
-  "Their words set the task; a quick run adds nothing beyond it. Answer directly when you can, without research. When you cannot, make the one tool call that best matches what they asked and answer from its result, without chaining further calls, delegating or researching. A call that failed, or that you made with the wrong arguments for what they asked, you may correct once. If the result still does not settle it, say what you found and what a fuller run would check.";
+  "Their words set the task; a quick run adds nothing beyond it. Answer directly when you can, without research. When you cannot, make the one tool call that best matches what they asked and answer from its result. Chain further calls, delegate or research only where their words ask for that work. A call that failed, or that you made with the wrong arguments for what they asked, you may correct once. If the result still does not settle it, say what you found and what a fuller run would check.";
 
 const PERSONAL_EXHAUSTIVE_GUIDANCE =
-  "Search every source of the person's own data that could hold the answer, and vary the wording: names, senders, dates, and the words they would have used. Stop when another search stops turning up anything new, not after a fixed number of tries. Absence holds only for what you searched: an unavailable or failed source is unknown, not empty, so name the sources you checked and any you could not read.";
+  "Search every source of the person's own data that could hold the answer, and vary the wording: names, senders, dates, and the words they would have used. Stop when another search stops turning up anything new, not after a fixed number of tries. Absence holds only for what you searched: an unavailable or failed source is unknown, not empty, so name only the sources you actually read, and any you tried and could not.";
 
 const WEB_RESEARCH_GUIDANCE =
-  "Research across several independent sources, primary ones first, and read them rather than answering from memory. Keep what each source says apart from what you infer, note where they disagree, and cite them in what you leave.";
+  "Read several independent sources, primary ones first, rather than answering from memory, and cite only those you read.";
 
 const MATERIAL_GUIDANCE =
   "Material you leave must be worth opening on its own: substance and a judgement, not a list of links, a shortlist without reasons, or an empty scaffold. One strong piece beats several thin ones.";
