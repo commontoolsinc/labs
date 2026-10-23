@@ -53,6 +53,7 @@ import {
   NAME,
   pattern,
   type PerSession,
+  type PerUser,
   principalOf,
   spaceAccess,
   spaceOf,
@@ -342,7 +343,7 @@ export interface ManagerActState {
    * offers a room to a member it names by principal alone; absent for every
    * other act.
    */
-  people?: PerSession<Record<string, readonly ManagerProfileCell[]>>;
+  people?: PerUser<Record<string, readonly ManagerProfileCell[]>>;
 
   /** The session's group draft, which a rendered create reads. */
   draft: Writable<GroupDraft>;
@@ -1263,10 +1264,10 @@ const performManagerAct = (
     // A member named by principal alone is offered the room through the
     // profiles `people` lists for them, so a person this user shares no room
     // with is offered nothing.
-    // TODO(danfuzz): A served run can't read the session's instance of
+    // TODO(danfuzz): A served run can't read the user's instance of
     // `people`, and finds none listed, so under server execution such a
     // member gets a notice. Offer through `people` there too, once a served
-    // handler can read a per-session instance of its user's.
+    // handler can read a per-user instance of its user's.
     const profiles = named === undefined
       ? [...(state.people?.[member] ?? [])]
       : [named];
@@ -1637,7 +1638,7 @@ export interface FabriChatManagerOutput {
   [UI]: VNode;
 
   /** Every room this user belongs to and hasn't forgotten, newest first. */
-  rooms: PerSession<ChatIndexEntry[]>;
+  rooms: PerUser<ChatIndexEntry[]>;
 
   /**
    * The stored catalog used for standalone membership and container discovery.
@@ -1667,7 +1668,7 @@ export interface FabriChatManagerOutput {
    * each one's profile attests, the profiles attesting it, each once, in the
    * order the rooms, newest first, list them.
    */
-  people: PerSession<Record<string, ManagerProfileCell[]>>;
+  people: PerUser<Record<string, ManagerProfileCell[]>>;
 
   /** Finds or creates the direct room with a person. */
   openDirect: Stream<ManagerStreamEvent>;
@@ -1857,17 +1858,17 @@ export const FabriChatManagerCore = pattern<
         : [];
     });
     // A room's space is read under the reader's own access, so a principal it
-    // refuses finds nothing there that the others find. Each room is found,
-    // and everything read from it derived, per session: a value stored once
-    // for every reader, which readers derive differently, is one their
-    // runtimes overwrite without end.
+    // refuses finds nothing there that the others find. That access is the
+    // principal's, so each room is found, and everything read from it
+    // derived, per user: a value stored once for every reader, which readers
+    // derive differently, is one their runtimes overwrite without end.
     const found = savedRooms.map((entry) =>
-      FoundRoom.asScope("session")({ space: entry.space, kind: entry.kind })
+      FoundRoom.asScope("user")({ space: entry.space, kind: entry.kind })
     );
     // Each saved room once it resolves and reads as a room, newest first. The
     // room's own records are read here, beside the entry they belong to, so
     // they are read in the run that lists them.
-    const newestFirst = computed((): PerSession<ChatIndexEntry[]> => {
+    const newestFirst = computed((): PerUser<ChatIndexEntry[]> => {
       const self = principalOf(myProfile, "represents-principal");
       const stored = direct.get() ?? {};
       const catalogValue = sharedSpaceCatalog.get();
@@ -1926,12 +1927,12 @@ export const FabriChatManagerCore = pattern<
     });
     // The people the listed rooms' rosters hold, by the principal each
     // profile's own label attests, read beside the rooms that list them, and
-    // per session, as `newestFirst` is: a profile attests no one to a reader
-    // its space refuses. A profile attesting no principal, or a DID no
+    // per user, as `newestFirst` is: a profile attests no one to a reader its
+    // space refuses. A profile attesting no principal, or a DID no
     // principal can have, names no one to offer a room to, and this user's
     // own are left out.
     const people = computed(
-      (): PerSession<Record<string, ManagerProfileCell[]>> => {
+      (): PerUser<Record<string, ManagerProfileCell[]>> => {
         const self = principalOf(myProfile, "represents-principal");
         return newestFirst.reduce<Record<string, ManagerProfileCell[]>>(
           (found, entry) =>
@@ -1962,9 +1963,9 @@ export const FabriChatManagerCore = pattern<
       draft,
       startRefusal,
     };
-    // Per session, as `newestFirst` is: a room's label is the title its room
+    // Per user, as `newestFirst` is: a room's label is the title its room
     // holds, which a direct room has only once a member sets one.
-    const shown = computed((): PerSession<ShownEntry[]> =>
+    const shown = computed((): PerUser<ShownEntry[]> =>
       newestFirst.map((entry) => ({
         room: entry.room,
         ...(entry.revision === undefined ? {} : { revision: entry.revision }),
@@ -1984,7 +1985,7 @@ export const FabriChatManagerCore = pattern<
     );
     // Each person once, by the first profile attesting them, and whether the
     // session's draft has picked them, by any profile of theirs, per session,
-    // as `people` is.
+    // as the draft is.
     const shownPeople = computed((): PerSession<ShownPerson[]> => {
       const picked = draft.get()?.picked ?? [];
       return Object.values(people).flatMap((profiles): ShownPerson[] => {
@@ -2002,10 +2003,10 @@ export const FabriChatManagerCore = pattern<
       shownPeople.length === 0 ? "none" : "block"
     );
     // A notice whose room's roster lists a profile attesting its recipient
-    // has nothing left to tell them: they are in the room. Per session, as
+    // has nothing left to tell them: they are in the room. Per user, as
     // `newestFirst` is: the roster is read under the reader's access, and a
     // profile attests no one to a reader its space refuses.
-    const noticeList = computed((): PerSession<ChatManagerNotice[]> =>
+    const noticeList = computed((): PerUser<ChatManagerNotice[]> =>
       ((outgoingNotices.get() ?? []) as ChatManagerNotice[]).filter((notice) =>
         !(notice.room.key("roster").get() ?? []).some((member) =>
           principalOf(member, "represents-principal") === notice.recipient

@@ -29,6 +29,7 @@ import {
   NAME,
   pattern,
   type PerSession,
+  type PerUser,
   principalOf,
   SELF,
   spaceAccess,
@@ -332,7 +333,7 @@ export interface RoomManager extends JoiningManager {
    * The people the viewer's rooms list, other than the viewer: by principal,
    * the profiles attesting it.
    */
-  people: PerSession<Record<string, ProfileCell[]>>;
+  people: PerUser<Record<string, ProfileCell[]>>;
 }
 
 /** Each of the viewer's adds' outcomes, by its `requestId`. */
@@ -643,7 +644,7 @@ export interface AddMemberInput {
   manager?: RoomManager;
 
   /** The principals of those already in the room, whom the picker leaves out. */
-  present: PerSession<string[]>;
+  present: PerUser<string[]>;
 }
 
 /** What the control adding a member to a room provides. */
@@ -727,8 +728,8 @@ export const AddMember = pattern<AddMemberInput, AddMemberOutput>(
       shown === "" ? "none" : "block"
     );
     // Each person the manager lists who isn't in the room, by the first
-    // profile attesting them, per session, as the manager's people are.
-    const candidates = computed((): PerSession<ProfileCell[]> =>
+    // profile attesting them, per user, as the manager's people are.
+    const candidates = computed((): PerUser<ProfileCell[]> =>
       Object.entries(manager?.people ?? {}).flatMap(
         ([principal, profiles]): ProfileCell[] =>
           present.includes(principal) || profiles[0] === undefined
@@ -991,13 +992,13 @@ export interface ChatRoomView {
    * attests none or the label can't be read where the list is derived. Like
    * `participants`, it is not proof of access.
    */
-  participantEntries: PerSession<ParticipantEntry[]>;
+  participantEntries: PerUser<ParticipantEntry[]>;
 
   /**
    * The principals `participantEntries` holds, each once, in the order of
    * `participants`.
    */
-  participantPrincipals: PerSession<string[]>;
+  participantPrincipals: PerUser<string[]>;
 
   /**
    * Adds a profile to those who joined the room, once. Any participant may add
@@ -1226,13 +1227,13 @@ export const FabriChatRoomCore = pattern<
   );
   const participants = computed(() => participantsOf(listed, facts.authors));
   // A profile lives in its owner's own space, and attests no one to a reader
-  // that space refuses, so the entries, and the principals taken from them,
-  // are derived per session: one instance for every reader is one their
-  // runtimes hold differently.
-  const participantEntries = computed((): PerSession<ParticipantEntry[]> =>
+  // that space refuses. That access is the reader's principal's, so the
+  // entries, and the principals taken from them, are derived per user: one
+  // instance for every reader is one their runtimes hold differently.
+  const participantEntries = computed((): PerUser<ParticipantEntry[]> =>
     participantEntriesOf(participants)
   );
-  const participantPrincipals = computed((): PerSession<string[]> =>
+  const participantPrincipals = computed((): PerUser<string[]> =>
     principalsOf(participantEntries)
   );
   const join = addParticipant({ roster });
