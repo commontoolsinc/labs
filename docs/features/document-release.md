@@ -81,12 +81,13 @@ not load it again, so dropping it would leave the action with no value and no
 later changes. If the space refuses the watch outright, the document is removed
 and dropped like the others, so that its readers meet the refusal.
 
-A removal the server pushes for any other reason, the retraction of a document
-a write's re-walk no longer reaches or of an instance whose lease has lapsed,
-is handled the same way: a document the replica holds keeps its value and is
-watched again on its own, and any other is emptied and dropped. The watch of
-its own is what the server refuses for a lapsed lease, which empties the
-document after all, so its readers meet the refusal.
+A removal the server pushes, for a document a write's re-walk no longer reaches
+or for an instance whose lease has lapsed, stands: the document leaves the
+watch list, and nothing asks the server for it again. One the replica holds
+keeps its value, unwatched, for the reader that holds it, so an action in the
+middle of reading it finishes with the value it had; the first release pass to
+find it held by nothing drops it, and a read after that loads it as it now
+stands. One nothing holds is emptied and dropped at once.
 
 The server attributes each document it tracks to what reached it: a watch's
 root to the watch, a document reached through a link to the document holding
