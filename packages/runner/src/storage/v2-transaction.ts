@@ -82,7 +82,6 @@ import type {
 import { createReadOnlyTransactionError } from "./interface.ts";
 import {
   assertLocalReadAvailable,
-  endLocalReadValidationStretch,
   releaseLocalReadBasis,
   usesLocalReads,
   validateLocalReadBasis,
@@ -2731,9 +2730,6 @@ export class V2StorageTransaction implements IStorageTransaction {
       throw new Error("memory v2 replica does not support commitNative()");
     }
     const commitNative = replica.commitNative.bind(replica);
-    // The replica takes the writes now, and they can change what a local read
-    // validation before them proved.
-    endLocalReadValidationStretch();
     const promise = withCommitTiming(
       ["commit", "commitNative"],
       () => commitNative(native!, this, options),
@@ -2892,7 +2888,6 @@ export class V2StorageTransaction implements IStorageTransaction {
       // committed before the failure are not rolled back (logged); the failing
       // space and everything after it are left uncommitted.
       try {
-        endLocalReadValidationStretch();
         const result = await commitNative(native, this, options);
         if (result.error) {
           multiSpaceCommitLogger.error(
@@ -3114,7 +3109,6 @@ export class V2StorageTransaction implements IStorageTransaction {
       // spaces already sealed are not unwound here — the wave accumulator
       // owns the sealed writes' lifecycle from the moment it accepts them.
       try {
-        endLocalReadValidationStretch();
         const result = await sink.sealSpaceCommit(space, native, this);
         if (result.error) {
           multiSpaceCommitLogger.error(

@@ -2,7 +2,6 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { stub } from "@std/testing/mock";
 
-import { deepFreeze } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 
 import {
@@ -76,28 +75,6 @@ describe("view input basis", () => {
         false,
       );
     }
-  });
-
-  it("answers again from the deep-frozen document a basis was last observed in", () => {
-    const cache = new ViewInputBasisCache();
-    const first = deepFreeze({ value: { nested: { count: 1 } } });
-    const basis = viewInputBasis([{
-      space,
-      id: "of:cache",
-      type: "application/json",
-      path: ["value", "nested"],
-    }], () => first)[0];
-    expect(cache.matches(first, basis)).toBe(true);
-    expect(cache.matches(first, basis)).toBe(true);
-    const changed = deepFreeze({ value: { nested: { count: 2 } } });
-    expect(cache.matches(changed, basis)).toBe(false);
-    expect(cache.matches(changed, basis)).toBe(false);
-    expect(cache.matches(first, basis)).toBe(true);
-    // An equal value in another document version matches as well.
-    expect(
-      cache.matches(deepFreeze({ value: { nested: { count: 1 } } }), basis),
-    )
-      .toBe(true);
   });
 
   it("retains the same currency checks after compacting ancestor reads", () => {

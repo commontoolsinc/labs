@@ -22,7 +22,6 @@ import {
   requireLocalReadCondition,
   usesLocalReads,
   validateLocalReadBasis,
-  validateLocalReadBasisForCommit,
 } from "../storage/local-read-policy.ts";
 import {
   isConflictRejection,
@@ -1277,7 +1276,7 @@ function finalizeReactiveActionCommit(
   }, {
     beforeCommit: () => {
       log = txToReactivityLog(args.tx);
-      if (validateLocalReadBasisForCommit(args.tx) !== undefined) return;
+      if (validateLocalReadBasis(args.tx) !== undefined) return;
       warnOnWriteSurfaceViolations(state, args, log);
       echoRun = state.captureRemoteEcho(args.tx, log, args.invalidCauses);
       hasPostCommitEffects = args.tx.hasPendingPostCommitEffects();
