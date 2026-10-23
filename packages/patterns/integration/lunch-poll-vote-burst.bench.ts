@@ -27,42 +27,53 @@
  * in how long it takes and how much is thrown away getting there.
  *
  * Reading the series. One number per iteration: hundred votes dispatched, then
- * every client's list current. The keyed write throws nothing away, and the
- * same burst over a whole-list write cost 430 rejected commits and 558
+ * every client's list current. The vote write throws nothing away: none of
+ * the commits a burst's sessions refuse writes the vote list. With the loop
+ * off, what a burst does throw away is the clients' derivations, since each
+ * derives what its view shows and commits it, and those commits contend: on a
+ * four-core container one burst cost 1,460 rejected commits and 2,356
+ * rolled-back writes, most of the refused commits writing derived documents
+ * alone. Over clients that hold no view the keyed burst rejects nothing, and
+ * the same burst over a whole-list write cost 430 rejected commits and 558
  * rolled-back writes and dropped two votes for the length of one burst on the
  * way, at a time an order of magnitude longer.
- * `packages/patterns/integration/lunch-poll-keyed-votes.test.ts` is the
- * assertion half of the same property, requiring that a burst roll back no
- * write at all rather than timing one.
+ * `packages/patterns/integration/lunch-poll-keyed-votes.test.ts`, whose
+ * clients hold no view, is the assertion half of the same property: it bounds
+ * a burst's rolled-back writes below one a vote and requires that no refused
+ * commit wrote the vote list, rather than timing one.
  *
- * Sample count is the weak point, and it is inherent. An iteration takes
- * seconds on a four-core CI host, so a run collects about a dozen samples. The
- * 75th percentile the dashboard trend reads discards only the slowest quarter
- * of those, so a runner that stalls twice moves this line without any code
- * changing. Read it for the shape of a move across several windows, not for
- * one window against the last.
+ * Sample count is the weak point, and it is inherent. With the loop off an
+ * iteration took 35.5 seconds on average on a four-core container, so a run
+ * collects about a dozen samples. The 75th percentile the dashboard trend
+ * reads discards only the slowest quarter of those, so a runner that stalls
+ * twice moves this line without any code changing. Read it for the shape of a
+ * move across several windows, not for one window against the last.
  *
- * The setup — ten Deno workers, ten joins, ten options, and a warm-up burst —
- * runs once at module scope, outside every measurement, because it costs some
- * twelve seconds and repeating it per iteration would leave a run with almost
- * no samples. Each iteration recolors every vote, so all hundred are genuine
- * changes and the vote count holds at a hundred throughout; no iteration leaves
- * a state the next one starts from differently.
+ * The setup — ten Deno workers, ten joins, ten options, and two warm-up bursts
+ * — runs once at module scope, outside every measurement, because with the
+ * loop off it took four and a half minutes on a four-core container, the first
+ * warm-up burst two and a half of them, and repeating it per iteration would
+ * leave a run with almost no samples. Each iteration recolors every vote, so
+ * all hundred are genuine changes and the vote count holds at a hundred
+ * throughout; no iteration leaves a state the next one starts from
+ * differently.
  *
- * Ten runtimes is the largest footprint of any benchmark in the job. On a
- * default hosted runner — four cores, 15.6GB — the whole file takes 89 seconds
- * and peaks at 4.76GB resident, under a third of that host; the group the
- * benchmarks workflow runs on is larger still. The peak is held to the end of
- * the process, because the workers are released at exit rather than when this
- * file's benchmarks finish, so it is a floor under everything measured after
- * it.
+ * Ten runtimes is the largest footprint of any benchmark in the job. With the
+ * loop off, the whole file took 1,044 seconds on a four-core container and
+ * peaked at 8.73GB resident, more than half of a default hosted runner's
+ * 15.6GB; the group the benchmarks workflow runs on is larger. The peak is
+ * held to the end of the process, because the workers are released at exit
+ * rather than when this file's benchmarks finish, so it is a floor under
+ * everything measured after it.
  *
  * `CF_LUNCH_POLL_VOTERS` and `CF_LUNCH_POLL_OPTIONS` resize it for a local run
  * asking how the burst scales. The size is part of the measurement and names
  * the series, so changing it starts a new line rather than continuing this one;
- * CI leaves both unset. The size in force, and a contention accounting taken
- * over one untimed burst, are written to stderr and so into the run's
- * `diagnostics.log`.
+ * CI leaves both unset. The views the clients hold are part of the
+ * measurement as well, which `rendered` in the name says: a burst over clients
+ * that hold none would be a line of its own. The size in force, and a
+ * contention accounting taken over one untimed burst, are written to stderr
+ * and so into the run's `diagnostics.log`.
  *
  * The harness hosts its own storage server, with a serving loop attached when
  * server execution is enabled. Both modes use ordinary worker clients with no
@@ -399,7 +410,7 @@ globalThis.addEventListener("unload", () => harness.terminate());
 let round = 4;
 
 Deno.bench({
-  name: `vote burst ${voters.length}x${options.length}`,
+  name: `vote burst ${voters.length}x${options.length} rendered`,
   group: GROUP,
   async fn(b) {
     const current = round++;

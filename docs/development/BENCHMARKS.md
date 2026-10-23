@@ -768,7 +768,8 @@ which it may not; read that before weakening an assertion in it.
 several people editing one thing at the same moment cost each other: ten voters
 each cast a vote on each of ten lunch-poll options, all hundred dispatched
 before any settles, timed until every one of the ten clients holds the whole
-result. Its `lunch poll` group carries one series, `vote burst 10x10`.
+result. Its `lunch poll` group carries one series, `vote burst 10x10 rendered`,
+named for the views its clients hold.
 
 It is the only benchmark in the repository with a second writer. Every other
 bench file drives one runtime against storage it alone holds, so a write
@@ -807,21 +808,28 @@ for every option, or the run fails.
 Four things follow from that shape:
 
 - **Setup runs once, at module scope.** Ten workers, ten joins, ten options and
-  two warm-up bursts cost around twelve seconds, so paying it per iteration
-  would leave a run with almost no samples. Each iteration recolors every vote,
-  so all hundred are real changes and the poll holds a hundred votes throughout;
-  no iteration leaves a state the next one starts from differently.
-- **Few samples.** An iteration runs in about 450ms on a developer machine and
-  2.6 seconds on a four-core CI host, which puts this benchmark at the end of
-  the distribution where the 75th percentile buys least — it discards the
-  slowest quarter of a dozen samples, so two stalls in a run reach the figure
-  the trend reads. Read it across several windows.
+  two warm-up bursts took four and a half minutes with the loop off on a
+  four-core container, the first warm-up burst two and a half of them, so
+  paying it per iteration would leave a run with almost no samples. Each
+  iteration recolors every vote, so all hundred are real changes and the poll
+  holds a hundred votes throughout; no iteration leaves a state the next one
+  starts from differently.
+- **Few samples.** An iteration took 35.5 seconds on average with the loop off
+  on a four-core container, from 29.3 to 40.9, which puts this benchmark at the
+  end of the distribution where the 75th percentile buys least — it discards
+  the slowest quarter of a dozen samples, so two stalls in a run reach the
+  figure the trend reads. Read it across several windows.
 - **The wall-clock is half of what it measures.** A contended write is also
   work thrown away, and that half does not appear in a timing. The file writes a
   contention accounting — rejected commits and rolled-back writes over one
-  untimed burst — to stderr, and so into `diagnostics.log`. On the keyed vote
-  write both are zero; the same burst over a whole-list write measured 430 and
-  558.
+  untimed burst — to stderr, and so into `diagnostics.log`. None of the
+  commits a burst's sessions refuse writes the vote list, so with the loop off
+  what the accounting counts is the clients' derivations: each derives what its
+  view shows and commits it, and those commits contend. One burst at 10x10
+  counted 1,460 rejected commits and 2,356 rolled-back writes on a four-core
+  container, most of the refused commits writing derived documents alone. Over
+  clients that hold no view the keyed write's burst counts zero of both, and
+  the same burst over a whole-list write measured 430 and 558.
 - **The size names the series.** `CF_LUNCH_POLL_VOTERS` and
   `CF_LUNCH_POLL_OPTIONS` resize it for a local run asking how the burst scales.
   Changing either starts a new line rather than continuing this one, exactly as
@@ -829,18 +837,17 @@ Four things follow from that shape:
   is written to stderr.
 
 Ten runtimes is a large footprint, and the cost is worth knowing before adding
-a voter to it. **Measured on a default hosted
-runner — four cores, 15.6GB — the file takes 89 seconds and peaks at 4.76GB
-resident**, under a third of that host with around 9GB still free. The runner
-group this workflow uses is a larger machine than that one, so the share it
-takes there is smaller again.
+a voter to it. **Measured with the loop off on a four-core container, the file
+takes 1,044 seconds and peaks at 8.73GB resident**, more than half of a default
+hosted runner's 15.6GB. The runner group this workflow uses is a larger machine
+than that one, so the share it takes there is smaller.
 
-Read that peak as a working set rather than as a requirement. The same run
-under `--max-old-space-size=512` completes in 3.5GB at roughly double the
-per-iteration time, and a developer machine with far more memory peaks higher,
-at 5.4GB. So the absolute figure rises with the headroom the heap is offered
-while the fraction of the host falls, and it is the fraction that decides
-whether this belongs beside the other benchmarks.
+Read that peak as a working set rather than as a requirement. Over clients that
+hold no view, the same run under `--max-old-space-size=512` completes in 3.5GB
+at roughly double the per-iteration time, and a developer machine with far more
+memory peaks higher, at 5.4GB. So the absolute figure rises with the headroom
+the heap is offered while the fraction of the host falls, and it is the
+fraction that decides whether this belongs beside the other benchmarks.
 
 That peak is a floor under everything measured after it. The workers are
 released at process exit — `Deno.bench` offers no seam for "this file's
@@ -850,9 +857,10 @@ Which benchmarks that floor sits under is therefore a question of where
 a question the workflow's list answers.
 
 `packages/patterns/integration/lunch-poll-keyed-votes.test.ts` is the assertion
-half of the same property: it counts rolled-back writes instead of timing them,
-and requires none, so a regression that this benchmark shows as trend drift
-also fails a test.
+half of the same property: over clients that hold no view it counts rolled-back
+writes instead of timing them, bounds them below one a vote, and requires that
+no refused commit wrote the vote list, so a regression that this benchmark
+shows as trend drift also fails a test.
 
 ### The browser copy of the vote burst
 
