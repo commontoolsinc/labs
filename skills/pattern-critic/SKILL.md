@@ -49,11 +49,7 @@ Warnings summary line, never Failed.
   other derivations or the view's shared parts. Under server execution such a
   node runs once per viewer, per user or per session by what it read, and so
   does everything downstream of it. Derive the shared data from shared inputs
-  and decide what is the viewer's at the leaf. Flag too a row pattern that
-  splits what it shows the viewer, or what the session has open, across several
-  computeds: each runs per viewer for every row, where one computed for the
-  viewer and one for the session, each returning every field, do the same work
-  in two runs. See
+  and decide what is the viewer's at the leaf. See
   `docs/common/patterns/multi-user-patterns.md#keep-the-viewer-out-of-shared-derivations`.
 
 - **Oversized cross-pattern contracts:** for every type describing linked,

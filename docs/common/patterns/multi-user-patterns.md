@@ -329,28 +329,6 @@ at the leaf runs per viewer. The same holds for any "is this me", "my entry",
 or "can I" read: carry the identity-free data through the shared derivations
 and apply the viewer's identity where it is displayed or acted on.
 
-The leaf has a count of its own. Wherever the serving loop derives, a computed
-that reads the viewer runs once per viewer, and one that reads the session
-once per session, so a row pattern with a computed for each flag it shows pays
-a run for each flag, for each viewer, for each row. Derive everything a row
-shows the viewer in one computed that returns it all, everything the session
-has open in one more, and bind the UI to their fields:
-
-```tsx
-// Shown for illustration only.
-const viewer = computed(() => {
-  const rights = rightsOf(row, viewerProfile);
-  return {
-    editDisplay: rights.canEdit ? "inline-flex" : "none",
-    deleteDisplay: rights.canDelete ? "inline-flex" : "none",
-  };
-});
-// <cf-button style={{ display: viewer.editDisplay }}>Edit</cf-button>
-```
-
-What reads the row alone folds the same way: one computed for every field the
-row's own values decide.
-
 ### Show every participant with `cf-profile-badge`
 
 ```tsx
