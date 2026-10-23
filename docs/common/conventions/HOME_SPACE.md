@@ -390,8 +390,9 @@ by the space's DID, naming the profile by its own space DID. A registration
 that names a profile records it when Home records none for the space: a host
 that joins a space or makes one social names the profile the person acts as,
 and the share intake names the profile an offer's `toProfile` addresses. Home never replaces a
-record; a registration naming another profile is a `conflict`, and so is one
-naming a profile Home does not list. The record outlasts the space's root, and
+record. A registration naming another profile, or one Home does not list,
+registers the space all the same, records no profile, and returns a `conflict`
+saying why; its offer's receipt says so too. The record outlasts the space's root, and
 archive and restore leave it, while `removeSharedSpace` takes it out with the
 entry. Like `retiredProfiles`, the stored document carries its write contract
 itself, naming `registerSharedSpace` and `removeSharedSpace` as its only

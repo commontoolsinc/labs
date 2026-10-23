@@ -49,7 +49,18 @@ export interface SharedSpaceOfferReceipt {
   space: string;
   host: string;
   kind: string;
+
+  /**
+   * Why the profile the offer's registration named was not recorded as the
+   * one acting in the space, when it was not: Home records another profile
+   * for the space, or holds a record it cannot read (`profile`), or the
+   * profile is not one Home lists (`unknown-profile`).
+   */
+  profileConflict?: SharedSpaceProfileConflict;
 }
+
+/** Why a registration did not record the profile it named. */
+export type SharedSpaceProfileConflict = "profile" | "unknown-profile";
 
 /** A collection keyed by space DID and receipts keyed by sender and offer ID. */
 export interface SharedSpaceCatalog {
@@ -93,12 +104,20 @@ export interface SharedSpaceRegistration {
   profile?: string;
 }
 
-/** Registration's outcome, independent of subsequent membership changes. */
+/**
+ * Registration's outcome, independent of subsequent membership changes. A
+ * conflict over the route or the offer wrote nothing. A conflict over the
+ * profile registered the space all the same, and `registration` says whether
+ * that admitted a new entry or found one.
+ */
 export type SharedSpaceRegistrationResult =
   | { status: "registered" | "existing"; space: string }
+  | { status: "conflict"; reason: "host" | "kind" | "offer" }
   | {
     status: "conflict";
-    reason: "host" | "kind" | "offer" | "profile" | "unknown-profile";
+    reason: SharedSpaceProfileConflict;
+    space: string;
+    registration: "registered" | "existing";
   };
 
 /** A membership action's outcome, carried by its normal handler receipt. */
@@ -387,10 +406,13 @@ function membershipAction(
  * records it in `recorder.records` as the profile acting in the space, unless
  * a record is already there, which is never replaced, whether or not the
  * space already has an entry. Returns `conflict` without writing anything
- * when the space is already registered with another host or kind, the
- * offer's receipt names another target, the named profile is not among
+ * when the space is already registered with another host or kind, or the
+ * offer's receipt names another target. When the named profile is not among
  * `recorder.listed` (`unknown-profile`), or the space's profile record names
- * another profile or is one this writer cannot read (`profile`). Call it only
+ * another profile or is one this writer cannot read (`profile`), it registers
+ * the space and the offer's receipt as it would for a registration naming no
+ * profile, records no profile, writes the reason into a new receipt as its
+ * `profileConflict`, and returns `conflict` with that reason. Call it only
  * from a handler, since a new entry's revision names the handler's event.
  *
  * @throws When `input` is not a valid registration, when it names a profile
@@ -432,16 +454,17 @@ export function registerSharedSpaceIn(
       receipt.kind !== kind)
   ) return { status: "conflict", reason: "offer" };
   let recordProfile: (() => void) | undefined;
+  let profileConflict: SharedSpaceProfileConflict | undefined;
   if (profile !== undefined && recorder !== undefined) {
-    if (!recorder.listed().includes(profile)) {
-      return { status: "conflict", reason: "unknown-profile" };
-    }
     const held = readSharedSpaceProfiles(recorder.records)[space];
-    if (
+    if (!recorder.listed().includes(profile)) {
+      profileConflict = "unknown-profile";
+    } else if (
       held !== undefined &&
       !(isSharedSpaceProfileRecord(held, space) && held.profile === profile)
-    ) return { status: "conflict", reason: "profile" };
-    if (held === undefined) {
+    ) {
+      profileConflict = "profile";
+    } else if (held === undefined) {
       recordProfile = () => recorder.records.key(space).set({ space, profile });
     }
   }
@@ -464,10 +487,18 @@ export function registerSharedSpaceIn(
       space,
       host,
       kind,
+      ...(profileConflict === undefined ? {} : { profileConflict }),
     });
   }
   recordProfile?.();
-  return { status: current ? "existing" : "registered", space };
+  return profileConflict === undefined
+    ? { status: current ? "existing" : "registered", space }
+    : {
+      status: "conflict",
+      reason: profileConflict,
+      space,
+      registration: current ? "existing" : "registered",
+    };
 }
 
 /**

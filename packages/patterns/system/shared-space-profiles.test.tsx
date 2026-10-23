@@ -150,11 +150,16 @@ export default pattern(() => {
       profile: PERSONAL,
     });
   });
+  // The competing offer is registered all the same; only its profile is
+  // refused, which its receipt says.
   const assert_competing_conflicts = assert(() => {
     const result = results.get()[2] as SharedSpaceRegistrationResult;
     return result?.status === "conflict" && result.reason === "profile" &&
+      "registration" in result && result.registration === "existing" &&
       records.get()[LOOM]?.profile === WORK &&
-      stored.offers[offer("personal")] === undefined;
+      stored.offers[offer("personal")]?.space === LOOM &&
+      stored.offers[offer("personal")]?.profileConflict === "profile" &&
+      stored.offers[offer("work")]?.profileConflict === undefined;
   });
 
   const action_name_none = action(() => {
@@ -186,11 +191,12 @@ export default pattern(() => {
       profile: STRANGER,
     });
   });
-  const assert_stranger_writes_nothing = assert(() => {
+  const assert_stranger_registers_without_profile = assert(() => {
     const result = results.get()[5] as SharedSpaceRegistrationResult;
     return result?.status === "conflict" &&
       result.reason === "unknown-profile" &&
-      stored.entries[STRANGER_LOOM] === undefined &&
+      "registration" in result && result.registration === "registered" &&
+      stored.entries[STRANGER_LOOM]?.state === "saved" &&
       records.get()[STRANGER_LOOM] === undefined;
   });
 
@@ -240,7 +246,8 @@ export default pattern(() => {
       spaces[BROKEN]?.status === "unreadable" &&
       spaces[RETIRED_LOOM]?.status === "retired" &&
       (spaces[RETIRED_LOOM] as { profile?: string }).profile === OLD &&
-      spaces[STRANGER_LOOM] === undefined;
+      spaces[STRANGER_LOOM]?.status === "unrecorded" &&
+      spaces["did:key:profiles-unrecordable"] === undefined;
   });
 
   const assert_view_unavailable = assert(() => {
@@ -282,7 +289,7 @@ export default pattern(() => {
       { action: action_record_legacy },
       { assertion: assert_legacy_recorded },
       { action: action_stranger },
-      { assertion: assert_stranger_writes_nothing },
+      { assertion: assert_stranger_registers_without_profile },
       { action: action_over_unreadable },
       { assertion: assert_unreadable_kept },
       { action: action_route_conflict },

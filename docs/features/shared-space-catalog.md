@@ -292,13 +292,21 @@ records the profile an offer's `toProfile` names
 profile Home records is a replay: the result is the one the registration
 would have without it, and nothing about the record changes. A registration
 naming no profile leaves the record as it is. A record is never replaced.
-Registration returns `conflict` and writes nothing, no entry, receipt or
-record, when:
+Home records no profile for a registration, and the registration returns
+`conflict` with the reason, when:
 
 - Home records another profile for the space, or holds a record for it that
   this writer cannot read (`profile`);
 - the named profile is not one Home's `profiles` list holds (`unknown-profile`).
   A retired profile is one Home lists, so a registration can name it.
+
+Such a registration still registers the space and the offer's receipt, as one
+naming no profile would; only the profile is refused. The result carries the
+space and `registration`, `registered` when it admitted a new entry and
+`existing` when it found one. A receipt it adds carries the reason as
+`profileConflict`, so a reader of the receipts, such as the share intake, can
+tell an offer whose profile Home refused from one it has not seen. A conflict
+over the host, the kind or the offer's receipt still writes nothing.
 
 Home records no profile that no registration named. There is no rule that
 infers one for a space registered without a profile, and nothing chooses the

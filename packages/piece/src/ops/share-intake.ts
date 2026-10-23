@@ -112,11 +112,13 @@ const profilesSchema = {
 
 /**
  * What the intake reads of Home before deciding the rows of an inbox: the
- * offers its catalog holds receipts for, by {@link offerIdentity}, and the
- * spaces it records no profile for.
+ * offers its catalog holds receipts for, by {@link offerIdentity}, those of
+ * them whose receipt says Home refused the profile the offer named
+ * (`profileConflict`), and the spaces it records no profile for.
  */
 interface HomeReceipts {
   received: Set<string>;
+  profileRefused: Set<string>;
   unrecorded: Set<string>;
 }
 
@@ -145,9 +147,10 @@ export function startShareIntakeOf(
  * them, is taken up as it lands.
  *
  * An offer is skipped, without being vetted, when the catalog already holds a
- * receipt for its sender and `id`, unless the offer names a `toProfile` and
+ * receipt for its sender and `id`, unless the offer names a `toProfile`,
  * Home's `sharedSpaces.profiles` says Home records no profile for its space,
- * as it does for a space registered by a registration that named none. Any
+ * as it does for a space registered by a registration that named none, and
+ * the receipt does not say Home refused the profile (`profileConflict`). Any
  * other offer is registered, with its sender and `id`, its `kind`, `host` and
  * `title`, and as `profile` the space of the profile its `toProfile` names,
  * if it names one, when:
@@ -195,11 +198,14 @@ export function startShareIntakeOf(
  * Registration is Home's handler's, so an offer already registered under
  * another sender or `id` leaves the entry as it is, archived or not, and adds
  * a receipt for this offer. Home records the offer's profile as the one
- * acting in the space when it records none for the space, keeps the one it
- * records when the offer names that one or none, and returns a `conflict`,
- * recording no receipt, when the offer names another.
+ * acting in the space when it records none for the space, and keeps the one
+ * it records when the offer names that one or none. When the offer names
+ * another, or a profile Home does not list, Home registers the offer all the
+ * same, records the conflict in its receipt as `profileConflict`, and
+ * returns a `conflict`, which the intake logs.
  *
- * Once Home's handler returns `registered`, a new entry, for a
+ * Once Home's handler returns `registered`, a new entry, or a `conflict`
+ * over the offer's profile whose `registration` is `registered`, for a
  * `fabrichat-room` offer, the intake sends the space's root to Home's
  * `chatManager.accept`, when Home has one, with `keepArchived` set, so that
  * the manager records the room as an acceptance from the room itself would,
@@ -440,7 +446,7 @@ export class ShareIntake {
    */
   async #homeReceipts(): Promise<HomeReceipts> {
     return {
-      received: await this.#receipts(),
+      ...await this.#receipts(),
       unrecorded: await this.#unrecorded(),
     };
   }
@@ -479,13 +485,16 @@ export class ShareIntake {
   }
 
   /**
-   * The offers Home's catalog holds receipts for, by {@link offerIdentity}, or
-   * none while the catalog cannot be read, since Home's handler refuses a
-   * duplicate in any case. Each is read from the `from` and `id` its receipt
-   * stores, whatever the key the catalog files it under, and a receipt that
-   * stores no such pair is passed over.
+   * The offers Home's catalog holds receipts for, by {@link offerIdentity},
+   * and those whose receipt carries a `profileConflict`, or none while the
+   * catalog cannot be read, since Home's handler refuses a duplicate in any
+   * case. Each is read from the `from` and `id` its receipt stores, whatever
+   * the key the catalog files it under, and a receipt that stores no such
+   * pair is passed over.
    */
-  async #receipts(): Promise<Set<string>> {
+  async #receipts(): Promise<
+    Pick<HomeReceipts, "received" | "profileRefused">
+  > {
     let catalog;
     try {
       catalog = await this.#home.key("sharedSpaceCatalog").asSchema(
@@ -498,17 +507,21 @@ export class ShareIntake {
           error,
         ]);
       }
-      return new Set();
+      return { received: new Set(), profileRefused: new Set() };
     }
     const received = new Set<string>();
-    if (!isObjectNotArray(catalog?.offers)) return received;
+    const profileRefused = new Set<string>();
+    if (!isObjectNotArray(catalog?.offers)) return { received, profileRefused };
     for (const receipt of Object.values(catalog.offers)) {
       if (
-        isObjectNotArray(receipt) && typeof receipt.from === "string" &&
-        typeof receipt.id === "string"
-      ) received.add(offerIdentity(receipt.from, receipt.id));
+        !isObjectNotArray(receipt) || typeof receipt.from !== "string" ||
+        typeof receipt.id !== "string"
+      ) continue;
+      const identity = offerIdentity(receipt.from, receipt.id);
+      received.add(identity);
+      if (receipt.profileConflict !== undefined) profileRefused.add(identity);
     }
-    return received;
+    return { received, profileRefused };
   }
 
   /** Decides `raw`, a row of an inbox's offers, unless it is decided already. */
@@ -520,7 +533,8 @@ export class ShareIntake {
     const offer = wellFormedOffer(raw);
     if (
       receipts.received.has(receipt) &&
-      !(offer?.profile !== undefined && receipts.unrecorded.has(offer.space))
+      !(offer?.profile !== undefined && receipts.unrecorded.has(offer.space) &&
+        !receipts.profileRefused.has(receipt))
     ) {
       this.#decide(row, raw, "received");
       return;
@@ -632,7 +646,11 @@ export class ShareIntake {
       return;
     }
     if (this.#halted || !isObjectNotArray(result)) return;
-    if (result.status === "registered" && room !== undefined) {
+    // A conflict over the profile the offer named registered the space all
+    // the same, saying whether that admitted a new entry.
+    const admitted = result.status === "registered" ||
+      (result.status === "conflict" && result.registration === "registered");
+    if (admitted && room !== undefined) {
       const accept = this.#home.key("chatManager").key("accept");
       if (accept.getRaw() !== undefined) {
         try {

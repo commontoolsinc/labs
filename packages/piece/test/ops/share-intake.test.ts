@@ -58,14 +58,15 @@ type Registration = {
 
 type Result =
   | { status: "registered" | "existing"; space: string }
-  | { status: "conflict"; reason: string };
+  | { status: "conflict"; reason: string; space?: string; registration?: string };
 
 type Acceptance = { room?: Cell<unknown>; keepArchived?: boolean };
 
 // Returns a conflict for a registration titled \`Conflicting\`, as Home's own
-// handler does for a space already registered under another kind, and
+// handler does for a space already registered under another kind,
 // \`existing\` for one titled \`Existing\`, as it does for a space it lists
-// already.
+// already, and a conflict over the profile that admitted a new entry for one
+// titled \`Profile refused\`, as it does for a profile it does not list.
 const registerSharedSpace = handler<
   Registration,
   { registered: Writable<Registration[]> },
@@ -74,6 +75,13 @@ const registerSharedSpace = handler<
   registered.push(event);
   return event.title === "Conflicting"
     ? { status: "conflict", reason: "kind" }
+    : event.title === "Profile refused"
+    ? {
+      status: "conflict",
+      reason: "unknown-profile",
+      space: event.space,
+      registration: "registered",
+    }
     : event.title === "Existing"
     ? { status: "existing", space: event.space }
     : { status: "registered", space: event.space };
@@ -456,12 +464,18 @@ describe("share-intake", () => {
     space: MemorySpace,
     id: string,
     profile: Row,
+    receipt: Row = {},
   ): Promise<void> {
     const target = { space, host: HOST, kind: "fabrichat-room" };
     await setHome("sharedSpaceCatalog", {
       entries: { [space]: { ...target, state: "saved", revision: "1:x" } },
       offers: {
-        [JSON.stringify([sender, id])]: { from: sender, id, ...target },
+        [JSON.stringify([sender, id])]: {
+          from: sender,
+          id,
+          ...target,
+          ...receipt,
+        },
       },
     });
     await setHome("sharedSpaces", {
@@ -860,6 +874,20 @@ describe("share-intake", () => {
       }]);
     });
 
+    it("is accepted once Home's handler admits its space, though it refuses the profile the offer names", async () => {
+      const space = await offeredSpace({ [sender]: "WRITE" });
+      const intake = start();
+      await deliver([
+        offerOf(space, "refused profile", { title: "Profile refused" }),
+      ]);
+      await registeredThrough("refused profile");
+
+      expect(await acceptedNow(intake)).toEqual([{
+        space,
+        keepArchived: true,
+      }]);
+    });
+
     it("is not accepted when Home's handler finds its space already listed, or returns a conflict", async () => {
       const existing = await offeredSpace({ [sender]: "WRITE" });
       const conflicting = await offeredSpace({ [sender]: "WRITE" });
@@ -1119,6 +1147,20 @@ describe("share-intake", () => {
 
       expect(registeredIds(registered)).toEqual(["received", "barrier"]);
       expect(registered[0].profile).toBe(someoneElse);
+    });
+
+    it("is not registered when its receipt says Home refused the profile it names", async () => {
+      const space = await offeredSpace({ [sender]: "WRITE" });
+      await holdReceiptFor(space, "received", { status: "unrecorded" }, {
+        profileConflict: "unknown-profile",
+      });
+      start();
+
+      const registered = await deliverThenBarrier(
+        offerOf(space, "received", { toProfile: { space: someoneElse } }),
+      );
+
+      expect(registeredIds(registered)).toEqual(["barrier"]);
     });
 
     it("is not registered when it names no `toProfile`", async () => {

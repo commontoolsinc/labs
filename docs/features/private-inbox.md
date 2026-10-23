@@ -806,12 +806,17 @@ so an offer of a space already in the catalog under the same host and kind,
 archived or not, adds a receipt and leaves the entry as it is; one under another
 host or kind is a `conflict`, which writes nothing. Home records the offer's
 `profile` as the profile acting in the space when it records none for the space
-and the profile is one Home lists; an offer naming another profile than the one
-Home records, or a profile Home does not list, is a `conflict` too, as
-"The profile acting in a space" in
-[`shared-space-catalog.md`](shared-space-catalog.md) describes.
+and the profile is one Home lists. An offer naming another profile than the one
+Home records, or a profile Home does not list, is registered all the same, with
+its receipt's `profileConflict` saying why its profile was refused, and Home
+returns a `conflict` the intake logs, as "The profile acting in a space" in
+[`shared-space-catalog.md`](shared-space-catalog.md) describes. Such an offer of
+a `fabrichat-room` is accepted when it admitted a new entry, as any offer that
+does is. A receipt carrying `profileConflict` also keeps the intake from
+registering its offer again for a space Home records no profile for.
 
-When Home's handler returns `registered`, a new entry, for a `fabrichat-room`
+When Home's handler returns `registered`, a new entry, or a `conflict` over the
+offer's profile whose `registration` is `registered`, for a `fabrichat-room`
 offer, the intake then accepts the room on the owner's behalf: it sends the
 space's root, the one vetting read, to Home's `chatManager.accept`, when Home
 has that stream, with `keepArchived` set. A `loom` entry gets no acceptance;

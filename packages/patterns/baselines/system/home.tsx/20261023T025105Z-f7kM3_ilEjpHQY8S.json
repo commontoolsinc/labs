@@ -2180,6 +2180,10 @@
           "kind": {
             "type": "string"
           },
+          "profileConflict": {
+            "$ref": "#/$defs/SharedSpaceProfileConflict",
+            "description": "Why the profile the offer's registration named was not recorded as the\none acting in the space, when it was not: Home records another profile\nfor the space, or holds a record it cannot read (`profile`), or the\nprofile is not one Home lists (`unknown-profile`)."
+          },
           "space": {
             "type": "string"
           }
@@ -2227,6 +2231,12 @@
             ],
             "type": "object"
           }
+        ]
+      },
+      "SharedSpaceProfileConflict": {
+        "enum": [
+          "profile",
+          "unknown-profile"
         ]
       },
       "SharedSpaceProfileRecord": {
@@ -2589,7 +2599,7 @@
                 "writeAuthorizedBy": {
                   "__ctWriterIdentityOf": {
                     "file": "/packages/patterns/system/shared-space-catalog.ts",
-                    "moduleIdentity": "LTtIAVijjwG-Y8mJ2gOYLntA5tSUofrq1YrC-zQyHAQ",
+                    "moduleIdentity": "tgp3qbZKRowooFoKs7lazDw-j3dbafNwBfgyXoCEnBs",
                     "path": [
                       "registerSharedSpace"
                     ]
@@ -2600,7 +2610,7 @@
                 "writeAuthorizedBy": {
                   "__ctWriterIdentityOf": {
                     "file": "/packages/patterns/system/shared-space-catalog.ts",
-                    "moduleIdentity": "LTtIAVijjwG-Y8mJ2gOYLntA5tSUofrq1YrC-zQyHAQ",
+                    "moduleIdentity": "tgp3qbZKRowooFoKs7lazDw-j3dbafNwBfgyXoCEnBs",
                     "path": [
                       "removeSharedSpace"
                     ]
@@ -2616,7 +2626,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/shared-space-catalog.ts",
-                  "moduleIdentity": "LTtIAVijjwG-Y8mJ2gOYLntA5tSUofrq1YrC-zQyHAQ",
+                  "moduleIdentity": "tgp3qbZKRowooFoKs7lazDw-j3dbafNwBfgyXoCEnBs",
                   "path": [
                     "registerSharedSpace"
                   ]
@@ -2627,7 +2637,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/shared-space-catalog.ts",
-                  "moduleIdentity": "LTtIAVijjwG-Y8mJ2gOYLntA5tSUofrq1YrC-zQyHAQ",
+                  "moduleIdentity": "tgp3qbZKRowooFoKs7lazDw-j3dbafNwBfgyXoCEnBs",
                   "path": [
                     "removeSharedSpace"
                   ]

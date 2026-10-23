@@ -365,11 +365,14 @@ describe("shared-space-profiles", () => {
     await runtime.idle();
   }
 
-  /** Whether Home's catalog holds a receipt for the offer keyed `id`. */
-  async function received(id: string): Promise<boolean> {
+  /**
+   * The receipt Home's catalog holds for the offer keyed `id`, or `undefined`
+   * when it holds none.
+   */
+  async function receiptOf(id: string): Promise<unknown> {
     const offers = await read(home).key("sharedSpaceCatalog").key("offers")
       .pull() ?? {};
-    return Object.hasOwn(offers, JSON.stringify([sender, id]));
+    return offers[JSON.stringify([sender, id])];
   }
 
   /**
@@ -419,7 +422,7 @@ describe("shared-space-profiles", () => {
       });
     });
 
-    it("records the profile the first names, and registers none of a second naming another", async () => {
+    it("records the profile the first names, and registers a second naming another with a receipt saying its profile was refused", async () => {
       const space = await loomSpace();
       const conflicts = conflictsLogged();
       const barrier = await loomSpace();
@@ -435,12 +438,15 @@ describe("shared-space-profiles", () => {
         status: "live",
         profile: spaceOf(work),
       });
-      expect(await received("work")).toBe(true);
-      expect(await received("personal")).toBe(false);
+      expect(await receiptOf("work")).not.toHaveProperty("profileConflict");
+      expect(await receiptOf("personal")).toMatchObject({
+        space,
+        profileConflict: "profile",
+      });
       expect(conflictsLogged()).toBe(conflicts + 1);
     });
 
-    it("records nothing for a space when the profile it names is none of the owner's", async () => {
+    it("registers the space, recording no profile, when the profile it names is none of the owner's, and is not sent again by a later intake", async () => {
       const space = await loomSpace();
       const conflicts = conflictsLogged();
       const barrier = await loomSpace();
@@ -454,8 +460,18 @@ describe("shared-space-profiles", () => {
       ]);
       await receivedThrough("barrier");
 
-      expect(await received("stranger")).toBe(false);
-      expect(await profileIn(space)).toBeUndefined();
+      expect(await receiptOf("stranger")).toMatchObject({
+        space,
+        profileConflict: "unknown-profile",
+      });
+      expect(await profileIn(space)).toEqual({ status: "unrecorded" });
+      expect(conflictsLogged()).toBe(conflicts + 1);
+
+      intake?.stop();
+      intake = undefined;
+      await deliver([offerOf(await loomSpace(), "second barrier")]);
+      await receivedThrough("second barrier");
+
       expect(conflictsLogged()).toBe(conflicts + 1);
     });
   });
@@ -523,7 +539,12 @@ describe("shared-space-profiles", () => {
 
       expect(
         await register(registrationOf(space, { profile: spaceOf(personal) })),
-      ).toEqual({ status: "conflict", reason: "profile" });
+      ).toEqual({
+        status: "conflict",
+        reason: "profile",
+        space,
+        registration: "existing",
+      });
       expect(await profileIn(space)).toEqual({
         status: "live",
         profile: spaceOf(work),
@@ -591,7 +612,12 @@ describe("shared-space-profiles", () => {
       });
       expect(
         await register(registrationOf(space, { profile: spaceOf(personal) })),
-      ).toEqual({ status: "conflict", reason: "profile" });
+      ).toEqual({
+        status: "conflict",
+        reason: "profile",
+        space,
+        registration: "existing",
+      });
     });
 
     it("is kept when its space is archived and restored", async () => {
