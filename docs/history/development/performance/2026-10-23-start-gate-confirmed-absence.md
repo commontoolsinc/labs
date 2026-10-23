@@ -121,6 +121,10 @@ it, so with that result present the report predates the write, and the gate
 now asks the store for the argument again
 (`IStorageProvider.readStoreAbsenceAgain`), the read the feed's report of the
 write would make. An argument the store still holds nothing at holds no start,
-like any other document the store reported absent. This was not measured: a
-start meets it only in the feed's lag, which none of the runs above was timed
-in.
+like any other document the store reported absent. A read the store gives no
+answer to holds the start for a name-sync, as one it could not be asked for
+does. Once the store answers that it holds the argument, the gate walks the
+links in what it holds through a read transaction of its own, since the
+probe's transaction checked the argument out absent and reads it that way.
+This was not measured: a start meets it only in the feed's lag, which none of
+the runs above was timed in.

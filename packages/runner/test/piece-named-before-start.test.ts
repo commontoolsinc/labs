@@ -19,12 +19,14 @@ import {
   parseLink,
 } from "../src/link-utils.ts";
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
+import { engineReadThrough } from "../src/executor/engine-read-through.ts";
 import { stampWaveRunContext } from "../src/executor/wave.ts";
 import { entityKey } from "../src/scheduler/keys.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type {
   CommitError,
   IExtendedStorageTransaction,
+  URI,
 } from "../src/storage/interface.ts";
 import { setCfcTrustSnapshot } from "../src/storage/extended-storage-transaction.ts";
 import { type ErrorWithContext, Runtime } from "../src/runtime.ts";
@@ -113,7 +115,7 @@ const ITEMS_SCHEMA = {
   items: { type: "object", properties: { seed: { type: "string" } } },
 } as const;
 // One card per case, each cold on the replica that runs it.
-const CARD_COUNT = 15;
+const CARD_COUNT = 16;
 
 type EventCommitMarker = {
   type: "scheduler.event.commit";
@@ -959,6 +961,56 @@ describe("piece-named-before-start", () => {
     await runCard(cardB, itemB);
     await quiesce(b);
     expect(heldAgain).toBe(false);
+    expect(await bump(cardB)).toBe(1);
+    expect(errors.get(b)!.map((error) => error.message)).toEqual([]);
+  });
+
+  it("walks the argument the store holds once asked for it again, and holds the run for a document that argument links to and nothing examined", async () => {
+    const { cardB, argumentId, key } = locateCard(15);
+    // The document the card's stored argument links to, which nothing on B
+    // has read.
+    const read = engineReadThrough(await server.engineForSpace(space));
+    const stored = read({ id: argumentId as URI, scopeKey: "space" });
+    const hopId = linkTargetId(
+      (stored?.doc as { value?: { item?: unknown } } | undefined)?.value?.item,
+    );
+    expect(hopId).toBeDefined();
+    expect(replicaB.getDocument(hopId!)).toBeUndefined();
+    // B reads the store directly from here. Its first read of the argument
+    // finds nothing there, as a read the feed has yet to catch up with does,
+    // and the store gives no answer for the linked document until the gate
+    // has decided, as a lease holder's read-through gives none while its
+    // lease is unconfirmed.
+    let argumentReads = 0;
+    let answering = false;
+    managers.at(-1)!.installStoreReadThrough(space, (address) => {
+      if (address.id === argumentId && argumentReads++ === 0) {
+        return {
+          branch: "",
+          id: address.id,
+          scope: "space",
+          scopeKey: address.scopeKey,
+          seq: 0,
+          deleted: true as const,
+        };
+      }
+      if (address.id === hopId && !answering) return undefined;
+      return read(address);
+    });
+    let held = false;
+    waitForDeferredStart(b, "runner.deferred-start.pending", key).then(() => {
+      held = true;
+    });
+    // Run with no argument of the caller's, as a child reached by its result
+    // alone is, so the stored argument is all the gate walks.
+    const runTx = b.edit();
+    b.runner.run(runTx, cardPattern, undefined, cardB);
+    answering = true;
+    b.prepareTxForCommit(runTx);
+    expect((await runTx.commit().settled).error).toBeUndefined();
+    await quiesce(b);
+    expect(argumentReads).toBe(2);
+    expect(held).toBe(true);
     expect(await bump(cardB)).toBe(1);
     expect(errors.get(b)!.map((error) => error.message)).toEqual([]);
   });
