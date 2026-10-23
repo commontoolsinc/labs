@@ -43,14 +43,15 @@ Warnings summary line, never Failed.
   `docs/common/patterns/multi-user-patterns.md#presenting-identity`
   (critique-guide category 16).
 
-- **Viewer identity inside a shared derivation (multi-user):** flag a `computed`
-  or `lift` over shared data that also reads the viewer's profile, `#profile`
-  wish result, or "me" cell to mark what is the viewer's, when its result feeds
-  other derivations or the view's shared parts. Under server execution such a
-  node runs once per viewer, per user or per session by what it read, and so
-  does everything downstream of it. Derive the shared data from shared inputs
-  and decide what is the viewer's at the leaf. See
-  `docs/common/patterns/multi-user-patterns.md#keep-the-viewer-out-of-shared-derivations`.
+- **Per-viewer work (multi-user):** under server execution a derivation that
+  reads the viewer's state runs once for each viewer, or for each session, by
+  what it read, and so does everything downstream of it. Flag a `computed` or
+  `lift` over shared data that also reads the viewer's profile, `#profile` wish
+  result, or "me" cell to mark what is the viewer's, when its result feeds
+  derivations over shared data or the view's shared parts: derive the shared
+  data from shared inputs and decide what is the viewer's at the leaf. See
+  `docs/common/patterns/multi-user-patterns.md#keep-the-viewer-out-of-shared-derivations`
+  (critique-guide category 10).
 
 - **Oversized cross-pattern contracts:** for every type describing linked,
   wished, registered, or otherwise external data — imported or declared inline —
