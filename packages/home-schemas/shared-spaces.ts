@@ -81,7 +81,7 @@ export const sharedSpaceReceiptViewSchema = {
               space: { type: "string" },
               host: { type: "string" },
               kind: { type: "string" },
-              profileConflict: { type: "string" },
+              profileConflict: { enum: ["profile", "unknown-profile"] },
             },
             required: ["from", "id", "space", "host", "kind"],
             additionalProperties: true,
