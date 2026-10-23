@@ -287,34 +287,6 @@ const hasProfile = computed(() => (profileNameWish.result ?? "").trim() !== "");
 **Never** add a "type your name" field and treat that string as the current user.
 The viewer is whoever the runtime says they are; `#profile` is how you read it.
 
-### Fold what a row shows the viewer into one computed
-
-Under server execution one runtime derives for every viewer. A computed that
-reads user-scoped state, such as the viewer's profile, runs once for each user
-who demands it, one that reads session-scoped state runs once for each such
-session, and so does everything downstream of either
-([cell scopes](../../specs/server-side-execution/scopes.md), §2). A row pattern
-that derives each flag it shows in a computed of its own therefore pays a run
-for each flag, for each viewer or session, for each row. Derive everything a
-row shows the viewer in one computed that returns it all, everything the
-session has open in one more, and bind the UI to their fields:
-
-```tsx
-// Shown for illustration only.
-const viewer = computed(() => {
-  const rights = rightsOf(row, viewerProfile);
-  return {
-    editDisplay: rights.canEdit ? "inline-flex" : "none",
-    deleteDisplay: rights.canDelete ? "inline-flex" : "none",
-  };
-});
-// <cf-button style={{ display: viewer.editDisplay }}>Edit</cf-button>
-```
-
-What reads the row alone folds the same way: one computed for every field the
-row's own values decide. A client runtime, which derives only its own viewer's
-instances, runs fewer nodes for each row too.
-
 ### Show every participant with `cf-profile-badge`
 
 ```tsx
@@ -871,6 +843,46 @@ const roomButtons = conversation.rooms.map((room) => (
 For editable nested objects, pass a writable item reference and use `.key(...)`
 inside the child pattern or handler.
 
+## Per-Viewer Work
+
+Under server execution one runtime derives for every viewer. A computed that
+reads user-scoped state, such as the viewer's profile, runs once for each user
+who demands it, one that reads session-scoped state runs once for each such
+session, and so does everything downstream of either
+([cell scopes](../../specs/server-side-execution/scopes.md), §2). Two sessions
+of one user share that user's instance and have separate session instances. The
+runtime learns what a node reads by running it, so nothing in the source says
+which derivations fan out, and a client runtime, which derives only its own
+viewer's instances, shows none of the cost.
+
+### Fold what a row shows the viewer into one computed
+
+A row pattern, instantiated once for each item of a list, that derives each
+flag it shows the viewer in a computed of its own pays a run of each, for each
+viewer or session, for each row. Where those flags read the same inputs, or
+each is cheap to derive, derive everything a row shows the viewer in one
+computed that returns it all, everything the session has open in one more, and
+bind the UI to their fields:
+
+```tsx
+// Shown for illustration only.
+const forViewer = computed(() => {
+  const allowed = permissionsFor(card, me);
+  return {
+    renameDisplay: allowed.rename ? "inline-flex" : "none",
+    archiveDisplay: allowed.archive ? "inline-flex" : "none",
+  };
+});
+// <cf-button style={{ display: forViewer.renameDisplay }}>Rename</cf-button>
+```
+
+A folded computed runs again when an input of any of its fields changes, and
+derives every field each time. Fields that read disjoint inputs, one of them
+costly to derive, are cheaper apart, since folding them makes each change pay
+for all of them. What reads the row alone folds the same way: one computed for
+every field the row's own values decide. A client runtime runs fewer nodes for
+each row too.
+
 ## Concurrent Edits Without Clobbering
 
 When several users edit the same shared data at once, a handler written as
@@ -986,6 +998,8 @@ See:
 - Handlers use scoped `Writable` aliases when they need stable cell handles.
 - The pattern does not store user ids or session ids to fake isolation.
 - Object identity uses references and `equals()`, not synthetic ids.
+- A row derives what it shows the viewer in one computed, and what the session
+  has open in one more.
 - Concurrently-edited shared collections and counters use the mergeable writes
   (`push` / `addUnique` / `increment` / `removeByValue` / `elementById`), not
   read-modify-write `set`, so simultaneous edits merge instead of clobbering.
