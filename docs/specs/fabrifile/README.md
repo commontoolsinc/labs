@@ -2,8 +2,9 @@
 
 FabriFile is a space's designated file storage. This directory describes the
 patterns it is made of, the contracts they fill, and what they require of the
-runtime and of the programs that use them. It is a design. Nothing in it is
-built yet.
+runtime and of the programs that use them. [Implementation
+status](#implementation-status) says where they are built, and where the build
+departs from this design.
 
 ## Quick links
 
@@ -177,11 +178,43 @@ The design depends on runtime capabilities that don't exist yet:
   blob's space admits, as a read of any other document of the space is, and a
   blob write likewise. Until then, everything under [Privacy](#privacy)
   holds.
-- **A blob reference a pattern can check.** The store takes a blob reference
-  from a client, and can't yet confirm that the blob exists in its own space,
-  or that its stored media type and name are the ones the request names (see
+- **A blob reference a pattern can check, in full.** The store learns whether
+  its space holds the blob a request names, since storing it under the entry's
+  name reads its record, but not the media type or the size the blob was
+  stored with, so it takes those as the request states them (see
   [`FileStoreOutput`](FileStoreOutput.md#add)).
-- **A blob URL a pattern can form.** A rendering needs a URL for a blob, such
-  as an image's `src`. An upload returns one, relative to the toolshed's
-  `/<space>/` path, but nothing lets a pattern form one from a blob reference
-  alone (see [`FileStoreView`](FileStoreView.md#prerequisites)).
+
+## Implementation status
+
+The patterns are in `packages/patterns/fabrifile/`: `schemas.tsx` holds the
+contracts and records, `names.ts` the name rules, `store.tsx` the store, with
+its stored records and the handlers that write them, and `view.tsx` its
+rendering. `store.tsx` reaches no module that renders, which
+`store-imports.test.ts` checks, and `integration/fabrifile-store.test.ts`
+drives the store over blobs its space holds, as a pattern test cannot, since
+nothing a pattern runs can write a blob's first record. No root names a store
+yet.
+
+- **The store and its core.** `FileStore` resolves the viewer's profile with
+  `#profile` and hands it to `FileStoreCore`, which takes it as an input, so a
+  test can name one.
+- **Writers and labels.** An entry's write policy is the element's, at its
+  position in the list, and names `commitAdd`, `commitRename` and
+  `commitRemove`, since a removal is a write to the element removed. The
+  `authored-by` label is the `addedBy` field's, written only by `commitAdd`,
+  rather than the whole entry's, which a rename would restamp; `remove` and
+  `rename` read the adder from it.
+- **Who may write.** A request from a principal the store's space admits with
+  `READ`, or not at all, is not admitted. A level not known yet is left to the
+  space's own access list, which refuses the write where it doesn't admit it.
+- **Blobs.** `add` and `rename` store the entry's bytes under its name with
+  `nameBlob()` ([files](../../common/capabilities/files.md#renaming)), and an
+  `add` naming a blob the space doesn't hold is refused with `no-blob`. An
+  `add` reads the blob's record even when the
+  names already agree, which loads its bytes into the adder's runtime.
+- **Showing a blob.** A rendering shows an entry's blob with `cf-image` and
+  offers it with `cf-blob-link`, which each take the blob reference and ask the
+  runtime for the URL its space's host serves it at.
+- **A root's store.** `FileStoreRecord`, `FileStoreRecordCell` and
+  `ensureFileStore` are what a root keeps its store with
+  ([`FileStore.md`](FileStore.md#where-it-lives)); no root uses them yet.

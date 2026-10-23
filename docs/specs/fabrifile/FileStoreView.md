@@ -7,8 +7,8 @@ about the store's files that the store doesn't already say.
 
 ## What it holds
 
-A view is a pattern taking one input, **`store`**: a link to a store, set when
-the view is instantiated. That is all it holds besides its own rendering state,
+A view is a pattern taking one input, **`store`**: a store's files group
+(`FileStoreFiles`), set when the view is instantiated. That is all it holds besides its own rendering state,
 which is `PerSession`: a sort order, a selection, a rename in progress, and the
 uploads it has started and not yet added. It MUST NOT hold anything read from
 the store, or any copy of a file's bytes.
@@ -43,9 +43,8 @@ streams.
 
 ## Prerequisites
 
-- **A blob URL a pattern can form.** Showing an image, or linking a download,
-  needs a URL for the entry's blob. `cf-file-input` returns one for each upload,
-  but an entry holds a blob reference and no URL (see
-  [`FileEntry`](FileEntry.md#fields)), and nothing yet forms a URL from a
-  reference. That needs either a component that takes a blob reference, such as
-  `cf-image` taking `blob`, or a function a pattern can call.
+None. An entry holds a blob reference and no URL (see
+[`FileEntry`](FileEntry.md#fields)), and the view shows it with components that
+take the reference: `cf-image`, given `blob`, shows an image, and
+`cf-blob-link` links to the blob, saving it under a name. Each asks the runtime
+for the URL the blob's space's host serves it at.

@@ -93,7 +93,8 @@ const safeResponseType = (type: string): string =>
  * Returns the `Content-Disposition` a blob of media type `type` is served with,
  * naming its file when `name` is given: `inline` for a type served as itself,
  * and `attachment` for one served as `application/octet-stream`, which a
- * browser saves rather than shows. A name is given twice, as RFC 6266
+ * browser saves rather than shows, or for any type when `download` asks for the
+ * blob to be saved. A name is given twice, as RFC 6266
  * describes: as percent-encoded UTF-8 in `filename*`, and as an ASCII stand-in
  * in `filename`, with `_` for each character a quoted string can't carry, for a
  * client that reads only that one.
@@ -101,8 +102,11 @@ const safeResponseType = (type: string): string =>
 const contentDispositionFor = (
   name: string | undefined,
   type: string,
+  download: boolean,
 ): string => {
-  const disposition = SAFE_RESPONSE_TYPES.has(type) ? "inline" : "attachment";
+  const disposition = !download && SAFE_RESPONSE_TYPES.has(type)
+    ? "inline"
+    : "attachment";
   if (name === undefined) {
     return disposition;
   }
@@ -224,7 +228,14 @@ router.get("/:spaceDid/blobs/:blobName", async (c) => {
     "Content-Type": safeResponseType(contents.type),
     "Cache-Control": "public, max-age=31536000, immutable",
     "X-Content-Type-Options": "nosniff",
-    "Content-Disposition": contentDispositionFor(contents.name, contents.type),
+    // `?download` asks for the blob to be saved, which a browser does for an
+    // `attachment` from any origin, where it honors a link's `download`
+    // attribute only from its own.
+    "Content-Disposition": contentDispositionFor(
+      contents.name,
+      contents.type,
+      c.req.query("download") !== undefined,
+    ),
   });
   return new Response(body, { status: 200, headers });
 });

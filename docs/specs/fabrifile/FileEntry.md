@@ -109,10 +109,12 @@ restored: adding the same blob again makes a new entry.
 
 ## Who wrote what
 
-An entry is labeled `authored-by` the principal who added it, and its write
-policy names the store's own handlers as its only writers, so no other code can
-write it, even code a member runs in the store's space. A rename leaves
-`authored-by` naming the adder, and labels the new name with its own writer.
+An entry's `addedBy` is labeled `authored-by` the principal who added it, by
+the one handler that writes the field, and the entry's write policy names the
+store's own handlers as its only writers, so no other code can write it, even
+code a member runs in the store's space. A rename writes the entry's `name` and
+`blob`, never its `addedBy`, so the label goes on naming the adder, and the
+store reads who added an entry from it.
 
 ## Identity
 
