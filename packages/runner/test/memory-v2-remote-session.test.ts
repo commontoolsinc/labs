@@ -1280,6 +1280,99 @@ describe("WebSocketTransport failure signaling", () => {
       });
     });
 
+    it("compresses streamed uploads when compression is on and expands a compressed body between credits", async () => {
+      const space = (await Identity.fromPassphrase("streamed-compression"))
+        .did();
+      const value = Array.from({ length: 2000 }, (_, i) => `entry ${i}`)
+        .join(" ");
+      await withTransport(async (transport, socket) => {
+        const received = Promise.withResolvers<string>();
+        transport.setReceiver(received.resolve);
+        try {
+          const active = await selectCredits(transport, socket);
+          transport.setMessageCompressionEnabled(true);
+          const payload = `fvj1:${
+            JSON.stringify({
+              type: "transact",
+              requestId: "compressed",
+              space,
+              sessionId: "s",
+              value,
+            })
+          }`;
+          const upload = transport.send(payload);
+          const receiver = new RouterAssembler();
+          let result;
+          for (let at = 2; result === undefined; at++) {
+            await active.whenSent(at + 1);
+            const record = requireRecord(active.sent[at]);
+            grantCredit(active, record.length);
+            result = receiver.receive(record);
+          }
+          await upload;
+          // The envelope, marked binary, much smaller than the text, and
+          // carrying the frame's space as its hint.
+          expect(result.header.binary).toBe(true);
+          if (typeof result.payload === "string") {
+            throw new Error("Expected a compressed body");
+          }
+          expect(result.payload.length).toBeLessThan(payload.length / 4);
+          const decoded = decodeRoutedFrame(result.payload, true, null);
+          expect(decoded.payload).toBe(payload);
+          expect(decoded.space).toBe(space);
+          // A compressed body arriving beside credit is expanded, not taken
+          // for credit.
+          const push = `fvj1:${
+            JSON.stringify({
+              type: "session/effect",
+              space,
+              sessionId: "s",
+              value,
+            })
+          }`;
+          const envelope = encodeRoutedFrame(push, null);
+          expect(envelope).toBeInstanceOf(Uint8Array);
+          active.receive((envelope as Uint8Array<ArrayBuffer>).buffer);
+          expect(await received.promise).toBe(push);
+          expect(active.readyState).toBe(DrivableWebSocket.OPEN);
+        } finally {
+          await transport.close();
+        }
+      });
+    });
+
+    it("refuses a compressed body on a connection that did not negotiate compression", async () => {
+      const space = (await Identity.fromPassphrase("uncompressed-refusal"))
+        .did();
+      await withTransport(async (transport, socket) => {
+        try {
+          const active = await selectCredits(transport, socket);
+          const closed = Promise.withResolvers<Error | undefined>();
+          transport.setCloseReceiver(closed.resolve);
+          const push = `fvj1:${
+            JSON.stringify({
+              type: "session/effect",
+              space,
+              sessionId: "s",
+              value: Array.from({ length: 2000 }, (_, i) => `entry ${i}`)
+                .join(" "),
+            })
+          }`;
+          const envelope = encodeRoutedFrame(push, null) as Uint8Array<
+            ArrayBuffer
+          >;
+          active.receive(envelope.buffer);
+          const error = await closed.promise;
+          expect(error?.message).toBe(
+            "Unable to decode compressed memory websocket message",
+          );
+          expect(active.readyState).toBe(DrivableWebSocket.CLOSED);
+        } finally {
+          await transport.close();
+        }
+      });
+    });
+
     it("streams compression controls and consumes their responses", async () => {
       await withTransport(async (transport, socket) => {
         try {

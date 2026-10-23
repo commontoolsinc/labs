@@ -2298,14 +2298,16 @@ finally:
     message.type === "session/effect" &&
     message.sessionId === compressedSession
   );
-  assertEquals(compressing.binaryFrames, 0);
+  // The toolshed compressed the large effect; the router forwarded the
+  // envelope opaquely and the client expanded it.
+  assert(compressing.binaryFrames > 0);
   assertEquals(
     (await compressing.request({ type: "memory.compression", enabled: true }))
       .enabled,
-    false,
+    true,
   );
   pass(
-    "a compression-capable client receives opaque text responses and a truthful disabled acknowledgement",
+    "a compression-capable client receives large bodies as the toolshed's compression envelope, forwarded opaquely, and a truthful acknowledgement",
   );
   // The toolshed answers each of these, so the ID was in flight and retired.
   for (let i = 0; i < 2; i++) {
@@ -3045,9 +3047,12 @@ finally:
       };
       traces.push(trace);
       connection.socket.on("message", (bytes, binary) => {
-        if (binary) {
-          // Compression is disabled on credited connections; their only
-          // binary responses are router-owned grants, outside Memory bodies.
+        const envelope = binary && bytes instanceof ArrayBuffer &&
+          bytes.byteLength >= 5 &&
+          new TextDecoder().decode(new Uint8Array(bytes, 0, 5)) === "mcmp\x02";
+        if (binary && !envelope) {
+          // Besides toolshed bodies in the compression envelope, a credited
+          // connection's binary frames are router-owned grants.
           expect(trace.selected).toBe(true);
           assert(bytes instanceof ArrayBuffer);
           expect(bytes.byteLength).toBe(8);
@@ -3064,8 +3069,8 @@ finally:
           return;
         }
         const message = decodeRoutedFrame(
-          bytes.toString(),
-          false,
+          envelope ? new Uint8Array(bytes as ArrayBuffer) : bytes.toString(),
+          true,
           ROUTED_FRAME_SLOTS,
         ).body;
         expect(message.type).not.toBe("router.credit");

@@ -25,7 +25,8 @@ import {
 } from "../v2.ts";
 import type { MemoryCompressionControlMessage } from "./message-compression.ts";
 import {
-  decodeRoutedFrame,
+  compressRoutedPayload,
+  decodeRoutedFrameAsync,
   parseRoutedJson,
   ROUTED_DEFAULT_SLOT_LIMIT,
   ROUTED_HOLDINGS_LIMIT,
@@ -1909,6 +1910,10 @@ export class RoutedMemoryHost {
     let ticket: Ticket | undefined;
     let backend: Backend | undefined;
     let compression = false;
+    // Whether bodies sent on this socket are compressed: on once compression
+    // is negotiated, and changed by a `memory.compression` control as the
+    // direct server's is.
+    let sendCompression = false;
     let negotiatedMemoryFlags: Record<string, unknown> | undefined;
     let failed = false;
     let closeReason: CloseReason | undefined;
@@ -2280,7 +2285,21 @@ export class RoutedMemoryHost {
         this.#setUsage(ticket!.link, ticket!.context, key, undefined);
       }
       const payload = encodeMemoryBoundary(message);
-      const size = new TextEncoder().encode(payload).length;
+      const bytes = new TextEncoder().encode(payload);
+      // A client that negotiated `messageCompressionV1` receives each message
+      // of 1 KiB or more as the routed compression envelope, which the router
+      // forwards as an opaque binary body. The output bounds apply to what
+      // goes on the socket.
+      const frame = sendCompression
+        ? compressRoutedPayload(
+          payload,
+          bytes,
+          "space" in message && typeof message.space === "string"
+            ? message.space
+            : undefined,
+        )
+        : payload;
+      const size = typeof frame === "string" ? bytes.length : frame.length;
       checkOutput(
         socket,
         size,
@@ -2293,14 +2312,14 @@ export class RoutedMemoryHost {
           ...diagnostics.snapshot(source),
           messageSizes: outputSizeBreakdown(
             message,
-            size,
+            bytes.length,
             this.#limits.frameSlots,
           ),
         }),
       );
       enqueueSource = source;
       try {
-        outgoing.send(route, payload);
+        outgoing.send(route, frame);
       } finally {
         enqueueSource = undefined;
       }
@@ -2406,7 +2425,7 @@ export class RoutedMemoryHost {
             payload: "",
             space: undefined,
           }
-          : decodeRoutedFrame(
+          : await decodeRoutedFrameAsync(
             frame,
             compression,
             this.#limits.frameSlots,
@@ -2540,6 +2559,7 @@ export class RoutedMemoryHost {
             }
           }
           compression = negotiatedMemoryFlags.messageCompressionV1 === true;
+          sendCompression = compression;
           const hello = {
             type: "hello",
             protocol: "memory",
@@ -2577,12 +2597,16 @@ export class RoutedMemoryHost {
           ].some((key) => body[key] !== undefined),
         );
         if (body.type === "memory.compression") {
+          // The router answers this control itself, for every toolshed on the
+          // connection; a router that forwards it changes this socket's send
+          // mode, and the reply states the mode now in force.
           requireRouted(typeof body.enabled === "boolean");
           routedIdentifier(body.requestId);
+          sendCompression = compression && body.enabled;
           send({
             type: "memory.compression",
             requestId: body.requestId,
-            enabled: false,
+            enabled: sendCompression,
           });
           return;
         }

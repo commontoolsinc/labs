@@ -33,9 +33,15 @@ clients use its `hello`, `connection.challenge`, `connection.auth`,
 - Routed binary compression uses `mcmp` version 2, a big-endian expanded length,
   two-byte space-hint length, canonical DID bytes and one minimal gzip member.
   Version 1 has no routing hint and is refused. Uncompressed `fvj1` text still
-  uses the Fabric codec after strict JSON validation. Legacy public uploads may
-  use this encoding. Streamed uploads and private responses currently use plain
-  UTF-8 bodies; the router does not compress or decompress private responses.
+  uses the Fabric codec after strict JSON validation. When the client
+  negotiated `messageCompressionV1`, its streamed uploads and the toolshed's
+  responses carry messages of 1 KiB or more in this envelope, end to end: the
+  record header says `binary:true`, the toolshed or the SDK expands the body,
+  and the router expands only the controls it reads (`connection.*`,
+  `memory.compression`, `session.open`, `session.watch.*`). The sender keeps a
+  message as text when it is under 1 KiB, over the 16 MiB expanded bound, or
+  would pass the 32-times expansion bound. Legacy public uploads may use the
+  envelope too, and the router expands them.
 - The router offers `routerTransport:1` and `routerUploadWindow:262144` in
   `hello.ok`. A supporting client selects
   `fvj1:{"type":"router.transport","version":1,"uploadCredits":true}` as text
@@ -56,11 +62,13 @@ clients use its `hello`, `connection.challenge`, `connection.auth`,
   credit amount. The amount must be positive and no greater than the client's
   outstanding sent bytes. Unsolicited or invalid credits close the connection.
   Text `router.credit` messages cannot grant credit and close the connection.
-  On credited public connections, the router rejects every private upstream
-  header with `binary:true` before emitting public fragments. This reserves
-  binary public frames for router credit, so opaque text response bodies cannot
-  impersonate it. The SDK consumes binary credit before Memory or compression
-  decoding and accepts windows
+  The router forwards a private upstream body with `binary:true` only to a
+  client that negotiated compression, and only once its first record opens with
+  the envelope's `mcmp\x02`; otherwise it fails the upstream before emitting a
+  public fragment. Binary public frames are therefore credit or a compression
+  envelope, told apart by their first bytes, and no body can impersonate a
+  credit. The SDK takes a binary frame that does not open with `mcmp` as credit,
+  before Memory or compression decoding, and accepts windows
   from 32,773 through 262,144 bytes. Credit acknowledges receipt, not Memory
   execution, and provides the event that permits a browser's native send queue
   to drain. The SDK retains its separate 4 MiB native queue cap. Closing,
@@ -732,8 +740,9 @@ failed send, before socket accounting can change during close:
   The [memory package diagnostics reference](../../../packages/memory/README.md#routed-transport-and-quotas)
   defines the fields and measurement limits.
 
-The snapshot contains no payload or error text. Data messages use uncompressed
-private-hop payload bytes; the router forwards their encoding unchanged.
+The snapshot contains no payload or error text. Data message sizes are the
+bytes on the private hop, compressed or not; the router forwards their encoding
+unchanged.
 Buffered bytes describe local output buffering, not browser processing or
 acknowledgment.
 An earlier non-output failure keeps its reason and has no `outputLimit` object.

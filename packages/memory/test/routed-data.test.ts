@@ -3098,6 +3098,72 @@ describe("routed encoding handshake", () => {
     }
   });
 
+  it("sends a client that negotiated compression its large bodies as the routed envelope, until it asks for text", async () => {
+    for (const negotiated of [true, false]) {
+      const f = await fixture(
+        `encoding-compressed-output-${negotiated}`,
+        negotiated ? {} : { negotiatedFlags: { messageCompressionV1: false } },
+      );
+      try {
+        const session = await f.open();
+        const value = Array.from({ length: 400 }, (_, i) => `entry ${i}`)
+          .join(" ");
+        const transact = (requestId: string, localSeq: number) =>
+          encodeMemoryBoundary({
+            type: "transact",
+            requestId,
+            space: f.space.did(),
+            sessionId: session.sessionId,
+            commit: {
+              localSeq,
+              reads: { confirmed: [], pending: [] },
+              operations: [{
+                op: "set",
+                id: `of:${requestId}`,
+                value: { value },
+              }],
+            },
+          });
+        const reply = async (requestId: string) => {
+          for (;;) {
+            const frame = await f.socket.take();
+            const body = decodeRoutedFrame(frame, true, FRAME_SLOTS).body;
+            if (body.requestId === requestId) return { frame, body };
+          }
+        };
+        // A compressed upload where compression is negotiated, and a reply
+        // carrying the document.
+        f.socket.receive(
+          negotiated
+            ? encodeRoutedFrame(transact("large", 1), FRAME_SLOTS)
+            : transact("large", 1),
+        );
+        const large = await reply("large");
+        expect(large.body.ok).toBeDefined();
+        expect(large.frame instanceof Uint8Array).toBe(negotiated);
+        if (!negotiated) continue;
+        // A small reply stays text; after the client asks for text, so does
+        // a large one.
+        const off = encodeMemoryBoundary({
+          type: "memory.compression",
+          requestId: "off",
+          enabled: false,
+        });
+        f.socket.receive(off);
+        const small = await reply("off");
+        expect(typeof small.frame).toBe("string");
+        expect(small.body.enabled).toBe(false);
+        f.socket.receive(transact("after", 2));
+        const after = await reply("after");
+        expect(after.body.ok).toBeDefined();
+        expect(typeof after.frame).toBe("string");
+        expect(f.socket.readyState).toBe(WebSocket.OPEN);
+      } finally {
+        await f.close();
+      }
+    }
+  });
+
   it("authenticates and echoes an omitted legacy mode without inserting a default", async () => {
     const f = await fixture("encoding-omitted-legacy-mode", {
       modernCellRep: false,

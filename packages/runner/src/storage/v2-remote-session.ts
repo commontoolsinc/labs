@@ -23,7 +23,9 @@ import {
   routedStatementPayload,
 } from "@commonfabric/memory/v2/routed-wire";
 import {
+  compressRoutedPayload,
   decodeRoutedFrame,
+  decodeRoutedFrameAsync,
   encodeRoutedFrame,
 } from "@commonfabric/memory/v2/routed-parser";
 import {
@@ -495,12 +497,21 @@ export class WebSocketTransport implements MemoryClient.Transport {
         : undefined;
       const control = decoded !== undefined &&
         isRouterControl(decoded.body.type);
-      const frame = compressionEnabled && !streaming
+      // A streamed message travels as the routed compression envelope when
+      // compression is on: the router reads only the controls it answers or
+      // counts, and the toolshed expands the rest.
+      const frame = decoded !== undefined
+        ? compressionEnabled
+          ? compressRoutedPayload(
+            payload,
+            new TextEncoder().encode(payload),
+            decoded.space,
+          )
+          : payload
+        : compressionEnabled
         ? routed
           ? encodeRoutedFrame(payload, frameSlots)
           : await encodeCompressedMemoryMessage(payload)
-        : streaming
-        ? payload
         : routed
         ? checkedRoutedText(payload, frameSlots)
         : payload;
@@ -624,14 +635,18 @@ export class WebSocketTransport implements MemoryClient.Transport {
               if (this.#socket !== socket) return;
               if (
                 this.#uploadCredits !== undefined &&
-                typeof routedFrame !== "string"
+                typeof routedFrame !== "string" &&
+                !(routedFrame.length >= 4 && routedFrame[0] === 0x6d &&
+                  routedFrame[1] === 0x63 && routedFrame[2] === 0x6d &&
+                  routedFrame[3] === 0x70)
               ) {
-                // Credited connections reserve binary public frames for the
-                // router. Private upstream responses must have text headers.
+                // On a credited connection a binary frame is a compressed body
+                // only if it opens with the envelope's `mcmp`, which the router
+                // checks before forwarding one; any other is a router credit.
                 this.#acceptUploadCredit(routedFrame);
                 return;
               }
-              const decoded = decodeRoutedFrame(
+              const decoded = await decodeRoutedFrameAsync(
                 routedFrame,
                 this.#receiveCompressionEnabled,
                 this.#routedFrameSlots,

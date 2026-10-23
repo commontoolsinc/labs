@@ -257,22 +257,26 @@ export function parseRoutedText(
   };
 }
 
+/** The fixed part of a routed compression envelope, checked but not expanded. */
+interface RoutedEnvelope {
+  /** The expanded size the envelope declares. */
+  expanded: number;
+  /** The cleartext, untrusted space hint: a DID or empty. */
+  hint: string;
+  /** One minimal gzip member. */
+  compressed: Uint8Array;
+}
+
 /**
- * Decodes one gzip member, enforcing header, expansion, size and JSON bounds.
- * `maxSlots` is the receiver's frame cap: the toolshed's `limits.frameSlots`
- * or the SDK's cap learned from the public hello; `null` disables counting.
- * `maxHoldings` is the receiver's holdings quota, or `null` to disable it.
+ * Helper for both decoders, which checks a binary frame's `mcmp` version 2
+ * header: compression negotiated, the raw bound, the hint, a minimal gzip
+ * header, and a declared expansion within {@link ROUTED_EXPANDED_LIMIT} and 32
+ * times the compressed size.
  */
-export function decodeRoutedFrame(
-  frame: string | Uint8Array,
+function routedEnvelope(
+  frame: Uint8Array,
   compression: boolean,
-  maxSlots: number | null,
-  maxHoldings: number | null = ROUTED_HOLDINGS_LIMIT,
-): RoutedFrame {
-  if (typeof frame === "string") {
-    requireRouted(encoder.encode(frame).length <= ROUTED_RAW_LIMIT);
-    return parseRoutedText(frame, maxSlots, undefined, maxHoldings);
-  }
+): RoutedEnvelope {
   requireRouted(
     compression && frame.length <= ROUTED_RAW_LIMIT && frame.length >= 12 &&
       decoder.decode(frame.subarray(0, 5)) === "mcmp\x02",
@@ -285,7 +289,7 @@ export function decodeRoutedFrame(
   requireRouted(hint === "" || isCanonicalEd25519DID(hint));
   const compressed = frame.subarray(11 + hintLength);
   // A routed envelope uses the minimal gzip header: no optional metadata or
-  // extra members. fflate bounds expansion; CRC32 verifies the gzip trailer.
+  // extra members.
   requireRouted(
     compressed.length >= 18 && compressed[0] === 0x1f &&
       compressed[1] === 0x8b && compressed[2] === 8 && compressed[3] === 0,
@@ -293,6 +297,29 @@ export function decodeRoutedFrame(
   requireRouted(
     expanded <= ROUTED_EXPANDED_LIMIT && expanded <= compressed.length * 32,
   );
+  return { expanded, hint, compressed };
+}
+
+/**
+ * Decodes one gzip member, enforcing header, expansion, size and JSON bounds.
+ * `maxSlots` is the receiver's frame cap: the toolshed's `limits.frameSlots`
+ * or the SDK's cap learned from the public hello; `null` disables counting.
+ * `maxHoldings` is the receiver's holdings quota, or `null` to disable it.
+ * {@link decodeRoutedFrameAsync} applies the same rules with the platform's
+ * gzip, several times faster for a large frame.
+ */
+export function decodeRoutedFrame(
+  frame: string | Uint8Array,
+  compression: boolean,
+  maxSlots: number | null,
+  maxHoldings: number | null = ROUTED_HOLDINGS_LIMIT,
+): RoutedFrame {
+  if (typeof frame === "string") {
+    requireRouted(encoder.encode(frame).length <= ROUTED_RAW_LIMIT);
+    return parseRoutedText(frame, maxSlots, undefined, maxHoldings);
+  }
+  const { expanded, hint, compressed } = routedEnvelope(frame, compression);
+  // fflate bounds expansion; CRC32 verifies the gzip trailer.
   const chunks: Uint8Array[] = [];
   let total = 0;
   let final = false;
@@ -328,6 +355,102 @@ export function decodeRoutedFrame(
   return parseRoutedText(decoder.decode(bytes), maxSlots, hint, maxHoldings);
 }
 
+/** Compressed bytes handed to the platform decoder at a time. */
+const GUNZIP_INPUT_BYTES = 8 * 1024;
+
+/**
+ * {@link decodeRoutedFrame} with the platform's `DecompressionStream`. The
+ * compressed member is fed in 8 KiB pieces and each piece's output is checked
+ * against the declared size before the next is read, so a frame that lies
+ * about its expansion is refused within one piece's worth of output (deflate
+ * expands at most about 1,032 times). The platform decoder verifies the
+ * checksum and length in the gzip trailer and refuses a second member or
+ * trailing bytes; the declared size must equal the output exactly.
+ */
+export async function decodeRoutedFrameAsync(
+  frame: string | Uint8Array,
+  compression: boolean,
+  maxSlots: number | null,
+  maxHoldings: number | null = ROUTED_HOLDINGS_LIMIT,
+): Promise<RoutedFrame> {
+  if (typeof frame === "string") {
+    return decodeRoutedFrame(frame, compression, maxSlots, maxHoldings);
+  }
+  const { expanded, hint, compressed } = routedEnvelope(frame, compression);
+  let offset = 0;
+  const source = new ReadableStream<BufferSource>({
+    pull(controller) {
+      if (offset >= compressed.length) {
+        controller.close();
+        return;
+      }
+      const end = Math.min(offset + GUNZIP_INPUT_BYTES, compressed.length);
+      controller.enqueue(compressed.slice(offset, end));
+      offset = end;
+    },
+  }, { highWaterMark: 0 });
+  const reader = source.pipeThrough(new DecompressionStream("gzip"))
+    .getReader();
+  const bytes = new Uint8Array(expanded);
+  let total = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      requireRouted(total + value.length <= expanded);
+      bytes.set(value, total);
+      total += value.length;
+    }
+  } catch {
+    // Output past the declared size, or the platform decoder's refusal of a
+    // corrupt or truncated member, a second member or trailing bytes.
+    await reader.cancel().catch(() => {});
+    requireRouted(false);
+  }
+  const trailer = new DataView(
+    compressed.buffer,
+    compressed.byteOffset + compressed.length - 4,
+    4,
+  );
+  requireRouted(total === expanded && trailer.getUint32(0, true) === total);
+  return parseRoutedText(decoder.decode(bytes), maxSlots, hint, maxHoldings);
+}
+
+/** Below this UTF-8 size a routed message stays text, as on the direct path. */
+const ROUTED_COMPRESSION_THRESHOLD = 1024;
+
+/**
+ * The wire form of a routed message for a peer that negotiated
+ * `messageCompressionV1`: the `mcmp` version 2 envelope (the frame's own space
+ * as the cleartext hint and one gzip member at the fastest level), or the text
+ * itself when it is under 1 KiB, over the {@link ROUTED_EXPANDED_LIMIT}
+ * expanded bound, when gzip would not make it smaller, or when the expansion
+ * would pass the receiver's 32× ratio bound. `bytes` is `payload`'s UTF-8
+ * encoding. The raw bound on the result is the caller's to apply. It does not
+ * parse the payload: the caller has already, and knows its space.
+ */
+export function compressRoutedPayload(
+  payload: string,
+  bytes: Uint8Array,
+  space: string | undefined,
+): string | Uint8Array<ArrayBuffer> {
+  if (
+    bytes.length < ROUTED_COMPRESSION_THRESHOLD ||
+    bytes.length > ROUTED_EXPANDED_LIMIT
+  ) return payload;
+  const gzip = gzipSync(bytes, { level: 1 });
+  if (bytes.length > gzip.length * 32) return payload;
+  const hint = encoder.encode(space ?? "");
+  requireRouted(hint.length <= 64);
+  const result = new Uint8Array(11 + hint.length + gzip.length);
+  result.set(encoder.encode("mcmp\x02"));
+  new DataView(result.buffer).setUint32(5, bytes.length);
+  new DataView(result.buffer).setUint16(9, hint.length);
+  result.set(hint, 11);
+  result.set(gzip, 11 + hint.length);
+  return result.length < bytes.length ? result : payload;
+}
+
 /**
  * Encodes a routed envelope with its cleartext, untrusted space hint, after
  * checking the payload against the sender's frame cap `maxSlots`, so a frame
@@ -339,33 +462,32 @@ export function encodeRoutedFrame(
 ): string | Uint8Array<ArrayBuffer> {
   const parsed = parseRoutedText(payload, maxSlots);
   const bytes = encoder.encode(payload);
-  const raw = () => {
-    requireRouted(bytes.length <= ROUTED_RAW_LIMIT);
-    return payload;
-  };
-  if (bytes.length < 1024) return payload;
-  const gzip = gzipSync(bytes);
-  if (bytes.length > gzip.length * 32) return raw();
-  const hint = encoder.encode(parsed.space ?? "");
-  const result = new Uint8Array(11 + hint.length + gzip.length);
-  result.set(encoder.encode("mcmp\x02"));
-  new DataView(result.buffer).setUint32(5, bytes.length);
-  new DataView(result.buffer).setUint16(9, hint.length);
-  result.set(hint, 11);
-  result.set(gzip, 11 + hint.length);
-  return result.length <= ROUTED_RAW_LIMIT && result.length < bytes.length
-    ? result
-    : raw();
+  const frame = compressRoutedPayload(payload, bytes, parsed.space);
+  if (typeof frame !== "string" && frame.length <= ROUTED_RAW_LIMIT) {
+    return frame;
+  }
+  requireRouted(bytes.length <= ROUTED_RAW_LIMIT);
+  return payload;
 }
+
+/** The CRC-32 of every byte value, for {@link gzipCrc32}. */
+const CRC32_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let crc = n;
+    for (let bit = 0; bit < 8; bit++) {
+      crc = (crc & 1) ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+    }
+    table[n] = crc >>> 0;
+  }
+  return table;
+})();
 
 /** The gzip trailer checksum (RFC 1952), separate from identity/content hashes. */
 function gzipCrc32(bytes: Uint8Array): number {
   let crc = 0xffffffff;
-  for (const byte of bytes) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit++) {
-      crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
-    }
+  for (let i = 0; i < bytes.length; i++) {
+    crc = CRC32_TABLE[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
   }
   return (crc ^ 0xffffffff) >>> 0;
 }
