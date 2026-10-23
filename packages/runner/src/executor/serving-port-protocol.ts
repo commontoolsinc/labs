@@ -14,11 +14,6 @@ import type {
   SessionViewInterest,
 } from "@commonfabric/memory/v2";
 import { ProtocolError } from "@commonfabric/memory/v2";
-import {
-  getLogger,
-  type getLoggerCountsBreakdown,
-  type TimingStatsBreakdown,
-} from "@commonfabric/utils/logger";
 import type {
   AdmittedCommitNotice,
   DemandChangeReason,
@@ -28,6 +23,11 @@ import type {
   SessionDemand,
   SessionLifecycleEvent,
 } from "@commonfabric/memory/v2/server";
+import {
+  getLogger,
+  type getLoggerCountsBreakdown,
+  type TimingStatsBreakdown,
+} from "@commonfabric/utils/logger";
 import type { SpaceAccessChange } from "../builder/types.ts";
 import type { ExperimentalOptions } from "../runtime.ts";
 import type { MemorySpace, Result } from "../storage/interface.ts";
@@ -120,8 +120,14 @@ export type ServingWorkerInit = {
 
   /** The serving runtimes' patterns and compile base. */
   readonly apiUrl: string;
+
+  /** The loop's policy, its data fields alone. */
   readonly policy: ServingWorkerPolicy | undefined;
+
+  /** The host's space-root ensure switch (`ExecutorHostOptions`). */
   readonly ensureSpaceRoots: boolean | undefined;
+
+  /** The serving runtimes' experimental options. */
   readonly experimental: ExperimentalOptions | undefined;
 };
 
@@ -132,6 +138,7 @@ export type PlaneRequests = {
    * worker opens a connection of its own to the same file.
    */
   "space.open": { params: { space: string }; result: { url: string } };
+
   "server.idle": { params: null; result: void };
   "server.flushSessions": {
     params: { spaces: string[] | undefined };
@@ -173,7 +180,10 @@ export type PlaneRequests = {
     };
     result: ServedAclChangeVerdict;
   };
-  /** `entry` is a {@link DelegatedAppendEntry} in the memory boundary's encoding. */
+  /**
+   * `entry` is a {@link DelegatedAppendEntry} in the memory boundary's
+   * encoding.
+   */
   "server.commitDelegatedAppend": {
     params: { entry: string };
     result: Awaited<ReturnType<Server["commitDelegatedAppend"]>>;
@@ -213,6 +223,7 @@ export type PlaneNotices = {
    * before that is dropped, so the server's thread sends nothing earlier.
    */
   "worker.ready": null;
+
   "server.noteExecutorCommit": { notice: AdmittedCommitNotice };
   "server.noteLeaseReacquired": {
     notice: { space: string; principal: string };
@@ -233,6 +244,7 @@ export type BridgeRequests = {
     params: ServingWorkerInit;
     result: { lifetimeLock: string | undefined };
   };
+
   "host.stats": { params: null; result: ServingLoopStats };
   "host.diagnostics": { params: null; result: ServingLoopDiagnostics };
   "host.runLifecycleVerb": {
@@ -259,7 +271,11 @@ export type BridgeNotices = {
 
 /** The shape of one request's parameters and answer. */
 type RequestShape = { params: unknown; result: unknown };
+
+/** Requests by method, each with its parameters and answer. */
 type RequestMap = Record<string, RequestShape>;
+
+/** Notices by method, each with its parameters. */
 type NoticeMap = Record<string, unknown>;
 
 /**
@@ -496,7 +512,10 @@ export class PortEndpoint<
     }
   }
 
-  /** Helper for `#receive()`, which runs a request's handler and posts its answer. */
+  /**
+   * Helper for `#receive()`, which runs a request's handler and posts its
+   * answer.
+   */
   #answer(request: Extract<Envelope, { t: "req" }>): void {
     const handler = this.#requestHandlers.get(request.method);
     const { id } = request;

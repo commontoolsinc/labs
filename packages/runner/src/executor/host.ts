@@ -146,6 +146,7 @@ export type ExecutorHostOptions = {
 
   /** Forwarded internal deterministic-verification seam. */
   decorateWaveCommitSink?: SpaceServerOptions["decorateWaveCommitSink"];
+
   /** Forwarded to every SpaceServer this host builds; see
    * `SpaceServerOptions.createWaveCommitSink`. */
   createWaveCommitSink?: SpaceServerOptions["createWaveCommitSink"];

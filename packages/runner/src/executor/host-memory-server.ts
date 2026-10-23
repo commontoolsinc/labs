@@ -48,12 +48,14 @@ export type HostMemoryServer = ServerMembers & {
   ):
     | ReturnType<Server["demandForSpace"]>
     | Promise<ReturnType<Server["demandForSpace"]>>;
+
   /** @see Server.viewInterestsForSpace */
   viewInterestsForSpace(
     ...args: Parameters<Server["viewInterestsForSpace"]>
   ):
     | ReturnType<Server["viewInterestsForSpace"]>
     | Promise<ReturnType<Server["viewInterestsForSpace"]>>;
+
   /**
    * Attaches a wave batch's sqlite cell databases for the in-process wave
    * commit sink. Absent where the sink runs elsewhere, which is where the
@@ -69,6 +71,8 @@ export type HostMemoryServer = ServerMembers & {
 export type LoopbackConnection = {
   /** Hands one client frame to the server; settles once the server took it. */
   receive(payload: string): Promise<void>;
+
+  /** Closes the connection, as the client's going away does. */
   close(): void;
 };
 

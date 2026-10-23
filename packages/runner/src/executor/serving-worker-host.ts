@@ -29,7 +29,11 @@ import type {
   ServingWorkerInit,
   ServingWorkerPolicy,
 } from "./serving-port-protocol.ts";
-import type { ServingLoopStats } from "./stats.ts";
+import {
+  emptyServingLoopStats,
+  registerServingLoopStatsProvider,
+  type ServingLoopStats,
+} from "./stats.ts";
 
 const logger = getLogger("serving-worker-host", {
   enabled: true,
@@ -58,6 +62,7 @@ export type ServingLoopHandle = {
 
 export type { ServingLoopDiagnostics } from "./serving-port-protocol.ts";
 
+/** What a serving worker is built from, and the observers of its host. */
 export type ServingWorkerOptions = {
   server: Server;
 
@@ -73,8 +78,14 @@ export type ServingWorkerOptions = {
    * `serveFromPort()` with the verbs and fetch it uses.
    */
   workerModule?: URL;
+
+  /** The loop's policy, its data fields alone, since a closure cannot cross. */
   policy?: ServingWorkerPolicy;
+
+  /** The host's space-root ensure switch (`ExecutorHostOptions`). */
   ensureSpaceRoots?: boolean;
+
+  /** The serving runtimes' experimental options. */
   experimental?: ExperimentalOptions;
 
   /** DIAGNOSTIC (tests): the worker's activation outcomes. */
@@ -93,7 +104,11 @@ type WorkerGeneration = {
   bridge: ServingPortBridge;
   /** The lease holder this worker's rows name. */
   holder: string;
+
+  /** Settles once the worker's host serves. */
   ready: Promise<void>;
+
+  /** The lifetime lock the worker's host holds, if it holds one. */
   lifetimeLock: string | undefined;
 };
 
@@ -109,10 +124,13 @@ type WorkerGeneration = {
 export class ServingWorker {
   readonly #options: ServingWorkerOptions;
   #generation: WorkerGeneration | undefined;
+
   /** The teardown of the last worker that failed, while it runs. */
   #terminating: Promise<void> | undefined;
+
   /** The timer that starts the next worker, while it is pending. */
   #respawn: ReturnType<typeof setTimeout> | undefined;
+
   #failures = 0;
   #closed = false;
 
@@ -172,7 +190,10 @@ export class ServingWorker {
     const generation = this.#generation;
     this.#generation = undefined;
     await this.#terminating;
-    if (generation === undefined) return;
+    if (generation === undefined) {
+      registerServingLoopStatsProvider(undefined);
+      return;
+    }
     let hostClosed = false;
     try {
       await generation.ready;
@@ -269,6 +290,7 @@ export class ServingWorker {
    * carries a holder of its own, acquires them without waiting out their TTL.
    */
   #onWorkerFailed(generation: WorkerGeneration, message: string): void {
+    const stats = generation.bridge.stats();
     generation.bridge.close();
     if (this.#generation !== generation) return;
     this.#generation = undefined;
@@ -284,6 +306,10 @@ export class ServingWorker {
       },
     );
     if (this.#closed) return;
+    // The health route reads a process with no serving-loop counters as one
+    // whose loop is off, so until the next worker's bridge reports its own,
+    // the failed worker's last counters stand in.
+    registerServingLoopStatsProvider(() => stats ?? emptyServingLoopStats());
     this.#failures += 1;
     const delayMs = failureParkBackoffDelayMs(
       this.#failures,

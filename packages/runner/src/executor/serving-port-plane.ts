@@ -12,9 +12,9 @@
 import type { CellScope } from "@commonfabric/api";
 import type { FabricValue } from "@commonfabric/data-model";
 import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
+import type { SessionReadCeiling } from "@commonfabric/memory/v2";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
 import * as Engine from "@commonfabric/memory/v2/engine";
-import type { SessionReadCeiling } from "@commonfabric/memory/v2";
 import {
   resolveSpaceOwnerOf,
   type ServedAclChange,
@@ -118,6 +118,7 @@ class SessionMirror {
 
   constructor(readonly expired: (space: string, sessionId: string) => void) {}
 
+  /** Applies one of the server's session lifecycle events to the mirror. */
   apply(event: SessionLifecycleEvent): void {
     let sessions = this.#spaces.get(event.space);
     if (sessions === undefined) {
@@ -229,6 +230,7 @@ class PlaneWaveCommitSink implements WaveCommitSink, WaveCommitSinkReads {
     return true;
   }
 
+  /** @inheritDoc */
   currentHeads(
     space: MemorySpace,
     docs: ReadonlyArray<{ id: string; scope?: CellScope; scopeKey: string }>,
@@ -236,6 +238,7 @@ class PlaneWaveCommitSink implements WaveCommitSink, WaveCommitSinkReads {
     return this.#reads.currentHeads(space, docs);
   }
 
+  /** @inheritDoc */
   concurrentWritePaths(
     space: MemorySpace,
     doc: { id: string; scope?: CellScope; scopeKey: string },
@@ -244,6 +247,7 @@ class PlaneWaveCommitSink implements WaveCommitSink, WaveCommitSinkReads {
     return this.#reads.concurrentWritePaths(space, doc, sinceSeq);
   }
 
+  /** @inheritDoc */
   intrusionSince(
     space: MemorySpace,
     doc: { id: string; scope?: CellScope; scopeKey: string },
@@ -253,6 +257,7 @@ class PlaneWaveCommitSink implements WaveCommitSink, WaveCommitSinkReads {
     return this.#reads.intrusionSince(space, doc, sinceSeq, holder);
   }
 
+  /** @inheritDoc */
   sessionOverwritePathsSince(
     space: MemorySpace,
     doc: { id: string; scope?: CellScope; scopeKey: string },
@@ -267,6 +272,7 @@ class PlaneWaveCommitSink implements WaveCommitSink, WaveCommitSinkReads {
     );
   }
 
+  /** @inheritDoc */
   async commitWave(
     batch: WaveSpaceCommit,
   ): Promise<Result<{ seq: number }, WaveCommitRejection>> {
@@ -288,6 +294,7 @@ class PlaneWaveCommitSink implements WaveCommitSink, WaveCommitSinkReads {
     }
   }
 
+  /** @inheritDoc */
   async commitSpaceAccessChange(
     change: ServedAclChange,
   ): Promise<Result<{ seq?: number }, WaveCommitRejection>> {
@@ -329,12 +336,14 @@ class PlaneMemoryServer implements HostMemoryServer {
     this.#viewInterests = viewInterests;
   }
 
+  /** @inheritDoc */
   setServerExecutionObserver(
     observer: ServerExecutionObserver | undefined,
   ): void {
     this.#plane.observer = observer;
   }
 
+  /** @inheritDoc */
   hasLiveSessionsForSpace(
     space: string,
     options: { excludePrincipal?: string } = {},
@@ -350,6 +359,7 @@ class PlaneMemoryServer implements HostMemoryServer {
     return false;
   }
 
+  /** @inheritDoc */
   hasLiveSessionFor(
     space: string,
     principal: string,
@@ -359,6 +369,7 @@ class PlaneMemoryServer implements HostMemoryServer {
     return session !== undefined && session.principal === principal;
   }
 
+  /** @inheritDoc */
   sessionReadCeiling(
     space: string,
     sessionId: string,
@@ -366,26 +377,31 @@ class PlaneMemoryServer implements HostMemoryServer {
     return this.#sessions.live(space).get(sessionId)?.readCeiling;
   }
 
+  /** @inheritDoc */
   idle(): Promise<void> {
     return this.#endpoint.request("server.idle", null);
   }
 
+  /** @inheritDoc */
   flushSessions(spaces?: Iterable<string>): Promise<void> {
     return this.#endpoint.request("server.flushSessions", {
       spaces: spaces === undefined ? undefined : [...spaces],
     });
   }
 
+  /** @inheritDoc */
   noteExecutorCommit(
     notice: Parameters<HostMemoryServer["noteExecutorCommit"]>[0],
   ): void {
     this.#endpoint.notify("server.noteExecutorCommit", { notice });
   }
 
+  /** @inheritDoc */
   noteLeaseReacquired(notice: { space: string; principal: string }): void {
     this.#endpoint.notify("server.noteLeaseReacquired", { notice });
   }
 
+  /** @inheritDoc */
   checkServedAclChange(
     change: ServedAclChange,
   ): ReturnType<HostMemoryServer["checkServedAclChange"]> {
@@ -394,6 +410,7 @@ class PlaneMemoryServer implements HostMemoryServer {
     });
   }
 
+  /** @inheritDoc */
   commitServedAclChange(
     change: ServedAclChange & { sessionId: string; localSeq: number },
   ): ReturnType<HostMemoryServer["commitServedAclChange"]> {
@@ -405,6 +422,7 @@ class PlaneMemoryServer implements HostMemoryServer {
     });
   }
 
+  /** @inheritDoc */
   commitDelegatedAppend(
     entry: Parameters<HostMemoryServer["commitDelegatedAppend"]>[0],
   ): ReturnType<HostMemoryServer["commitDelegatedAppend"]> {
@@ -413,10 +431,12 @@ class PlaneMemoryServer implements HostMemoryServer {
     });
   }
 
+  /** @inheritDoc */
   engineForSpace(space: string): Promise<Engine.Engine> {
     return this.#plane.engineForSpace(space);
   }
 
+  /** @inheritDoc */
   foreignWriteAuthorityFor(
     space: string,
     principal: string | undefined,
@@ -427,10 +447,12 @@ class PlaneMemoryServer implements HostMemoryServer {
     });
   }
 
+  /** @inheritDoc */
   resolveSpaceOwner(engine: Engine.Engine, space: string): string | undefined {
     return resolveSpaceOwnerOf(engine, space);
   }
 
+  /** @inheritDoc */
   async setViewSelection(
     ...[space, handle, selection]: Parameters<
       HostMemoryServer["setViewSelection"]
@@ -449,6 +471,7 @@ class PlaneMemoryServer implements HostMemoryServer {
     return installed;
   }
 
+  /** @inheritDoc */
   demandForSpace(
     space: string,
     options: { excludePrincipal?: string } = {},
@@ -468,6 +491,7 @@ class PlaneMemoryServer implements HostMemoryServer {
     );
   }
 
+  /** @inheritDoc */
   viewInterestsForSpace(
     space: string,
     options: { excludePrincipal?: string } = {},
@@ -595,6 +619,7 @@ export class ServingPlane {
     this.#endpoint.notify("host.stats", { stats });
   }
 
+  /** Posts a space's activation outcome for the server's thread to report. */
   reportActivationSettled(
     space: MemorySpace,
     outcome: "active" | "refused" | "failed",
@@ -602,6 +627,7 @@ export class ServingPlane {
     this.#endpoint.notify("host.activationSettled", { space, outcome });
   }
 
+  /** Posts a space's park and its reason for the server's thread to report. */
   reportSpaceParked(space: MemorySpace, reason: string): void {
     this.#endpoint.notify("host.spaceParked", { space, reason });
   }

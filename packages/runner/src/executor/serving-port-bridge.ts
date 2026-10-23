@@ -67,11 +67,18 @@ type BridgeSink = {
   state: { homeRefused: boolean };
 };
 
+/**
+ * What a bridge serves: the memory server, the port its worker answers on, and
+ * the observers of what the worker's host reports.
+ */
 export type ServingPortBridgeOptions = {
   server: Server;
   port: PortLike;
 
-  /** DIAGNOSTIC (tests): the worker's activation outcomes, as its host reports them. */
+  /**
+   * DIAGNOSTIC (tests): the worker's activation outcomes, as its host reports
+   * them.
+   */
   onActivationSettled?: (
     space: MemorySpace,
     outcome: "active" | "refused" | "failed",
@@ -105,6 +112,7 @@ export class ServingPortBridge {
   readonly #sinks = new Map<string, BridgeSink>();
   /** Every space the worker opened an engine for. */
   readonly #openedSpaces = new Set<string>();
+
   readonly #workerReady = Promise.withResolvers<void>();
   readonly #releaseServerExecution: () => void;
   #stats: ServingLoopStats | undefined;

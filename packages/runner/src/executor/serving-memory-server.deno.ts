@@ -39,11 +39,11 @@
 import { toFileUrl } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";
 import {
   getLoggerCountsBreakdown,
   getTimingStatsBreakdown,
 } from "@commonfabric/utils/logger";
-import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";
 import type { ExperimentalOptions } from "../runtime.ts";
 import { newLoopbackServer } from "../storage/v2-emulate.ts";
 import { ExecutorHost, type ExecutorHostOptions } from "./host.ts";
@@ -171,6 +171,9 @@ const temporaryStore = async (): Promise<TemporaryStore> => {
 const runsInWorker = (options: ServingMemoryServerOptions): boolean =>
   options.worker ?? Deno.env.get("SERVER_EXECUTION_WORKER") === "true";
 
+/** The longest delay a timer takes; a longer one fires at once. */
+const TIMER_DELAY_MAX_MS = 2_147_483_647;
+
 /**
  * The loop's policy, with what `policy` leaves unset taken from the
  * environment as the toolshed bootstrap takes it: the store read-through
@@ -182,9 +185,6 @@ const runsInWorker = (options: ServingMemoryServerOptions): boolean =>
  * milliseconds. A lane sets the first two to run every test that leaves them
  * unset under the posture; a benchmark sets the others to measure a cadence.
  */
-/** The longest delay a timer takes; a longer one fires at once. */
-const TIMER_DELAY_MAX_MS = 2_147_483_647;
-
 const policyFromEnvironment = (
   policy: SpaceServerPolicy | undefined,
 ): SpaceServerPolicy | undefined => {

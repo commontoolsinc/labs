@@ -9,6 +9,10 @@ import { EngineWaveCommitSink } from "../../src/executor/engine-wave-sink.ts";
 import { SpaceNotServedError } from "../../src/executor/host.ts";
 import { ServingPortBridge } from "../../src/executor/serving-port-bridge.ts";
 import { ServingWorker } from "../../src/executor/serving-worker-host.ts";
+import {
+  emptyServingLoopStats,
+  getServingLoopStats,
+} from "../../src/executor/stats.ts";
 import type { MemorySpace } from "../../src/storage/interface.ts";
 
 const identity = await Identity.fromPassphrase("serving-worker-recovery");
@@ -252,6 +256,45 @@ describe("serving-worker-recovery", () => {
     await host.close();
     expect(cleared).toEqual([7]);
     expect(workers).toHaveLength(1);
+  });
+
+  it("reports the failed worker's last counters while its replacement waits, and none once closed", async () => {
+    using fakes = fakeWorkers();
+    const { workers } = fakes;
+    using _timer = stub(
+      globalThis,
+      "setTimeout",
+      (() => 1) as unknown as typeof setTimeout,
+    );
+    using _init = stub(
+      ServingPortBridge.prototype,
+      "init",
+      () => Promise.resolve({ lifetimeLock: undefined }),
+    );
+    using _release = stub(
+      ServingPortBridge.prototype,
+      "releaseLeasesOf",
+      () => Promise.resolve(),
+    );
+    const host = new ServingWorker({
+      server,
+      identity,
+      apiUrl: new URL(import.meta.url),
+    });
+    try {
+      await host.ready;
+      workers[0].post({
+        t: "note",
+        method: "host.stats",
+        params: { stats: { ...emptyServingLoopStats(), activeSpaces: 1 } },
+      });
+      workers[0].fail();
+      expect(host.stats()).toBeUndefined();
+      expect(getServingLoopStats()?.activeSpaces).toBe(1);
+    } finally {
+      await host.close();
+    }
+    expect(getServingLoopStats()).toBeUndefined();
   });
 
   it("widens the replacement backoff across activations, and resets it once a worker commits a wave", async () => {
