@@ -8,8 +8,11 @@ reason: "Why a view-scoped web client proves each producer once per wake rather 
 # One proof pass per wake in a view-scoped web client
 
 This change was made and measured on the served-vote branch
-(commonfabric/labs#9122), and split out of it to land on its own. The code is
-the same on both.
+(commonfabric/labs#9122), and split out of it to land on its own. Review changed
+it after the measurements below: whether a proof observed what its previous
+proof did now takes an address's scope instance into account, and the cone
+selection slices each source's edits by the entity they write, which the last
+section measures on its own.
 
 ## How it was measured
 
@@ -62,6 +65,11 @@ On #9122's branch the 1000-row cone selection read 67 ms before and 9.3 ms
 after. Off `main`, with only the bench added, it read 69.4 and 79.8 ms against
 12.7 and 15.5 ms with the change, in two alternating rounds; at 300 rows, 7.3
 and 10.6 ms against 3.2 and 3.9 ms.
+
+Slicing each source's edits by entity came after those figures. A list whose
+tallies read their rows' bound inputs, added to the bench with it, read 5.3 and
+5.1 ms at 1000 rows before the slicing and 3.4 and 2.2 ms after, over two
+alternating rounds; the visible-handlers group did not move beyond its noise.
 
 The vote's end-to-end time carries the serving loop's work as well, which is
 #9122's, so only the browser's rows above describe this change alone.
