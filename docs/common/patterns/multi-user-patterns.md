@@ -998,8 +998,9 @@ See:
 - Handlers use scoped `Writable` aliases when they need stable cell handles.
 - The pattern does not store user ids or session ids to fake isolation.
 - Object identity uses references and `equals()`, not synthetic ids.
-- A row derives what it shows the viewer in one computed, and what the session
-  has open in one more.
+- Where its flags read the same inputs or are cheap to derive, a row derives
+  what it shows the viewer in one computed, and what the session has open in
+  one more.
 - Concurrently-edited shared collections and counters use the mergeable writes
   (`push` / `addUnique` / `increment` / `removeByValue` / `elementById`), not
   read-modify-write `set`, so simultaneous edits merge instead of clobbering.
