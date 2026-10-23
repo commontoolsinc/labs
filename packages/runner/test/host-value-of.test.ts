@@ -120,6 +120,32 @@ describe("hostValueOf()", () => {
     expect(value.to.back).toEqual(linkRefFrom({ path: [] }));
   });
 
+  it("returns a back-link to a nested container a link inside it returns to", async () => {
+    await using docs = holder();
+    const piece = docs.cell("piece");
+    await docs.write("piece", {
+      nested: { name: "self", back: piece.key("nested").getAsLink() },
+    });
+
+    expect(hostValueOf(piece.get())).toEqual({
+      nested: { name: "self", back: linkRefFrom({ path: ["nested"] }) },
+    });
+  });
+
+  it("reads a document reached on two branches out at both", async () => {
+    await using docs = holder();
+    const shared = await docs.write("shared", { n: 1 });
+    const piece = await docs.write("piece", {
+      a: shared.getAsLink(),
+      b: { inner: shared.getAsLink() },
+    });
+
+    expect(hostValueOf(piece.get())).toEqual({
+      a: { n: 1 },
+      b: { inner: { n: 1 } },
+    });
+  });
+
   it("refuses a held view whose document no longer holds the kind it was built over", async () => {
     await using docs = holder();
     const tx = docs.runtime.edit();

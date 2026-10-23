@@ -219,6 +219,33 @@ function holds(answer: unknown, text: string): boolean {
   return JSON.stringify(answer ?? null).includes(text);
 }
 
+/**
+ * Subscribes through `gate` and returns the first `count` updates it
+ * delivers, once they have been delivered.
+ */
+function updatesOf(
+  gate: HostReadGate,
+  cell: Cell<unknown>,
+  count: number,
+): Promise<CellUpdateNotification[]> {
+  return new Promise((resolve) => {
+    const updates: CellUpdateNotification[] = [];
+    const cancel = gate.subscribe(
+      cell,
+      createCellRef(cell),
+      {},
+      () => {},
+      (u) => {
+        updates.push(u);
+        if (updates.length === count) {
+          cancel();
+          resolve(updates);
+        }
+      },
+    );
+  });
+}
+
 /** Subscribes through `gate`, keeping every update it delivers. */
 function subscribe(
   gate: HostReadGate,
@@ -761,6 +788,36 @@ describe("HostReadGate", () => {
             entries: [{ path: [], label: { confidentiality: [ownerOnly] } }],
           },
         }),
+      ]);
+    });
+
+    it("delivers each of two equal events sent to a stream, under a display policy", async () => {
+      await using docs = await shelf();
+      const stream = docs.runtime.getCell(space, "a-repeating-stream", {
+        asCell: ["stream"],
+      });
+      const delivered = updatesOf(gateFor(docs.runtime, owner), stream, 2);
+      stream.send({ action: "increment" } as never);
+      stream.send({ action: "increment" } as never);
+
+      expect(await delivered).toEqual([
+        expect.objectContaining({ value: { action: "increment" } }),
+        expect.objectContaining({ value: { action: "increment" } }),
+      ]);
+    });
+
+    it("delivers each of two equal events sent to a stream, with no policy", async () => {
+      await using docs = await shelf();
+      const stream = docs.runtime.getCell(space, "a-repeating-stream", {
+        asCell: ["stream"],
+      });
+      const delivered = updatesOf(new HostReadGate(undefined, {}), stream, 2);
+      stream.send({ action: "increment" } as never);
+      stream.send({ action: "increment" } as never);
+
+      expect(await delivered).toEqual([
+        expect.objectContaining({ value: { action: "increment" } }),
+        expect.objectContaining({ value: { action: "increment" } }),
       ]);
     });
 

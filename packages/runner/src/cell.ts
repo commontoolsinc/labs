@@ -5874,8 +5874,9 @@ function readOutView(
   const { runtime } = view;
   return view.atEpoch(() => {
     const tx = view.readTx();
-    // The depth the walk entered each document position at, keyed by the
-    // position, so that a link back to one yields a back-link to its depth.
+    // The depth the walk entered each container it is inside, keyed by the
+    // container's document position, so that a link back to one yields a
+    // back-link to that depth.
     const entered = new Map<string, number>();
 
     const streamLink = (
@@ -5913,17 +5914,11 @@ function readOutView(
         if (ContextualFlowControl.declaresStream(target.schema)) {
           return streamLink(target, targetView);
         }
-        const key = addressKey(target);
-        const depth = entered.get(key);
+        const depth = entered.get(addressKey(target));
         if (depth !== undefined) {
           return deepFreeze(linkRefFrom({ path: stack.slice(0, depth) }));
         }
-        entered.set(key, stack.length);
-        try {
-          return walk(tx.readValueOrThrow(target), target, [], targetView);
-        } finally {
-          entered.delete(key);
-        }
+        return walk(tx.readValueOrThrow(target), target, [], targetView);
       }
       if (isStreamValue(stored)) {
         return streamLink(
@@ -5950,17 +5945,30 @@ function readOutView(
           stack.pop();
         }
       };
-      if (Array.isArray(stored)) {
-        return Object.freeze(
-          stored.map((element, index) => member(String(index), element)),
-        );
+      // The container is an ancestor of everything below it for as long as
+      // the walk is inside it, and nothing else: a value reached again on
+      // another branch is shared, and is read out again there.
+      const here = addressKey({
+        ...document,
+        path: [...document.path, ...position],
+      });
+      entered.set(here, stack.length);
+      try {
+        if (Array.isArray(stored)) {
+          return Object.freeze(
+            stored.map((element, index) => member(String(index), element)),
+          );
+        }
+        return Object.freeze(Object.fromEntries(
+          Object.entries(stored).map((
+            [key, value],
+          ) => [key, member(key, value)]),
+        ));
+      } finally {
+        entered.delete(here);
       }
-      return Object.freeze(Object.fromEntries(
-        Object.entries(stored).map(([key, value]) => [key, member(key, value)]),
-      ));
     };
 
-    entered.set(addressKey(view.link), stack.length);
     return walk(view.readDocument(), view.link, [], view.cfcLabelView);
   });
 }
