@@ -237,8 +237,11 @@ producer once and records its basis as wake dependencies. The reads of one
 transaction share a proof, and each validation pass makes its own, so a commit
 validates current replica and local scheduler state again and fails a read an
 earlier proof let through before that state changed. Fingerprints may be
-reused for an unchanged primitive or a value proven deeply frozen. Every check
-still observes the current value and path reachability. Mutable values are
+reused for an unchanged primitive or a value proven deeply frozen. A check
+observes the current value and path reachability, except in the deep-frozen
+document version its basis value was last observed in, which can observe
+nothing different; the replica hands back one such object per version, so a
+check repeated over an unchanged document observes nothing. Mutable values are
 rehashed.
 
 Shallow observations use conservative deep fingerprints for this currency check,
