@@ -1040,6 +1040,7 @@ function createViewProxy<T>(
     readTx,
     atEpoch,
     link,
+    readDocument: () => currentValue(true),
     cfcLabelView,
   });
 
@@ -1141,6 +1142,13 @@ export type ViewReadOut = {
 
   /** The link the view resolved to: the document position it reads. */
   readonly link: NormalizedFullLink;
+
+  /**
+   * Reads the whole value at the view's position, as a recursive read, with
+   * the check every trap makes: a document that no longer holds a container
+   * of the kind the view was built over refuses with `ViewDriftError`.
+   */
+  readonly readDocument: () => unknown;
 
   /** The label view the view carries, rebased to its position. */
   readonly cfcLabelView: CfcLabelView | undefined;

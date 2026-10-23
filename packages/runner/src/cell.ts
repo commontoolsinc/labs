@@ -50,7 +50,6 @@ import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
 import { IndexTrackingStack } from "@commonfabric/utils/index-tracking-stack";
 import { getLogger } from "@commonfabric/utils/logger";
-import { stringTupleKey } from "@commonfabric/utils/string-tuple-key";
 import {
   type Immutable,
   isObjectNotArray,
@@ -145,6 +144,7 @@ import {
   resolveLinkTracingDereferences,
 } from "./link-resolution.ts";
 import {
+  addressKey,
   areNormalizedLinksSame,
   isPrimitiveCellLink,
   isSigilLink,
@@ -5852,9 +5852,10 @@ function convertOneToLinks(
  * and copying it from there costs no view, link resolution or label view per
  * member.
  *
- * The document is read once, whole, which registers a read of every position
- * under it, where reading it through the view registers each position as it
- * is reached. A stored link is followed where it sits, as the view follows
+ * The document is read once, whole, through the view's own checked read, so
+ * a document that no longer holds what the view was built over refuses as
+ * every access through the view does; the read registers every position
+ * under it, where reading through the view registers each as it is reached. A stored link is followed where it sits, as the view follows
  * one on access, with the same resolution, so the dereference traces and
  * labeled crossings it records are the ones the view's reads record. A link
  * that returns to a position the walk is inside yields a back-link to it, as
@@ -5876,8 +5877,6 @@ function readOutView(
     // The depth the walk entered each document position at, keyed by the
     // position, so that a link back to one yields a back-link to its depth.
     const entered = new Map<string, number>();
-    const positionKey = (link: NormalizedFullLink): string =>
-      stringTupleKey([link.space, link.scope ?? "", link.id, ...link.path]);
 
     const streamLink = (
       link: NormalizedFullLink,
@@ -5914,7 +5913,7 @@ function readOutView(
         if (ContextualFlowControl.declaresStream(target.schema)) {
           return streamLink(target, targetView);
         }
-        const key = positionKey(target);
+        const key = addressKey(target);
         const depth = entered.get(key);
         if (depth !== undefined) {
           return deepFreeze(linkRefFrom({ path: stack.slice(0, depth) }));
@@ -5961,13 +5960,8 @@ function readOutView(
       ));
     };
 
-    entered.set(positionKey(view.link), stack.length);
-    return walk(
-      tx.readValueOrThrow(view.link),
-      view.link,
-      [],
-      view.cfcLabelView,
-    );
+    entered.set(addressKey(view.link), stack.length);
+    return walk(view.readDocument(), view.link, [], view.cfcLabelView);
   });
 }
 

@@ -13,6 +13,7 @@ import { Identity } from "@commonfabric/identity";
 import { type Cell, hostValueOf, sinkProjected } from "../src/cell.ts";
 import { isSigilLink } from "../src/link-types.ts";
 import { parseLink } from "../src/link-utils.ts";
+import { ViewDriftError } from "../src/query-result-proxy.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 
@@ -117,6 +118,17 @@ describe("hostValueOf()", () => {
     const value = hostValueOf(first.get()) as { to: { back: unknown } };
 
     expect(value.to.back).toEqual(linkRefFrom({ path: [] }));
+  });
+
+  it("refuses a held view whose document no longer holds the kind it was built over", async () => {
+    await using docs = holder();
+    const tx = docs.runtime.edit();
+    const piece = docs.runtime.getCell<unknown>(space, "piece", undefined, tx);
+    piece.set({ title: "a title" });
+    const held = piece.get();
+    piece.set(["a title"]);
+
+    expect(() => hostValueOf(held)).toThrow(ViewDriftError);
   });
 
   it("returns a stream position as the link to the stream", async () => {
