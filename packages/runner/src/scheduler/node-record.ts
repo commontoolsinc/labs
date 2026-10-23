@@ -137,6 +137,9 @@ export class NodeRegistry {
    */
   #nextOrdinal = 0;
 
+  /** Advances each time a node joins or leaves the active set. */
+  #membership = 0;
+
   readonly effects: ReadonlySet<Action> = this.#activeEffects;
   readonly computations: ReadonlySet<Action> = this.#activeComputations;
 
@@ -161,6 +164,14 @@ export class NodeRegistry {
   /** How many active nodes are `invalid` or `never-ran`. */
   get invalidCount(): number {
     return this.#invalidNodes.size;
+  }
+
+  /**
+   * A count that advances each time a node joins or leaves the active set, so
+   * that an index over active nodes can tell whether it still describes them.
+   */
+  get membership(): number {
+    return this.#membership;
   }
 
   isDemandedWriter(action: Action): boolean {
@@ -226,7 +237,7 @@ export class NodeRegistry {
     record.adoptedViewDependencies = undefined;
     record.cancelLocalReadWake?.();
     record.cancelLocalReadWake = undefined;
-    this.#all.delete(record);
+    if (this.#all.delete(record)) this.#membership++;
     this.#activeEffects.delete(action);
     this.#activeComputations.delete(action);
     this.#invalidNodes.delete(action);
@@ -423,7 +434,10 @@ export class NodeRegistry {
   }
 
   #activate(record: SchedulerNode): void {
-    if (!this.#all.has(record)) record.registrationToken = {};
+    if (!this.#all.has(record)) {
+      record.registrationToken = {};
+      this.#membership++;
+    }
     this.#all.add(record);
     if (record.kind === "effect") {
       this.#activeEffects.add(record.action);
