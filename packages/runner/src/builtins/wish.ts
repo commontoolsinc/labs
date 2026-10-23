@@ -43,8 +43,13 @@ import { systemPatternSource } from "../pattern-source-scheme.ts";
 import {
   homeHasDefaultProfileSlot,
   orderProfileCandidates,
+  preferProfile,
   profileCellIsValid,
+  profileIsRetired,
   profileLinkListSchema,
+  profileOrderDocuments,
+  profileOwnership,
+  retiredProfileCells,
   sameProfileCell,
 } from "../profile-order.ts";
 import { setRunnableName } from "../runner-utils.ts";
@@ -502,7 +507,9 @@ function profileDocument(
  * order. Identity is by the profile's own SPACE — each profile is a distinct
  * `ProfileHome.inSpace()` space, so the `defaultProfile` / `mru` links are
  * matched to candidates by space, not `Cell.equals` (see `sameProfileCell`;
- * CT-1842). Skips confirmed-absent entries when a valid candidate remains.
+ * CT-1842). Skips confirmed-absent entries when a valid candidate remains,
+ * and leaves out the profiles the home retired and those whose name is
+ * attested to someone else (`profileOwnership()`).
  * A profile whose load failed is ordered with the rest, so a failure never
  * changes which profile is selected: the selected profile's failure is thrown,
  * and any other failed profile is left out of the roster. Throws
@@ -519,6 +526,12 @@ function getProfileCandidateCells(
   ctx.readiness.requireDocument(defaultPattern, ctx.tx);
   const profilesCell = defaultPattern.key("profiles").resolveAsCell();
   ctx.readiness.requireDocument(profilesCell, ctx.tx);
+  // What the ordering reads. A failure to load one of these throws, since
+  // ordering without it could put another profile first.
+  for (const document of profileOrderDocuments(defaultPattern)) {
+    ctx.readiness.requireDocument(document, ctx.tx);
+  }
+  const retired = retiredProfileCells(defaultPattern);
   // Read the list as cell references so a freshly-created profile (a link into
   // its own space, not yet loaded here) is still counted rather than collapsing
   // the whole list to `undefined`. See profileLinkListSchema.
@@ -532,6 +545,8 @@ function getProfileCandidateCells(
   for (let i = 0; i < length; i++) {
     const entry = profilesCell.key(i);
     const cell = entry.resolveAsCell();
+    // A retired profile is not one of the user's, so it is not loaded.
+    if (profileIsRetired(retired, cell, homeSpaceCell.space)) continue;
     const loaded = profileDocument(cell, ctx);
     if (loaded === false) {
       hasAbsentProfile = true;
@@ -546,8 +561,18 @@ function getProfileCandidateCells(
     ) {
       continue;
     }
-    if (loaded instanceof DocumentLoadError) {
-      failures.set(cell, loaded);
+    // A profile whose name is attested to someone else is not one of the
+    // person's, whatever list holds it. Its `name` is read once its document
+    // has loaded.
+    const named = loaded instanceof DocumentLoadError
+      ? loaded
+      : profileDocument(cell.key("name").resolveAsCell(), ctx);
+    if (named instanceof DocumentLoadError) {
+      failures.set(cell, named);
+    } else if (
+      profileOwnership(cell, homeSpaceCell.space, ctx.tx) === "foreign"
+    ) {
+      continue;
     } else {
       subscribeProfileName(cell);
     }
@@ -555,11 +580,12 @@ function getProfileCandidateCells(
   }
   if (candidates.length === 0) {
     if (hasAbsentProfile) throw new WishError("Profile data is unavailable");
+    preferredOrder(ctx, []);
     return { ordered: [], defaultValid: false };
   }
 
   const homeSpace = homeSpaceCell.space;
-  const { ordered, defaultValid, defaultCell, mruCells } =
+  const { ordered: homeOrder, defaultValid, defaultCell, mruCells } =
     orderProfileCandidates(
       ctx.runtime,
       defaultPattern,
@@ -567,6 +593,7 @@ function getProfileCandidateCells(
       candidates,
       ctx.tx,
     );
+  const ordered = preferredOrder(ctx, homeOrder);
   // Falling back past the selected profile would switch persona silently.
   const selectedFailure = failures.get(ordered[0]);
   if (selectedFailure) throw selectedFailure;
@@ -585,6 +612,32 @@ function getProfileCandidateCells(
     ordered: ordered.filter((cell) => !failures.has(cell)),
     defaultValid,
   };
+}
+
+/**
+ * `homeOrder` as a runtime acting as one of the user's profiles orders it:
+ * that profile first, when the runtime names one
+ * (`RuntimeOptions.preferredProfileSpace`). Answering as another profile
+ * would switch persona silently, so a named profile the home does not list,
+ * or has retired, is an error rather than a fallback.
+ *
+ * @throws WishError when the runtime names a profile not in `homeOrder`.
+ */
+function preferredOrder(
+  ctx: WishContext,
+  homeOrder: Cell<unknown>[],
+): Cell<unknown>[] {
+  const preferred = ctx.runtime.preferredProfileSpace;
+  if (preferred === undefined) return homeOrder;
+  const ordered = preferProfile(homeOrder, preferred);
+  if (ordered === undefined) {
+    throw new WishError(
+      `This runtime acts as the profile in ${preferred}, which is not one ` +
+        "of the user's profiles: the home does not list it, retired it, or " +
+        "lists one whose name is attested to someone else.",
+    );
+  }
+  return ordered;
 }
 
 /**
@@ -2323,6 +2376,7 @@ export function wish(
       legacyDefaultProfile: unknown;
       offersSetDefault: boolean;
       mru: unknown;
+      retiredProfiles: unknown;
       privateInbox: unknown;
     };
     resultCell?: Cell<any>;
@@ -3066,9 +3120,9 @@ export function wish(
   }
 
   // Launch the profile picker for #profile wishes with multiple profiles. Feeds
-  // the home `profiles`/`defaultProfile`/`mru` cells (as sigil links) so the
-  // picker can render natively, select (stamp MRU), set the default, and create
-  // another — all as trusted picker-surface writes. Mirrors
+  // the home `profiles`/`defaultProfile`/`mru`/`retiredProfiles` cells (as
+  // sigil links) so the picker can render natively, select (stamp MRU), set
+  // the default, retire a profile, and create another. Mirrors
   // launchProfileCreatePattern's deferred-fetch/run handling.
   function launchProfilePickerPattern(
     ctx: WishContext,
@@ -3112,6 +3166,10 @@ export function wish(
       mru: createSigilLinkFromParsedLink(
         homeDefaultPattern.key("mru").getAsNormalizedFullLink(),
       ),
+      // The picker lists no retired profile, and its Remove retires one here.
+      retiredProfiles: createSigilLinkFromParsedLink(
+        homeDefaultPattern.key("retiredProfiles").getAsNormalizedFullLink(),
+      ),
       // As for the create surface: the picker's create section points a new
       // profile at it.
       privateInbox: createSigilLinkFromParsedLink(
@@ -3142,6 +3200,7 @@ export function wish(
         legacyDefaultProfile: bindInputCell(slot.input.legacyDefaultProfile),
         offersSetDefault: slot.input.offersSetDefault,
         mru: bindInputCell(slot.input.mru),
+        retiredProfiles: bindInputCell(slot.input.retiredProfiles),
         privateInbox: bindInputCell(slot.input.privateInbox),
       };
     };

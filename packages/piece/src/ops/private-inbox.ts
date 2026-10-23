@@ -18,10 +18,9 @@ import {
   type Cell,
   isCell,
   isStream,
-  loadDocument,
+  loadProfileCandidates,
   type NormalizedFullLink,
   orderProfileCandidates,
-  profileCellIsValid,
   readDurable,
   type Runtime,
   sendEvent,
@@ -68,11 +67,6 @@ export type PrivateInboxEnsure =
     inbox: Cell<unknown>;
     profile: Cell<unknown>;
   };
-
-const profilesSchema = {
-  type: "array",
-  items: { type: "unknown", asCell: ["cell"] },
-} as const;
 
 /**
  * The link the host reads an inbox pointer through: a link to a piece naming
@@ -376,9 +370,10 @@ async function vetAdvertisedInbox(
 /**
  * The first of `home`'s profiles, in the order `#profile` answers in, that
  * points at an inbox, with the link it holds; `undefined` when none does.
- * Loads what `orderProfileCandidates()` reads first. A profile whose document
- * is absent is left out, as `#profile` leaves it out, and one whose document
- * failed to load is ordered with the rest, as `#profile` orders it.
+ * The candidates are the ones `loadProfileCandidates()` loads, as `#profile`
+ * collects them: a retired profile, or one whose document is absent, is left
+ * out, and one whose document failed to load, or whose space refuses this
+ * runtime, is ordered with the rest.
  *
  * @throws When a profile ordered ahead of the one found failed to load, since
  *   whether it advertises an inbox is then unknown.
@@ -387,40 +382,13 @@ async function decidingProfile(
   runtime: Runtime,
   home: Cell<unknown>,
 ): Promise<{ profile: Cell<unknown>; piece: Cell<unknown> } | undefined> {
-  const list = await home.key("profiles").asSchema(profilesSchema).pull();
-  const length = Array.isArray(list) ? list.length : 0;
-  if (length === 0) return undefined;
-  const profilesCell = home.key("profiles").resolveAsCell();
-  const unreadable = new Map<Cell<unknown>, unknown>();
-  const loaded = await Promise.all(
-    Array.from({ length }, async (_, index) => {
-      const entry = profilesCell.key(index);
-      const profile = entry.resolveAsCell();
-      const valid = profileCellIsValid(
-        profile,
-        entry.getRaw() !== undefined,
-        home.space,
-      );
-      if (!valid) return undefined;
-      try {
-        if (!await loadDocument(runtime, profile)) return undefined;
-      } catch (error) {
-        unreadable.set(profile, error);
-        return profile;
-      }
-      if (accessRefused(runtime, profile.space)) {
-        unreadable.set(profile, new Error("access refused"));
-      }
-      return profile;
-    }),
-  );
-  const candidates = loaded.filter((each) => each !== undefined);
+  const { candidates, failures } = await loadProfileCandidates(runtime, home);
   if (candidates.length === 0) return undefined;
-  await Promise.all(
-    ["defaultProfile", "legacyDefaultProfile", "mru"].map((key) =>
-      home.key(key).resolveAsCell().sync()
-    ),
-  );
+  for (const profile of candidates) {
+    if (!failures.has(profile) && accessRefused(runtime, profile.space)) {
+      failures.set(profile, new Error("access refused"));
+    }
+  }
   const { ordered } = orderProfileCandidates(
     runtime,
     home,
@@ -428,10 +396,10 @@ async function decidingProfile(
     candidates,
   );
   for (const profile of ordered) {
-    if (unreadable.has(profile)) {
+    if (failures.has(profile)) {
       throw new Error(
         `Cannot read the profile that decides Home's private inbox: ${profile.space}`,
-        { cause: unreadable.get(profile) },
+        { cause: failures.get(profile) },
       );
     }
     const piece = await storedPointer(profile.key("inbox"));

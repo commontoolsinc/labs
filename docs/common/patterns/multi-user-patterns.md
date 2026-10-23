@@ -220,8 +220,13 @@ canonical live-link demo:
 `packages/patterns/lunch-poll/main.tsx`.
 
 **`<cf-profile-badge>` is the one idiomatic way to render an identity** — avatar +
-name + the runtime-attested generative seal (a DID-derived aura ring + cursor
-glint; there is no shield icon), navigable to the person's profile. Prefer it
+name + the runtime-attested generative seal (an aura ring derived from the
+owner's DID and, for a profile, the profile's space, + cursor glint; there is no
+shield icon), navigable to the person's profile. Verification attests the
+principal; the seal tells their profiles apart, so two profiles of one person
+look like two people. A document that carries the person's claim without being
+a profile, such as a room's record of them, wears the person's seal alone, the
+same in every space. Prefer it
 anywhere an identity appears (rosters, message authors, "playing as",
 scoreboards); inline a name into a string only as an explicit fallback. Four
 variants, all carrying the same seal (CT-1761):

@@ -103,6 +103,29 @@ most-recently-used (MRU) ordering:
   default".
 - `homeSpaceCell.defaultPattern.mru` — recency-ordered links; drives ordering
   after the default.
+- `homeSpaceCell.defaultPattern.retiredProfiles` — links to the profiles the
+  user retired. A retired profile keeps its link in `profiles` and is not one of
+  the user's profiles: `#profile` never answers with it and leaves it out of its
+  candidates, and a retired default is no default. Its space and data stay on
+  the host, so a link to it held elsewhere still shows it. The picker's Remove
+  control retires a profile after asking to confirm, through Home's
+  `retireProfile` handler, and `cf profile retire` does the same from the
+  command line. The picker lists retired profiles apart, each with a Restore
+  that calls Home's `restoreProfile` handler, as `cf profile restore` does; a
+  restored profile is one of the user's profiles again. `retireProfile` refuses
+  the profile `#profile` returns for a runtime that names no preferred profile:
+  the default when one is set, and otherwise the first live profile by MRU and
+  then by list order. Retiring that profile would move `#profile` to another
+  profile without the person choosing it, so another default is set first. The
+  last live profile is always that profile, so it cannot be retired. The picker
+  offers no Remove on that profile's row. Retiring a profile does not change
+  any access. The retired profile stays on the roster of every room or space it
+  joined. Its principal, which the person's other profiles share, keeps the
+  access those rosters give it. An offer addressed to it (`toProfile`) still
+  lands in the inbox it points at, which is normally the private inbox all of
+  the person's profiles share. A space whose recorded profile is retired
+  keeps that record, and `sharedSpaces.profiles` reads it as `retired`
+  ([Social-space collection](#social-space-collection)).
 
 Each profile lives in its own space, created with the anonymous
 `PatternFactory.inSpace()` — one allocation per creation, each a new space with
@@ -181,13 +204,38 @@ it represents the person the host expects. Until the repair reaches it, a
 profile in such a space is reached only through a link to it, such as the one
 in `profiles`.
 
-`profiles`/`defaultProfile`/`mru` are CFC-protected profile-link data, created
-through the trusted profile-create / picker surfaces. Untrusted writes are
-rejected: adding/replacing a link fails the element contract, and structural
-changes (truncation/removal/reorder) fail the array's container
-`writeAuthorizedBy`. The inline `#profile` wish UI uses the trusted
-profile-create surface for the same creation event and does not navigate away
-from the current view.
+`profiles`, `defaultProfile`, `mru` and `retiredProfiles` are profile-link data
+with CFC write contracts. On `profiles` and `mru` each element carries the
+trusted profile-create or picker surface's UI contract, which gates adding or
+replacing a link, and the array container carries `writeAuthorizedBy`, which
+gates truncation, removal and reorder. Home keeps each of these lists in a
+document of its own, which its result links, and the contracts on `profiles` and
+`mru` are stated only on Home's result type, not on those documents. They do not
+hold there: an untrusted write to either list, through Home's result or to the
+document itself, commits. So a profile a list links need not be one of the
+person's. Which listed profiles are theirs is decided by the label on the value
+of each profile's `name`, by one rule (`profileOwnership()` in
+`packages/runner/src/profile-order.ts`, which pattern code applies with
+`principalsOf()`). A profile whose name is attested to anyone else is not the
+person's: `#profile`, a runtime's preferred profile, and the guard
+`retireProfile` keeps on the profile `#profile` returns all leave it out. They
+keep a profile whose name carries no label, as a name stored before names were
+labeled does, so a raw document with no label at all that something links from
+`profiles` can still be answered by `#profile` until names are relabeled. What
+lists or records the person's profiles is stricter, and takes only a profile
+whose name is attested to the person: `cf profile`, whose `attest-name` command
+has a person attest a name stored without a label, and Home's record of the
+profile acting in each social space. A listed profile whose document is absent
+is left out by all of them. The `defaultProfile` slot's cell and the
+`retiredProfiles` cell carry their contracts themselves, so an untrusted write
+to either is refused. `retiredProfiles` names `retireProfile` and
+`restoreProfile` through `writePolicyAnyOf`, on the elements and the container
+alike, and neither asks for a gesture. Any pattern that reaches Home's streams
+can therefore retire or restore a profile by sending those handlers' events, as
+it can rename one or set its picture; what the contract refuses is a write by
+anything else. The inline `#profile` wish UI uses the trusted profile-create
+surface for the same creation event and does not navigate away from the current
+view.
 
 Patterns can discover profile data from any space:
 
@@ -349,6 +397,25 @@ the rendered control showed and leave space access unchanged. Unfamiliar states
 remain visible in **Other states**. An unavailable collection has an explicit
 notice rather than an empty list. Ordinary space navigation opens a listed
 space using the runtime's configured routing.
+
+Home also records which of the person's profiles acts in each space, as part of
+their membership in it: `sharedSpaceProfiles` holds one record per space, keyed
+by the space's DID, naming the profile by its own space DID. A registration
+that names a profile records it when Home records none for the space: a host
+that joins a space or makes one social names the profile the person acts as,
+and the share intake names the profile an offer's `toProfile` addresses. A new
+record names one of the person's live profiles: one whose name is attested to
+the person, as "Profile" above says, and that is not retired. Home never
+replaces or removes a record. A registration naming another profile, or one
+that is not the person's live profile, registers the space all the same,
+records no profile, and returns a `conflict` saying why; its offer's receipt
+says so too. The record outlasts the space's root and its entry, and archive
+and restore leave it. Like `retiredProfiles`, the stored document carries its
+write contract itself, naming `registerSharedSpace` as its only writer. A
+reader reads `sharedSpaces.profiles`, which says, for each space in the
+catalog, whether Home records no profile for it, holds a record it cannot read,
+or names a live, a retired, or a foreign profile, one that is not the person's
+own when it is read; none of these is the default profile.
 
 This collection is independent of the navigation list, routing hints, favorites,
 and browser recents. See [the catalog interface](../../features/shared-space-catalog.md)

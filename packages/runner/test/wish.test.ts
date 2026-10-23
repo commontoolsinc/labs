@@ -4,13 +4,16 @@ import { Identity } from "@commonfabric/identity";
 import { hashOf } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { fromFileUrl } from "@std/path";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { textLeaves } from "./support/vnode-text.ts";
 import type { Cell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { entityIdFrom } from "../src/create-ref.ts";
 import { NAME, UI } from "../src/builder/types.ts";
+import { PatternsRoute } from "../src/harness/patterns-route.deno.ts";
 import { acquireSchemaRegistryLease } from "../src/schema-registry.ts";
 import {
   openedSidecarSurface,
@@ -3552,6 +3555,82 @@ describe("wish built-in", () => {
       expect(result.key("profile").get()?.result?.name).toBe("Grace");
     });
 
+    it("resolves headless #profile to the profile the runtime prefers, over the home's default, and fails for one the home does not list or retired", async () => {
+      // A runtime acting as one of the user's profiles names it; the home's
+      // default stays Grace. A preference for a space the home does not
+      // list, or for a profile it retired, is an error naming the space.
+      const adaSpace = (await Identity.fromPassphrase(
+        "wish-preferred-profile-ada",
+      )).did();
+      const graceSpace = (await Identity.fromPassphrase(
+        "wish-preferred-profile-grace",
+      )).did();
+      const answers: unknown[] = [];
+      const cases = [
+        { preferred: adaSpace, retireAda: false },
+        { preferred: patternSpace.did(), retireAda: false },
+        { preferred: adaSpace, retireAda: true },
+      ];
+      for (const { preferred, retireAda } of cases) {
+        await tx.commit().settled;
+        await runtime.dispose({ closeStorage: false });
+        runtime = new Runtime({
+          apiUrl: new URL("https://example.com"),
+          storageManager,
+          preferredProfileSpace: preferred,
+        });
+        ({ wish, pattern } = createTrustedBuilder(runtime).commonfabric);
+        tx = runtime.edit();
+        const ada = runtime.getCell(adaSpace, "preferred-ada", undefined, tx);
+        ada.set({ name: "Ada", initialNameApplied: "Ada", elements: [] });
+        await tx.commit().settled;
+        tx = runtime.edit();
+        const grace = runtime.getCell(
+          graceSpace,
+          "preferred-grace",
+          undefined,
+          tx,
+        );
+        grace.set({ name: "Grace", initialNameApplied: "Grace", elements: [] });
+        await tx.commit().settled;
+        tx = runtime.edit();
+        const home = runtime.getCell<any>(
+          userIdentity.did(),
+          "home-preferred-profile",
+          undefined,
+          tx,
+        );
+        home.key("profiles").set([ada, grace]);
+        home.key("defaultProfile").set({ profile: grace });
+        home.key("retiredProfiles").set(retireAda ? [ada] : []);
+        (runtime.getHomeSpaceCell(tx) as any).key("defaultPattern").set(home);
+        await tx.commit().settled;
+        await runtime.idle();
+        tx = runtime.edit();
+        const result = runtime.run(
+          tx,
+          pattern(() => ({ profileName: wish({ query: "#profileName" }) })),
+          {},
+          runtime.getCell<Record<string, any>>(
+            patternSpace.did(),
+            "wish-preferred-profile-result",
+            undefined,
+            tx,
+          ),
+        );
+        await tx.commit().settled;
+        tx = runtime.edit();
+        await result.pull();
+        const state = result.key("profileName").get();
+        answers.push(state?.result ?? String(state?.error));
+      }
+
+      expect(answers[0]).toBe("Ada");
+      expect(answers[1]).toContain(patternSpace.did());
+      expect(answers[1]).toContain("not one of the user's profiles");
+      expect(answers[2]).toContain(adaSpace);
+    });
+
     it("does not parse profile scope as an arbitrary DID", async () => {
       const wishPattern = pattern(() => ({
         missing: wish({ query: "#missing", scope: ["profile"] }),
@@ -4089,6 +4168,10 @@ describe("wish built-in", () => {
           // Point `defaultProfile` at a cell that is not in `profiles` (an
           // invalid default link) so `defaultValid` is false.
           invalidDefault?: boolean;
+          // Indices into `names` the home lists in `retiredProfiles`.
+          retiredIndices?: number[];
+          // Indices into `names` whose profile document is never written.
+          absentIndices?: number[];
           headless?: boolean;
         },
       ) {
@@ -4107,13 +4190,15 @@ describe("wish built-in", () => {
             undefined,
             tx,
           );
-          cell.set({
-            name: opts.names[i],
-            initialNameApplied: opts.names[i],
-            avatar: "",
-            bio: "",
-            elements: [],
-          });
+          if (!opts.absentIndices?.includes(i)) {
+            cell.set({
+              name: opts.names[i],
+              initialNameApplied: opts.names[i],
+              avatar: "",
+              bio: "",
+              elements: [],
+            });
+          }
           await tx.commit().settled;
           await runtime.idle();
           tx = runtime.edit();
@@ -4155,6 +4240,11 @@ describe("wish built-in", () => {
         if (opts.mruIndices) {
           homeDefaultCell.key("mru").set(
             opts.mruIndices.map((i) => profileCells[i]),
+          );
+        }
+        if (opts.retiredIndices) {
+          homeDefaultCell.key("retiredProfiles").set(
+            opts.retiredIndices.map((i) => profileCells[i]),
           );
         }
         (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
@@ -4297,6 +4387,55 @@ describe("wish built-in", () => {
         expect(result.key("profile").get()?.result?.name).toBe("Grace");
       });
 
+      it("leaves a retired profile out of `.result` and its candidates", async () => {
+        const { result } = await setupProfiles("retired-left-out", {
+          names: ["Ada", "Grace", "Hopper"],
+          mruIndices: [0],
+          retiredIndices: [0],
+          headless: true,
+        });
+        const state = result.key("profile").get();
+        expect(state?.result?.name).toBe("Grace");
+        expect(state?.candidates?.map((each: any) => each.name)).toEqual([
+          "Grace",
+          "Hopper",
+        ]);
+      });
+
+      it("treats a retired default as no default, so 2+ others show the picker", async () => {
+        const { result } = await setupProfiles("retired-default", {
+          names: ["Ada", "Grace", "Hopper"],
+          defaultIndex: 0,
+          retiredIndices: [0],
+        });
+        const ui = result.key("profile").key(UI).get() as any;
+        expect(ui?.props?.["data-profile-picker-ui"]).toBe("wish");
+        expect(result.key("profile").get()?.result?.name).toBe("Grace");
+      });
+
+      it("offers to create a profile when the only one listed is retired and absent", async () => {
+        const { result } = await setupProfiles("retired-absent", {
+          names: ["Gone"],
+          retiredIndices: [0],
+          absentIndices: [0],
+        });
+        const state = result.key("profile").get();
+        const ui = result.key("profile").key(UI).get() as any;
+        expect(state?.result).toBeUndefined();
+        expect(String(state?.error)).not.toContain("unavailable");
+        expect(ui?.props?.["data-profile-create-ui"]).toBe("wish");
+      });
+
+      it("reports profile data unavailable when the only one listed is absent and not retired", async () => {
+        const { result } = await setupProfiles("absent", {
+          names: ["Gone"],
+          absentIndices: [0],
+        });
+        expect(String(result.key("profile").get()?.error)).toContain(
+          "Profile data is unavailable",
+        );
+      });
+
       it("interactive 2+ no default renders the picker sidecar as [UI]", async () => {
         const { result } = await setupProfiles("picker-ui", {
           names: ["Ada", "Grace"],
@@ -4348,6 +4487,39 @@ describe("wish built-in", () => {
         await r2.pull();
 
         expect(r2.key("profile").get()?.result?.name).toBe("Grace");
+      });
+
+      it("hands the picker sidecar the home's retired profiles, so it lists no row for one", async () => {
+        // The patterns route serves the system patterns from this checkout,
+        // so the picker sidecar opens and runs.
+        const route = new PatternsRoute(
+          fromFileUrl(new URL("../../patterns/", import.meta.url)),
+        );
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch =
+          (async (input: Request | URL | string) =>
+            await route.serve(
+              input instanceof Request ? input : new Request(String(input)),
+            ) ?? new Response("not found", { status: 404 })) as typeof fetch;
+
+        try {
+          const { result } = await setupProfiles("picker-retired", {
+            names: ["Ada", "Grace", "Hopper"],
+            retiredIndices: [1],
+          });
+          const pickerCell = result.key("profile").key(UI).key("props")
+            .key("$cell").resolveAsCell();
+          await runtime.settled();
+          const removes = textLeaves(pickerCell.key(UI).get()).filter((leaf) =>
+            leaf.trim() === "Remove…"
+          );
+          // Ada and Hopper are listed, and Ada, whom `#profile` returns,
+          // offers no Remove.
+          expect(removes).toHaveLength(1);
+        } finally {
+          globalThis.fetch = originalFetch;
+          await runtime.idle();
+        }
       });
 
       it("picker sidecar fetch failure → result still resolves; error surfaced in picker UI", async () => {

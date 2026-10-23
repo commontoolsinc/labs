@@ -616,8 +616,8 @@ runtime holding the inbox refuses to let another principal's code copy the
 offers anywhere. The label does not stop another principal's runtime reading
 them, as the access section says.
 
-An offer is the envelope a loom share inbox keeps, its eight fields, and one
-more:
+An offer is the envelope a loom share inbox keeps, its nine fields, and one
+more, `receivedAt`:
 
 - `kind`: what is offered, such as `loom` or `fabrichat-room`. A reader acts
   only on the kinds it knows.
@@ -631,6 +631,11 @@ more:
   actor, from `currentPrincipal()`.
 - `sharedAt`: when the sender shared the offer, in milliseconds since the
   epoch, by the sender's clock.
+- `toProfile`: `{space}`, the recipient's profile the offer is for, by its
+  space DID, when the sender named one. Several profiles of one identity can
+  point at one inbox, so this is what tells the recipient which of them was
+  offered the thing. Like `from`, it is the sender's claim; a reader acts on
+  it only for a profile that is its own and that points at this inbox.
 - `receivedAt`: when the inbox received the offer, by its own clock. A
   handler's clock reads to the second, so two offers can share it.
 
@@ -666,8 +671,9 @@ does, and then checks the sender:
   (`loom`), `sharedAt`, unless it is a positive number, with the time the
   inbox received the offer, and `id` with `<space>@<sharedAt>`, so a resend
   with neither `id` nor `sharedAt` in a later second is kept again. An
-  `ownerOrigin` that is not an origin is kept empty. A field the envelope does
-  not name is not kept.
+  `ownerOrigin` that is not an origin is kept empty, and a `toProfile` whose
+  `space` is not a well-formed DID is not kept. A field the envelope does not
+  name is not kept.
 - The event is dropped when its `from` is not the principal sending it, or
   when an offer in the inbox already has its `from` and `id`. So a resend of
   one offer is kept once, the first one kept stays as it was, and no sender
@@ -714,12 +720,15 @@ restart. It reads the pointers through `inboxPieceLinkSchema`, as the ensure
 does.
 
 An offer whose `from` and `id` already key a receipt in the catalog is
-skipped. Any other offer is registered when:
+skipped, unless it names a `toProfile` and Home's `sharedSpaces.profiles` says
+Home records no profile for its space, as for a space a registration naming no
+profile admitted first. Any other offer is registered when:
 
 - its envelope is well formed: `space` and `from` are well-formed DIDs, `host`
   is an origin, as `normalizeSpaceHost()` reads one, `ownerOrigin` is empty,
   as `receive` keeps one it was not given or could not read, or else such an
-  origin, every string fits the length `receive` cuts it to, and `sharedAt` is
+  origin, a `toProfile`, when there is one, names a well-formed DID as its
+  `space`, every string fits the length `receive` cuts it to, and `sharedAt` is
   a nonnegative integer;
 - its `kind` is one the intake admits, which `ADMITTED_SPACE_KINDS` in the
   intake's module lists: `fabrichat-room` and `loom`, kinds of space as
@@ -787,16 +796,28 @@ the paragraph below on deciding rows says:
 | `space-root-mismatch` | names a `loom` space whose root's result schema is not a Loom's composition | no |
 
 The intake sends Home's `registerSharedSpace` the offer's `space`, its `host` as
-normalized, its `kind`, its `title` unless it is empty, and `{ from, id }`. It
+normalized, its `kind`, its `title` unless it is empty, `{ from, id }`, and, as
+`profile`, the space its `toProfile` names, when it names one. It
 sends no `since`, so Home's handler records the time it admits the entry, as the
 catalog's `since` requires, rather than the sender's `sharedAt`. The handler
 reads only Home's own catalog, never an inbox pointer, so the hazard an untyped
 pointer read carries, above, cannot reach it. Registration is insert-if-absent,
 so an offer of a space already in the catalog under the same host and kind,
 archived or not, adds a receipt and leaves the entry as it is; one under another
-host or kind is a `conflict`, which writes nothing.
+host or kind is a `conflict`, which writes nothing. Home records the offer's
+`profile` as the profile acting in the space when it records none for the space
+and the profile is one of the person's live profiles, whose name is attested to
+them. An offer naming another profile than the one Home records, or a profile
+that is not one of the person's live profiles, is registered all the same, with
+its receipt's `profileConflict` saying why its profile was refused, and Home
+returns a `conflict` the intake logs, as "The profile acting in a space" in
+[`shared-space-catalog.md`](shared-space-catalog.md) describes. Such an offer of
+a `fabrichat-room` is accepted when it admitted a new entry, as any offer that
+does is. A receipt carrying `profileConflict` also keeps the intake from
+registering its offer again for a space Home records no profile for.
 
-When Home's handler returns `registered`, a new entry, for a `fabrichat-room`
+When Home's handler returns `registered`, a new entry, or a `conflict` over the
+offer's profile whose `registration` is `registered`, for a `fabrichat-room`
 offer, the intake then accepts the room on the owner's behalf: it sends the
 space's root, the one vetting read, to Home's `chatManager.accept`, when Home
 has that stream, with `keepArchived` set. A `loom` entry gets no acceptance;

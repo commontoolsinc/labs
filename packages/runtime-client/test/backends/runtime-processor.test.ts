@@ -4297,6 +4297,9 @@ describe("runtime-processor", () => {
       );
       const home = {
         getAsLink: () => cellRefToSigilLink(homeRef),
+        // The document Home's root is, which the inbox ensure loads before
+        // reading Home's lists: none is stored, so it is absent.
+        getAsNormalizedFullLink: () => ({ ...homeRef }),
         // The pattern Home's root records that it runs.
         getMetaRaw: (key: string) =>
           key === "patternIdentity"
@@ -4309,16 +4312,16 @@ describe("runtime-processor", () => {
             ? ensurePrivateInbox
             : {
               getRaw: () => ({ $stream: true }),
-              // Home's `privateInbox` and `profiles`, as the inbox ensure and
-              // the profile root repair read them: no inbox held, and no
-              // profile listed.
+              // Home's `privateInbox`, its `profiles` and the lists that
+              // order them, as the inbox ensure and the profile root repair
+              // read them: no inbox held, and no profile listed.
               asSchema: () => ({
+                get: () => undefined,
                 pull: async () => {
                   await inboxReadable;
                   return undefined;
                 },
                 sync: () => Promise.resolve(),
-                get: () => undefined,
                 sink: () => {
                   onSubscribe();
                   subscribed.push(name);
