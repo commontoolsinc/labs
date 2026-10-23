@@ -16,7 +16,11 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { terminateWorker } from "@commonfabric/utils/worker-lifetime";
 import type { ExperimentalOptions } from "../runtime.ts";
 import type { MemorySpace } from "../storage/interface.ts";
-import { type ExecutorHost, failureParkBackoffDelayMs } from "./host.ts";
+import {
+  type ExecutorHost,
+  failureParkBackoffDelayMs,
+  SpaceNotServedError,
+} from "./host.ts";
 import { ServingPortBridge } from "./serving-port-bridge.ts";
 import type {
   LifecycleVerbDescriptor,
@@ -97,15 +101,18 @@ type WorkerGeneration = {
  * The serving loop running in a Worker. Constructing one spawns it; `ready`
  * settles once the worker's host serves; `close()` closes the host and the
  * worker. A worker that fails is replaced after the same backoff the host
- * applies to a space whose tenures keep failing, and the replacement adopts a
- * new lease-holder process component, so its commits never meet its
- * predecessor's under the engine's replay keying.
+ * applies to a space whose tenures keep failing, widening until a worker
+ * commits a wave, and the replacement adopts a new lease-holder process
+ * component, so its commits never meet its predecessor's under the engine's
+ * replay keying.
  */
 export class ServingWorker {
   readonly #options: ServingWorkerOptions;
   #generation: WorkerGeneration | undefined;
   /** The teardown of the last worker that failed, while it runs. */
   #terminating: Promise<void> | undefined;
+  /** The timer that starts the next worker, while it is pending. */
+  #respawn: ReturnType<typeof setTimeout> | undefined;
   #failures = 0;
   #closed = false;
 
@@ -116,8 +123,7 @@ export class ServingWorker {
 
   /** Settles once the current worker's host serves; rejects when it cannot. */
   get ready(): Promise<void> {
-    return this.#generation?.ready ??
-      Promise.reject(new Error("the serving worker is closed"));
+    return this.#generation?.ready ?? Promise.reject(this.#notRunning());
   }
 
   /** The counters the worker last posted, or none before its first. */
@@ -137,29 +143,41 @@ export class ServingWorker {
     return await this.#bridge().requestDiagnostics();
   }
 
-  /** Runs a lifecycle verb on the worker's host, once it serves. */
+  /**
+   * Runs a lifecycle verb on the worker's host, once it serves. Throws
+   * {@link SpaceNotServedError} while no worker runs: once closed, and between
+   * a worker that failed and its replacement.
+   */
   async runLifecycleVerb(
     space: MemorySpace,
     verb: LifecycleVerbDescriptor,
   ): Promise<LifecycleVerbRun> {
-    await this.ready;
-    return await this.#bridge().runLifecycleVerb(space, verb);
+    const generation = this.#generation;
+    if (generation === undefined) throw new SpaceNotServedError(space);
+    await generation.ready;
+    return await generation.bridge.runLifecycleVerb(space, verb);
   }
 
   /**
    * Closes the worker's host, then the worker; settles once both are gone,
-   * and once a worker that failed before the call has been torn down.
+   * and once a worker that failed before the call has been torn down. A host
+   * that does not close, the worker failing first among the reasons, leaves
+   * the lease rows its worker held to be released here.
    */
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+    clearTimeout(this.#respawn);
+    this.#respawn = undefined;
     const generation = this.#generation;
     this.#generation = undefined;
     await this.#terminating;
     if (generation === undefined) return;
+    let hostClosed = false;
     try {
       await generation.ready;
       await generation.bridge.closeHost();
+      hostClosed = true;
     } catch (error) {
       logger.warn("worker-close-failed", () => [
         "closing the serving worker's host failed; terminating the worker",
@@ -169,14 +187,22 @@ export class ServingWorker {
       generation.bridge.close();
       await terminateWorker(generation.worker, generation.lifetimeLock);
     }
+    if (!hostClosed) await generation.bridge.releaseLeasesOf(generation.holder);
   }
 
   #bridge(): ServingPortBridge {
     const generation = this.#generation;
-    if (generation === undefined) {
-      throw new Error("the serving worker is closed");
-    }
+    if (generation === undefined) throw this.#notRunning();
     return generation.bridge;
+  }
+
+  /** Helper for `ready` and `#bridge()`, which says why no worker runs. */
+  #notRunning(): Error {
+    return new Error(
+      this.#closed
+        ? "the serving worker is closed"
+        : "the serving worker failed, and its replacement has not started",
+    );
   }
 
   #spawn(): WorkerGeneration {
@@ -193,10 +219,15 @@ export class ServingWorker {
     const bridge = new ServingPortBridge({
       server,
       port: worker,
-      onActivationSettled: (space, outcome) => {
-        if (outcome === "active") this.#failures = 0;
-        this.#options.onActivationSettled?.(space, outcome);
+      // A committed wave is the progress a worker that keeps failing never
+      // makes, as the host's own failure streak counts it: an activation is
+      // not, since a worker can activate a space and fail at its first wave.
+      onWaveCommitted: () => {
+        this.#failures = 0;
       },
+      ...(this.#options.onActivationSettled === undefined
+        ? {}
+        : { onActivationSettled: this.#options.onActivationSettled }),
       ...(this.#options.onSpaceParked === undefined
         ? {}
         : { onSpaceParked: this.#options.onSpaceParked }),
@@ -232,14 +263,15 @@ export class ServingWorker {
   /**
    * Replaces a worker that reported an error it did not handle. Its bridge
    * closes first, which closes the loopback connections its runtimes held, so
-   * the server sees their sessions detach; once the worker is gone, the lease
-   * rows it held are released, so its successor, which carries a holder of
-   * its own, acquires them without waiting out their TTL.
+   * the server sees their sessions detach, and fails whatever still waits on
+   * the worker, a `close()` already under way included; once the worker is
+   * gone, the lease rows it held are released, so its successor, which
+   * carries a holder of its own, acquires them without waiting out their TTL.
    */
   #onWorkerFailed(generation: WorkerGeneration, message: string): void {
+    generation.bridge.close();
     if (this.#generation !== generation) return;
     this.#generation = undefined;
-    generation.bridge.close();
     this.#terminating = terminateWorker(
       generation.worker,
       generation.lifetimeLock,
@@ -262,7 +294,8 @@ export class ServingWorker {
       `the serving worker failed (${message}); starting another in ${delayMs}ms`,
     );
     const terminating = this.#terminating;
-    setTimeout(() => {
+    this.#respawn = setTimeout(() => {
+      this.#respawn = undefined;
       terminating.then(() => {
         if (this.#closed) return;
         this.#generation = this.#spawn();

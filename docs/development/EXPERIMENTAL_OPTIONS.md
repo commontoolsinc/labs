@@ -1870,22 +1870,25 @@ the per-epic implementation notes).
   toolshed, read by the serving-host bootstrap
   ([`packages/toolshed/lib/server-execution.ts`](../../packages/toolshed/lib/server-execution.ts)).
   Only the literal `true` turns it on; `false`, empty, and unset leave it off.
-  Other values warn and leave it off. Meaningful only with the serving loop
-  running ([`serverExecution`](#serverexecution) on).
+  Other values warn and leave it off. The serving memory server tests build
+  ([`packages/runner/src/executor/serving-memory-server.deno.ts`](../../packages/runner/src/executor/serving-memory-server.deno.ts))
+  reads it too, where its `worker` option is left unset, and `cf test` sets that
+  option to keep its loop on its own thread. Meaningful only with the serving
+  loop running ([`serverExecution`](#serverexecution) on).
 - **Added by.** Bernhard Seefeld, in the change that moves the serving loop
   off the request thread.
-- **Purpose.** The serving loop, its host and every serving runtime run in a
-  Web Worker of the toolshed process instead of on the thread that answers
-  the memory server's frames and the HTTP routes. A wave's settle step is a
-  run of synchronous scheduler actions, and on one thread every client round
-  trip waits behind it. The worker reads the store through its own SQLite
-  connections and reaches the memory server over a port: wave commits cross
-  to a sink on the main thread, which keeps the store's one writer; the
-  serving runtimes' storage sessions cross as frames; and the server's
-  observer crosses as events. The memory server's store has to be a file for
-  the worker to open it. The pattern-lifecycle verbs reach the loop as
-  descriptors on both arms. [`docs/plans/serving-loop-worker.md`](../plans/serving-loop-worker.md)
-  is the design and its stages.
+- **Purpose.** The serving loop, its host and every serving runtime run in a Web
+  Worker of the toolshed process instead of on the thread that answers the
+  memory server's frames and the HTTP routes. A wave's settle step is a run of
+  synchronous scheduler actions, and on one thread every client round trip waits
+  behind it. The worker reads the store through its own SQLite connections and
+  reaches the memory server over a port: wave commits cross to a sink on the
+  main thread, which applies every commit the server fans out; the serving
+  runtimes' storage sessions cross as frames; and the server's observer crosses
+  as events. The memory server's store has to be a file for the worker to open
+  it. The pattern-lifecycle verbs reach the loop as descriptors on both arms.
+  [`docs/plans/serving-loop-worker.md`](../plans/serving-loop-worker.md) is the
+  design and its stages.
 - **Current default and planned end state.** Off by default. The end state is
   on by default, then the in-process arm goes, with the knob.
 - **Path to removal.** Soak with the worker on, flip the default, then delete

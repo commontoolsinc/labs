@@ -28,27 +28,30 @@ Each is placed below; the placement is the design.
 **Reads of the store stay reads, on the worker's own connection.** The loop
 reads `serverSeq`, the pending stream-event documents, commits since a sequence,
 document heads, retirable effect instances, and, under the store read-through
-posture, documents, all through `Engine.*` on an engine object. Every one of
-those is a SQLite query; the engine's decoded-document cache is keyed by
-revision identity, and its branch-head cache is dropped whenever the
-connection's data version shows another connection's commit, so a second
-connection to the same WAL-mode file reads every committed revision and serves
-nothing stale. The worker opens one engine per space it serves, read-through
-included, at the file the main thread names once it has opened the space itself,
-so the server's own engine map holds every space the worker serves, which its
-synchronous lease scan reads. A store that is not a file cannot be shared this
-way, so the worker needs a file store. Three writes stay on the worker's
-connection, each small and serialized by SQLite's lock with the engine's 5 s
-busy timeout: the lease rows the loop writes (`execution-lease.ts`), which the
-main thread's admission reads from SQLite each time; the outbox's retirement of
-a delivered row; and the outbox's failure notice for an append the target
-refused, a derived commit of the loop's own that the server does not fan out
-whichever thread writes it. The busy timeout covers a transaction that takes the
-write lock up front, so every transaction the engine opens is immediate, the
-schema's and the migrations' at open included: a deferred one that reads first
-and writes after fails at once, rather than waiting, when the other connection
-committed in between. The owner a space's access list names is read the same
-way, through `resolveSpaceOwnerOf` on the worker's engine.
+posture, documents, all through `Engine.*` on an engine object. The wave commit
+sink's reads run there too: the heads a rebase decides on, the paths written
+since a sequence, an intrusion, and the paths the session that fired an event
+overwrote. Every one of those is a SQLite query; the engine's decoded-document
+cache is keyed by revision identity, and its branch-head cache is dropped
+whenever the connection's data version shows another connection's commit, so a
+second connection to the same WAL-mode file reads every committed revision and
+serves nothing stale. The worker opens one engine per space it serves,
+read-through included, at the file the main thread names once it has opened the
+space itself, so the server's own engine map holds every space the worker
+serves, which its synchronous lease scan reads. A store that is not a file
+cannot be shared this way, so the worker needs a file store. Three writes stay
+on the worker's connection, each small and serialized by SQLite's lock with the
+engine's 5 s busy timeout: the lease rows the loop writes
+(`execution-lease.ts`), which the main thread's admission reads from SQLite each
+time; the outbox's retirement of a delivered row; and the outbox's failure
+notice for an append the target refused, a derived commit of the loop's own that
+the server does not fan out whichever thread writes it. The busy timeout covers
+a transaction that takes the write lock up front, so every transaction the
+engine opens is immediate, the schema's and the migrations' at open included: a
+deferred one that reads first and writes after fails at once, rather than
+waiting, when the other connection committed in between. The owner a space's
+access list names is read the same way, through `resolveSpaceOwnerOf` on the
+worker's engine.
 
 **Wave commits cross to the main thread.** `EngineWaveCommitSink` applies a
 wave's one derived commit inside the engine transaction that also writes its
@@ -58,17 +61,17 @@ through the memory server, and reports the commit to the server
 reports the commit itself, as it applies it, and the worker's loop reports
 nothing for it: a notice posted by the worker once the reply reached it would
 let the server's fan-out of the wave's rows fall behind the loop's next step,
-which in-process follows the apply synchronously. The store keeps one writer
-with one view of its own commits: the worker sends the `WaveSpaceCommit` (data
-throughout: operations, preconditions, confirmed reads, annotations, basis rows,
-consequence ids, delegated carriage, outbox appends) in the memory boundary's
-encoding, and the main thread applies it through a sink of its own per session,
-returning the result. The counter that keys the session's commits stays with the
-worker, because the outbox's own writes draw from the same counter under the
-same session: each commit crosses with the number the worker minted for it, and
-the main thread's sink is handed that number. The served-ACL-change commit
-crosses the same way, as the list of changes it applies; the main thread
-rebuilds the function from the list.
+which in-process follows the apply synchronously. Every commit the server fans
+out is applied on the main thread, where the server sees each one land: the
+worker sends the `WaveSpaceCommit` (data throughout: operations, preconditions,
+confirmed reads, annotations, basis rows, consequence ids, delegated carriage,
+outbox appends) in the memory boundary's encoding, and the main thread applies
+it through a sink of its own per session, returning the result. The counter that
+keys the session's commits stays with the worker, because the outbox's own
+writes draw from the same counter under the same session: each commit crosses
+with the number the worker minted for it, and the main thread's sink is handed
+that number. The served-ACL-change commit crosses the same way, as the list of
+changes it applies; the main thread rebuilds the function from the list.
 
 **The serving runtime's storage plane crosses as frames.** The serving runtime's
 `StorageManager` connects to the memory server through `LoopbackStorageManager`,

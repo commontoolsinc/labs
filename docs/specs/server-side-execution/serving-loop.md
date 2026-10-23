@@ -44,17 +44,19 @@ toolshed process
 
 *(AMENDED 2026-10-11: under `SERVER_EXECUTION_WORKER` the `ExecutorHost`
 and everything under it run in a Web Worker of the toolshed process, and
-the memory server, the HTTP routes and the store's one writer stay on the
-main thread. The worker reads the store through SQLite connections of its
-own and reaches the memory server over a port: its wave commits cross to a
-sink on the main thread (plane (a)'s commits, so the store keeps one
-writer), its serving runtimes' storage sessions cross as frames, the
-server's observer crosses as events, and the three session questions the
-loop asks synchronously are answered from a mirror the server's session
-lifecycle keeps current. The lease rows (plane (c)) stay the worker's own
-writes. The lease holder's process component is minted by the main thread
-per worker start, so a worker started in place of one that died never
-shares its predecessor's holder.
+the memory server, the HTTP routes and the commits the server fans out
+stay on the main thread. The worker reads the store through SQLite
+connections of its own and reaches the memory server over a port: its wave
+commits cross to a sink on the main thread (plane (a)'s commits, applied
+where the server sees each one land), its serving runtimes' storage
+sessions cross as frames, the server's observer crosses as events, and the
+three session questions the loop asks synchronously are answered from a
+mirror the server's session lifecycle keeps current. The lease rows (plane
+(c)) and the outbox's own bookkeeping, its retirement of a delivered row
+and its notice of a refused append, stay the worker's own writes. The
+lease holder's process component is minted by the main thread per worker
+start, so a worker started in place of one that died never shares its
+predecessor's holder.
 [`docs/plans/serving-loop-worker.md`](../../plans/serving-loop-worker.md)
 places each crossing; the in-process arrangement, the default, is
 unchanged.)*

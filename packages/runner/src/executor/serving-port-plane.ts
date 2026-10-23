@@ -192,12 +192,23 @@ const planeTransport = (
   });
 
 /**
- * The tenure's wave commit sink on the worker: the three reads run on the
- * worker's engines, and each commit crosses to the sink the server's thread
- * keeps for this session, carrying the number this side's counter minted
- * for it.
+ * The members of a wave commit sink that read the store rather than commit,
+ * each one required: the worker's sink answers every one of them on its own
+ * engines, so a read the sink's contract gains is one it must forward.
  */
-class PlaneWaveCommitSink implements WaveCommitSink {
+type WaveCommitSinkReads = Required<
+  Omit<
+    WaveCommitSink,
+    "reportsCommits" | "commitWave" | "commitSpaceAccessChange"
+  >
+>;
+
+/**
+ * The tenure's wave commit sink on the worker: the reads run on the worker's
+ * engines, and each commit crosses to the sink the server's thread keeps for
+ * this session, carrying the number this side's counter minted for it.
+ */
+class PlaneWaveCommitSink implements WaveCommitSink, WaveCommitSinkReads {
   readonly #endpoint: ServingPlaneEndpoint;
   readonly #deps: WaveCommitSinkDeps;
   readonly #reads: EngineWaveCommitSink;
@@ -205,7 +216,7 @@ class PlaneWaveCommitSink implements WaveCommitSink {
   constructor(endpoint: ServingPlaneEndpoint, deps: WaveCommitSinkDeps) {
     this.#endpoint = endpoint;
     this.#deps = deps;
-    // Its counter never advances: only the three reads are called on it.
+    // Its counter never advances: only the reads are called on it.
     this.#reads = new EngineWaveCommitSink({
       engineFor: (space) =>
         space === deps.space ? deps.engine : deps.foreignEngineFor(space),
@@ -240,6 +251,20 @@ class PlaneWaveCommitSink implements WaveCommitSink {
     holder: string | undefined,
   ): Promise<boolean> {
     return this.#reads.intrusionSince(space, doc, sinceSeq, holder);
+  }
+
+  sessionOverwritePathsSince(
+    space: MemorySpace,
+    doc: { id: string; scope?: CellScope; scopeKey: string },
+    sinceSeq: number,
+    session: { principal: string; sessionId: string },
+  ): Promise<ReadonlyArray<readonly string[]>> {
+    return this.#reads.sessionOverwritePathsSince(
+      space,
+      doc,
+      sinceSeq,
+      session,
+    );
   }
 
   async commitWave(

@@ -79,6 +79,9 @@ export type ServingPortBridgeOptions = {
 
   /** DIAGNOSTIC (tests): the worker's parks, as its host reports them. */
   onSpaceParked?: (space: MemorySpace, reason: string) => void;
+
+  /** Called each time a wave commit the worker sent lands in the store. */
+  onWaveCommitted?: () => void;
 };
 
 /**
@@ -232,15 +235,24 @@ export class ServingPortBridge {
    * Releases the lease rows `holder` holds in every space the worker opened:
    * what the worker's successor needs when the worker died holding them,
    * since the host leaves a space parked on another holder's live lease
-   * rather than contending for it. A row held by anyone else is left alone.
+   * rather than contending for it. A row held by anyone else is left alone,
+   * and a space whose rows cannot be released is reported and leaves the
+   * others to be released.
    */
   async releaseLeasesOf(holder: string): Promise<void> {
     const { server } = this.#options;
     for (const space of this.#openedSpaces) {
-      releaseExecutionLease(await server.engineForSpace(space), {
-        space,
-        holder,
-      });
+      try {
+        releaseExecutionLease(await server.engineForSpace(space), {
+          space,
+          holder,
+        });
+      } catch (error) {
+        logger.warn("lease-release-failed", () => [
+          `releasing ${holder}'s lease rows in ${space} failed`,
+          error,
+        ]);
+      }
     }
   }
 
@@ -378,7 +390,9 @@ export class ServingPortBridge {
         entry.state.homeRefused = false;
         const pending = entry.sink.commitWave(batch);
         const homeRefused = entry.state.homeRefused;
-        return { result: await pending, homeRefused };
+        const result = await pending;
+        if (result.error === undefined) this.#options.onWaveCommitted?.();
+        return { result, homeRefused };
       },
     );
     endpoint.onRequest(

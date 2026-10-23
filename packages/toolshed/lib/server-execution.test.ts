@@ -386,29 +386,31 @@ describe("ensureSpaceRootsFromEnv", () => {
   });
 });
 
+/**
+ * Polls `predicate` until it holds, and throws naming `label` once the
+ * deadline has passed: a backstop on a live host's activation, which exposes
+ * no event to await, sized for a stuck condition rather than a slow one (the
+ * runner's executor suites wait the same way).
+ */
+const until = async (
+  predicate: () => boolean,
+  label: string,
+  timeoutMs = 20_000,
+): Promise<void> => {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) {
+      throw new Error(`timed out waiting for ${label}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+};
+
 describe("startServerExecutionHost with the store read-through on", () => {
   // A real memory server and a client session on it: the session open
   // activates the space, the host's factory builds the serving runtime with
   // the read-through the SpaceServer handed it installed ahead of the
   // runtime, and the space serves. What the knob switches on, end to end.
-
-  /** Polls `predicate` until it holds, and throws naming `label` once the
-   * deadline has passed — a backstop on a live host's activation, which
-   * exposes no event to await, sized for a stuck condition rather than a
-   * slow one (the runner's executor suites wait the same way). */
-  const until = async (
-    predicate: () => boolean,
-    label: string,
-    timeoutMs = 20_000,
-  ): Promise<void> => {
-    const deadline = Date.now() + timeoutMs;
-    while (!predicate()) {
-      if (Date.now() > deadline) {
-        throw new Error(`timed out waiting for ${label}`);
-      }
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-  };
 
   it("serves a space whose client session opens, with the read-through installed through the factory", async () => {
     const identity = await Identity.fromPassphrase(
@@ -482,12 +484,14 @@ describe("startServerExecutionHost with the store read-through on", () => {
       await server.close();
     }
   });
+});
 
+describe("startServerExecutionHost with the worker on", () => {
   it("serves a space from a Worker under SERVER_EXECUTION_WORKER=true, relaying the loop's counters", async () => {
-    // The same end to end, with the loop in a worker of this process: the
-    // bootstrap starts the worker over the file store the memory server
+    // The bootstrap starts the worker over the file store the memory server
     // owns, the client's session open crosses to it as an event, and the
     // counters it posts are what `stats()` reads.
+
     const identity = await Identity.fromPassphrase("serving worker service");
     const client = await Identity.fromPassphrase("serving worker client");
     const space = (await Identity.fromPassphrase("serving worker space")).did();
