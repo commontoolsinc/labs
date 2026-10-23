@@ -2299,8 +2299,8 @@ finally:
     message.type === "session/effect" &&
     message.sessionId === compressedSession
   );
-  // The toolshed compressed the large effect; the router forwarded the
-  // envelope opaquely and the client expanded it.
+  // The toolshed compressed its large bodies; the router forwarded the
+  // envelopes opaquely and the client expanded them.
   assert(compressing.binaryFrames > 0);
   assertEquals(
     (await compressing.request({ type: "memory.compression", enabled: true }))
@@ -2323,7 +2323,9 @@ finally:
     principal: alice.did(),
     session: {},
   })).ok as { sessionId: string }).sessionId;
-  await older.request({
+  // The watch result carries the large document. (The compressing client's
+  // later effect follows from its own commit; this client made none.)
+  const olderWatch = await older.request({
     type: "session.watch.set",
     space: spaces[0],
     sessionId: olderSession,
@@ -2335,10 +2337,7 @@ finally:
       },
     }],
   });
-  const olderEffect = await older.take((message) =>
-    message.type === "session/effect" && message.sessionId === olderSession
-  );
-  assert(JSON.stringify(olderEffect).includes("routed compression entry 399"));
+  assert(JSON.stringify(olderWatch).includes("routed compression entry 399"));
   assertEquals(older.binaryFrames, 0);
   older.close();
   await older.closed.promise;
