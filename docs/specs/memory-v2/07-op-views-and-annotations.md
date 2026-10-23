@@ -298,7 +298,9 @@ establishes that the field still holds that value takes one of two forms:
 - **No hash: the commit's read.** The commit must carry a recursive read,
   confirmed or pending, of the field or of a path above it on the commit's
   branch, and no operation ahead of the `apply-op` in the commit may write the
-  field; otherwise the engine rejects it with `OpCursorMismatchError`. Reads
+  field, nor add, remove, or move an element of an array at or above it, which
+  would move another value into it; otherwise the engine rejects it with
+  `OpCursorMismatchError`. Reads
   are validated before operations apply, so where the field moved since the
   read, the read refuses the whole commit as an ordinary `ConflictError` before
   the `apply-op` is considered. Where it did not, the field holds exactly what

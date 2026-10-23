@@ -27,6 +27,7 @@ import {
   emptyEntityDocument,
   PatchApplyError,
   patchOpChangesParentKeySet,
+  patchOpIsStructural,
   touchedPointerPaths,
 } from "./patch.ts";
 import {
@@ -4823,7 +4824,8 @@ const commitReadIsFieldBase = (
       case "patch":
         return earlier.patches.every((patch) =>
           touchedPointerPaths(patch).every((path) =>
-            !pathsOverlap(path, fieldPath)
+            !pathsOverlap(path, fieldPath) &&
+            !shiftsArrayAbove(patch, path, fieldPath)
           )
         );
       case "apply-op":
@@ -4834,6 +4836,26 @@ const commitReadIsFieldBase = (
         return false;
     }
   });
+};
+
+/**
+ * Whether `patch`, touching `path`, adds, removes, or moves an element of an
+ * array at or above `fieldPath`. That shifts the elements after it, so the
+ * value at `fieldPath` can become a different one without any path of the
+ * patch overlapping it. Adding or removing an object's key moves none of its
+ * other keys. Any index counts, one after the field's included, and so does a
+ * numeric key of an object; both only refuse an edit that would have been
+ * sound.
+ */
+const shiftsArrayAbove = (
+  patch: PatchOp,
+  path: readonly string[],
+  fieldPath: readonly string[],
+): boolean => {
+  if (!patchOpIsStructural(patch) || path.length === 0) return false;
+  const key = path[path.length - 1];
+  return (key === "-" || /^(0|[1-9][0-9]*)$/.test(key)) &&
+    isPrefixPath(parentPath(path), fieldPath);
 };
 
 /** An `apply-op` whose base is stated, as the engine applies one. */
