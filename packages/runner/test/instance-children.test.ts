@@ -136,23 +136,25 @@ describe("instance-children", () => {
     expect((await tx.commit().settled).error).toBeUndefined();
   };
 
-  // What `instanceChildren` records for the child result cell `child`.
-  const record = (child: Cell<unknown>) => {
+  // The `instanceChildren` entry that gives the instance `name` the child
+  // result cell `child`.
+  const entry = (name: string, child: Cell<unknown>) => {
     const { space, id, scope } = child.getAsNormalizedFullLink();
-    return { space, id, scope };
+    return { name, child: { space, id, scope } };
   };
 
   /**
    * A stopped parent that ran `DEPLOYED`, holding `a`'s count of 7 at its
-   * positional spot, with its pattern pointers naming `NAMED`, the source it
+   * positional spot, with its pattern pointers naming `named`, the source it
    * runs.
    */
   const deployedParent = async (
     name: string,
+    named: RuntimeProgram = NAMED,
   ): Promise<Cell<Record<string, unknown>>> => {
     const deployed = await compile(DEPLOYED);
     const namedRef = rt.patternManager.getArtifactEntryRef(
-      await compile(NAMED),
+      await compile(named),
     )!;
     const tx = rt.edit();
     const cell = rt.getCell<Record<string, unknown>>(
@@ -213,7 +215,7 @@ describe("instance-children", () => {
     it("runs the child its parent's `instanceChildren` records for it", async () => {
       const cell = await deployedParent("recorded-child");
       await writeMeta(cell, {
-        instanceChildren: { a: record(positionalChild(cell, 0)) },
+        instanceChildren: [entry("a", positionalChild(cell, 0))],
       });
 
       const result = await update(cell, NAMED);
@@ -277,11 +279,14 @@ describe("instance-children", () => {
         partialCause: deepFreeze(instancePartialCause("b")),
       });
       await writeMeta(cell, {
-        instanceChildren: {
-          a: record(rt.getCell(space, {
-            resultFor: { space: spot.space, id: spot.id, path: [] },
-          })),
-        },
+        instanceChildren: [
+          entry(
+            "a",
+            rt.getCell(space, {
+              resultFor: { space: spot.space, id: spot.id, path: [] },
+            }),
+          ),
+        ],
       });
 
       await expect(update(cell, NAMED_TWO_NEWER_COUNTER)).rejects.toThrow(
@@ -292,7 +297,7 @@ describe("instance-children", () => {
     it("refuses to set up a positional instance over the child its `instanceChildren` records for a named instance", async () => {
       const cell = await deployedParent("positional-over-recorded");
       await writeMeta(cell, {
-        instanceChildren: { a: record(positionalChild(cell, 0)) },
+        instanceChildren: [entry("a", positionalChild(cell, 0))],
       });
 
       await expect(update(cell, POSITIONAL_SIBLING_OF_NAMED)).rejects.toThrow(
@@ -306,8 +311,10 @@ describe("instance-children", () => {
       // has on the first setup that names its instances.
 
       const cell = await deployedParent("one-child-two-instances");
-      const child = record(positionalChild(cell, 0));
-      await writeMeta(cell, { instanceChildren: { a: child, b: child } });
+      const child = positionalChild(cell, 0);
+      await writeMeta(cell, {
+        instanceChildren: [entry("a", child), entry("b", child)],
+      });
 
       await expect(update(cell, NAMED_TWO)).rejects.toThrow(
         /refusing to set up .*#Counter for instance "(a|b)" over the child of .*#Counter that instance "(a|b)" carries/,
@@ -321,5 +328,62 @@ describe("instance-children", () => {
 
       expect(result.sCount).toBe(7);
     });
+  });
+  describe("an instance named for a key a record cannot hold or that an object inherits", () => {
+    // `constructor` and `__proto__` are names the codec refuses as a stored
+    // record's keys, and `toString` and `hasOwnProperty` are members every
+    // object inherits. Each is an ordinary `const` name, so each has to
+    // survive the record, the guard and a start.
+
+    // `NAMED` and `POSITIONAL_SIBLING_OF_NAMED`, with the instance bound to
+    // `name` in place of `a`.
+    const namedAs = (name: string) =>
+      parentProgram([
+        `  const ${name} = Counter({ label: 'a' });`,
+        `  return { views: [${name}], aCount: ${name}.count };`,
+      ].join("\n"));
+    const positionalSiblingOf = (name: string) =>
+      parentProgram([
+        "  const [s] = [Other({ label: 's' })];",
+        `  const ${name} = Counter({ label: 'a' });`,
+        `  return { views: [s, ${name}], aCount: ${name}.count, sCount: s.count };`,
+      ].join("\n"));
+
+    for (
+      const name of ["constructor", "__proto__", "toString", "hasOwnProperty"]
+    ) {
+      describe(`\`${name}\``, () => {
+        it("runs the child its parent's `instanceChildren` records for it, and runs it again when the parent starts", async () => {
+          const cell = await deployedParent(`recorded-${name}`, namedAs(name));
+          await writeMeta(cell, {
+            instanceChildren: [entry(name, positionalChild(cell, 0))],
+          });
+
+          const updated = await update(cell, namedAs(name));
+          rt.runner.stop(cell);
+          expect(await rt.runner.start(cell)).toBe(true);
+          await rt.idle();
+          await cell.pull();
+
+          expect({
+            updated: updated.aCount,
+            started: (cell.get() as Record<string, unknown>).aCount,
+          }).toEqual({ updated: 7, started: 7 });
+        });
+
+        it("refuses to set up a positional instance over the child its `instanceChildren` records for it", async () => {
+          const cell = await deployedParent(
+            `positional-over-${name}`,
+            namedAs(name),
+          );
+          await writeMeta(cell, {
+            instanceChildren: [entry(name, positionalChild(cell, 0))],
+          });
+
+          await expect(update(cell, positionalSiblingOf(name))).rejects
+            .toThrow(`that instance "${name}" carries`);
+        });
+      });
+    }
   });
 });

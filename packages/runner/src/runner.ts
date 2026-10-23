@@ -1133,30 +1133,35 @@ function isPositionalPartialCause(partialCause: unknown): boolean {
 /**
  * The children a parent's `instanceChildren` meta records, by instance name:
  * for each, the child that named instance runs in place of the one at its own
- * spot.
+ * spot. The meta is a list of `{ name, child }` entries rather than a record
+ * keyed by name, since an instance may take any name a `const` can, among
+ * them names a stored record may not use as a key, such as `constructor` and
+ * `__proto__`. An entry that is malformed, or that repeats a name an earlier
+ * entry gave, is skipped.
  */
 function readInstanceChildren(
   parent: Cell<any>,
-): Record<string, NormalizedFullLink> {
+): Map<string, NormalizedFullLink> {
   const raw = convertibleJsFromFabricValue(
     parent.getMetaRaw("instanceChildren", { meta: ignoreReadForScheduling }),
   );
-  // Prototype-free, so an instance named for an inherited member, such as
-  // `toString`, finds nothing it was not given.
-  const children: Record<string, NormalizedFullLink> = Object.create(null);
-  if (!isObjectNotArray(raw)) return children;
-  for (const [name, entry] of Object.entries(raw)) {
+  const children = new Map<string, NormalizedFullLink>();
+  if (!Array.isArray(raw)) return children;
+  for (const entry of raw) {
+    if (!isObjectNotArray(entry) || typeof entry.name !== "string") continue;
+    const child = entry.child;
     if (
-      isObjectNotArray(entry) && typeof entry.space === "string" &&
-      typeof entry.id === "string"
+      children.has(entry.name) || !isObjectNotArray(child) ||
+      typeof child.space !== "string" || typeof child.id !== "string"
     ) {
-      children[name] = {
-        space: entry.space as MemorySpace,
-        id: entry.id as URI,
-        path: [],
-        scope: isCellScope(entry.scope) ? entry.scope : "space",
-      };
+      continue;
     }
+    children.set(entry.name, {
+      space: child.space as MemorySpace,
+      id: child.id as URI,
+      path: [],
+      scope: isCellScope(child.scope) ? child.scope : "space",
+    });
   }
   return children;
 }
@@ -14579,7 +14584,7 @@ export class Runner {
     // runs that child, wherever its own spot would mint one.
     const recordedChild = instanceName === undefined
       ? undefined
-      : readInstanceChildren(resultCell.withTx(tx))[instanceName];
+      : readInstanceChildren(resultCell.withTx(tx)).get(instanceName);
     return {
       ...io,
       childResultCell: recordedChild !== undefined
@@ -14706,14 +14711,14 @@ export class Runner {
         ? recorded.has(positionalNumber(partialCause))
         : instanceName !== undefined &&
           (recordedInstances.has(instanceName) ||
-            recordedChildren[instanceName] !== undefined);
+            recordedChildren.has(instanceName));
       if (!judged) continue;
       // A space's root sits where its space's genesis reserved it, whatever
       // the node's cause, so no shift between this parent's spots moves it.
       if (module.targetSpaceRoot) continue;
       const link = instanceName === undefined
         ? undefined
-        : recordedChildren[instanceName];
+        : recordedChildren.get(instanceName);
       const child = link !== undefined
         ? this.#runtime.getCellFromLink(link, undefined, tx)
         : this.#childAtPartialCause(tx, resultCell, module, partialCause);
@@ -14788,11 +14793,7 @@ export class Runner {
       );
     }
     const storedKey = documentKey(storedChild.getAsNormalizedFullLink());
-    for (
-      const [name, link] of Object.entries(
-        readInstanceChildren(resultCell.withTx(tx)),
-      )
-    ) {
+    for (const [name, link] of readInstanceChildren(resultCell.withTx(tx))) {
       if (name === instanceName || documentKey(link) !== storedKey) continue;
       throw new Error(
         `refusing to set up ${settingUp} for ${holder} over ${over} that ` +

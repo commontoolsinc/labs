@@ -150,9 +150,12 @@ A named instance also records, as its descriptor's `legacyPartialCause`, the
 number, so every other anonymous root keeps the number it would have without
 instance names.
 
-A parent's `instanceChildren` meta maps an instance name to the child that
-named instance runs in place of the one minted at its own spot, as a link
-(`{ space, id, scope }`). Binding reads it on every setup and start: a named
+A parent's `instanceChildren` meta lists, as `{ name, child }` entries, the
+child a named instance runs in place of the one minted at its own spot, with
+`child` a link (`{ space, id, scope }`). The name is a value rather than a
+record key, since an instance may take any name a `const` can, among them
+names a stored record may not use as a key, such as `constructor` and
+`__proto__`; an entry repeating an earlier entry's name is ignored. Binding reads it on every setup and start: a named
 instance it records a child for runs that child, and any other named instance
 runs the child at its own spot. The record is how a deployed parent's
 positional child can become a named instance's child without moving to a new
