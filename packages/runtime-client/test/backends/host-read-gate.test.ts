@@ -647,6 +647,68 @@ describe("HostReadGate", () => {
       expect(updates.every((update) => "refused" in update)).toBe(true);
     });
 
+    it("delivers nothing for a write that leaves the value and label as delivered", async () => {
+      await using docs = await shelf();
+      const { updates, cancel } = subscribe(
+        gateFor(docs.runtime, owner),
+        docs.publicPiece.key(NAME).asSchema(stringSchema),
+        { includeCfcLabel: true },
+      );
+      await docs.write("public-piece", {
+        [NAME]: "Public piece",
+        entry: "public entry",
+      });
+      await docs.runtime.idle();
+      cancel();
+
+      expect(updates).toEqual([
+        expect.objectContaining({ value: "Public piece" }),
+      ]);
+    });
+
+    it("delivers a label change on its own", async () => {
+      await using docs = await shelf();
+      const { updates, cancel } = subscribe(
+        gateFor(docs.runtime, owner),
+        docs.publicPiece.key(NAME).asSchema(stringSchema),
+        { includeCfcLabel: true },
+      );
+      await docs.write("public-piece", {
+        [NAME]: "Public piece",
+        entry: "public entry",
+      }, [[[], [cfcAtom.space(space)]]]);
+      await docs.runtime.idle();
+      cancel();
+
+      expect(updates).toHaveLength(2);
+      expect(updates[1]).toEqual(expect.objectContaining({
+        value: "Public piece",
+        cfcLabel: expect.objectContaining({ entries: expect.anything() }),
+      }));
+    });
+
+    it("delivers the value admitted after a refusal, which the update before the refusal delivered too", async () => {
+      await using docs = await shelf();
+      const { updates, cancel } = subscribe(
+        gateFor(docs.runtime, visitor),
+        docs.publicPiece.key(NAME).asSchema(stringSchema),
+      );
+      const value = { [NAME]: "Public piece", entry: "public entry" };
+      await docs.write("public-piece", value, [[[], [ownerOnly]]]);
+      await docs.runtime.idle();
+      await docs.write("public-piece", value);
+      await docs.runtime.idle();
+      cancel();
+
+      expect(updates[0]).toEqual(
+        expect.objectContaining({ value: "Public piece" }),
+      );
+      expect("refused" in updates[1]).toBe(true);
+      expect(updates.at(-1)).toEqual(
+        expect.objectContaining({ value: "Public piece" }),
+      );
+    });
+
     it("delivers a sealed entry inside an untyped field to the owner, and refuses it to a visitor", async () => {
       await using docs = await shelf();
       const schema = {
