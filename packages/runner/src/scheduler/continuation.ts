@@ -17,6 +17,7 @@ export interface ExecuteContinuationState {
    * release starts, so the work it left is not cause for another pass.
    */
   readonly settleDeferredForLoadPark: () => boolean;
+
   readonly scheduleWake: (at: number) => void;
   readonly hasWakeTimer: () => boolean;
   readonly setScheduled: (scheduled: boolean) => void;

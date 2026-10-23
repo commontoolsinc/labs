@@ -49,8 +49,10 @@ type Selection = Omit<ViewPlan, "id" | "revision" | "generation"> & {
 /** Independent invalidation of rendered reads and execution-dependent output. */
 type CachedView = {
   render: ViewReadCache<ViewRenderReads>;
+
   /** What the UI walk found at each visible cell, kept across walks. */
   walk: ViewRenderWalkMemo;
+
   selection: ViewReadCache<true>;
   execution?: ViewExecutionNode[];
 };
@@ -75,24 +77,31 @@ export class ViewPlanPublisher {
   #published = new Map<string, Selection>();
   #views = new Map<string, CachedView>();
   #runtime: Runtime | undefined;
-  /** Fingerprints by the document version they were taken over, so that a
+
+  /**
+   * Fingerprints by the document version they were taken over, so that a
    * document unchanged since the last plan, or shared by several viewing
-   * sessions, is hashed once at each path. A version is a new object. */
+   * sessions, is hashed once at each path. A version is a new object.
+   */
   #fingerprints = new WeakMap<EntityDocument, Map<string, string>>();
-  /** Each producer's write surface and basis reads, sorted and compacted, by
+
+  /**
+   * Each producer's write surface and basis reads, sorted and compacted, by
    * the observation they were taken from, so that a node that has not run
-   * again since the last plan sorts neither again. A node that ran again is
-   * a new key: `viewExecutionNodes` reports the log its last run handed the
-   * scheduler, and nothing changes a log once handed out, since a
-   * transaction builds a new one after any later read or write rather than
-   * appending to the old. The write surface is the node's declared one,
-   * which a change replaces rather than edits, and `writes` holds the one
-   * the entry was sorted from. */
+   * again since the last plan sorts neither again. A node that ran again is a
+   * new key: `viewExecutionNodes` reports the log its last run handed the
+   * scheduler, and nothing changes a log once handed out, since a transaction
+   * builds a new one after any later read or write rather than appending to
+   * the old. The write surface is the node's declared one, which a change
+   * replaces rather than edits, and `writes` holds the one the entry was
+   * sorted from.
+   */
   #surfaces = new WeakMap<TransactionReactivityLog, {
     writes: readonly IMemorySpaceAddress[];
     surface: IMemorySpaceAddress[];
     reads: IMemorySpaceAddress[];
   }>();
+
   #subscription: IStorageNotification = {
     next: (notification) => {
       for (const view of this.#views.values()) {

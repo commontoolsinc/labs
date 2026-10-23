@@ -173,15 +173,7 @@ describe("scheduler serving event batch", () => {
     const coldLink = cold.getAsNormalizedFullLink();
     const coldKey = `${coldLink.space}/${coldLink.scope}/${coldLink.id}`;
     const load = Promise.withResolvers<void>();
-    const manager = storageManager as unknown as {
-      pendingLoadAddresses(): readonly {
-        space: string;
-        scope: string;
-        id: string;
-      }[];
-      pendingLoadGeneration(key: string): number | undefined;
-      loadsSettled(keys: readonly string[]): Promise<void>;
-    };
+    const manager = storageManager!;
     manager.pendingLoadAddresses = () => [{
       space: coldLink.space,
       scope: coldLink.scope,

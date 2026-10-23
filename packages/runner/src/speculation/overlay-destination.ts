@@ -332,9 +332,10 @@ export class SpeculationOverlayDestination
   /** DIAGNOSTIC counter (tests): late echoes dropped at seal. */
   #lateEchoDrops = 0;
 
-  /** Stage C W2.1: cascade-child echoes retired because an ANCESTOR
-   * intent's terminal consequence arrived (`retireIntent` walked the
-   * cascade thread to them). */
+  /** Stage C W2.1: cascade-child echoes retired along the cascade
+   * thread, because an ANCESTOR intent's terminal consequence arrived
+   * (`retireIntent`) or because the transaction that sent the ancestor
+   * event did not commit (`retireUnfiredEcho`). */
   #cascadeEchoRetirements = 0;
 
   /** The subset of those retired while NO doc they wrote had yet moved
@@ -483,9 +484,10 @@ export class SpeculationOverlayDestination
     return this.#lateEchoDrops;
   }
 
-  /** DIAGNOSTIC (tests): client cascade-child echoes retired by an
-   * ANCESTOR intent's terminal consequence (stage C W2.1 — the cascade
-   * arm of `retireIntent`). */
+  /** DIAGNOSTIC (tests): client cascade-child echoes retired along the
+   * cascade thread (stage C W2.1), by an ANCESTOR intent's terminal
+   * consequence (`retireIntent`) or by the ancestor event's send never
+   * firing (`retireUnfiredEcho`). */
   get cascadeEchoRetirementCount(): number {
     return this.#cascadeEchoRetirements;
   }

@@ -16,7 +16,6 @@ import {
   loopback,
   queuedFrameTransport,
 } from "../v2/client.ts";
-import type { Server } from "../v2/server.ts";
 
 // A stand-in for the server. `loopback` calls `connect` once and then only
 // `receive` and `close` on what it hands back, so nothing else of Server is
@@ -28,7 +27,7 @@ const harness = (onFrame?: (index: number) => void) => {
       emit = send;
       return { receive: () => Promise.resolve(), close: () => {} };
     },
-  } as unknown as Server;
+  };
 
   const transport = loopback(server);
   const received: string[] = [];
@@ -260,7 +259,7 @@ describe("client", () => {
           send({ type: "response", requestId: "at-connect" } as ServerMessage);
           return { receive: () => Promise.resolve(), close: () => {} };
         },
-      } as unknown as Server;
+      };
       const transport = loopback(server);
       const received: string[] = [];
       transport.setReceiver((payload) => received.push(payload));

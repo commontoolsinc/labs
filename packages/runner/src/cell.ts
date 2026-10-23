@@ -34,6 +34,7 @@ import {
 import {
   deepFrozenCloneAndInternSchema,
   internSchema,
+  internSchemaAsTaggedHashString,
   isInternedSchema,
 } from "@commonfabric/data-model-schema";
 import type { MemorySpace } from "@commonfabric/memory/interface";
@@ -1585,9 +1586,9 @@ export class CellImpl<T extends FabricValue>
     const { schema, ...rest } = link;
     const hash = schema !== undefined && isInternedSchema(schema)
       ? hashStringOf({
-        link: { ...rest, schema: internSchema(schema, true).taggedHashString },
+        link: { ...rest, schema: internSchemaAsTaggedHashString(schema) },
         cfcLabelView,
-      } as unknown as CellViewRef)
+      })
       : hashStringOf({ link, cfcLabelView } satisfies CellViewRef);
     this.#viewRefHashCache = { link, cfcLabelView, hash };
     return hash;

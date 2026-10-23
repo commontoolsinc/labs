@@ -1297,7 +1297,7 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
 
   it("runs a served event on a nested pattern's stream, while nothing runs the enclosing piece, against the actor's own instance of the enclosing piece's per-user derivation", async () => {
     // A room's first message, reduced: its sender set the piece up and
-    // nothing has run it since, so the serving runtime first meets it
+    // nothing has run it since, so the serving runtime first reaches it
     // through an event on a stream its NESTED instance defines, whose
     // handler reads what the enclosing instance derives per user.
     const names = { arg: "fo-nested-arg", result: "fo-nested-result" };

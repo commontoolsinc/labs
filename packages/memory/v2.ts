@@ -1600,7 +1600,10 @@ export type EntitySnapshot = {
 export type GraphQueryResult = {
   serverSeq: number;
   entities: EntitySnapshot[];
-  /** Present when requested, bounded by `atSeq` and restricted to the branch. */
+  /**
+   * Present when requested, bounded by `atSeq` and restricted to the
+   * branch.
+   */
   authoredSeq?: number;
 };
 

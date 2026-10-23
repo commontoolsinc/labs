@@ -4500,33 +4500,31 @@ export class WatchView {
 
 export const connect = Client.connect;
 
-// A queued-frame transport delivers server frames on EVENT LOOP turns, one
-// frame per turn, like a socket: no response or push ever arrives inside the sender's
-// own await cascade, so code that accidentally depends on "nothing arrives
-// until I yield" fails here the way it would against a deployment. One
-// frame per macrotask also guarantees a frame's full microtask cascade
-// (response resolution, request() continuation, caller continuation)
-// completes before the next frame delivers. Client→server keeps awaiting
-// the server's processing: the server's fan-out drain-wait counts a frame
-// from receive() entry, and a send that merely enqueued would let fan-out
-// read heads that predate a write already handed to the transport. Frames
-// staged at close() are dropped — nothing arrives after the socket is
-// gone. Remaining fidelity gap over loopback: nothing there calls `lose()`,
-// so a server-initiated disconnect is invisible over it.
-//
-// The pump takes that turn through armTurn, so a queued frame always has an
-// armed zero-delay timer for `clock.settle()` to see without the delivery
-// itself waiting on one. A posted message is not an option in its place:
-// Node's MessageChannel replaces the web one as soon as anything in the
-// process loads node compatibility, and its ports deliver inside a microtask
-// cascade rather than on a turn of their own.
 /**
  * A transport over a connection whose server frames are handed to it one at
- * a time ({@link QueuedFrameTransport.deliver}), as this module's comment
- * above describes: each frame reaches the receiver on a turn of its own,
- * frames staged at `close()` are dropped, and `delivered()` waits for the
- * frames held at the call. `loopback()` builds one over an in-process
- * connection; the serving worker's plane builds one over its port.
+ * a time ({@link QueuedFrameTransport.deliver}). It delivers them on event
+ * loop turns, one frame per turn, like a socket: no response or push ever
+ * arrives inside the sender's own await cascade, so code that accidentally
+ * depends on "nothing arrives until I yield" fails here the way it would
+ * against a deployment. One frame per macrotask also guarantees a frame's
+ * full microtask cascade (response resolution, `request()` continuation,
+ * caller continuation) completes before the next frame delivers.
+ * Client→server keeps awaiting the server's processing: the server's fan-out
+ * drain-wait counts a frame from `receive()` entry, and a send that merely
+ * enqueued would let fan-out read heads that predate a write already handed
+ * to the transport. Frames staged at `close()` are dropped, since nothing
+ * arrives after the socket is gone, and `delivered()` waits for the frames
+ * held at the call.
+ *
+ * The pump takes each turn through `armTurn`, so a queued frame always has an
+ * armed zero-delay timer for `clock.settle()` to see without the delivery
+ * itself waiting on one. A posted message is not an option in its place:
+ * Node's MessageChannel replaces the web one as soon as anything in the
+ * process loads node compatibility, and its ports deliver inside a microtask
+ * cascade rather than on a turn of their own.
+ *
+ * `loopback()` builds one over an in-process connection; the serving worker's
+ * plane builds one over its port.
  */
 export const queuedFrameTransport = (
   connection: {
@@ -4613,7 +4611,7 @@ export const queuedFrameTransport = (
 
 /** What {@link queuedFrameTransport} returns. */
 export type QueuedFrameTransport = Transport & {
-  /** Hands one server frame over, to reach the receiver on a turn of its own. */
+  /** Hands one server frame over, to reach the receiver on its own turn. */
   deliver(frame: string): void;
 
   /**
@@ -4623,6 +4621,11 @@ export type QueuedFrameTransport = Transport & {
   lose(error: Error): void;
 };
 
+/**
+ * A transport to an in-process server, delivering its frames as
+ * {@link queuedFrameTransport} does. Nothing calls `lose()` over it, so a
+ * disconnect the server initiates is invisible over loopback.
+ */
 export const loopback = (
   server: {
     connect(send: (message: ServerMessage) => void): {

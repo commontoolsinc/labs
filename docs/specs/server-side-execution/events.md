@@ -249,7 +249,9 @@ handler fires
   from elsewhere waits for the park's end as well. The park ends when
   its loads settle, when one fails, or when a drop takes the parked head
   off the queue first, as the flush deadline's purge of an in-process
-  leftover does, and each of the three queues that pass. A head that
+  leftover does, and each queues that pass; a head the event phases
+  drop on their own leaves its park to end at its loads' release, which
+  queues it then. A head that
   parks before the pass ran any handler leaves the settle to run as
   before. The scheduler is not idle while a head is parked, so a serving
   cycle whose flush deadline comes before the park ends commits the

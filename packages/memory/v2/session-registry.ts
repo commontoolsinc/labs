@@ -94,27 +94,33 @@ export type SessionState = {
    * evaluation to re-diff them out. Self-clearing. */
   forceFullResync: boolean;
 
-  /** Set when a planner selection changed what the session's views may run
+  /**
+   * Set when a planner selection changed what the session's views may run
    * or adopt without changing what they are delivered: the next frame
    * carries the new plans, over the incremental refresh, and a session
    * nothing dirtied gets a frame of plans alone. Cleared as that frame is
    * built. A changed delivery takes `viewSupportGrown` or
-   * `viewSupportReplaced` as well. */
+   * `viewSupportReplaced` as well.
+   */
   viewPlansPending: boolean;
 
-  /** Set when a planner selection added delivery roots to a view and took
+  /**
+   * Set when a planner selection added delivery roots to a view and took
    * none away: the next pass extends the view's support graph by the added
    * roots, inside the incremental refresh, instead of re-evaluating the
    * whole watch set. Cleared as that pass commits. A selection that removes
-   * a root takes `viewSupportReplaced`. */
+   * a root takes `viewSupportReplaced`.
+   */
   viewSupportGrown: boolean;
 
-  /** Set when a planner selection took a delivery root away from a view of
+  /**
+   * Set when a planner selection took a delivery root away from a view of
    * the same revision: the next pass refreshes the demand graphs by its
    * dirty batch, rebuilds the support graphs from the current selections
    * over them, and diffs the session's delivery against the result, as a
    * full evaluation does, so the departed documents are removed without
-   * the demand being walked again. Cleared as that pass begins. */
+   * the demand being walked again. Cleared as that pass begins.
+   */
   viewSupportReplaced: boolean;
 
   /** Set once this session was admitted an explicit `entity_scope_key`

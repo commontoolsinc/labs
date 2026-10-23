@@ -1,6 +1,8 @@
-// `Runtime.trackEventIntent()`: an event fired before any speculative edit
-// installs the flag-ON client overlay and is counted by it, so a wait for
-// intent quiescence covers a runtime whose first act is a stream send.
+/**
+ * `Runtime.trackEventIntent()`: an event fired before any speculative edit
+ * installs the flag-ON client overlay and is counted by it, so a wait for
+ * intent quiescence covers a runtime whose first act is a stream send.
+ */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

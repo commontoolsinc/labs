@@ -333,13 +333,15 @@ export class Scheduler {
   readonly #pending = new Set<Action>();
   #dependencies = new WeakMap<Action, ReactivityLog>();
   #viewConsumers = new Map<MemorySpace, Set<string>>();
-  /** Active view nodes by node id in each space, as of a registry membership. */
+
+  /** Each space's active view nodes by node id, as of a registry membership. */
   #viewNodeIndex:
     | {
       membership: number;
       bySpace: Map<MemorySpace, Map<string, SchedulerNode>>;
     }
     | undefined;
+
   #viewOutcomes = new WeakMap<
     Action,
     Map<string, {
@@ -596,6 +598,7 @@ export class Scheduler {
    * moves past its head without starting one dropped or deferred it.
    */
   #eventHandlerRuns = 0;
+
   #actionRunState!: SchedulerActionRunState;
   #graphSnapshotState!: SchedulerGraphSnapshotState;
   #settleLoopState!: SchedulerSettleLoopState;

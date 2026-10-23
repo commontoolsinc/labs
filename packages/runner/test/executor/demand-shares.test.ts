@@ -10,7 +10,7 @@ const share = (sessionId: string): SessionDemand => ({
   rows: new Map(),
 });
 
-/** A reader that answers from `shares` and records what it was asked for. */
+/** A reader that returns from `shares` and records what it was asked for. */
 const reader = (shares: Record<string, SessionDemand>) => {
   const asked: string[][] = [];
   return {

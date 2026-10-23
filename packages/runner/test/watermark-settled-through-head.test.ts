@@ -1,6 +1,8 @@
-// `waitForSettledThroughHead()`: a client that knows only the store's head
-// settles on a quiet space, where the head is the serving loop's own
-// watermark write and W rests below it.
+/**
+ * `waitForSettledThroughHead()`: a client that knows only the store's head
+ * settles on a quiet space, where the head is the serving loop's own
+ * watermark write and W rests below it.
+ */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

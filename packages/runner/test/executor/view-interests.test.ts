@@ -23,7 +23,7 @@ const interest = (
   ...(selectionGeneration === undefined ? {} : { selectionGeneration }),
 });
 
-/** A reader that answers with `list` and counts how often it was asked. */
+/** A reader that returns `list` and counts how often it was asked. */
 const reader = (list: () => SessionViewInterest[]) => {
   const state = { reads: 0 };
   return {
@@ -102,7 +102,7 @@ describe("view-interests", () => {
     expect(r.state.reads).toBe(1);
   });
 
-  it("reads again after a read that failed, and keeps the list it held until then", async () => {
+  it("reads again on the next publish after a read that failed", async () => {
     const cache = new ViewInterestCache();
     let list = [interest("a", undefined)];
     const r = reader(() => list);

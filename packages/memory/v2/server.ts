@@ -6700,8 +6700,10 @@ export class Server {
     });
   }
 
-  /** Publishes eligibility only with the document frame that supplies its
-   * inputs; the frame carries the plans a changed selection owed. */
+  /**
+   * Publishes eligibility only with the document frame that supplies its
+   * inputs; the frame carries the plans a changed selection owed.
+   */
   #attachViewPlans(session: SessionState, sync: SessionSync): void {
     session.viewPlansPending = false;
     sync.viewPlans = session.views.map((view) => {
@@ -6815,7 +6817,7 @@ export class Server {
     };
   }
 
-  /** The delivery-only watches the planner's current selections give the views. */
+  /** The delivery-only watches the planner's current selections give views. */
   #viewSupportWatches(
     session: SessionState,
     views: readonly ViewInterest[],
