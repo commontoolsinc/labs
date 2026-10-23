@@ -334,4 +334,13 @@ export interface HarnessModelToolDescriptor {
 export interface HarnessToolDescriptor extends HarnessModelToolDescriptor {
   /** Stable builtin id used by policy, transcripts, and the registry. */
   toolId: BuiltinToolId;
+
+  /**
+   * Whether the host, not the run's task, authorizes what this read tool
+   * reaches: it sends only what a host-owned broker lists and grants per
+   * job, and the broker rechecks the grant when it executes. Policy admits
+   * such a read for a `context`-bound task at `enforce-strict`, where a read
+   * the task itself would authorize is refused.
+   */
+  hostGrantedRead?: true;
 }

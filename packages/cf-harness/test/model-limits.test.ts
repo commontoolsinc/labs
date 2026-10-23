@@ -138,4 +138,19 @@ describe("model-limits", () => {
       .toThrow("limit enforcement is unavailable");
     expect(dispatched).toBe(0);
   });
+
+  it("refuses to bound a gateway client as it is built", () => {
+    const client = new OpenAICompatibleGatewayModelClient(
+      new OpenAICompatibleGatewayClient({
+        baseUrl: "https://example.test",
+        authMode: "none",
+        fetchFn: () => {
+          throw new Error("unexpected dispatch");
+        },
+      }),
+    );
+    expect(() => limitHarnessModelClient(client, { maxOutputTokens: 64 }))
+      .toThrow("require the openai-codex provider");
+    expect(limitHarnessModelClient(client, {})).toBe(client);
+  });
 });

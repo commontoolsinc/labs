@@ -3091,11 +3091,11 @@ const evaluateToolPolicy = (
     case "enforce-strict":
       if (
         promptSlotBinding?.role === "context" && effectClass === "read" &&
-        (descriptor.toolId === "list_commands" ||
-          descriptor.toolId === "run_read_command")
+        descriptor.hostGrantedRead === true
       ) {
-        // The host owns the catalog. Execution additionally requires its
-        // fresh read-effect declaration and per-job read-only grant.
+        // The host owns the catalog and the grant: the tool rechecks both on
+        // a fresh listing before it sends, and the broker again when it
+        // executes.
         return {
           allowed: true,
           reasonCodes: ["cfc_enforce_strict_host_command_read"],

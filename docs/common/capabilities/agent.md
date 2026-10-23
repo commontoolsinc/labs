@@ -83,7 +83,10 @@ const view = recommendation.pending
   the graph.
 - `INVALID_RESULT` means the model loop completed without a structured result
   satisfying `resultSchema`: the result was missing, malformed JSON, or
-  schema-invalid. Model and tool failures use `PROVIDER_FAILURE`.
+  schema-invalid. The model returns its result through `submit_result`, which
+  must be the only tool call in its model turn; a turn that pairs it with
+  another call is refused and the run continues. Model and tool failures use
+  `PROVIDER_FAILURE`.
 - `run` is a link to the run's `AgentRun` record: its `state`, `stateSince`,
   and, once finished, `outcome`, `usage`, `modelTurns`, and `toolCalls`, for
   a pattern that wants to show progress or cost. Optional `modelResponses`

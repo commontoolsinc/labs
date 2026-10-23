@@ -291,6 +291,19 @@ describe("loom-commands tools", () => {
         .toEqual(["list_commands", "run_command", "run_read_command"]);
     });
 
+    it("marks the reads the host grants, and not the write", () => {
+      expect(
+        LOOM_COMMAND_TOOLS.map((tool) => [
+          tool.descriptor.toolId,
+          tool.descriptor.hostGrantedRead,
+        ]),
+      ).toEqual([
+        ["list_commands", true],
+        ["run_command", undefined],
+        ["run_read_command", true],
+      ]);
+    });
+
     it("withholds the tools without a host command broker and offers them with one", () => {
       const without = { ...backing, loomCommandsAvailable: false };
       for (const toolId of LOOM_COMMAND_TOOL_IDS) {

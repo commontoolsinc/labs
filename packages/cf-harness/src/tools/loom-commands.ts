@@ -337,6 +337,7 @@ export const listCommandsTool: HarnessToolDefinition<
     toolId: "list_commands",
     title: "List Commands",
     effectClass: "read",
+    hostGrantedRead: true,
     description:
       `List the commands this run's host lets it run on the person's data, each as a signature line \`name(param: type, optional?: type = default) -> {output fields}  [effect, target]\` with its title; name commands in detail for their full description and JSON schema.`,
     inputSchema: {
@@ -714,6 +715,9 @@ const commandTool = (
     // command the host declares a read and the broker grants read-only, and
     // the broker rechecks both when it executes.
     effectClass: toolId === "run_read_command" ? "read" : "write",
+    ...(toolId === "run_read_command"
+      ? { hostGrantedRead: true as const }
+      : {}),
     description:
       `Run commands list_commands showed, as the agent: one call as {command, args, loomId?, expectedVersion?}, or up to ${RUN_COMMAND_BATCH_LIMIT} independent calls as {calls: [...]}. ${
         toolId === "run_read_command"

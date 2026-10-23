@@ -1,5 +1,6 @@
 /** Host model limits, inherited by every call through a bounded client. */
 import type { HarnessModelClient, HarnessModelLimits } from "./client.ts";
+import { OPENAI_COMPATIBLE_GATEWAY_PROVIDER_ID } from "./openai-compatible-gateway.ts";
 
 export const assertHarnessModelLimits = (limits: HarnessModelLimits): void => {
   for (const [name, value] of Object.entries(limits)) {
@@ -37,7 +38,13 @@ const narrower = (host: number | undefined, request: number | undefined) =>
     ? host
     : Math.min(host, request);
 
-/** A child retains its parent's limits even when it selects another model. */
+/**
+ * A child retains its parent's limits even when it selects another model.
+ *
+ * @throws Error when a limit is set and `client` is the gateway provider,
+ * which cannot verify either bound: refused here, as the client is built,
+ * rather than on the first model turn.
+ */
 export const limitHarnessModelClient = (
   client: HarnessModelClient,
   limits: HarnessModelLimits,
@@ -46,6 +53,11 @@ export const limitHarnessModelClient = (
   if (
     limits.maxInputBytes === undefined && limits.maxOutputTokens === undefined
   ) return client;
+  if (client.providerId === OPENAI_COMPATIBLE_GATEWAY_PROVIDER_ID) {
+    throw new Error(
+      "maxInputBytes and maxOutputTokens require the openai-codex provider; the openai-compatible-gateway provider cannot verify them",
+    );
+  }
   const { maxInputBytes, maxOutputTokens } = limits;
   const listModels = client.listModels?.bind(client);
   return {

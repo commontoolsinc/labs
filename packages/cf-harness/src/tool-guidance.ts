@@ -79,6 +79,7 @@ export const LOOM_COMMANDS_TOOL_GUIDANCE = [
   "Running the host's commands:",
   "- A listed command with target loom takes a loomId. Pass expectedVersion to refuse a stale write.",
   "- Batch independent calls into one run_command as {calls: [...]}; they run concurrently and answer in order.",
+  "- run_command needs direct-command authority. A task without it reads through run_read_command, which takes the same calls and sends only a command the fresh listing shows with effect read and readOnlyGranted.",
   "- not_granted means this run may not run the command: do not retry; if the person should, offer it in your result.",
   `- ${LOOM_COMMAND_UNTRUSTED_NOTICE}`,
 ].join("\n");
