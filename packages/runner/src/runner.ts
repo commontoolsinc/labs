@@ -7667,8 +7667,10 @@ export class Runner {
    * cell, which no store holds before the session writes it, the replica
    * counts as examined without asking. A document the store read-through
    * reported holding nothing at (`IStorageProvider.storeReportedAbsent`)
-   * holds no run either, named family or not: a name-sync would ask the
-   * store the same question and get the same answer. A cell owed a default
+   * holds no run either, named family or not: a name-sync asks the replica,
+   * which answers with that report until the feed reports a write. The
+   * argument document is the one asked of the store again, since the result
+   * here shows the report predates its write. A cell owed a default
    * (`ownedCellOwesSeed`) that the store reported holding nothing at is not
    * an absence a name-sync delivers either, so its owning instance is added
    * to `seeds`, the instances whose defaults a start seeds before it runs,
@@ -7727,12 +7729,20 @@ export class Runner {
       }
       return true;
     };
-    // The argument document holds the run even when the store reported it
-    // absent. Setup writes it in the transaction that writes the result
-    // linking to it, so with that result here such a report predates the
-    // write, and the name-sync reads the argument fresh where the run would
-    // read it missing and have its commit refused.
-    if (!present(argumentLink)) return hold("the argument document");
+    // Setup writes the argument document in the transaction that writes the
+    // result linking to it, so with that result here a report that the store
+    // held nothing at the argument predates the write. The store is asked
+    // again, which nothing else does before the feed reports the write: a
+    // name-sync asks the replica, which answers that report. An argument the
+    // store still holds nothing at is one no name-sync could deliver, and the
+    // run reads it missing as it would after one.
+    if (
+      !present(argumentLink) &&
+      !this.#readStoreAbsenceAgain(argumentLink, identity) &&
+      !this.#storeReportedAbsent(argumentLink, identity)
+    ) {
+      return hold("the argument document");
+    }
     const presyncNamed =
       this.#presyncNamedInstances.get(familyKey) === entryKey;
     if (!presyncNamed) {
@@ -7810,6 +7820,23 @@ export class Runner {
       { id: link.id, ...(link.scope !== undefined && { scope: link.scope }) },
       identity,
     ) === true;
+  }
+
+  /**
+   * Asks the store read-through again for the document `link` names, in the
+   * instance `identity` resolves it to, when it reported holding nothing
+   * there (`IStorageProvider.readStoreAbsenceAgain`). Returns whether the
+   * store holds it now.
+   */
+  #readStoreAbsenceAgain(
+    link: NormalizedFullLink,
+    identity: ScopeKeyIdentity | undefined,
+  ): boolean {
+    return this.#runtime.storageManager.open(link.space)
+      .readStoreAbsenceAgain?.(
+        { id: link.id, ...(link.scope !== undefined && { scope: link.scope }) },
+        identity,
+      ) === true;
   }
 
   /**

@@ -987,12 +987,23 @@ export interface IStorageProvider {
    * Whether the store read-through, asked for the instance `address` names
    * under `identity`, reported holding nothing there, with no write to it
    * reported since. Such an absence stays unexamined for commit to
-   * reconcile ({@link unexaminedAbsences}), but asking the store for the
-   * document again returns the same answer until the feed reports a write.
-   * Optional: a provider with no read-through may leave it out, which a
-   * caller reads as no such report.
+   * reconcile ({@link unexaminedAbsences}), but the replica does not ask the
+   * store for the document again until the feed reports a write to it, or
+   * `readStoreAbsenceAgain()` asks. Optional: a provider with no
+   * read-through may leave it out, which a caller reads as no such report.
    */
   storeReportedAbsent?(
+    address: { id: URI; scope?: CellScope },
+    identity?: ScopeKeyIdentity,
+  ): boolean;
+
+  /**
+   * Asks the store read-through again for an instance it reported holding
+   * nothing at (`storeReportedAbsent()`), as the feed's report of a write
+   * would, and integrates what it holds now. Returns whether the store holds
+   * the document now. Optional, as `storeReportedAbsent()` is.
+   */
+  readStoreAbsenceAgain?(
     address: { id: URI; scope?: CellScope },
     identity?: ScopeKeyIdentity,
   ): boolean;

@@ -218,9 +218,12 @@ Exit: a plan's inputs document is hashed over its links, not its schemas.
 - [x] An absence the store read-through confirmed holds no start, named
       family or not. The replica remembers each instance the store held
       nothing at until the feed reports a write to it
-      (`IStorageProvider.storeReportedAbsent`), and a name-sync would ask
-      the store the same question; the replica still reports such a read
-      unexamined, for commit to reconcile. A cell owed a default at a
+      (`IStorageProvider.storeReportedAbsent`), and a name-sync asks the
+      replica, which answers with that report until then; the replica still
+      reports such a read unexamined, for commit to reconcile. The argument
+      document is asked of the store again (`readStoreAbsenceAgain()`):
+      setup writes it with the result that links to it, so with that result
+      present the report predates the write. A cell owed a default at a
       scope narrower than its owner's result (`ownedCellOwesSeed`) whose
       absence the store confirmed holds the start only for its seed: the
       start seeds each such default in a transaction of its own, as the
@@ -228,15 +231,15 @@ Exit: a plan's inputs document is hashed over its links, not its schemas.
       seeds the defaults in the caller's transaction, is not held at all.
       Any other absent cell owed a default holds the start for the whole
       preparation, since the store may hold a value for it. On a served
-      FabriChat send burst, each new message row is started once per
-      viewing session and owes that session's instance of `pickerOpen` a
-      default; with both changes the rows' starts ran no pre-sync, where a
-      burst's ran 2 to 24, and the burst's time did not move (3.3, 3.9 and
-      3.3 s against 3.1, 4.3 and 2.9 s). A tree whose rows owe a
-      per-session default, named by a synced run in a caller's transaction
-      on a replica with the read-through, pays no name-sync for any row
-      (`packages/runner/test/resume-presync-plan-count.test.ts`). The
-      record is
+      FabriChat send burst, each new message row is started once per viewing
+      session and owes that session's instance of `pickerOpen` a default;
+      with both changes the rows' starts ran no pre-sync, where a burst's
+      ran 2 to 24, and the burst's time did not move (3.3, 3.9 and 3.3 s
+      against 3.1, 4.3 and 2.9 s). A tree whose rows owe a per-session
+      default, named by a synced run in a caller's transaction on a replica
+      with the read-through, pays no name-sync for any row
+      (`packages/runner/test/resume-presync-plan-count.test.ts`). The record
+      is
       [`../history/development/performance/2026-10-23-start-gate-confirmed-absence.md`](../history/development/performance/2026-10-23-start-gate-confirmed-absence.md).
 - [ ] An instance the pre-sync did not name is still held on a derived
       cell that holds no value: one a caller's `run()` reaches, or one

@@ -8,8 +8,8 @@ reason: "Why a piece's start is not held for a name-sync over a document the sto
 # A start the store's confirmed absence does not hold
 
 This change was made and measured on the served-vote branch
-(commonfabric/labs#9122), and split out of it to land on its own. The code is
-the same on both.
+(commonfabric/labs#9122), and split out of it to land on its own. The change
+under "After review" came after the measurements, on both.
 
 ## How it was measured
 
@@ -42,9 +42,10 @@ a family name-sync:
 | A space-scoped owned cell (`counterpart`, `chatDisplay`) nothing has computed yet | 29 |
 
 With the store read-through on, the replica had already asked the store for
-each such document and been told it holds nothing there. A name-sync could
-only ask the same question and get the same answer, while its pre-sync walk
-cost the start CPU: in an earlier profile of the serving worker over one
+each such document and been told it holds nothing there. A name-sync asks the
+replica, which answers with that report and does not ask the store again until
+the feed reports a write, so it could deliver none of them, while its pre-sync
+walk cost the start CPU: in an earlier profile of the serving worker over one
 burst, the pre-syncs took 2.15 s of its 14.0 s busy, 15%, and 1.46 s of that
 was `#syncCrossSpaceReads` reading every node plan's inputs under its schema.
 (Busy time here is the profile's sampled time less its idle samples, and a
@@ -109,3 +110,17 @@ That is the count the earlier profile's 15% comes from.
 Profiles of round 1's burst alone did not settle it. How much of the rows'
 start work fell inside the burst's window varied from run to run: without the
 change, three runs caught 23, 112 and 779 ms of pre-syncs.
+
+## After review
+
+The gate held a start for the argument document even when the store had
+reported it absent, on the reasoning that the name-sync would read it fresh.
+It would not: the name-sync asks the replica, which answers with the report.
+Setup writes the argument in the transaction that writes the result linking to
+it, so with that result present the report predates the write, and the gate
+now asks the store for the argument again
+(`IStorageProvider.readStoreAbsenceAgain`), the read the feed's report of the
+write would make. An argument the store still holds nothing at holds no start,
+like any other document the store reported absent. This was not measured: a
+start meets it only in the feed's lag, which none of the runs above was timed
+in.

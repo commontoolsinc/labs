@@ -1784,11 +1784,13 @@ the per-epic implementation notes).
 - **Status on 2026-10-23.** Implemented, off by default. The replica reports
   which instances the read-through found nothing at
   (`IStorageProvider.storeReportedAbsent`), and the gate before a piece's run
-  holds no start for a name-sync over such a document, since the name-sync
-  would ask the store the same question. A start held only for defaults such
+  holds no start for a name-sync over such a document, since the name-sync asks
+  the replica, which answers with that report until the feed reports a write;
+  the argument document, whose report the present result shows to predate its
+  write, is asked of the store again. A start held only for defaults such
   documents owe seeds them without the pre-sync walk. A transaction's read of
-  one still reaches commit unexamined, so a commit that read it absent after
-  the store gained it is refused and the run repeated
+  one still reaches commit unexamined, so a commit that read it absent after the
+  store gained it is refused and the run repeated
   (`packages/runner/test/engine-read-through.test.ts`). On the served FabriChat
   send burst no row start ran a pre-sync, where a burst's ran 2 to 24, and the
   burst's time did not move; over three rooms of the chat probe the serving
