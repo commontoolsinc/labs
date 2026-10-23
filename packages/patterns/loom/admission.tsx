@@ -148,9 +148,9 @@ function adderFields(
  * Throws unless `event` names no profile in `as`, or names one that represents
  * the principal the event acts for, as
  * `principalOf(as, "represents-principal")` returns it. A profile it returns
- * no principal for, because its label names nobody, names more than one
- * principal, or holds only claims the reader does not accept, represents no
- * one, and a run that acts for no one has no profile of its own.
+ * no principal for represents no one, whether its label names nobody, names
+ * more than one principal, or holds a claim the reader refuses, and a run that
+ * acts for no one has no profile of its own.
  */
 function assertOwnProfile(event: PanelAdmission): void {
   if (event.as === undefined) return;
