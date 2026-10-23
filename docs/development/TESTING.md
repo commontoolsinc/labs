@@ -671,25 +671,26 @@ one of its providers goes.
 
 Either shape runs its loop in a Worker of the test's process when
 `SERVER_EXECUTION_WORKER` is `true` in the environment, as a toolshed does under
-that variable ([`EXPERIMENTAL_OPTIONS.md`](EXPERIMENTAL_OPTIONS.md#server_execution_worker)),
+that variable
+([`EXPERIMENTAL_OPTIONS.md`](EXPERIMENTAL_OPTIONS.md#server_execution_worker)),
 unless its `worker` option says otherwise, over a store in a temporary
-directory, since a worker cannot open a non-persistent one. `serving.host` is then the loop's handle, with `stats()` and
-`close()`, and its `host` is `undefined`; on this thread `serving.host.host` is
-the `ExecutorHost`. Either way `serving.host.diagnostics()` answers with the
-logger counts and timing statistics of the realm the loop runs in, which is
-where a test reads a refusal the serving loop's own CFC gate logged, since the
-test process's loggers do not reach a worker. A worker takes no closure, so a
-test that passes
-`prepareStorageManager`, `fetch`, `moduleByteCache`,
-`policy.flushDeadlineNow`, a diagnostic hook other than `onActivationSettled` or
-`onSpaceParked`, or verbs built from closures to the host says `worker: false`
-and runs its loop on this thread whatever the environment. The store
-read-through is selected the same way: a `policy` that leaves
-`storeReadThrough` unset takes it from `SERVER_EXECUTION_STORE_READ_THROUGH`
+directory, since a worker cannot open a non-persistent one. `serving.host` is
+then the loop's handle, with `stats()` and `close()`, and its `host` is
+`undefined`; on this thread `serving.host.host` is the `ExecutorHost`. Either
+way `serving.host.diagnostics()` returns the logger counts and timing statistics
+of the realm the loop runs in, which is where a test reads a refusal the serving
+loop's own CFC gate logged, since the test process's loggers do not reach a
+worker. A worker takes no closure, so a test that passes
+`prepareStorageManager`, `fetch`, `moduleByteCache`, a policy field holding a
+function, a diagnostic hook other than `onActivationSettled` or `onSpaceParked`,
+or verbs built from closures to the host says `worker: false` and runs its loop
+on this thread whatever the environment. The store read-through is selected the
+same way: a `policy` that leaves `storeReadThrough` unset takes it from
+`SERVER_EXECUTION_STORE_READ_THROUGH`
 ([`EXPERIMENTAL_OPTIONS.md`](EXPERIMENTAL_OPTIONS.md#server_execution_store_read_through)),
-so a lane runs every test that does not decide the posture itself under it,
-and a `policy` that leaves `flushDeadlineMs` or `flushDeadlineMaxMs` unset
-takes `SERVER_EXECUTION_FLUSH_DEADLINE_MS` and
+so a lane runs every test that does not decide the posture itself under it, and
+a `policy` that leaves `flushDeadlineMs` or `flushDeadlineMaxMs` unset takes
+`SERVER_EXECUTION_FLUSH_DEADLINE_MS` and
 `SERVER_EXECUTION_FLUSH_DEADLINE_MAX_MS` when they are positive decimal
 integers, which is how a benchmark measures a cadence.
 

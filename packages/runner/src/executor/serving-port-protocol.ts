@@ -98,6 +98,18 @@ export type ServingLoopDiagnostics = {
   timingStats: TimingStatsBreakdown;
 };
 
+/**
+ * A space server policy as it crosses to the worker: the fields that hold
+ * data, since a closure does not cross the port.
+ */
+export type ServingWorkerPolicy = {
+  [
+    Key
+      in keyof SpaceServerPolicy as NonNullable<SpaceServerPolicy[Key]> extends
+        (...args: never[]) => unknown ? never : Key
+  ]: SpaceServerPolicy[Key];
+};
+
 /** What the worker's entry module needs to build its host. */
 export type ServingWorkerInit = {
   /** The service identity's key pair, encoded for the realm crossing. */
@@ -108,7 +120,7 @@ export type ServingWorkerInit = {
 
   /** The serving runtimes' patterns and compile base. */
   readonly apiUrl: string;
-  readonly policy: SpaceServerPolicy | undefined;
+  readonly policy: ServingWorkerPolicy | undefined;
   readonly ensureSpaceRoots: boolean | undefined;
   readonly experimental: ExperimentalOptions | undefined;
 };
@@ -124,10 +136,6 @@ export type PlaneRequests = {
   "server.flushSessions": {
     params: { spaces: string[] | undefined };
     result: void;
-  };
-  "server.demandForSpace": {
-    params: { space: string; excludePrincipal: string | undefined };
-    result: SessionDemand[];
   };
   "server.demandForSessions": {
     params: {

@@ -27,8 +27,8 @@ import type {
   LifecycleVerbRun,
   ServingLoopDiagnostics,
   ServingWorkerInit,
+  ServingWorkerPolicy,
 } from "./serving-port-protocol.ts";
-import type { SpaceServerPolicy } from "./space-server.ts";
 import type { ServingLoopStats } from "./stats.ts";
 
 const logger = getLogger("serving-worker-host", {
@@ -73,7 +73,7 @@ export type ServingWorkerOptions = {
    * `serveFromPort()` with the verbs and fetch it uses.
    */
   workerModule?: URL;
-  policy?: SpaceServerPolicy;
+  policy?: ServingWorkerPolicy;
   ensureSpaceRoots?: boolean;
   experimental?: ExperimentalOptions;
 

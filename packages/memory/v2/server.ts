@@ -2434,19 +2434,31 @@ function isSubset(subset: Set<string>, superset: Set<string>): boolean {
 }
 
 /**
- * A planner delivery root's key, with its selector: a root whose selector
- * changed reaches different documents, which only a full evaluation diffs
- * out, so it is not the same root.
+ * A planner delivery root's key: the branch its query reads, its address and
+ * its selector. A root whose selector changed reaches different documents,
+ * which only a full evaluation diffs out, so it is not the same root.
  */
-function deliveryRootKey(root: ViewQuery["roots"][number]): string {
-  return JSON.stringify([root.scope ?? "space", root.id, root.selector]);
+function deliveryRootKey(
+  query: ViewQuery,
+  root: ViewQuery["roots"][number],
+): string {
+  return JSON.stringify([
+    query.branch ?? "",
+    root.scope ?? "space",
+    root.id,
+    root.selector,
+  ]);
 }
 
-/** The keys of the roots a planner delivery names (`deliveryRootKey`). */
+/**
+ * The keys of the roots a planner delivery names (`deliveryRootKey()`): two
+ * deliveries naming the same keys, in whatever order, deliver the same
+ * documents.
+ */
 function deliveryRootKeys(delivery: readonly ViewQuery[]): Set<string> {
   const keys = new Set<string>();
   for (const query of delivery) {
-    for (const root of query.roots) keys.add(deliveryRootKey(root));
+    for (const root of query.roots) keys.add(deliveryRootKey(query, root));
   }
   return keys;
 }
@@ -2471,15 +2483,12 @@ function deliveryToResolve(
   installed: { delivery: readonly ViewQuery[] } | undefined,
 ): readonly ViewQuery[] {
   if (installed === undefined) return delivery;
-  const keyOf = (query: ViewQuery, root: ViewQuery["roots"][number]) =>
-    `${query.branch ?? ""}\0${deliveryRootKey(root)}`;
-  const held = new Set<string>();
-  for (const query of installed.delivery) {
-    for (const root of query.roots) held.add(keyOf(query, root));
-  }
+  const held = deliveryRootKeys(installed.delivery);
   const added: ViewQuery[] = [];
   for (const query of delivery) {
-    const roots = query.roots.filter((root) => !held.has(keyOf(query, root)));
+    const roots = query.roots.filter((root) =>
+      !held.has(deliveryRootKey(query, root))
+    );
     if (roots.length > 0) added.push({ ...query, roots });
   }
   return added;
@@ -6623,11 +6632,17 @@ export class Server {
       // current selection delivers were resolved when it was installed, so
       // only the roots it does not deliver are resolved here
       // (`deliveryToResolve`).
+      const deliveryKeys = deliveryRootKeys(selection.delivery);
       const sameDelivery = (
         previous: ReturnType<SessionState["viewSelections"]["get"]>,
-      ) =>
-        previous !== undefined && previous.revision === handle.revision &&
-        valueEqualByWalk(previous.delivery, selection.delivery);
+      ) => {
+        if (previous === undefined || previous.revision !== handle.revision) {
+          return false;
+        }
+        const previousKeys = deliveryRootKeys(previous.delivery);
+        return previousKeys.size === deliveryKeys.size &&
+          isSubset(previousKeys, deliveryKeys);
+      };
       const installed = session!.viewSelections.get(handle.viewId);
       if (!sameDelivery(installed)) {
         await this.evaluateWatchSet(
@@ -6670,10 +6685,7 @@ export class Server {
         previous !== undefined && previous.revision === handle.revision
       ) {
         if (
-          isSubset(
-            deliveryRootKeys(previous.delivery),
-            deliveryRootKeys(selection.delivery),
-          )
+          isSubset(deliveryRootKeys(previous.delivery), deliveryKeys)
         ) {
           session!.viewSupportGrown = true;
         } else {
@@ -9088,6 +9100,12 @@ export class Server {
             }
           }
 
+          // A support rebuild refreshes the demand graphs in place, so the
+          // demand they held before is read ahead of it.
+          const demandBeforeRebuild = supportReplaced !== undefined &&
+              this.#serverExecutionObserver?.demandChanged !== undefined
+            ? this.#viewDemandIds(session)
+            : undefined;
           const { serverSeq, graphs, entities, demandGraphs, demandEntities } =
             supportReplaced === undefined
               ? await this.#evaluateViewWatchSet(
@@ -9185,15 +9203,10 @@ export class Server {
               this.#serverExecutionObserver?.demandChanged !== undefined;
             let changed = false;
             if (wantsDemandNotify) {
-              const previous = session.views.length === 0
-                ? session.trackedIds
-                : trackedIdsFromEntries(session.viewDemandEntities.values());
-              if (session.views.length > 0) {
-                this.#addMissedToTrackedIds(
-                  previous,
-                  session.viewDemandGraphs.values(),
-                );
-              }
+              const previous = demandBeforeRebuild ??
+                (session.views.length === 0
+                  ? session.trackedIds
+                  : this.#viewDemandIds(session));
               const next = session.views.length === 0
                 ? evaluatedTrackedIds
                 : evaluatedDemandIds;

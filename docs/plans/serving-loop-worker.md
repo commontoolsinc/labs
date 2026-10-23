@@ -93,9 +93,9 @@ thread installs the `ServerExecutionObserver` and forwards `commitAdmitted`,
 worker. The last is
 the session registry's own lifecycle, an open, a detach with its expiry, or a
 removal, replayed in full when the observer is installed; the worker keeps a
-mirror from it and answers the three questions the loop asks without waiting,
+mirror from it and serves the three lookups the loop makes without waiting,
 `hasLiveSessionsForSpace`, `hasLiveSessionFor` and `sessionReadCeiling`, as the
-registry would. The worker asks the main thread for `demandForSpace`,
+registry would. The worker asks the main thread for `demandForSessions`,
 `viewInterestsForSpace`, `setViewSelection`, `foreignWriteAuthorityFor`,
 `checkServedAclChange`, `commitDelegatedAppend`, `idle` and `flushSessions`, and
 tells it of `noteExecutorCommit` and `noteLeaseReacquired` without waiting. The

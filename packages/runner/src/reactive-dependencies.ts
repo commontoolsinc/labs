@@ -441,7 +441,10 @@ function shallowEqual(
   return valueEqual(before, after);
 }
 
-/** Whether two address lists name the same addresses in the same order. */
+/**
+ * Whether two address lists name the same addresses in the same order, an
+ * address's scope instance (`scopeKey`) included.
+ */
 export function sameAddresses(
   a: readonly IMemorySpaceAddress[],
   b: readonly IMemorySpaceAddress[],
@@ -454,6 +457,7 @@ export function sameAddresses(
       left.space !== right.space || left.id !== right.id ||
       left.type !== right.type ||
       normalizeCellScope(left.scope) !== normalizeCellScope(right.scope) ||
+      left.scopeKey !== right.scopeKey ||
       !arrayEqual(left.path, right.path)
     ) return false;
   }

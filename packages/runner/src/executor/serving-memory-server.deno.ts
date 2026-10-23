@@ -131,10 +131,10 @@ export type ServingMemoryServerOptions =
      * Whether the serving loop runs in a Worker of this process, over a store
      * in a temporary directory, as a toolshed's does under
      * `SERVER_EXECUTION_WORKER`. Default: `true` when that variable is the
-     * literal `true` in this process's environment, which is how a lane runs
-     * every test that leaves this unset under the worker. A worker takes no
-     * closure, so `prepareStorageManager`, `fetch`, `moduleByteCache`,
-     * `policy.flushDeadlineNow`, `policy.onFlushDeadline`, and the host's
+     * literal `true` in this process's environment, so a run with it set
+     * runs every test that leaves this unset under the worker. A worker
+     * takes no closure, so `prepareStorageManager`, `fetch`,
+     * `moduleByteCache`, a policy field holding a function, and the host's
      * diagnostic hooks other than `onActivationSettled` and `onSpaceParked`
      * are refused under it; a test that needs one says `false` here.
      *
@@ -372,11 +372,8 @@ async function attachServingLoop(params: {
     const refused: string[] = WORKER_REFUSED_OPTIONS.filter((name) =>
       params.options[name] !== undefined
     );
-    if (policy?.flushDeadlineNow !== undefined) {
-      refused.push("policy.flushDeadlineNow");
-    }
-    if (policy?.onFlushDeadline !== undefined) {
-      refused.push("policy.onFlushDeadline");
+    for (const [field, value] of Object.entries(policy ?? {})) {
+      if (typeof value === "function") refused.push(`policy.${field}`);
     }
     if (refused.length > 0) {
       await params.close();

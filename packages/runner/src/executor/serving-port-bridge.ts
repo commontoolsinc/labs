@@ -316,14 +316,6 @@ export class ServingPortBridge {
       ({ spaces }) => server.flushSessions(spaces),
     );
     endpoint.onRequest(
-      "server.demandForSpace",
-      ({ space, excludePrincipal }) =>
-        server.demandForSpace(
-          space,
-          excludePrincipal === undefined ? {} : { excludePrincipal },
-        ),
-    );
-    endpoint.onRequest(
       "server.demandForSessions",
       ({ space, sessionIds, excludePrincipal }) =>
         server.demandForSessions(

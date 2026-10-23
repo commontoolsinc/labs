@@ -1004,6 +1004,34 @@ describe("view interests", () => {
     expect(ids).toEqual(["of:ordinary"]);
   });
 
+  it("takes a delivery that only reorders its roots as the same delivery", async () => {
+    await set([], [view()]);
+    const [{ handle }] = server.viewInterestsForSpace(space);
+    await server.setViewSelection(space, handle, {
+      generation: 1,
+      delivery: [query("of:support"), query("of:ordinary")],
+    });
+    await server.flushSessions();
+    messages.length = 0;
+    const evaluations = spy(server, "evaluateWatchSet");
+    try {
+      await server.setViewSelection(space, handle, {
+        generation: 2,
+        delivery: [query("of:ordinary"), query("of:support")],
+      });
+      await server.flushSessions();
+      expect(evaluations.calls).toHaveLength(0);
+    } finally {
+      evaluations.restore();
+    }
+    const effects = messages.flatMap((message) =>
+      message.type === "session/effect" ? [message.effect] : []
+    );
+    expect(effects.flatMap((effect) => [...effect.upserts, ...effect.removes]))
+      .toEqual([]);
+    expect(effects.at(-1)?.viewPlans?.[0].generation).toBe(2);
+  });
+
   it("resolves only the roots a selection adds to the view's installed delivery", async () => {
     await set([], [view()]);
     const [{ handle }] = server.viewInterestsForSpace(space);
@@ -1119,6 +1147,55 @@ describe("view interests", () => {
       .toContain("of:ordinary");
     expect(effects.flatMap((effect) => effect.removes.map((entry) => entry.id)))
       .toEqual(["of:extra"]);
+  });
+
+  it("reports a demand change the pass that rebuilds the support graphs refreshes into the rendered graph", async () => {
+    // The rebuild refreshes the rendered graph in place with the pass's
+    // dirty documents, so the demand it held is read before the refresh.
+    const changed = spy();
+    server.setServerExecutionObserver({ demandChanged: changed });
+    const linked = (id: string) => ({
+      primary: { "/": { "link@1": { id, path: [], space } } },
+    });
+    await server.writeDocument(space, "of:render", linked("of:unborn"));
+    await set([], [{
+      ...view(),
+      query: {
+        roots: [{
+          id: "of:render",
+          selector: {
+            path: [],
+            schema: {
+              type: "object",
+              properties: {
+                primary: {
+                  type: "object",
+                  properties: { label: { type: "string" } },
+                },
+              },
+            },
+          },
+        }],
+      },
+    }]);
+    const [{ handle }] = server.viewInterestsForSpace(space);
+    await server.setViewSelection(space, handle, {
+      generation: 1,
+      delivery: [query("of:support"), query("of:extra")],
+    });
+    await server.flushSessions();
+    const notifications = changed.calls.length;
+    await server.writeDocument(space, "of:render", linked("of:arriving"));
+    await server.setViewSelection(space, handle, {
+      generation: 2,
+      delivery: [query("of:support")],
+    });
+    await server.flushSessions();
+    expect(
+      server.demandedInstancesForSpace(space).map((row) => row.id),
+    ).toContain("of:arriving");
+    expect(changed.calls.slice(notifications).map((call) => call.args))
+      .toEqual([[space, "push-growth", principal, sessionId]]);
   });
 
   it("rebuilds only the support graphs for a plan that keeps a root under another selector", async () => {
