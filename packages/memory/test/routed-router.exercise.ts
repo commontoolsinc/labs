@@ -2992,6 +2992,27 @@ finally:
       }
     };
 
+    /**
+     * Expands one public frame a client receives: text, or a toolshed body in
+     * the routed compression envelope. A binary frame that is not the envelope
+     * is a router credit, and gives `undefined`.
+     */
+    const publicFrame = (
+      bytes: unknown,
+      binary: boolean,
+      frameSlots: number | null = ROUTED_FRAME_SLOTS,
+    ) => {
+      if (!binary) {
+        return decodeRoutedFrame(String(bytes), false, frameSlots);
+      }
+      assert(bytes instanceof ArrayBuffer);
+      const frame = new Uint8Array(bytes);
+      if (new TextDecoder().decode(frame.subarray(0, 5)) !== "mcmp\x02") {
+        return undefined;
+      }
+      return decodeRoutedFrame(frame, true, frameSlots);
+    };
+
     /** Observes complete public requests using the transport's record assembler. */
     const observeRequests = (
       connection: ReturnType<typeof socketFactory>,
@@ -3006,10 +3027,12 @@ finally:
             ? frame
             : assembler.receive(frame)?.payload;
           if (payload !== undefined) {
-            assert(typeof payload === "string");
+            // A compressed upload is measured by its expanded payload, the
+            // size the request bounds and the label tables are about.
+            const decoded = decodeRoutedFrame(payload, true, frameSlots);
             observe(
-              decodeRoutedFrame(payload, false, frameSlots).body,
-              new TextEncoder().encode(payload).length,
+              decoded.body,
+              new TextEncoder().encode(decoded.payload).length,
             );
           }
           connection.send(frame);
@@ -3281,13 +3304,10 @@ finally:
             const connection = socketFactory(address, "127.0.0.49");
             writerSockets.push(connection.socket);
             connection.socket.on("message", (bytes, binary) => {
-              if (binary) return;
-              const payload = bytes.toString();
-              const message = decodeRoutedFrame(
-                payload,
-                false,
-                ROUTED_FRAME_SLOTS,
-              ).body;
+              const frame = publicFrame(bytes, binary);
+              if (frame === undefined) return;
+              const { payload } = frame;
+              const message = frame.body;
               if (
                 message.type === "response" && isPlainObject(message.ok) &&
                 Array.isArray(message.ok.revisions)
@@ -3952,12 +3972,8 @@ finally:
             const connection = socketFactory(address, source);
             sockets.push(connection.socket);
             connection.socket.on("message", (bytes, binary) => {
-              if (!binary) {
-                messages.push(
-                  decodeRoutedFrame(bytes.toString(), false, frameSlots)
-                    .body,
-                );
-              }
+              const frame = publicFrame(bytes, binary, frameSlots);
+              if (frame !== undefined) messages.push(frame.body);
             });
             return observeRequests(connection, (message) => {
               requests.push(message);
