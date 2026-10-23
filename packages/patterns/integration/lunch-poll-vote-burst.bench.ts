@@ -4,8 +4,13 @@
  * Ten voters each cast a vote on each of ten lunch options, every one of the
  * hundred fired before any of them settles, and the measurement runs until
  * every one of the ten clients holds the whole result in its own vote list,
- * read at its runtime's quiescence with its rendered view demanded: the moment
- * each client's view is settled, whichever arm served it. That is the quantity a person actually waits on at
+ * read at its runtime's quiescence with its rendered view demanded. With the
+ * serving loop off that is the moment each client's view is settled, its own
+ * tallies included. With the loop on, a web client under
+ * `EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION` derives none of the poll itself:
+ * it holds the votes once the served consequences reach it, and the tallies
+ * the server derives from them can follow a wave later, which this end does
+ * not wait for. Converging is the quantity a person actually waits on at
  * lunchtime, and it is the one no other benchmark in the repository can see:
  * every other bench file drives a single runtime against its own private
  * storage server, where a second writer does not exist and a write conflict is
@@ -109,12 +114,12 @@ const harness = await MultiRuntimeHarness.create({
   programPath: PROGRAM_PATH,
   rootPath: ROOT_PATH,
   // Each voter holds a rendered view and nothing else, as a browser tab does:
-  // the clients derive the tallies and cards they would show, the burst's end
-  // is the moment that view is current rather than the moment the vote list
-  // is, and no client re-reads the whole result on every change, which the
-  // harness's default root watch would make it do. Each is a web client, so
-  // that under `EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION` the server selects
-  // what each receives for that view, as it does for a browser.
+  // a client that derives the tallies and cards it would show has derived
+  // them by the quiescence the burst's end reads its vote list at, and no
+  // client re-reads the whole result on every change, which the harness's
+  // default root watch would make it do. Each is a web client, so that under
+  // `EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION` the server selects what each
+  // receives for that view, as it does for a browser.
   watchPaths: [],
   input: { renderPoll: true },
   sessions: NAMES.map((_, index) => ({
@@ -178,10 +183,11 @@ function rowsOf(round: number): Record<string, string> {
 
 /**
  * Fire every vote before any of them settles, then wait until every
- * session's own vote list holds exactly the round's rows at quiescence: the
- * moment each client's view is settled, on the OFF arm through the others'
- * pushed votes and its own derivations, on the ON arm through the served
- * consequences and their delivery. That is the burst's measured end.
+ * session's own vote list holds exactly the round's rows at quiescence. On
+ * the OFF arm that is the moment each client's view is settled, through the
+ * others' pushed votes and its own derivations; on the ON arm it is the
+ * moment the served consequences reached it, which the tallies the server
+ * derives from them can follow by a wave. That is the burst's measured end.
  */
 async function burst(round: number): Promise<void> {
   await Promise.all(

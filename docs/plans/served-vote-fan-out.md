@@ -1,33 +1,35 @@
 # The served vote's remaining cost: the main thread's fan-out
 
-A vote in the lunch poll, served by the serving loop with five clients
-rendering the poll, takes about five seconds to reach every client's view on
-the box the records were taken on, and about three with the loop off. The
-records that got here say where the rest went and what has been taken out:
-the per-viewer fan-out of derivations
-([the served-vote record](../history/development/performance/2026-10-11-served-vote-per-viewer-runs.md)),
-the serving loop's own waits
-([the serving-cycle record](../history/development/performance/2026-10-11-serving-cycle-local-quiescence.md)),
+A vote in the lunch poll, served by the serving loop with five clients rendering
+the poll, takes about five seconds to reach every client's view on the box the
+records were taken on, and about three with the loop off. The records that got
+here say where the rest went and what has been taken out: the per-viewer fan-out
+of derivations ([the served-vote
+record](../history/development/performance/2026-10-11-served-vote-per-viewer-runs.md)),
+the serving loop's own waits ([the serving-cycle
+record](../history/development/performance/2026-10-11-serving-cycle-local-quiescence.md)),
 and the worker's port round trips, the publish and the commit, which the
 served-vote record's last section measures gone from the cycle with the burst
-unmoved. The [work census](../history/development/performance/2026-10-21-served-vote-work-census.md)
-then counted what one burst causes and named seven removals, and stage 3
-below tracks them: the growing flush deadline and the serving pass that runs
-every ready event before one derivation pass have taken out most of the
-per-wave and per-event machinery, and view-scoped replication now plans less
-and walks less: with it on, the vote burst reads faster than with the loop
-off on the main thread and about the same in the worker, and the FabriChat
-send burst slower in the worker than with the loop off. What is left is the
-memory server's root evaluations, once per session per flush pass with a
-tuple evaluated under every schema a reader declared; each client re-running
-what the server ran; and, with view-scoped replication on, the plan's size,
-the chat burst's head parks and the long settle they precede, and a room's
+unmoved. The [work
+census](../history/development/performance/2026-10-21-served-vote-work-census.md)
+then counted what one burst causes and named seven removals, and stage 3 below
+tracks them: the growing flush deadline and the serving pass that runs every
+ready event before one derivation pass have taken out most of the per-wave and
+per-event machinery, and view-scoped replication now plans less and walks less:
+with it on, the vote burst reads faster than with the loop off on the main
+thread and about the same in the worker, though on that arm its end is every
+client's vote list, which the tallies the server derives can follow by a wave,
+and the FabriChat send burst slower in the worker than with the loop off. What
+is left is the memory server's root evaluations, once per session per flush pass
+with a tuple evaluated under every schema a reader declared; each client
+re-running what the server ran; and, with view-scoped replication on, the plan's
+size, the chat burst's head parks and the long settle they precede, and a room's
 creating space running the room's graph only to have its writes refused. A
-client that runs nothing of a piece shows an event's consequence a wave
-before the derivations that read it whenever a flush deadline comes between
-them, a trade `docs/specs/server-side-execution/events.md` §2 states. This
-plan is for whoever picks that up on the branch, with everything they need
-that the records do not carry.
+client that runs nothing of a piece shows an event's consequence a wave before
+the derivations that read it whenever a flush deadline comes between them, a
+trade `docs/specs/server-side-execution/events.md` §2 states. This plan is for
+whoever picks that up on the branch, with everything they need that the records
+do not carry.
 
 ## Where things stand
 

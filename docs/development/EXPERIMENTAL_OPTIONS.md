@@ -618,21 +618,24 @@ flags it adopts from the deployment it runs against.
   [chat record](../history/development/performance/2026-10-22-served-chat-burst-and-the-deferred-settle.md),
   [vote record](../history/development/performance/2026-10-22-served-vote-batching-and-planner-reads.md),
   [the earlier record](../history/development/performance/2026-10-22-view-scoped-replication-vote-burst.md)).
-- **Status (2026-10-23):** off by default. With the serving loop in the
-  worker and the store read-through on, the vote burst at 5x5 reads 2.4 and
-  2.5 s with the flag on against 2.9 and 3.4 s with the loop off; the
-  FabriChat send burst 3.0 and 3.1 s against 2.0 and 2.2 s; and the Topics
-  navigation benchmark is faster in four segments and slower on the board,
-  2.6 s against 1.7 s, for a journey of 4.9 s against 4.6 s. One rendered
-  lunch vote at 296 votes takes about 1.1 s against 0.7 s. The plan's read
-  index is held per producer and a selection is resolved over the roots it
+- **Status (2026-10-23):** off by default. With the serving loop in the worker
+  and the store read-through on, the vote burst at 5x5 reads 2.4 and 2.5 s with
+  the flag on against 2.9 and 3.4 s with the loop off, an end that on the flag's
+  arm is every client's vote list, which the tallies the server derives can
+  follow by a wave; the FabriChat send burst 3.0 and 3.1 s against 2.0 and 2.2
+  s; and the Topics navigation benchmark is faster in four segments and slower
+  on the board, 2.6 s against 1.7 s, for a journey of 4.9 s against 4.6 s. One
+  rendered lunch vote at 296 votes takes about 1.1 s against 0.7 s. The plan's
+  read index is held per producer and a selection is resolved over the roots it
   adds, which took the serving worker's plan to 307 ms a vote and the memory
-  server's selection handling to 41 ms without moving the vote: the
-  browser's runtime worker, re-proving producers at each committing run's
-  read validation, is that vote's critical path
-  ([three-realm record](../history/development/performance/2026-10-23-one-served-vote-across-three-realms.md),
-  [plan and selection record](../history/development/performance/2026-10-23-served-vote-plan-and-selection.md),
-  [chat record](../history/development/performance/2026-10-23-served-chat-burst-per-session-rows.md)).
+  server's selection handling to 41 ms without moving the vote: the browser's
+  runtime worker, re-proving producers at each committing run's read validation,
+  is that vote's critical path ([three-realm
+  record](../history/development/performance/2026-10-23-one-served-vote-across-three-realms.md),
+  [plan and selection
+  record](../history/development/performance/2026-10-23-served-vote-plan-and-selection.md),
+  [chat
+  record](../history/development/performance/2026-10-23-served-chat-burst-per-session-rows.md)).
 
 
 ### `lazyMaterialization`
