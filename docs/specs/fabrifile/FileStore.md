@@ -14,6 +14,14 @@ the store the first time something needs it, from a handler of its own, such as
 `ensureFileStore`. A root that declares no `fileStore` offers none, and a
 pattern or client that needs one there has nowhere to put files.
 
+`store.tsx` gives a root both halves. `FileStoreRecord` is where the root keeps
+the link: a record holding it in `store`, absent until the store is created,
+rather than the link itself, because a handler's cell for a field holding a
+link writes through the link. `ensureFileStore`, bound to that record, creates
+the store as a piece in the root's space and names it there, and changes
+nothing when the record names one already, which is what keeps a root from
+replacing its store.
+
 The link is set once, when the store is created, and never changes. Two stores
 in one space would be two sets of files with no rule for which a file belongs
 in, so a root MUST NOT replace its store, and nothing else in the space creates
@@ -47,17 +55,23 @@ other code can write either, even code a member runs in the store's space.
 The handlers learn the principal they act for with `currentPrincipal()`, and an
 entry's adder from its `authored-by` label, which is how `remove` and `rename`
 admit the adder. They learn whether the principal is an OWNER of the store's
-space with `spaceAccess()`.
+space with `spaceAccess()`, and the space they run in with `spaceOf()`, which
+is how `add` refuses another space's blob. `rename`, and an `add` that chooses
+a free name, store the entry's bytes again under its new name with
+`nameBlob()` ([files](../../common/capabilities/files.md#renaming)).
 
 ## Modules
 
 The store's patterns are in `packages/patterns/fabrifile/`:
 
-- `schemas.tsx`: `FileEntry`, `BlobRef`, `FileProfile`, and
+- `schemas.tsx`: `FileEntry`, `BlobRef`, `FileProfile`, the requests and
+  their outcomes, `FileStoreFiles`, the store's files group, and
   `FileStoreOutput`.
 - `names.ts`: the [name rules](FileEntry.md#names), and the choice of a free
   name for `onConflict: "rename"`, as plain functions with no pattern in them.
-- `store.tsx`: `FileStore`. It has no `[UI]`.
+- `store.tsx`: `FileStore`, and the records it stores with the handlers that
+  write them, in one module because each record's write policy names its
+  writers. It has no `[UI]`.
 - `view.tsx`: `FileStoreView` (see [`FileStoreView.md`](FileStoreView.md)).
 
 `schemas.tsx`, `names.ts` and `store.tsx`, and every module they import, MUST
@@ -72,7 +86,5 @@ of `store.tsx` and fails on any module that renders.
 
 ## Prerequisites
 
-- **A blob reference a pattern can check**: the same as the contract's (see
-  [`README.md`](README.md#prerequisites)).
-- **Knowing its own space.** `add` refuses a `blob.space` other than the store's
-  own, so the handler needs the DID of the space it runs in.
+- **A blob reference a pattern can check, in full**: the same as the
+  contract's (see [`README.md`](README.md#prerequisites)).

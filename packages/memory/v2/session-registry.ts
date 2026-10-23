@@ -70,19 +70,6 @@ export type SessionState = {
   /** Watch declarations by id, updated with the array at publication. */
   watchIndex: Map<string, WatchSpec>;
 
-  /**
-   * The graph watches, by id, that `session.watch.add` left unwalked
-   * because the graph of their branch already covered every root of
-   * theirs. Nothing in a graph is attributable to one of these, so
-   * removing it leaves its branch's graph as it stands, and removing a
-   * walked watch of the same branch evaluates that graph again and walks
-   * each of these that the rebuilt graph no longer covers. Every other
-   * graph watch was walked into its graph. A full evaluation of the watch
-   * set, whether a replacement or a catch-up, walks every watch, so it
-   * empties this set.
-   */
-  coveredWatchIds: Set<string>;
-
   /** Scoped dirty keys owned by operation watches. Rebuilt on replacement. */
   operationTrackedIds: Set<string>;
 
@@ -102,9 +89,9 @@ export type SessionState = {
   pendingCaughtUpLocalSeq: number;
 
   /** Set when delivery-state rollback re-inserted tombstone cache entries
-   * for a lost frame's removes: the incremental refresh path never emits
-   * removes, so the next sync must run a FULL watch evaluation to re-diff
-   * them out (CT-1927 review, round 7). Self-clearing. */
+   * for a lost frame's removes: the incremental refresh retracts only what
+   * its own re-walks retire, so the next sync must run a FULL watch
+   * evaluation to re-diff them out. Self-clearing. */
   forceFullResync: boolean;
 
   /** Set when a planner selection changed what the session's views may run
@@ -381,7 +368,6 @@ export class SessionRegistry {
       viewDemandGraphs: existing?.viewDemandGraphs ?? new Map(),
       viewDemandEntities: existing?.viewDemandEntities ?? new Map(),
       watchIndex: existing?.watchIndex ?? new Map(),
-      coveredWatchIds: existing?.coveredWatchIds ?? new Set(),
       operationTrackedIds: existing?.operationTrackedIds ?? new Set(),
       operationWatches: existing?.operationWatches ?? [],
       operationCursors: existing?.operationCursors ?? new Map(),

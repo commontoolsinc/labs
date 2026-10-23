@@ -176,6 +176,8 @@ import {
   type QueryGraphReuseContext,
   type QueryTraversalStats,
   refreshTrackedGraph,
+  releaseTrackedRoots,
+  rootReferrersOf,
   type SlowestQueryRoot,
   stageTrackedGraphState,
   syncCrossingsOf,
@@ -193,7 +195,6 @@ import {
   holdingsToCacheEntries,
   isEmptySync,
   mergeWatchesById,
-  partitionWatchesByCoverage,
   sameSnapshot,
   sameWatchSpec,
   type SessionCacheEntry,
@@ -6884,16 +6885,11 @@ export class Server {
   }
 
   /**
-   * Helper for watchRemove(), which shrinks the session's graphs by the
-   * removed watches. A watch the session recorded as covered
-   * (`SessionState.coveredWatchIds`) has nothing in its branch's graph, so
-   * removing it leaves the graph as it stands. Removing a walked watch
-   * evaluates its branch again from the branch's remaining walked watches,
-   * and then walks each remaining covered watch of the branch that the
-   * rebuilt graph no longer covers. Branches the removal does not touch keep
-   * their graphs. A session that holds views, or one marked for a full
-   * re-evaluation, replaces its watch set with the remaining watches
-   * instead, which walks every one of them.
+   * Helper for watchRemove(), which releases the removed watches' roots from
+   * the session's graphs, retracting what nothing else reaches, and walks
+   * nothing a remaining watch already reaches. A session that holds views,
+   * or one marked for a full re-evaluation, replaces its watch set with the
+   * remaining watches instead, which walks every one of them.
    */
   async #watchRemove(
     message: WatchRemoveRequest,
@@ -6921,14 +6917,17 @@ export class Server {
     if (session === null || session.forceFullResync) {
       return await this.#watchSet(remaining(), "remove");
     }
-    return await this.#removeWatchesByCoverage(message, session);
+    return await this.#removeWatchesByRelease(message, session);
   }
 
   /**
-   * Helper for `#watchRemove()`, which removes the named watches from
-   * `session` and re-evaluates only the branches that lose a walked watch.
+   * Helper for `#watchRemove()`, which releases the removed watches' roots
+   * from their branches' graphs (`releaseTrackedRoots`): what no remaining
+   * root or link keeps retires and is retracted, a root a retired record
+   * had covered is walked again on its own, and a branch with no watch
+   * left drops its graph. Nothing else is walked.
    */
-  async #removeWatchesByCoverage(
+  async #removeWatchesByRelease(
     message: WatchRemoveRequest,
     session: SessionState,
   ): Promise<ResponseMessage<WatchSetResult>> {
@@ -6990,79 +6989,103 @@ export class Server {
         !removedIds.has(watch.id)
       );
       const remainingByBranch = graphWatchesByBranch(remaining);
-      const coveredWatchIds = new Set(session.coveredWatchIds);
-      for (const id of removedIds) coveredWatchIds.delete(id);
+      const identity = this.#sessionScopeIdentity(session);
       const graphs = new StagedMap(session.graphs);
+      const graphCommits: Array<() => void> = [];
       const attribution = createRootAttribution();
-      // The graphs the removal evaluated again, whose crossings the session
-      // may not have been told of.
+      // The graphs the release walked roots of again, whose crossings the
+      // session may not have been told of.
       const touchedGraphs: TrackedGraphState[] = [];
-      const options = {
-        principal: session.principal,
-        sessionId: session.id,
-        evaluationCache: this.#evaluationCacheFor(message.space),
-      };
+      const updates = new Map<string, SessionCacheEntry>();
+      const removes = new Map<string, SessionCacheEntry>();
+      const changedInterests = new Set<string>();
       for (
         const [branch, removedGroup] of graphWatchesByBranch(removedWatches)
       ) {
+        const existing = graphs.get(branch);
+        if (existing === undefined) continue;
+        const retract = (docKey: QueryDocKey) => {
+          const { id, scopeKey } = fromDocKey(docKey);
+          const entry = session.entities.get(
+            cacheKeyForEntity(branch, id, scopeKey),
+          );
+          if (entry !== undefined) {
+            removes.set(cacheKeyForEntity(branch, id, scopeKey), entry);
+          }
+          changedInterests.add(toDirtyKey(id, scopeKey));
+        };
         const group = remainingByBranch.get(branch) ?? [];
         if (group.length === 0) {
+          for (const docKey of existing.entities.keys()) retract(docKey);
+          for (const [key] of existing.missed) {
+            try {
+              const { id, scopeKey } = fromDocKey(key as QueryDocKey);
+              changedInterests.add(toDirtyKey(id, scopeKey));
+            } catch {
+              continue;
+            }
+          }
           graphs.delete(branch);
           continue;
         }
-        if (
-          removedGroup.every((watch) => session.coveredWatchIds.has(watch.id))
-        ) {
-          continue;
-        }
-        const walked = group.filter((watch) => !coveredWatchIds.has(watch.id));
-        const covered = group.filter((watch) => coveredWatchIds.has(watch.id));
-        // The branch is walked again from its remaining walked watches, or
-        // from its covered ones when no walked watch remains, every one of
-        // which is then walked.
-        const seed = walked.length > 0 ? walked : covered;
-        const tracked = trackGraph(
+        // A root two watches share stays while either does.
+        const kept = new Set(rootReferrersOf(
+          message.space,
+          group.flatMap((watch) => watch.query.roots),
+          identity,
+        ));
+        const released = rootReferrersOf(
+          message.space,
+          removedGroup.flatMap((watch) => watch.query.roots),
+          identity,
+        ).filter((referrer) => !kept.has(referrer));
+        if (released.length === 0) continue;
+        const staged = stageTrackedGraphState(engine, existing);
+        graphCommits.push(staged.commit);
+        touchedGraphs.push(staged.value);
+        const result = releaseTrackedRoots(
           message.space,
           engine,
-          unionQuery(branch, seed),
-          undefined,
-          options,
+          staged.value,
+          released,
         );
-        foldRootAttribution(attribution, tracked.stats);
-        // Enforced per evaluation, not per request: a later branch's
-        // failure must not leave an already-inserted entry over budget.
-        this.#enforceEvaluationCacheBudget();
-        const state = tracked.state;
-        const uncovered = walked.length > 0
-          ? partitionWatchesByCoverage(message.space, state, covered).uncovered
-          : covered;
-        if (walked.length > 0 && uncovered.length > 0) {
-          const extended = extendTrackedGraph(
-            message.space,
-            engine,
-            state,
-            unionQuery(branch, uncovered),
+        foldRootAttribution(attribution, result.stats);
+        for (const [docKey, entity] of result.updates) {
+          const { scopeKey } = fromDocKey(docKey);
+          const entry = toCacheEntry(entity, identity, scopeKey);
+          updates.set(
+            cacheKeyForEntity(entry.branch, entry.id, entry.scopeKey),
+            entry,
           );
-          foldRootAttribution(attribution, extended.stats);
+          changedInterests.add(toDirtyKey(entry.id, entry.scopeKey));
         }
-        for (const watch of uncovered) coveredWatchIds.delete(watch.id);
-        graphs.set(branch, state);
-        touchedGraphs.push(state);
+        for (const docKey of result.removed) retract(docKey);
+        for (const key of result.changedMisses) {
+          const { id, scopeKey } = fromDocKey(key as QueryDocKey);
+          changedInterests.add(toDirtyKey(id, scopeKey));
+        }
       }
-      const identity = this.#sessionScopeIdentity(session);
-      const entities = this.#entriesFromGraphs(graphs.values(), identity);
+      const upserts: SessionCacheEntry[] = [];
+      for (const [key, entry] of updates) {
+        if (!sameSnapshot(session.entities.get(key), entry)) {
+          upserts.push(entry);
+        }
+      }
       // Stage A (OW17's wire leg): a lease-holder session's frames carry
       // instance keys (see `#watchSet()`).
       const keyed = session.leaseHolderReads === true;
       const serverSeq = Engine.serverSeq(engine);
-      const sync = buildDiffSync(
-        session.entities,
-        entities,
-        session.lastSyncedSeq,
-        serverSeq,
-        undefined,
-        keyed,
-      );
+      const sync: SessionSync = {
+        type: "sync",
+        fromSeq: session.lastSyncedSeq,
+        toSeq: serverSeq,
+        upserts: upserts.toSorted(compareSyncAddress).map((entry) =>
+          toWireUpsert(entry, keyed)
+        ),
+        removes: [...removes.values()].sort(compareSyncAddress).map((entry) =>
+          toWireRemove(entry, keyed)
+        ),
+      };
       const newCrossings = this.#undeliveredCrossings(session, touchedGraphs);
       if (newCrossings.crossings.length > 0) {
         sync.crossings = newCrossings.crossings;
@@ -7073,6 +7096,7 @@ export class Server {
         ok: { serverSeq, sync },
       };
       // There is no await between graph evaluation and publication.
+      for (const commit of graphCommits) commit();
       graphs.commit();
       this.#markCrossingsDelivered(session, newCrossings.keys);
       this.#forgetUnfollowedCrossings(session, session.graphs.values());
@@ -7084,7 +7108,6 @@ export class Server {
       session.watchIndex = new Map(
         remaining.map((watch) => [watch.id, watch]),
       );
-      session.coveredWatchIds = coveredWatchIds;
       session.operationWatches = remaining.filter((watch) =>
         watch.kind === "operation"
       );
@@ -7094,13 +7117,20 @@ export class Server {
         remaining,
         watchIdentity,
       );
-      session.entities = entities;
-      session.trackedIds = addOperationWatchTrackedIds(
-        trackedIdsFromEntries(entities.values()),
-        remaining,
-        watchIdentity,
-      );
-      this.#addMissedToTrackedIds(session.trackedIds, session.graphs.values());
+      // A removed operation watch's keys stay interests only while a
+      // remaining watch owns them.
+      for (
+        const key of addOperationWatchTrackedIds(
+          new Set(),
+          removedWatches,
+          watchIdentity,
+        )
+      ) {
+        changedInterests.add(key);
+      }
+      for (const [key, entry] of updates) session.entities.set(key, entry);
+      for (const key of removes.keys()) session.entities.delete(key);
+      this.#reconcileTrackedInterests(session, changedInterests);
       this.#touchDemand(session);
       session.lastSyncedSeq = serverSeq;
       this.#notifyDemandChanged(message.space, "watch", session.principal);
@@ -7110,6 +7140,7 @@ export class Server {
         startedAt,
         {
           watches: message.watchIds.length,
+          upserts: upserts.length,
           ...attribution,
         },
       );
@@ -7390,7 +7421,6 @@ export class Server {
       session.watchIndex = new Map(
         message.watches.map((watch) => [watch.id, watch]),
       );
-      session.coveredWatchIds = new Set();
       session.operationTrackedIds = addOperationWatchTrackedIds(
         new Set(),
         message.watches,
@@ -7505,22 +7535,13 @@ export class Server {
         continue;
       }
 
-      const { uncovered } = partitionWatchesByCoverage(
-        session.space,
-        existing,
-        group,
-      );
-      if (uncovered.length === 0) {
-        continue;
-      }
-
       const staged = cloneTrackedGraphState(engine, existing);
       graphs.set(key, staged);
       const extended = extendTrackedGraph(
         session.space,
         engine,
         staged,
-        unionQuery(branch, uncovered),
+        unionQuery(branch, group),
       );
       foldRootAttribution(attribution, extended.stats);
       for (const [docKey, entity] of extended.updates) {
@@ -7708,9 +7729,6 @@ export class Server {
       // a new graph's state, or an extended graph's STAGED state, which is
       // where the extension's crossings sit until it commits.
       const touchedGraphs: TrackedGraphState[] = [];
-      // The added watches left unwalked because their branch's graph
-      // already covered them, recorded on the session at publication.
-      const coveredWatchIds: string[] = [];
       for (const [branch, group] of graphWatchesByBranch(newWatches)) {
         const existing = graphs.get(branch);
         if (existing === undefined) {
@@ -7739,16 +7757,6 @@ export class Server {
           continue;
         }
 
-        const { covered, uncovered } = partitionWatchesByCoverage(
-          message.space,
-          existing,
-          group,
-        );
-        for (const watch of covered) coveredWatchIds.push(watch.id);
-        if (uncovered.length === 0) {
-          continue;
-        }
-
         const staged = stageTrackedGraphState(engine, existing);
         graphCommits.push(staged.commit);
         touchedGraphs.push(staged.value);
@@ -7756,7 +7764,7 @@ export class Server {
           message.space,
           engine,
           staged.value,
-          unionQuery(branch, uncovered),
+          unionQuery(branch, group),
         );
         foldRootAttribution(attribution, extended.stats);
         for (const [docKey, entity] of extended.updates) {
@@ -7829,7 +7837,6 @@ export class Server {
       existingById.commit();
       for (const watch of addedWatches) nextWatches.push(watch);
       session.watches = nextWatches;
-      for (const id of coveredWatchIds) session.coveredWatchIds.add(id);
       for (const watch of addedOperationWatches) {
         nextOperationWatches.push(watch);
       }
@@ -8208,10 +8215,10 @@ export class Server {
    * buffering: only a locally-throwing send is visible in-process, and a
    * dying socket loses "successfully sent" frames just the same — the
    * durable repair for that is resume-time catch-up, not a server-side
-   * buffer. A doc REMOVED by the lost frame is the accepted residue: its
-   * cache entry is already gone and cannot be re-diffed; the client keeps
-   * it until a full re-evaluation or reconnect (watch-shrink removes are
-   * advisory today). */
+   * buffer. A doc REMOVED by the lost frame is re-inserted as a tombstone
+   * and the next sync runs a full evaluation, which re-diffs it out: the
+   * incremental refresh retracts only what its own re-walks retire, and
+   * knows nothing of a frame the socket lost. */
   rollbackUndeliveredSync(
     space: string,
     sessionId: string,
@@ -8267,8 +8274,9 @@ export class Server {
         // The remove's cache entry died when the frame was built;
         // re-insert a tombstone claiming the client still holds the doc,
         // and force the next sync through a FULL evaluation — the
-        // incremental path never emits removes, so only a full re-diff
-        // (tombstone present, entity absent) regenerates the removal.
+        // incremental path retracts only what its re-walks retire, so only
+        // a full re-diff (tombstone present, entity absent) regenerates
+        // the removal.
         session.entities.set(
           cacheKeyForEntity(entry.branch, entry.id, entry.scopeKey),
           {
@@ -8732,6 +8740,9 @@ export class Server {
               const fromSeq = session.lastSyncedSeq;
               const identity = this.#sessionScopeIdentity(session);
               const updates = new Map<string, SessionCacheEntry>();
+              // The delivered entries of the documents the re-walks retired:
+              // the frame retracts them.
+              const removed = new Map<string, SessionCacheEntry>();
               const changedInterests = new Set<string>();
               const walkStartedAt = performance.now();
 
@@ -8776,6 +8787,13 @@ export class Server {
                       cacheKeyForEntity(entry.branch, entry.id, entry.scopeKey),
                       entry,
                     );
+                  }
+                  for (const docKey of refreshed.removed) {
+                    const { id, scopeKey } = fromDocKey(docKey);
+                    const key = cacheKeyForEntity(graph.branch, id, scopeKey);
+                    const entry = session.entities.get(key);
+                    if (entry !== undefined) removed.set(key, entry);
+                    changedInterests.add(toDirtyKey(id, scopeKey));
                   }
                 }
               } finally {
@@ -8899,6 +8917,9 @@ export class Server {
                     if (!session.entities.has(key)) enteredEntity = true;
                     session.entities.set(key, entry);
                   }
+                  for (const key of removed.keys()) {
+                    session.entities.delete(key);
+                  }
                   let changed = this.#reconcileTrackedInterests(
                     session,
                     changedInterests,
@@ -8951,7 +8972,10 @@ export class Server {
                 session,
                 session.graphs.values(),
               );
-              if (upserts.length === 0 && newCrossings.crossings.length === 0) {
+              if (
+                upserts.length === 0 && removed.size === 0 &&
+                newCrossings.crossings.length === 0
+              ) {
                 // The watched set was re-evaluated current as of toSeq even though it
                 // produced no net upserts; advance the watermark so a later default
                 // fromSeq is not stale. emptyCatchUp receives the original fromSeq
@@ -8989,7 +9013,9 @@ export class Server {
                     // before.
                     toWireUpsert(entry, keyed)
                   ),
-                  removes: [],
+                  removes: [...removed.values()].sort(compareSyncAddress).map(
+                    (entry) => toWireRemove(entry, keyed),
+                  ),
                   ...(newCrossings.crossings.length === 0
                     ? {}
                     : { crossings: newCrossings.crossings }),
@@ -8999,7 +9025,7 @@ export class Server {
                 // rolls back the EXACT instances (rollbackUndeliveredSync).
                 this.#deliveredFrameEntries.set(message, {
                   upserts: [...upserts],
-                  removes: [],
+                  removes: [...removed.values()],
                   crossings: newCrossings.keys,
                 });
               } finally {
@@ -9162,11 +9188,6 @@ export class Server {
             // The full evaluation built the whole support graph, so a growth
             // an earlier selection owed is already in it.
             session.viewSupportGrown = false;
-            // The full evaluation walked every watch; a support rebuild
-            // kept the demand graphs, and with them the watches they cover.
-            if (supportReplaced === undefined) {
-              session.coveredWatchIds = new Set();
-            }
             session.entities = entities;
             this.#markCrossingsDelivered(session, newCrossings.keys);
             session.trackedIds = evaluatedTrackedIds;

@@ -136,6 +136,7 @@ import {
 } from "../schema-doc-delivery.ts";
 import {
   acquireSchemaRegistryLease,
+  isSchemaDocumentClosureComplete,
   lookupSchemaDocument,
   registerSchemaDocument,
 } from "../schema-registry.ts";
@@ -3519,8 +3520,9 @@ export class StorageManager implements IStorageManager {
   }
 
   /**
-   * Syncs the CFC schema document `document`'s `cfc.schemaHash` names and
-   * every label document its envelope references, in parallel, and
+   * Syncs the CFC schema document `document`'s `cfc.schemaHash` names when
+   * its verified closure is not locally registered, along with every label
+   * document its envelope references, in parallel, and
    * resolves to the first sync error among them; a document naming none
    * resolves at once. A reader of the envelope resolves its labels
    * synchronously from the replica, so the label documents are pulled
@@ -3538,7 +3540,10 @@ export class StorageManager implements IStorageManager {
     const cfc = isObjectNotArray(document?.cfc) ? document.cfc : undefined;
     const ids: URI[] = [];
     const schemaHash = cfc?.schemaHash;
-    if (typeof schemaHash === "string" && schemaHash.length > 0) {
+    if (
+      typeof schemaHash === "string" && schemaHash.length > 0 &&
+      !isSchemaDocumentClosureComplete(schemaHash)
+    ) {
       ids.push(`cid:${schemaHash}` as URI);
     }
     for (const hash of cfcEnvelopeLabelDocumentHashes(cfc)) {

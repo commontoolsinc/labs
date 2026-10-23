@@ -265,8 +265,8 @@ a record: archive it to `docs/history/plans/` following the procedure in
   [shaped reads and verb results](shaped-reads-and-verb-results.md) — the shared
   read layer, how a shape says "an address here, a value there", and what
   calling a verb adds — and at
-  [CLI surface shape](cli-surface-shape.md) for the command surface and an
-  additive path to it. Start here rather than at either part.
+  [CLI surface shape](../history/plans/cli-surface-shape.md) for the command surface, an executed
+  plan now archived. Start here rather than at either part.
 - [References as arguments](references-as-arguments.md) proposes lifting
   address resolution out of the LLM dialog builtin, which already does it, and
   into the boundary every external caller crosses. An LLM and the CLI can

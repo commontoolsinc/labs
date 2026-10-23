@@ -1605,8 +1605,8 @@ export class CellImpl<T extends FabricValue>
    * This affects all sibling cells (created via .key(), .asSchema(), .withTx()) since they
    * share the same container.
    *
-   * Record causes may not use the top-level key `$generated` — it is
-   * reserved for system-generated causes.
+   * Record causes may not use the top-level key `$generated` or `$instance` —
+   * they are reserved for the causes the pattern builder mints.
    * @param cause - The cause to associate with this cell
    * @param allowIfSet - If true, treat as suggestion and silently ignore if cause already set. If false (default), throw error if cause already set.
    * @returns This cell for method chaining
@@ -1626,8 +1626,8 @@ export class CellImpl<T extends FabricValue>
     }
 
     // Reject reserved keys before the cause can take effect: a user cause
-    // carrying a top-level `$generated` key would mimic the pattern builder's
-    // generated-cause namespace.
+    // carrying a top-level `$generated` or `$instance` key would mimic a cause
+    // the pattern builder mints.
     assertNoReservedCauseKeys(cause);
 
     // Store the cause in the shared container - all siblings will see this

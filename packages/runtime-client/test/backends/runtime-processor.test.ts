@@ -4054,6 +4054,65 @@ describe("runtime-processor", () => {
       );
     });
 
+    it("returns the URL a blob's space's host serves it at", () => {
+      const hostForSpaceCalls: string[] = [];
+      const processor = buildProcessor({
+        runtime: {
+          hostForSpace: (space: string) => {
+            hostForSpaceCalls.push(space);
+            return new URL("http://toolshed.test/base");
+          },
+        },
+      });
+
+      expect(
+        processor.handleBlobUrl({
+          type: RequestType.BlobUrl,
+          space: "did:key:test-space" as never,
+          id: "fid1:abc_-123",
+        }),
+      ).toEqual({
+        url: "http://toolshed.test/did:key:test-space/blobs/abc_-123",
+      });
+      expect(hostForSpaceCalls).toEqual(["did:key:test-space"]);
+    });
+
+    it("returns the URL to save a blob from for a request to download it", () => {
+      const processor = buildProcessor({
+        runtime: { hostForSpace: () => new URL("http://toolshed.test/base") },
+      });
+
+      expect(
+        processor.handleBlobUrl({
+          type: RequestType.BlobUrl,
+          space: "did:key:test-space" as never,
+          id: "fid1:abc",
+          download: true,
+        }).url,
+      ).toBe("http://toolshed.test/did:key:test-space/blobs/abc?download");
+    });
+
+    it("throws for a blob URL request naming no space or no blob", () => {
+      const processor = buildProcessor({
+        runtime: { hostForSpace: () => new URL("http://toolshed.test/base") },
+      });
+
+      expect(() =>
+        processor.handleBlobUrl({
+          type: RequestType.BlobUrl,
+          space: "not a did" as never,
+          id: "fid1:abc",
+        })
+      ).toThrow("blobUrl requires a space DID");
+      expect(() =>
+        processor.handleBlobUrl({
+          type: RequestType.BlobUrl,
+          space: "did:key:test-space" as never,
+          id: "",
+        })
+      ).toThrow("blobUrl requires a blob id");
+    });
+
     it("throws for a request whose name is not a string", async () => {
       const processor = buildProcessor({
         runtime: { hostForSpace: () => new URL("http://toolshed.test/base") },

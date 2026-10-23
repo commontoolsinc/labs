@@ -775,6 +775,39 @@ regardless, and a rule a pattern enforces only by consulting
 that must be refused, use a write policy as described above.
 [`space-access.md`](../../features/space-access.md) has the details.
 
+### A space's members
+
+`spaceMembers(target)` returns the principals the access list of `target`'s
+space names: `principals` maps each one's DID to its level, `"OWNER"`,
+`"WRITE"`, or `"READ"`. The list's `"*"` entry names nobody, so it makes no one
+a member; it is reported apart, as `anyone`, the level it grants whoever the
+list does not name.
+
+```tsx
+// Shown inside a pattern body.
+const board = new Writable.perSpace<string[]>([]);
+const memberCount = computed(() => {
+  const members = spaceMembers(board);
+  return members === undefined
+    ? undefined
+    : Object.keys(members.principals).length;
+});
+```
+
+Only a viewer the access list grants access gets the list, whether through
+their own entry or through `"*"`. Anyone else gets `undefined`, which also
+means "not known yet", as it does for `spaceAccess(target)`; the result is never
+an empty list. Call it where `spaceAccess(target)` can be called. In a
+computation the value is the viewer's own, and updates when the access list
+changes.
+
+It lists principals, not people. To show each member by the profile they joined
+with, match the space's roster against it with `principalOf()` (see
+[Build the roster by join](#build-the-roster-by-join)), and show a member with
+no matching profile by their DID.
+[`space-access.md`](../../features/space-access.md#a-spaces-members) has the
+details.
+
 ### Granting and revoking access to a space
 
 `grantSpaceAccess(target, principal, level)` sets `principal`'s entry in the

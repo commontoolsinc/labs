@@ -51,11 +51,34 @@ with a `Content-Disposition` header naming the file, so the saved file has that
 name whichever host serves the space. A blob stored with no name is served with
 one naming no file. There the `download` attribute is what names the saved file,
 and browsers honor it only when the link is same-origin with the page, so a
-space served from another host saves the file under its hash instead.
+space served from another host saves the file under its hash instead. A URL
+with `?download` is served as an attachment whatever the blob's type, which a
+browser saves from any origin, under the blob's name.
+
+A pattern that holds a blob's reference, its space's DID and its id there, rather
+than its URL, offers it with `cf-blob-link`, as
+`<cf-blob-link blob={file.blob} name={file.name}>`, which links to its
+`?download` URL, and shows an image with `<cf-image blob={file.blob}>`. Each
+asks the runtime for the URL the blob's space's host serves it at, which a
+pattern has no way to form itself.
 
 `cf-file-download` is not for stored files. It takes the content as a string
 and builds the download in the browser, so using it means holding the bytes in
 a cell.
+
+## Renaming
+
+A handler renames a file by naming its blob again: `nameBlob(target, blobId,
+name)` returns the id of a blob holding the same bytes and media type under
+`name`, in the space `target`'s value lives in, and the handler stores that id
+where it kept the old one. It returns `undefined` when the space holds no blob
+`blobId`, which the handler checks before storing anything. A blob never
+changes, so the space then holds the bytes under both names. The new blob's
+record is stored when the handler's transaction commits, and its bytes travel
+with the commit: the handler loads them first, and is run again once they
+arrive. The commit carries the bytes base64-encoded, so under the routed
+transport, whose frames hold at most 8 MiB, a file well within the upload limit
+can still be too large to rename.
 
 ## What the store provides
 
@@ -69,9 +92,11 @@ a cell.
   or digits; otherwise one chosen from the media type, or `bin`. Two uploads
   with the same id share a URL when they get the same suffix and have two URLs
   when they do not. Each URL is immutable and cacheable forever.
-- A name is any non-empty string of well-formed Unicode. Every download's
+- A name is any non-empty string of well-formed Unicode of at most 1024 bytes
+  as UTF-8. Every download's
   `Content-Disposition` is `inline` for a type served as itself, and
-  `attachment` for every other, naming the file when the blob has a name.
+  `attachment` for every other, or for any type under `?download`, naming the
+  file when the blob has a name.
 - The bytes stay in the space's own store beside its cells. There is no
   offload to an object store, and no signed or expiring URL.
 - GIF, JPEG, PNG, and WebP are served as their own media type, so an `<img>`
@@ -79,6 +104,8 @@ a cell.
   a browser downloads it rather than rendering it inline. Every blob is served
   with `X-Content-Type-Options: nosniff`, so a browser takes the type as given
   rather than guessing one from the bytes.
+- A record a handler stores with `nameBlob()` carries no label either, so the
+  name it gives is readable by anyone who can fetch the blob.
 - Nothing deletes a blob. Removing a record drops the reference; the bytes
   stay.
 - The upload and download routes are not authenticated: anyone who holds a

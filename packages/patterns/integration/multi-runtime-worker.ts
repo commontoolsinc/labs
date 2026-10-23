@@ -50,6 +50,7 @@ import type {
 import {
   cellRuntime,
   convertCellsToLinks,
+  createSpaceRootIfAbsent,
   isCell,
   markUiInputBlindWriteTx,
   parseLink,
@@ -66,7 +67,7 @@ import {
   markRendererTrustedEvent,
   reviewedActionProvenance,
 } from "@commonfabric/runner/cfc";
-import { Identity } from "@commonfabric/identity";
+import { type DID, Identity } from "@commonfabric/identity";
 import {
   ensurePrivateInboxOf,
   inboxPieceLinkSchema,
@@ -1404,6 +1405,44 @@ const handlers: Record<
     }
     await idle();
     return {};
+  },
+
+  /**
+   * Creates a space the way a loom daemon's sidecar creates a social Loom's:
+   * its genesis commit reserves the Loom root at the Loom's publication cause
+   * and declares `spaceKind`, `loom` when absent and no kind for `null`, and
+   * grants `recipient` `WRITE`, as the daemon's offer does. Then provisions
+   * the root, titled `title`, from `system:loom/main.tsx` at the host this
+   * runtime reads. Answers the space and the address of its root.
+   */
+  async createLoomSpace({ recipient, spaceKind, title }) {
+    const runtime = controller().runtime;
+    const root = {
+      source: "system:loom/main.tsx",
+      sourceRoots: [
+        "system:loom/main.test.tsx",
+        "system:loom/presentation-refusals.test.tsx",
+        "system:loom/multi-user.test.tsx",
+        "system:loom/url-view.test.tsx",
+      ],
+      cause: JSON.stringify({
+        purpose: "loom-publication-root",
+        publication: crypto.randomUUID(),
+      }),
+      argument: { title: title as string },
+    };
+    const space = await runtime.createSpace({
+      grants: { [recipient as DID]: "WRITE" },
+      root,
+      ...(spaceKind === null
+        ? {}
+        : { spaceKind: (spaceKind ?? "loom") as string }),
+    });
+    const { error } = await createSpaceRootIfAbsent(runtime, space, root);
+    if (error) throw new Error(`createLoomSpace failed: ${error.message}`);
+    await idle();
+    const { id } = runtime.getCell(space, root.cause).getAsNormalizedFullLink();
+    return { space, root: { space, id } };
   },
 
   /** Reads an explicit held address with the same stored-label gate as any Cell. */

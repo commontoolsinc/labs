@@ -80,6 +80,7 @@ import {
   createCell,
   internCellLinkSchema,
   isCell,
+  recordWriteDestinationPolicyInput,
   schemaCellScope,
   syncCellForIdentity,
 } from "./cell.ts";
@@ -3657,7 +3658,14 @@ export class Runner {
     const storable = flattenBuilderArtifacts(argument, {
       isLeaf: isCellResultForDereferencing,
     });
-    argumentCell.set(storable);
+    // The write's schema policy input describes the write, so it is recorded
+    // where the write lands: the argument document. Setup writes that
+    // document's bindings (`replacesBindings`, below) and nothing it binds.
+    recordWriteDestinationPolicyInput(
+      tx,
+      argumentLink,
+      argumentLink.schema ?? argumentCell.schema,
+    );
     // The policy recorder sees the RAW argument, as its sibling in
     // `#updateResultProjection` does. Handing it the flattened one would walk
     // a serialized pattern graph the raw walk stops at -- a function halts
@@ -3681,13 +3689,34 @@ export class Runner {
       projection,
       [],
     );
-    diffAndUpdate(
+    // The argument document is the piece's own, and this writes it whole: a
+    // binding it already holds stays where the argument names the same cell,
+    // and is replaced where the argument binds the slot another way. A write
+    // through the old binding would land in the cell it names, which is the
+    // caller's.
+    const changed = diffAndUpdate(
       this.#runtime,
       tx,
       argumentLink,
       storable,
       argumentLink,
+      { replacesBindings: true },
     );
+    // The document now holds the value supplied here, so flow labels may
+    // stamp it as a whole write, as they may a `Cell.set()`; and a mergeable
+    // op on a list in it resolves against this value rather than the store.
+    if (changed) {
+      tx.recordCfcAssertedValueRoot(
+        {
+          space: argumentLink.space,
+          id: argumentLink.id,
+          scope: argumentLink.scope,
+          path: [...argumentLink.path],
+        },
+        runtimeWritePolicyAuthorization,
+      );
+    }
+    tx.poisonMergeableOp?.(argumentLink);
     initializeScopedArgumentSlots(
       this.#runtime,
       tx,
@@ -12508,8 +12537,8 @@ export class Runner {
         // the client-written one — `{}` as the existence witness, the handler's
         // plain return under `plainResultReceipts` — and the cell identity is
         // the same cause-derived address, so the verb contract's readback
-        // (`cf call`'s `.result`) reads a serving-written receipt the same
-        // way it reads a client-written one.
+        // (`cf piece call`'s `.result`) reads a serving-written receipt the
+        // same way it reads a client-written one.
         //
         // Write-once is CAS, not a wire precondition: no markCreateOnly (a
         // create-only mark must not ride a wave commit whose event the

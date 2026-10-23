@@ -389,6 +389,33 @@ describe("Blob Routes", () => {
       expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
     });
 
+    it("serves a blob of a type it serves as itself as an attachment when asked to download it", async () => {
+      const identity = await Identity.fromPassphrase(
+        "toolshed-blob-named-download",
+      );
+      await bootstrapHomeSpace(identity);
+      const contents = {
+        type: "image/gif",
+        body: new FabricBytes(bytes),
+        name: "photo.gif",
+      };
+      const hash = hashOf(contents).toString().slice("fid1:".length);
+
+      const post = await uploadTo(
+        `/${identity.did()}/blobs/image.gif`,
+        contents,
+      );
+      expect(post.status).toBe(201);
+
+      const get = await app.request(
+        `/${identity.did()}/blobs/${hash}.gif?download`,
+      );
+      expect(get.headers.get("Content-Type")).toBe("image/gif");
+      expect(get.headers.get("Content-Disposition")).toBe(
+        `attachment; filename="photo.gif"; filename*=UTF-8''photo.gif`,
+      );
+    });
+
     it("serves a blob of a type it serves as octet-stream as an attachment, under its name", async () => {
       const identity = await Identity.fromPassphrase(
         "toolshed-blob-named-attachment",
@@ -430,11 +457,17 @@ describe("Blob Routes", () => {
       expect((await post.json()).url).toBe(`blobs/${hash}.pdf`);
     });
 
-    it("returns 400 for an upload whose name is not a non-empty well-formed string", async () => {
+    it("returns 400 for an upload whose name is not a non-empty well-formed string of at most 1024 bytes", async () => {
       const identity = await Identity.fromPassphrase(
         "toolshed-blob-named-invalid",
       );
-      const names: FabricValue[] = ["", "\ud800.gif", 7, ["photo.gif"]];
+      const names: FabricValue[] = [
+        "",
+        "\ud800.gif",
+        "é".repeat(512) + "x",
+        7,
+        ["photo.gif"],
+      ];
       for (const name of names) {
         const post = await uploadTo(`/${identity.did()}/blobs/image.gif`, {
           type: "image/gif",
@@ -443,6 +476,21 @@ describe("Blob Routes", () => {
         });
         expect({ name, status: post.status }).toEqual({ name, status: 400 });
       }
+    });
+
+    it("returns 201 for an upload whose name is 1024 bytes as UTF-8", async () => {
+      const identity = await Identity.fromPassphrase(
+        "toolshed-blob-named-longest",
+      );
+      await bootstrapHomeSpace(identity);
+
+      const post = await uploadTo(`/${identity.did()}/blobs/image.gif`, {
+        type: "image/gif",
+        body: new FabricBytes(bytes),
+        name: "é".repeat(512),
+      });
+
+      expect(post.status).toBe(201);
     });
 
     it("serves a name holding control characters encoded in the header", async () => {
