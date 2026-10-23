@@ -218,9 +218,12 @@ Exit: a plan's inputs document is hashed over its links, not its schemas.
 - [x] An absence the store read-through confirmed holds no start, named
       family or not. The replica remembers each instance the store held
       nothing at until the feed reports a write to it
-      (`IStorageProvider.storeReportedAbsent`), and a name-sync would ask
-      the store the same question; the replica still reports such a read
-      unexamined, for commit to reconcile. A cell owed a default at a
+      (`IStorageProvider.storeReportedAbsent`), and a name-sync asks the
+      replica, which answers with that report until then; the replica still
+      reports such a read unexamined, for commit to reconcile. The argument
+      document is asked of the store again (`readStoreAbsenceAgain()`):
+      setup writes it with the result that links to it, so with that result
+      present the report predates the write. A cell owed a default at a
       scope narrower than its owner's result (`ownedCellOwesSeed`) whose
       absence the store confirmed holds the start only for its seed: the
       start seeds each such default in a transaction of its own, as the

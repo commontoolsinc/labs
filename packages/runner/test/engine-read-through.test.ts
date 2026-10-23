@@ -685,6 +685,50 @@ describe("engine-read-through", () => {
     }
   });
 
+  it("asks the store again on request for an address it reported absent, and reads what it holds now", async () => {
+    const store = new Map<
+      string,
+      { seq: number; doc: { value: FabricValue } }
+    >();
+    let reads = 0;
+    const manager = SharedServerStorageManager.connectTo(server, {
+      as: serviceSigner,
+    });
+    try {
+      manager.installStoreReadThrough(space, ({ id, scopeKey }) => {
+        reads += 1;
+        const entry = store.get(id);
+        return {
+          branch: "",
+          id,
+          scope: "space",
+          scopeKey,
+          ...(entry === undefined
+            ? { seq: 0, deleted: true as const }
+            : { seq: entry.seq, doc: entry.doc }),
+        };
+      });
+      const provider = manager.open(space);
+      const id = "of:asked-again" as URI;
+      // An address nothing reported absent is not asked.
+      expect(provider.readStoreAbsenceAgain?.({ id })).toBe(false);
+      expect(reads).toBe(0);
+      expect(provider.replica.getDocument(id)).toBeUndefined();
+      expect(reads).toBe(1);
+      // Asked again while the store still holds nothing, it stays reported.
+      expect(provider.readStoreAbsenceAgain?.({ id })).toBe(false);
+      expect(reads).toBe(2);
+      expect(provider.storeReportedAbsent?.({ id })).toBe(true);
+      store.set(id, { seq: 1, doc: { value: { made: true } } });
+      expect(provider.readStoreAbsenceAgain?.({ id })).toBe(true);
+      expect(reads).toBe(3);
+      expect(provider.storeReportedAbsent?.({ id })).toBe(false);
+      expect(provider.replica.getDocument(id)?.value).toEqual({ made: true });
+    } finally {
+      await manager.close();
+    }
+  });
+
   it("refuses a commit that read an absence the store has since filled, and commits one that reads the document again once the feed reports the write", async () => {
     // The window the feed's lag leaves: the store holds the document while
     // this replica still reports it absent, so a run that was not held for

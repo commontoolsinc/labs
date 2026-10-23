@@ -156,13 +156,13 @@ the room's UI is per session, so the links its walks follow already declare
 a scope, and what stays slow is content a wave changed.
 
 **Holding no run for an absence the store confirmed.** The gate counted a
-document the store read-through had read and found nothing at as absent,
-and held the row's start for a name-sync that could only ask the store the
-same question. Letting such a document hold no run, named family or not,
-removed both of the holds above. Three pairs of send bursts, alternating
-with a control from the same worktree, read 3.2, 3.2 and 3.7 s with it
-against 3.5, 2.6 and 3.4 s without. A probe with the start log showed why
-nothing moved: every row was still held, now for a default owed to
+document the store read-through had read and found nothing at as absent, and
+held the row's start for a name-sync, which asks the replica and would have been
+told the same absence until the feed reported a write. Letting such a document
+hold no run, named family or not, removed both of the holds above. Three pairs
+of send bursts, alternating with a control from the same worktree, read 3.2, 3.2
+and 3.7 s with it against 3.5, 2.6 and 3.4 s without. A probe with the start log
+showed why nothing moved: every row was still held, now for a default owed to
 `pickerOpen`, which `message-row.tsx:242` declares as
 `new Writable.perSession(false)`. The row's result is the space's, so each
 viewing session's instance of that cell is owed a seed, and the hold's
@@ -176,6 +176,13 @@ transaction, is not held at all. The probe's round 1 ran no pre-syncs, where
 the earlier rounds ran 2 to 24. Three pairs, against the branch head from a
 worktree of its own, read 3.3, 3.9 and 3.3 s with it against 3.1, 4.3 and
 2.9 s without. The pre-sync's CPU is not what sets the burst's time.
+
+**After review.** The gate still held a start for an absent argument
+document the store had reported, on the reasoning that the name-sync would
+read it fresh; it would not, since a name-sync asks the replica. The setup
+that wrote the result linking to the argument wrote the argument too, so the
+gate now asks the store for it again (`readStoreAbsenceAgain()`). That came
+after the measurements here and was not measured.
 
 The benchmark's end is each member's own read of the room's newest messages
 holding every body. Each member is a web client with its view mounted, so
