@@ -317,7 +317,7 @@ class WorkerClient {
         this.#lifetimeLock = event.data.lifetimeLock;
         if (this.#lifetimeLock !== undefined) {
           // The worker holds this lock until its runtime has been torn down,
-          // so being granted it means the worker will answer nothing more.
+          // so being granted it means the worker will reply to nothing more.
           void navigator.locks.request(
             this.#lifetimeLock,
             () => this.#fail("worker exited"),
@@ -356,7 +356,7 @@ class WorkerClient {
    * `args` and the answer each cross as one `codec-realm` encoding, so both
    * carry the whole `FabricValue` domain.
    *
-   * The call waits for the worker's answer however long it takes. It is
+   * The call waits for the worker's reply however long it takes. It is
    * rejected, with an error naming it, once the worker errors, exits, or is
    * terminated, and a call made after any of those is rejected at once.
    */
