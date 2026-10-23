@@ -32,9 +32,9 @@ rewrite. In particular:
   than a server-issued, principal-bound identifier
 - the public one-shot read surfaces are `graph.query`, `entity-id.list`, and
   `entity-id.exists`
-- watch-set mutations return inline `sync` payloads, and steady-state topology
-  shrink does not yet guarantee automatic `removes`; a client shrinks its
-  watch set explicitly
+- watch-set mutations return inline `sync` payloads; a pushed frame retracts a
+  document a write left no watch reaching, and a client shrinks its watch set
+  explicitly
 
 ## 4.1 Transport
 
@@ -1189,9 +1189,9 @@ Semantics:
   entity-plus-selector pair
 - the server returns the inline `sync` needed for the mutation; pure additive
   growth does not emit `removes`
-- in the current pass, `removes` are only guaranteed for explicit watch-set
-  replacement and removal; steady-state topology shrink does not yet drive
-  automatic unwatch behavior
+- a later write that leaves a document reached by no watch, because the link
+  that reached it changed, is pushed as a `remove` by the refresh that re-walks
+  the changed document (section 4.6.3)
 - watch mutations are applied in order per session; clients must serialize
   `session.watch.set`, `session.watch.add` and `session.watch.remove`
 
@@ -1263,8 +1263,8 @@ Semantics:
 
 - each listed watch is removed from the session watch set; an id the set does
   not hold is ignored
-- the server recomputes the union of watched entities from the watches that
-  remain
+- the server releases what the removed watches alone reached (section 4.6.3):
+  the union of watched entities is what the watches that remain reach
 - the response carries the difference between what the session has been
   delivered and the new union: an entity the union no longer covers is sent
   in `removes`, and an entity it still covers is not resent unless it changed
@@ -1575,9 +1575,13 @@ When the client replaces the watch set, or removes watches from it:
   replacement that declares none is delivered in full, since the server does
   not assume a silent client holds anything
 
-In the current pass, that `removes` guarantee only applies to explicit
-watch-set replacement and removal. Steady-state topology shrink during
-background refresh does not yet drive automatic unwatch behavior.
+A background refresh retracts in the same way: the server attributes each
+tracked document to the watch root or the linking document whose walk reached
+it, and a re-walk after a write releases the attributions it does not make
+again. A document left with no attribution, and one kept only by documents
+that are themselves no longer reached, is sent as a `remove` in the pushed
+frame. A document reached through a different link, or by another watch, is
+not resent.
 
 ### 4.6.4 Cross-Session Delivery
 
