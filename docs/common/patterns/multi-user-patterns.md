@@ -287,6 +287,34 @@ const hasProfile = computed(() => (profileNameWish.result ?? "").trim() !== "");
 **Never** add a "type your name" field and treat that string as the current user.
 The viewer is whoever the runtime says they are; `#profile` is how you read it.
 
+### Fold what a row shows the viewer into one computed
+
+Under server execution one runtime derives for every viewer. A computed that
+reads user-scoped state, such as the viewer's profile, runs once for each user
+who demands it, one that reads session-scoped state runs once for each such
+session, and so does everything downstream of either
+([cell scopes](../../specs/server-side-execution/scopes.md), §2). A row pattern
+that derives each flag it shows in a computed of its own therefore pays a run
+for each flag, for each viewer or session, for each row. Derive everything a
+row shows the viewer in one computed that returns it all, everything the
+session has open in one more, and bind the UI to their fields:
+
+```tsx
+// Shown for illustration only.
+const viewer = computed(() => {
+  const rights = rightsOf(row, viewerProfile);
+  return {
+    editDisplay: rights.canEdit ? "inline-flex" : "none",
+    deleteDisplay: rights.canDelete ? "inline-flex" : "none",
+  };
+});
+// <cf-button style={{ display: viewer.editDisplay }}>Edit</cf-button>
+```
+
+What reads the row alone folds the same way: one computed for every field the
+row's own values decide. A client runtime, which derives only its own viewer's
+instances, runs fewer nodes for each row too.
+
 ### Show every participant with `cf-profile-badge`
 
 ```tsx

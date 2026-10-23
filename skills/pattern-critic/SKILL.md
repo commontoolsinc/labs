@@ -43,6 +43,14 @@ Warnings summary line, never Failed.
   `docs/common/patterns/multi-user-patterns.md#presenting-identity`
   (critique-guide category 16).
 
+- **Per-viewer flags split across computeds (multi-user):** flag a row pattern,
+  one instantiated for each item of a list, that derives what it shows the
+  viewer, or what the session has open, in several computeds. Under server
+  execution each of them runs once for each viewer, or each session, for every
+  row; one computed for the viewer and one for the session, each returning every
+  field, do the same work in two runs. See
+  `docs/common/patterns/multi-user-patterns.md#fold-what-a-row-shows-the-viewer-into-one-computed`.
+
 - **Oversized cross-pattern contracts:** for every type describing linked,
   wished, registered, or otherwise external data — imported or declared inline —
   compare the declared shape with the fields and bindings the consumer actually

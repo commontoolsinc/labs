@@ -241,59 +241,34 @@ export const FabriChatMessageRow = pattern<
   const joined = tellManagerJoined({ canJoin, container, manager, self });
   const pickerOpen = new Writable.perSession(false);
   const togglePicker = action(() => pickerOpen.set(!pickerOpen.get()));
-  const tallies = computed(() => {
-    const key = entityKeyOf(message.resolveAsCell()) ?? "unsaved";
-    return reactionTallies(
-      message.get()?.reactions,
-      myProfile?.get() === undefined ? undefined : myProfile,
-      `fabrichat-reactors-${key}`,
-    );
-  });
-  const isDeletedNow = computed(() => isDeleted(message.get()));
-  // What the viewer may do to the message, by the rule the room's handlers
-  // admit an act by, and none of it while they can't write in the room. The
-  // rule reads the message's author and body, and is handed those two alone.
-  const rights = computed(() => {
-    if (cannotWrite || myProfile?.get() === undefined) return NO_MESSAGE_RIGHTS;
+  // How the message reads, the same for every viewer. A row costs a run of
+  // each of its computeds for each message, so what reads the message alone
+  // is one computed.
+  const shown = computed(() => {
     const record = message.get();
-    return messageRightsOf(
-      record === undefined
-        ? undefined
-        : { authorProfile: record.authorProfile, body: record.body },
-      myProfile.resolveAsCell(),
-      kind,
-      isOwner === true,
-      ownersMayObliterate === true,
-    );
-  });
-  const isEditing = computed(() => {
-    const editing = composer.get()?.editing;
-    return editing !== undefined && equals(editing, message);
-  });
-  const text = computed(() => bodyText(message.get()));
-  const isEdited = computed(() => {
-    const record = message.get();
-    return record?.editedAt !== undefined && typeof record.body === "string";
-  });
-  const quote = computed(() => {
-    const reply = message.get()?.replyTo;
-    return reply?.shownIn === "main" ? bodyText(reply.message.get()) : "";
+    const reply = record?.replyTo;
+    return {
+      isDeleted: isDeleted(record),
+      text: bodyText(record),
+      isEdited: record?.editedAt !== undefined &&
+        typeof record.body === "string",
+      quote: reply?.shownIn === "main" ? bodyText(reply.message.get()) : "",
+    };
   });
   // How many replies the thread the message roots holds. The room derives
   // every message's place at once, from its messages alone, so whichever
   // runtime runs the room computes them for every viewer. The row reads its
   // own, and runs again only when that one changes.
-  const replies = computed(() => {
+  const thread = computed(() => {
     const key = viewKeyOf(message);
-    return (key === undefined ? undefined : places.key(key).get())?.replies ??
-      0;
+    const replies =
+      (key === undefined ? undefined : places.key(key).get())?.replies ?? 0;
+    return {
+      label: replies === 1 ? "1 reply" : `${replies} replies`,
+      display:
+        (!inThread && replies > 0 ? "inline-flex" : "none") as ChatDisplay,
+    };
   });
-  const threadLabel = computed(() =>
-    replies === 1 ? "1 reply" : `${replies} replies`
-  );
-  const threadLinkDisplay = computed((): ChatDisplay =>
-    !inThread && replies > 0 ? "inline-flex" : "none"
-  );
   // What differs by viewer or by session is shown or hidden through a prop,
   // never by building a different tree: a branch chosen per viewer is stored
   // once for everyone, and runtimes that chose differently overwrite each
@@ -305,24 +280,55 @@ export const FabriChatMessageRow = pattern<
   // for that viewer runs the room, which one that only renders it does not,
   // so which rows the main conversation holds, which every viewer is shown,
   // is decided from the room's messages alone, by the room.
-  const editDisplay = computed((): ChatDisplay =>
-    rights.canEdit ? "inline-flex" : "none"
-  );
-  const deleteDisplay = computed((): ChatDisplay =>
-    rights.canDelete ? "inline-flex" : "none"
-  );
-  const obliterateDisplay = computed((): ChatDisplay =>
-    rights.canObliterate ? "inline-flex" : "none"
-  );
+  //
+  // A runtime serving the room runs a computed that reads the viewer once
+  // for every viewer, and one that reads the session once for every session,
+  // so what each one shows is one computed: the viewer's tallies and what
+  // they may do to the message, and what the session has open on it.
+  //
+  // What the viewer may do follows the rule the room's handlers admit an act
+  // by, and none of it while they can't write in the room. The rule reads the
+  // message's author and body, and is handed those two alone.
+  const viewer = computed(() => {
+    const key = entityKeyOf(message.resolveAsCell()) ?? "unsaved";
+    const record = message.get();
+    const rights = cannotWrite || myProfile?.get() === undefined
+      ? NO_MESSAGE_RIGHTS
+      : messageRightsOf(
+        record === undefined
+          ? undefined
+          : { authorProfile: record.authorProfile, body: record.body },
+        myProfile.resolveAsCell(),
+        kind,
+        isOwner === true,
+        ownersMayObliterate === true,
+      );
+    return {
+      tallies: reactionTallies(
+        record?.reactions,
+        myProfile?.get() === undefined ? undefined : myProfile,
+        `fabrichat-reactors-${key}`,
+      ),
+      canEdit: rights.canEdit,
+      editDisplay: (rights.canEdit ? "inline-flex" : "none") as ChatDisplay,
+      deleteDisplay: (rights.canDelete ? "inline-flex" : "none") as ChatDisplay,
+      obliterateDisplay:
+        (rights.canObliterate ? "inline-flex" : "none") as ChatDisplay,
+    };
+  });
   // An open editor closes once the message no longer takes an edit from the
   // viewer, as when an OWNER deletes it.
-  const editorDisplay = computed((): ChatDisplay =>
-    isEditing && rights.canEdit ? "block" : "none"
-  );
-  const pickerDisplay = computed((): ChatDisplay =>
-    pickerOpen.get() === true ? "flex" : "none"
-  );
-  const pickerLabel = computed(() => (pickerOpen.get() === true ? "✕" : "☺+"));
+  const session = computed(() => {
+    const editing = composer.get()?.editing;
+    const isEditing = editing !== undefined && equals(editing, message);
+    const pickerShown = pickerOpen.get() === true;
+    return {
+      editorDisplay:
+        (isEditing && viewer.canEdit ? "block" : "none") as ChatDisplay,
+      pickerDisplay: (pickerShown ? "flex" : "none") as ChatDisplay,
+      pickerLabel: pickerShown ? "✕" : "☺+",
+    };
+  });
   const startReply = action(() => composer.key("replyTo").set(message));
   const openThread = action(() => composer.key("thread").set(message));
   const startEdit = action(() => composer.key("editing").set(message));
@@ -399,7 +405,7 @@ export const FabriChatMessageRow = pattern<
               $profile={message.key("authorProfile")}
             />
             <cf-vstack gap="1" style={{ flex: "1", minWidth: "0" }}>
-              {quote
+              {shown.quote
                 ? (
                   <cf-text
                     variant="caption"
@@ -409,14 +415,14 @@ export const FabriChatMessageRow = pattern<
                       whiteSpace: "pre-wrap",
                     }}
                   >
-                    {quote}
+                    {shown.quote}
                   </cf-text>
                 )
                 : null}
-              {isDeletedNow
+              {shown.isDeleted
                 ? (
                   <cf-text variant="body" style={{ fontStyle: "italic" }}>
-                    {text}
+                    {shown.text}
                   </cf-text>
                 )
                 : (
@@ -432,16 +438,18 @@ export const FabriChatMessageRow = pattern<
                         overflowWrap: "anywhere",
                       }}
                     >
-                      {text}
+                      {shown.text}
                     </cf-text>
                   </cf-cfc-authorship>
                 )}
-              {isEdited ? <cf-text variant="caption">(edited)</cf-text> : null}
+              {shown.isEdited
+                ? <cf-text variant="caption">(edited)</cf-text>
+                : null}
               <div
                 data-ui-pattern={CHAT_EDIT_SURFACE}
                 data-ui-event-integrity={CHAT_EDIT_SURFACE}
                 hidden
-                style={{ display: editorDisplay }}
+                style={{ display: session.editorDisplay }}
               >
                 <cf-hstack gap="1" align="center">
                   <cf-submit-input
@@ -461,7 +469,7 @@ export const FabriChatMessageRow = pattern<
                 data-ui-event-integrity={CHAT_REACT_SURFACE}
                 style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap" }}
               >
-                {tallies.map((tally) => (
+                {viewer.tallies.map((tally) => (
                   <cf-hover-card>
                     <cf-button
                       data-ui-action={CHAT_REACT_ACTION}
@@ -517,10 +525,10 @@ export const FabriChatMessageRow = pattern<
                 size="sm"
                 variant="link"
                 hidden
-                style={{ display: threadLinkDisplay }}
+                style={{ display: thread.display }}
                 onClick={openThread}
               >
-                {threadLabel}
+                {thread.label}
               </cf-button>
             </cf-vstack>
           </div>
@@ -530,7 +538,7 @@ export const FabriChatMessageRow = pattern<
               data-ui-event-integrity={CHAT_REACT_SURFACE}
               hidden
               style={{
-                display: pickerDisplay,
+                display: session.pickerDisplay,
                 gap: "0.25rem",
                 alignItems: "center",
               }}
@@ -562,7 +570,7 @@ export const FabriChatMessageRow = pattern<
                 onClick={sendReaction}
               />
             </div>
-            {isDeletedNow ? null : (
+            {shown.isDeleted ? null : (
               <cf-button
                 size="sm"
                 variant="ghost"
@@ -571,17 +579,17 @@ export const FabriChatMessageRow = pattern<
                 disabled={cannotWrite}
                 onClick={togglePicker}
               >
-                <span style={EMOJI_STYLE}>{pickerLabel}</span>
+                <span style={EMOJI_STYLE}>{session.pickerLabel}</span>
               </cf-button>
             )}
-            {isDeletedNow || inThread
+            {shown.isDeleted || inThread
               ? null
               : (
                 <cf-button size="sm" variant="ghost" onClick={startReply}>
                   Reply
                 </cf-button>
               )}
-            {isDeletedNow || inThread
+            {shown.isDeleted || inThread
               ? null
               : (
                 <cf-button size="sm" variant="ghost" onClick={openThread}>
@@ -592,7 +600,7 @@ export const FabriChatMessageRow = pattern<
               size="sm"
               variant="ghost"
               hidden
-              style={{ display: editDisplay }}
+              style={{ display: viewer.editDisplay }}
               onClick={startEdit}
             >
               Edit
@@ -607,7 +615,7 @@ export const FabriChatMessageRow = pattern<
                 size="sm"
                 variant="ghost"
                 hidden
-                style={{ display: deleteDisplay }}
+                style={{ display: viewer.deleteDisplay }}
                 onClick={deleteMessage}
               >
                 Delete
@@ -623,7 +631,7 @@ export const FabriChatMessageRow = pattern<
                 size="sm"
                 variant="ghost"
                 hidden
-                style={{ display: obliterateDisplay }}
+                style={{ display: viewer.obliterateDisplay }}
                 onClick={obliterateMessage}
               >
                 Remove entirely
@@ -633,7 +641,7 @@ export const FabriChatMessageRow = pattern<
         </cf-hover-reveal>
       </div>
     ),
-    tallies,
+    tallies: viewer.tallies,
     sendReaction,
     deleteReaction,
     editMessage,
