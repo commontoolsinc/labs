@@ -133,7 +133,12 @@ With `0ed69db50`, every run completed, and none logged a lag:
 | Vote 5x5 | 3.7 to 3.9 s | 3.5 to 3.6 s | 3.7 s |
 
 Two of the four chat runs with the change also carried the prefetch below.
-The chat burst no longer stalls, and still reads slower than the loop off.
+No run stalled with the change, and the burst still reads slower than the loop
+off. The stalls stopped with the change; that does not show the change ended
+them. What held the stalled bursts is not established, and every run here was
+on the read-through arm. A serving replica without the read-through, which is
+the default on either thread, reads over its session and still runs the
+barrier the read-through replaced.
 
 ## Tried and dropped: prefetching a parked head's queue
 
@@ -209,7 +214,8 @@ first commits the handlers' writes a wave ahead of the derivations over
 them.
 
 That is the flush deadline's existing trade (`serving-loop.md` §3), taken
-whenever a park outlasts the deadline. It is accepted for the batching, and
+whenever a park outlasts the deadline. It is accepted for this arc as the
+batching's price, a user-visible choice the owner has yet to ratify, and
 stated in `events.md` §2:
 
 - W does not cover those inputs until the derivations land.
@@ -243,4 +249,13 @@ No run logged a view lag.
 - **The vote burst**, about even with the loop off.
 - **The benchmark's stalls on `c416f1336`.** What held those bursts after
   their view lags resolved is not established. They did not recur under
-  instrumentation, or with `0ed69db50`.
+  instrumentation, or with `0ed69db50`, and both statements are about the
+  read-through arm. A serving replica without the read-through, the default,
+  still runs the barrier. Counting runs of the benchmark without it, or
+  finding whether `#armDeferredRescan` armed and fired after a stalled run's
+  last deferral, would settle which.
+- **A removal that should have helped and did not.** Stopping the room's run
+  in the space that created it removed every refusal and made the send burst
+  slower ([chat record](2026-10-22-served-chat-burst-and-the-deferred-settle.md)).
+  Every lever named here is chosen from a model of where the burst's time
+  goes, and that result says the model is wrong somewhere.

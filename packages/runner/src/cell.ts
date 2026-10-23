@@ -2471,8 +2471,14 @@ export class CellImpl<T extends FabricValue>
           } else {
             outcome = new Promise((resolve) => {
               originTx.enqueuePostCommitEffect({
-                // Unique per fire, so that the outbox's deduplication by
-                // id never drops a second fire of one event id.
+                // Unique per fire. Two sends of one caller event id inside
+                // one transaction both append, each settled by its own
+                // entry: the outbox's deduplication by id would drop the
+                // second entry and leave that fire's outcome unsettled once
+                // the transaction commits. The server's receipt is what
+                // collapses them (scheduler-v2 I11: at most one handling of
+                // an event id commits), and both sends wait on the same
+                // intent's consequence.
                 id: `event-append:${eventId}:${crypto.randomUUID()}`,
                 kind: "event-append",
                 flush: () => {
