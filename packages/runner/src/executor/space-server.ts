@@ -6200,7 +6200,14 @@ export class SpaceServer implements TransactionSealDestination {
     // outcome is what `#settleLifecycleVerbs` reads through `confirm`).
     // A verb that ran is settled either way: with its receipt or its
     // error after the wave commits, or with the cycle's own error if the
-    // wave never gets that far.
+    // wave never gets that far. A verb reads the replica as the previous
+    // wave's commit leaves it, so a commit an overlapped cycle left in
+    // flight is finished before the first verb runs: a write of it the
+    // sink refused rolls back before any verb can read it.
+    if (this.#lifecycleVerbs.length > 0 && this.#commitInFlight !== undefined) {
+      await this.#finishCommitInFlight(runtime);
+      if (!this.#active || this.#runtime !== runtime) return;
+    }
     const verbs = await this.#runQueuedLifecycleVerbs(runtime);
     this.#servedWave = undefined;
     // A verb's receipt reads this cycle's commit outcome, so a cycle that
