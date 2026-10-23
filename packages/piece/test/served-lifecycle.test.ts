@@ -915,6 +915,9 @@ export default pattern(() => {
         pattern: { identity: string };
       };
       expect(created.pattern).toEqual(ref);
+      // Asked to start, the verb names the piece's root as warm demand.
+      const root = `of:${created.pieceId.replace(/^of:/, "")}`;
+      expect(host.spaceServer(space)?.warmDemandIds.has(root)).toBe(true);
       expect(creation.timings.map((timing) => timing.phase)).toEqual([
         "instantiate.session",
         "instantiate.queue",

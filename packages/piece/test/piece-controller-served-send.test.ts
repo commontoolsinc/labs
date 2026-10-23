@@ -1,8 +1,10 @@
-// A stream send through `PieceController.set()` under server execution: the
-// call returns with the event committed and the serving runtime's run of the
-// handler still ahead, and a read through `PieceController.get()` waits for
-// that run's consequence, so the sender and a client opened afterwards both
-// read what the served run wrote.
+/**
+ * A stream send through `PieceController.set()` under server execution: the
+ * call returns with the event committed and the serving runtime's run of the
+ * handler still ahead, and a read through `PieceController.get()` waits for
+ * that run's consequence, so the sender and a client opened afterwards both
+ * read what the served run wrote.
+ */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -56,7 +58,11 @@ describe("piece-controller", () => {
   let session: Session;
   let cleanups: Array<() => Promise<void>>;
 
+  /** While set, the serving runtime's wave commits wait for it to settle. */
+  let held: Promise<void> | undefined;
+
   beforeEach(async () => {
+    held = undefined;
     serving = await startServingMemoryServer({
       apiUrl: new URL(import.meta.url),
       serviceIdentity: serviceSigner,
@@ -64,6 +70,19 @@ describe("piece-controller", () => {
       // The verbs below are closures over the host, which a loop in a
       // worker cannot take.
       worker: false,
+      decorateWaveCommitSink: (sink) =>
+        new Proxy(sink, {
+          get: (target, property) => {
+            if (property === "commitWave") {
+              return async (...args: Parameters<typeof target.commitWave>) => {
+                await held;
+                return await target.commitWave(...args);
+              };
+            }
+            const value = Reflect.get(target, property, target);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        }),
     });
     server = serving.server;
     host = serving.host.host!;
@@ -117,8 +136,15 @@ describe("piece-controller", () => {
     const receipt = await instantiate();
     const sender = await clientPieces();
     const piece = await sender.get(receipt.pieceId);
+    const release = Promise.withResolvers<void>();
+    held = release.promise;
     await piece.result.set({ name: "alice" }, ["setName"]);
-    expect(await piece.result.get(["name"])).toBe("served:alice");
+    // The send returned with the served run's write still held back, so its
+    // event's intent is outstanding.
+    expect(sender.runtime.speculationOverlay?.pendingIntentCount).toBe(1);
+    const reading = piece.result.get(["name"]);
+    release.resolve();
+    expect(await reading).toBe("served:alice");
     // The read returned once the event's consequence had arrived here.
     expect(sender.runtime.speculationOverlay?.pendingIntentCount).toBe(0);
     // A client opened afterwards reads the served run's write.

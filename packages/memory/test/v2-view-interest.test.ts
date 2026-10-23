@@ -949,11 +949,23 @@ describe("view interests", () => {
     expect(effect.effect.upserts).toEqual([]);
     expect(effect.effect.viewPlans?.[0].generation).toBe(2);
     expect(effect.effect.viewPlans?.[0].eligibleActions).toEqual(["second"]);
-    // The next frame carries the plans again only with what dirtied it.
+    // A later frame carries the plans only when a selection changed them: a
+    // write to a delivered document reaches the session without them.
     messages.length = 0;
+    await server.writeDocument(space, "of:support", { label: "updated" });
     await server.flushSessions();
-    expect(messages.filter((message) => message.type === "session/effect"))
-      .toHaveLength(0);
+    const later = messages.filter((message) =>
+      message.type === "session/effect"
+    );
+    expect(later).toHaveLength(1);
+    const next = later[0];
+    if (next.type !== "session/effect") {
+      throw new Error("Expected session effect");
+    }
+    expect(next.effect.upserts.map((entry) => entry.id)).toEqual([
+      "of:support",
+    ]);
+    expect(next.effect.viewPlans).toBeUndefined();
   });
 
   it("extends a view's support graph for a delivery that only grew, without re-evaluating its demand", async () => {

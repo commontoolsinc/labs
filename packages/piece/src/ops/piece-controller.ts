@@ -3264,12 +3264,12 @@ class PiecePropIo implements PieceCellIo {
     const pieces = this.#cc.pieces();
     let committedTargetCell: Cell<unknown> | undefined;
     let sentEvent = false;
-    // Under server execution a stream send appends outside this transaction,
-    // so an aborted attempt can leave its event durable. Reusing one caller
-    // identity makes both guards converge on that event: admission rejects a
-    // duplicate above the dedupe horizon, and the serving drain skips one that
-    // reaches it past the horizon
-    // (`docs/specs/server-side-execution/events.md` §4, §5).
+    // Every attempt sends under one caller identity. Only the attempt that
+    // commits fires its send, from its transaction's post-commit outbox, so
+    // one call sends one event, and the shared identity keeps it one should
+    // two attempts' sends both land: admission rejects a duplicate above the
+    // dedupe horizon, and the serving drain skips one that reaches it past
+    // the horizon (`docs/specs/server-side-execution/events.md` §4, §5).
     // Initialize both halves together: a session replacement between attempts
     // must not bind this API call's stable event ID to a second session.
     let streamSendOptions:

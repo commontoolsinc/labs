@@ -251,6 +251,9 @@ export type SpaceServerPolicy = {
   /** DIAGNOSTIC (tests): the deadline each settle takes, as it begins. */
   onFlushDeadline?: (deadlineMs: number) => void;
 
+  /** DIAGNOSTIC (tests): whether the deadline cut each settle, as it ends. */
+  onSettleEnded?: (exhausted: boolean) => void;
+
   /** Phase 6 (serving-loop.md §5's per-space budgets; README §3.8):
    * cap on dispatched-but-unsettled NETWORK effects per space —
    * "outstanding LLM calls". Undefined = unbounded. */
@@ -1454,6 +1457,11 @@ export class SpaceServer implements TransactionSealDestination {
    * less each one whose every key an earlier one names. */
   get warmNotices(): readonly AdmittedCommitNotice[] {
     return this.#warmNotices;
+  }
+
+  /** DIAGNOSTIC (tests): the documents this tenure holds as warm demand. */
+  get warmDemandIds(): ReadonlySet<string> {
+    return new Set([...this.#warmDemandKeys.values()].map(({ id }) => id));
   }
 
   /** Store head minus W — the per-space input to §7's watermarkLag. */
@@ -6018,6 +6026,7 @@ export class SpaceServer implements TransactionSealDestination {
    * quiescence.
    */
   #noteSettleEnded(exhausted: boolean): void {
+    this.#options.policy?.onSettleEnded?.(exhausted);
     if (!exhausted) {
       this.#grownFlushDeadlineMs = undefined;
       return;

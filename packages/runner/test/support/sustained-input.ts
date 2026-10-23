@@ -101,6 +101,9 @@ export interface SustainedInputFixture {
   /** The deadline each settle took, in milliseconds, as it began. */
   readonly deadlines: ArrivalLog<number>;
 
+  /** Each settle as it ends: the deadline it took, and whether it cut it. */
+  readonly settles: ArrivalLog<{ deadlineMs: number; exhausted: boolean }>;
+
   /** Writes `n` as the cascade's argument, returning the commit's seq. */
   write(n: number): Promise<number>;
 
@@ -150,6 +153,8 @@ export const openSustainedInputFixture = async (
   const engine = await server.engineForSpace(space);
   const cycles = new ArrivalLog<CycleEnd>();
   const deadlines = new ArrivalLog<number>();
+  const settles = new ArrivalLog<{ deadlineMs: number; exhausted: boolean }>();
+  let settleDeadlineMs = flushDeadlineMs;
   const activations = new ArrivalLog<string>();
   let onBarrier: (() => Promise<void>) | undefined;
   let flushDeadlineClock = 0;
@@ -216,7 +221,12 @@ export const openSustainedInputFixture = async (
     policy: {
       flushDeadlineMs,
       ...(flushDeadlineMaxMs === undefined ? {} : { flushDeadlineMaxMs }),
-      onFlushDeadline: (deadlineMs) => deadlines.record(deadlineMs),
+      onFlushDeadline: (deadlineMs) => {
+        settleDeadlineMs = deadlineMs;
+        deadlines.record(deadlineMs);
+      },
+      onSettleEnded: (exhausted) =>
+        settles.record({ deadlineMs: settleDeadlineMs, exhausted }),
       idleParkMs: 600_000,
       ...(overlapWaveCommit === undefined ? {} : { overlapWaveCommit }),
       ...(lateBarriers ? { flushDeadlineNow: () => flushDeadlineClock } : {}),
@@ -276,6 +286,7 @@ export const openSustainedInputFixture = async (
     },
     cycles,
     deadlines,
+    settles,
     write,
     stream: () => {
       const inputs: StreamedInput[] = [];

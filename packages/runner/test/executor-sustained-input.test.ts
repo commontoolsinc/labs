@@ -76,9 +76,9 @@ describe("SpaceServer", () => {
         // ahead of the deadline, or that proves nothing while a re-armed root
         // is pending, covers the stream's first input only once the stream
         // stops.
-        // An overlapped commit is finished in the following cycle. Its
-        // durable coverage is therefore observed at most one cycle later;
-        // both arms keep the two-cycle bound on producing the proof.
+        // An overlapped commit is finished in the following cycle, so its
+        // durable coverage is observed one cycle later: the overlap arm's
+        // bound is three cycles.
 
         const opened = await openSustainedInputFixture({
           flushDeadlineMs: 600_000,
@@ -140,9 +140,11 @@ describe("SpaceServer", () => {
       // inside one and that settle reaches quiescence, after which the next
       // settle takes the base again. Which settle finishes the cascade, and
       // whether a cycle before the first input was already cut, depend on
-      // the machine, so the shape is asserted rather than the count: every
-      // deadline is the base, twice the one before it, or the cap; one grew;
-      // and one that followed a grown one is the base again.
+      // the machine, so each settle is checked against the one before it
+      // rather than the count asserted: after a cut settle the next takes
+      // twice its deadline under the cap, or the base where the loop found
+      // no work between them, and after one that reached quiescence the
+      // base; one grew; and one that followed a grown one is the base again.
 
       const opened = await openSustainedInputFixture({
         flushDeadlineMs: 10,
@@ -150,17 +152,24 @@ describe("SpaceServer", () => {
         stageSpins: 20_000_000,
       });
       fixture = opened;
-      const { cycles, deadlines, host } = opened;
+      const { cycles, deadlines, host, settles } = opened;
       const before = deadlines.entries.length;
+      const settledBefore = settles.entries.length;
       const seq = await opened.write(3);
       await cycles.matching((end) => end.watermark >= seq && end.total === 22);
-      const grown = deadlines.entries.slice(before);
-      expect(grown.some((deadline) => deadline > 10)).toBe(true);
-      for (const [index, deadline] of grown.entries()) {
-        const previous = grown[index - 1];
+      const ran = settles.entries.slice(settledBefore);
+      expect(ran.some(({ deadlineMs }) => deadlineMs > 10)).toBe(true);
+      for (const [index, { deadlineMs }] of ran.entries()) {
+        const previous = ran[index - 1];
+        if (previous === undefined) {
+          expect([10, 20, 40, 80]).toContain(deadlineMs);
+          continue;
+        }
         expect(
-          previous === undefined ? [10, 20, 40, 80] : [10, 80, previous * 2],
-        ).toContain(deadline);
+          previous.exhausted
+            ? [Math.min(80, previous.deadlineMs * 2), 10]
+            : [10],
+        ).toContain(deadlineMs);
       }
       expect(host.stats().wavesBudgetExhausted).toBeGreaterThan(0);
 
