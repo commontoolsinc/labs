@@ -1704,7 +1704,7 @@ Deno.test("memory v2 server watch sets expand to previously hidden nodes after r
   }
 });
 
-Deno.test("memory v2 server does not emit delayed exact-reconcile removes after shrink retargets", async () => {
+Deno.test("memory v2 server retracts what a shrink retarget stops reaching in the effect frame, and nothing later", async () => {
   const time = new FakeTime();
   const server = createServer(
     "memory://memory-v2-server-watch-shrink-no-reconcile",
@@ -1820,7 +1820,14 @@ Deno.test("memory v2 server does not emit delayed exact-reconcile removes after 
     await time.tickAsync(0);
     await time.runMicrotasks();
     const effect = assertEffect(shiftMessage(messages));
-    assertEquals(effect.effect.removes, []);
+    // The expanded root's `alternate` was the only way to the hidden half;
+    // the cycle its `alternate` targets share with the initial half stays.
+    assertEquals(
+      effect.effect.removes.map((entry) => entry.id),
+      fixture.expandedReachableIds.filter((id) =>
+        !fixture.initialReachableIds.includes(id)
+      ),
+    );
 
     await time.tickAsync(300);
     await time.runMicrotasks();
