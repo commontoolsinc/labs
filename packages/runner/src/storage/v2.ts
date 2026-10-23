@@ -9479,8 +9479,8 @@ export class SpaceReplica
    * `undefined`, as does a read the store gives no answer to, which leaves
    * the report standing. A re-read the store answers is a frame like any
    * other: its storage notification reaches the subscribers before this
-   * returns, and the scheduler's marks the readers of what changed and
-   * queues a pass, so none of them runs inside the caller.
+   * returns, and the scheduler's subscriber marks the readers of what changed
+   * and queues a pass, so none of them runs inside the caller.
    */
   readStoreAbsenceAgain(
     address: { id: URI; scope?: CellScope },
