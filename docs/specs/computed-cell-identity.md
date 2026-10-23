@@ -202,8 +202,9 @@ move. A parent that runs whichever pattern a computation returns, such as a
 pointer does not yet name, and an unrelated pattern there is no sign that its
 children moved. The guard reads a child only at a positional spot or a named
 instance's spot that the parent's stored manifest of internal cells records,
-since no child can be set up at any other, so a fresh parent's setup reads no
-child at all.
+or a child the parent's `instanceChildren` records for a named instance, since
+no child can be set up at any other, so a fresh parent's setup reads no child
+at all.
 
 The refusal comes before anything the setup stages commits, so a refused
 update changes none of the piece's state. A live update the guard refuses

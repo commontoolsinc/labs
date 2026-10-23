@@ -14696,14 +14696,17 @@ export class Runner {
     const recordedInstances = recordedInstanceNames(manifest);
     const recordedChildren = readInstanceChildren(parent);
     for (const { module, partialCause } of subPatternNodes(pattern)) {
-      // Only a spot the stored manifest records can hold a child already, and
-      // only a positional or named one can hold another's: a spot a result
-      // key, a node input or `.for()` names does not shift with its siblings,
-      // and no instance stamps the child there.
+      // Only a spot the stored manifest records, or a child the parent's
+      // `instanceChildren` records for a named instance, can hold a child
+      // already, and only a positional or named one can hold another's: a
+      // spot a result key, a node input or `.for()` names does not shift with
+      // its siblings, and no instance stamps the child there.
       const instanceName = instanceNameOfPartialCause(partialCause);
       const judged = isPositionalPartialCause(partialCause)
         ? recorded.has(positionalNumber(partialCause))
-        : instanceName !== undefined && recordedInstances.has(instanceName);
+        : instanceName !== undefined &&
+          (recordedInstances.has(instanceName) ||
+            recordedChildren[instanceName] !== undefined);
       if (!judged) continue;
       // A space's root sits where its space's genesis reserved it, whatever
       // the node's cause, so no shift between this parent's spots moves it.

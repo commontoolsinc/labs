@@ -300,6 +300,20 @@ describe("instance-children", () => {
       );
     });
 
+    it("refuses to set up a named instance over the child its `instanceChildren` records for another named instance as well", async () => {
+      // The record gives one child to two instances, and neither instance's
+      // own spot is in the parent's manifest, which is the shape a parent
+      // has on the first setup that names its instances.
+
+      const cell = await deployedParent("one-child-two-instances");
+      const child = record(positionalChild(cell, 0));
+      await writeMeta(cell, { instanceChildren: { a: child, b: child } });
+
+      await expect(update(cell, NAMED_TWO)).rejects.toThrow(
+        /refusing to set up .*#Counter for instance "(a|b)" over the child of .*#Counter that instance "(a|b)" carries/,
+      );
+    });
+
     it("sets up a positional instance over a child its `instanceChildren` records for no instance", async () => {
       const cell = await deployedParent("positional-over-unrecorded");
 
