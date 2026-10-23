@@ -1664,6 +1664,59 @@ describe("Server", () => {
         }
       });
 
+      it("pushes no update for a document a removal retracted, and still pushes for one a remaining watch keeps", async () => {
+        // Frames arrive in order, so the first frame after the removal is
+        // the one the write to the kept document earns, and a frame for the
+        // write to the retracted document would have come before it.
+        const fixture = await openFixture(0);
+        try {
+          await fixture.writer.transact({
+            localSeq: 2,
+            reads: { confirmed: [], pending: [] },
+            operations: [
+              {
+                op: "set",
+                id: "of:a",
+                value: { value: { child: link(fixture.space, "of:x") } },
+              },
+              { op: "set", id: "of:x", value: { value: { name: "x" } } },
+              { op: "set", id: "of:b", value: { value: { name: "b" } } },
+            ],
+          });
+          await fixture.server.flushSessions();
+          const { view } = await fixture.reader.watchAddSync([
+            permissive("of:a"),
+            watch("of:b"),
+          ]);
+          const removal = await fixture.reader.watchRemoveSync(["of:a:all"]);
+          expect(ids(removal.sync.removes)).toEqual(["of:a", "of:x"]);
+          const frames = view.subscribeSync();
+          const pushed = frames.next();
+          await fixture.writer.transact({
+            localSeq: 3,
+            reads: { confirmed: [], pending: [] },
+            operations: [
+              { op: "set", id: "of:x", value: { value: { name: "x2" } } },
+            ],
+          });
+          await fixture.server.flushSessions();
+          await fixture.writer.transact({
+            localSeq: 4,
+            reads: { confirmed: [], pending: [] },
+            operations: [
+              { op: "set", id: "of:b", value: { value: { name: "b2" } } },
+            ],
+          });
+          await fixture.server.flushSessions();
+          const { value: frame } = await pushed;
+          expect(ids(frame!.upserts)).toEqual(["of:b"]);
+          expect(frame!.removes).toEqual([]);
+          expect(ids([...fixture.state.entities.values()])).toEqual(["of:b"]);
+        } finally {
+          await fixture.close();
+        }
+      });
+
       it("keeps the graph of a branch the removal does not touch", async () => {
         const fixture = await openCoveredFixture();
         try {
