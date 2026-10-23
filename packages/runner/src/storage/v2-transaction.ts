@@ -1887,7 +1887,21 @@ export class V2StorageTransaction implements IStorageTransaction {
     const operations: ApplyOpOperation[] = [];
     for (const docKey of this.#textChanges.get(space)?.keys() ?? []) {
       const { id, scope } = this.#parseDocKey(docKey);
+      const doc = this.#branches.get(space)?.docs.get(docKey);
       for (const intent of this.#pendingTextChanges(space, docKey) ?? []) {
+        // The edit reaches the store only beside the ordinary write of the
+        // text it produces, which is what CFC and reactivity judged.
+        const written = doc === undefined ? undefined : readValueAtPath(
+          (doc.current ?? doc.initial).value,
+          intent.path,
+        );
+        if (written !== intent.expected) {
+          throw new Error(
+            debugStr`the field at $quote${intent.path} does not hold the text ` +
+              "its recorded changes produce; text changes are recorded with " +
+              "the write of that text, as `applyChanges()` makes",
+          );
+        }
         operations.push({
           op: "apply-op",
           id,

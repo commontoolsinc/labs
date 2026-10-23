@@ -441,14 +441,17 @@ export interface IWritable<T, C extends AnyBrandedCell<any>> {
   increment(this: IsThisNumber, by?: number): void;
 
   /**
-   * Applies `changes` to a string cell. Every position refers to the value
-   * this transaction read, and a list of changes runs in ascending order
-   * without overlap. On a field a collaborative editor has opened, the
-   * changes reach the store as an edit the editors merge with their own, and
-   * land only while the field still holds the value this transaction read; a
-   * field that moved on refuses the commit, and the transaction runs again
-   * against the new value. A `get()` after this call returns the changed
-   * value.
+   * Applies `changes` to a string cell. The positions in one call refer to
+   * the value the cell holds when the call is made: the value this transaction
+   * read, or the value an earlier call in the transaction left. A list of
+   * changes runs in ascending order without overlap, all against that one
+   * value. On a field a collaborative editor has opened, the changes reach the
+   * store as an edit the editors merge with their own, and land only while the
+   * field still holds the value this transaction read; a field that moved on
+   * refuses the commit, and the transaction runs again against the new value.
+   * The first edit to a field no editor has opened opens it for
+   * collaboration, after which a `set()` of it is refused. A `get()` after
+   * this call returns the changed value.
    */
   applyChanges(
     this: IsThisString,

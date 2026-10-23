@@ -43,14 +43,14 @@ export interface SharedNoteOutput {
 
   /**
    * Replaces the one occurrence of `old` in the document with `new`, and
-   * refuses when `old` occurs nowhere or more than once.
+   * refuses when `old` is empty, occurs nowhere, or occurs more than once.
    */
   replaceText: Stream<ReplaceTextEvent>;
 }
 
 /** Text to add as a line of its own. */
 export interface LineEvent {
-  /** The line, without a trailing newline unless a blank line should follow. */
+  /** The line, without a trailing newline. */
   text: string;
 }
 
@@ -87,8 +87,14 @@ const prependLine = handler<LineEvent, { content: Writable<string> }>(
 
 const replaceText = handler<ReplaceTextEvent, { content: Writable<string> }>(
   (event, { content }) => {
+    if (event.old === "") {
+      throw new Error(
+        "replaceText needs a non-empty `old` to anchor on; to add text, use " +
+          "`appendLine` or `prependLine`",
+      );
+    }
     const current = content.get();
-    const from = event.old === "" ? -1 : current.indexOf(event.old);
+    const from = current.indexOf(event.old);
     if (from === -1) {
       throw new Error(
         "replaceText found no occurrence of `old`; read the note again and " +

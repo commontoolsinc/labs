@@ -108,14 +108,17 @@ Pattern code edits a collaborative field with `Writable<string>.applyChanges()`,
 which takes changes in the shape of a CodeMirror change spec against the value
 the handler read. The handler's commit carries them as an `apply-op` with no
 base, carrying the hash of the value read, beside the handler's read of the
-field. The read refuses the commit as an ordinary conflict once the field
-moves, and the scheduler runs the handler again against the new text. Under
-server execution a wave drops the reads of what it seals, and the hash is what
-refuses a stale edit there. Where neither refuses it, the edit lands at the
-field's current version with nothing to be rebased over. The document's patch in that commit
-leaves the field to the `apply-op`, while the handler's own view and the
-replica's pending layer show the changed text from the start. An `applyChanges()`
-on a field no editor has opened activates it from the value read.
+field. The edit lands only while the field still holds the value the handler
+read, at the field's current version with nothing to rebase over. Otherwise
+the read refuses the commit as an ordinary conflict, and the scheduler runs the
+handler again against the new text. Under server execution a wave drops the
+reads of what it seals, and the hash is what refuses a stale edit there.
+
+The commit's ordinary patch of the document leaves the edited field as it was,
+so that only the `apply-op` changes it, and Memory writes the field's new value
+when it integrates the edit. The handler's own view and the replica's pending
+layer show the changed text from the start. An `applyChanges()` on a field no
+editor has opened activates it from the value read.
 
 `cf-code-editor` submits every unconfirmed local update in one apply, and
 edits made while that apply is in flight go out in the next one, until none

@@ -49,11 +49,11 @@ verbs below rather than replacing it with an ordinary whole-value write.
 Three verbs edit the body while people are typing in it, so an agent or another
 pattern can add to a note without the editor:
 
-| Verb          | Event          | Effect                                                                                                |
-| ------------- | -------------- | ----------------------------------------------------------------------------------------------------- |
-| `appendLine`  | `{ text }`     | Adds `text` at the end, on a line of its own.                                                         |
-| `prependLine` | `{ text }`     | Adds `text` at the start, on a line of its own.                                                       |
-| `replaceText` | `{ old, new }` | Replaces the one occurrence of `old` with `new`; refuses when `old` occurs nowhere or more than once. |
+| Verb          | Event          | Effect                                                                                                                  |
+| ------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `appendLine`  | `{ text }`     | Adds `text` at the end, on a line of its own.                                                                           |
+| `prependLine` | `{ text }`     | Adds `text` at the start, on a line of its own.                                                                         |
+| `replaceText` | `{ old, new }` | Replaces the one occurrence of `old` with `new`; refuses when `old` is empty, occurs nowhere, or occurs more than once. |
 
 ```sh
 cf piece call --cell <piece> appendLine '{"text": "- [ ] Send the summary"}'

@@ -321,6 +321,19 @@ describe("collaborative-text-changes", () => {
     }
   });
 
+  it("throws when building a commit whose text changes were recorded without their write", async () => {
+    const note = await seed();
+
+    const tx = rt.edit();
+    tx.recordTextChanges!(note.key("body").getAsNormalizedFullLink(), [
+      { from: 2, insert: "!" },
+    ]);
+    expect(() => getDirectTransactionNativeCommit(tx, space)).toThrow(
+      "does not hold the text its recorded changes produce",
+    );
+    tx.abort();
+  });
+
   it("throws when the cell holds no string", async () => {
     const note = await seed();
 
