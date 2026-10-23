@@ -427,9 +427,14 @@ export class SpeculationOverlayDestination
 
   readonly #intentConsequenceMemo = new Map<string, IntentConsequence>();
 
-  /** Resolvers parked by `waitForIntentQuiescence`, flushed by the same
-   * untrack step that empties the outstanding-intent set (and by close). */
-  #intentQuiescenceWaiters: Array<() => void> = [];
+  /**
+   * Waiters parked by `waitForIntentQuiescence`, each with the space whose
+   * outstanding intents it waits on, or none for every space's. The untrack
+   * step that empties a space's set flushes them, as close does.
+   */
+  #intentQuiescenceWaiters: Array<
+    { space: MemorySpace | undefined; resolve: () => void }
+  > = [];
 
   #closed = false;
 
@@ -1330,32 +1335,49 @@ export class SpeculationOverlayDestination
     });
   }
 
-  /** Await the outstanding-intent set EMPTYING (speculation.md §4 step 2
-   * quiescence, the set `pendingIntentCount` counts): every event this
-   * runtime fired has reached a terminal consequence — consequenced,
-   * errored, dropped, or refused — AND that signal has arrived back
-   * here. Event-driven: resolves from the same untrack step that
-   * retires the last outstanding intent, immediately when nothing is
-   * outstanding, and on overlay close (nothing can retire afterwards).
-   * Carries no deadline of its own — a caller that needs a bound races
-   * it (the multi-runtime harness's budgeted settle does). Note this is
-   * a FIRST-ORDER signal, like the count it mirrors: a server-side
-   * cascade child (an event a served handler itself emits) is no
-   * client's intent and commits in a later wave, outside this wait. */
-  waitForIntentQuiescence(): Promise<void> {
-    if (this.#closed || this.pendingIntentCount === 0) {
+  /**
+   * Await the outstanding-intent set EMPTYING (speculation.md §4 step 2
+   * quiescence, the set `pendingIntentCount` counts), or only `space`'s part
+   * of it when one is given: every event this runtime fired, into `space`
+   * when one is given, has reached a terminal consequence — consequenced,
+   * errored, dropped, or refused — AND that signal has arrived back here.
+   * Event-driven: resolves from the same untrack step that retires the last
+   * such intent, immediately when none is outstanding, and on overlay close
+   * (nothing can retire afterwards). Carries no deadline of its own — a
+   * caller that needs a bound races it (the multi-runtime harness's budgeted
+   * settle does). Note this is a FIRST-ORDER signal, like the count it
+   * mirrors: a server-side cascade child (an event a served handler itself
+   * emits) is no client's intent and commits in a later wave, outside this
+   * wait.
+   */
+  waitForIntentQuiescence(space?: MemorySpace): Promise<void> {
+    if (this.#closed || !this.#intentsOutstandingIn(space)) {
       return Promise.resolve();
     }
     return new Promise((resolve) => {
-      this.#intentQuiescenceWaiters.push(resolve);
+      this.#intentQuiescenceWaiters.push({ space, resolve });
     });
   }
 
+  /** Whether an intent is outstanding in `space`, or in any space if none. */
+  #intentsOutstandingIn(space: MemorySpace | undefined): boolean {
+    return space === undefined
+      ? this.#trackedIntents.size > 0
+      : this.#trackedIntents.has(space);
+  }
+
+  /** Resolves every parked waiter whose space, or every space, has quiesced. */
   #flushIntentQuiescenceWaiters(): void {
     if (this.#intentQuiescenceWaiters.length === 0) return;
     const waiters = this.#intentQuiescenceWaiters;
     this.#intentQuiescenceWaiters = [];
-    for (const resolve of waiters) resolve();
+    for (const waiter of waiters) {
+      if (!this.#closed && this.#intentsOutstandingIn(waiter.space)) {
+        this.#intentQuiescenceWaiters.push(waiter);
+      } else {
+        waiter.resolve();
+      }
+    }
   }
 
   #settleIntentConsequence(
@@ -1611,13 +1633,13 @@ export class SpeculationOverlayDestination
     if (ids.size === 0) {
       bySidecar!.delete(sidecarId);
       this.#intentSidecarStates.delete(`${space}\0${sidecarId}`);
-      if (bySidecar!.size === 0) this.#trackedIntents.delete(space);
-      // The listener lives exactly as long as something is outstanding
-      // (contract point 5). The sidecar WATCH stays: a session's watch
-      // set is coarse by ruling (R-D), and the next fire on this stream
-      // is likely imminent.
-      if (this.#trackedIntents.size === 0) {
-        this.#releaseIntentListener();
+      if (bySidecar!.size === 0) {
+        this.#trackedIntents.delete(space);
+        // The listener lives exactly as long as something is outstanding
+        // (contract point 5). The sidecar WATCH stays: a session's watch
+        // set is coarse by ruling (R-D), and the next fire on this stream
+        // is likely imminent.
+        if (this.#trackedIntents.size === 0) this.#releaseIntentListener();
         this.#flushIntentQuiescenceWaiters();
       }
     }

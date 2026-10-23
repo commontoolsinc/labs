@@ -708,6 +708,55 @@ describe("intent listener — scripted notification seam (design (e) pins 1–5,
     expect(resolved).toBe(true);
     destination.close();
   });
+
+  it("quiescence waiter for one space: resolves once that space's intents retire, while another space's intent keeps the every-space waiter parked", async () => {
+    const { scripted, destination } = scriptedDestination();
+    const OTHER = "did:key:z6MkIntentListenerOtherSpace" as MemorySpace;
+    scripted.seed(SPACE, SIDECAR, { entries: [] });
+    scripted.seed(OTHER, SIDECAR, { entries: [] });
+    destination.trackIntent(SPACE, SIDECAR, "evt-here");
+    destination.trackIntent(OTHER, SIDECAR, "evt-there");
+    for (
+      const [space, eventId] of [[SPACE, "evt-here"], [OTHER, "evt-there"]]
+    ) {
+      scripted.deliver(space as MemorySpace, SIDECAR, (value) => {
+        value.entries = [{ eventId, stream: { id: "s", path: [] }, seq: 1 }];
+      }, [["value", "entries"]]);
+    }
+    await flushMicrotasks();
+    expect(destination.pendingIntentCount).toBe(2);
+
+    let here = false;
+    let everywhere = false;
+    const hereQuiesced = destination.waitForIntentQuiescence(SPACE).then(
+      () => {
+        here = true;
+      },
+    );
+    const everywhereQuiesced = destination.waitForIntentQuiescence().then(
+      () => {
+        everywhere = true;
+      },
+    );
+
+    scripted.deliver(SPACE, SIDECAR, (value) => {
+      value.entries![0].consequenced = true;
+    }, [["value", "entries", "0", "consequenced"]]);
+    await flushMicrotasks();
+    await hereQuiesced;
+    expect(here).toBe(true);
+    expect(everywhere).toBe(false);
+    // A space with nothing outstanding resolves at once.
+    await destination.waitForIntentQuiescence(SPACE);
+
+    scripted.deliver(OTHER, SIDECAR, (value) => {
+      value.entries![0].consequenced = true;
+    }, [["value", "entries", "0", "consequenced"]]);
+    await flushMicrotasks();
+    await everywhereQuiesced;
+    expect(everywhere).toBe(true);
+    destination.close();
+  });
 });
 
 //
