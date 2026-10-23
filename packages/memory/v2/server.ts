@@ -2426,6 +2426,57 @@ export type EngineOpener = (
   open: (space: string) => Promise<Engine.Engine>,
 ) => Promise<Engine.Engine>;
 
+/** Whether every member of `subset` is in `superset`. */
+function isSubset(subset: Set<string>, superset: Set<string>): boolean {
+  for (const key of subset) if (!superset.has(key)) return false;
+  return true;
+}
+
+/**
+ * A planner delivery root's key, with its selector: a root whose selector
+ * changed reaches different documents, which only a full evaluation diffs
+ * out, so it is not the same root.
+ */
+function deliveryRootKey(root: ViewQuery["roots"][number]): string {
+  return JSON.stringify([root.scope ?? "space", root.id, root.selector]);
+}
+
+/** The keys of the roots a planner delivery names (`deliveryRootKey`). */
+function deliveryRootKeys(delivery: readonly ViewQuery[]): Set<string> {
+  const keys = new Set<string>();
+  for (const query of delivery) {
+    for (const root of query.roots) keys.add(deliveryRootKey(root));
+  }
+  return keys;
+}
+
+/**
+ * What of `delivery`, a selection a view's planner proposes, the server has
+ * yet to resolve: the roots that `installed`, the selection the view holds
+ * under the same revision, does not deliver on the same branch, each query
+ * kept with those of its roots alone. Without such a selection it is all of
+ * `delivery`. A root the installed selection delivers was resolved when that
+ * selection was.
+ */
+function deliveryToResolve(
+  delivery: readonly ViewQuery[],
+  installed: { delivery: readonly ViewQuery[] } | undefined,
+): readonly ViewQuery[] {
+  if (installed === undefined) return delivery;
+  const keyOf = (query: ViewQuery, root: ViewQuery["roots"][number]) =>
+    `${query.branch ?? ""}\0${deliveryRootKey(root)}`;
+  const held = new Set<string>();
+  for (const query of installed.delivery) {
+    for (const root of query.roots) held.add(keyOf(query, root));
+  }
+  const added: ViewQuery[] = [];
+  for (const query of delivery) {
+    const roots = query.roots.filter((root) => !held.has(keyOf(query, root)));
+    if (roots.length > 0) added.push({ ...query, roots });
+  }
+  return added;
+}
+
 /**
  * The memory v2 server. An instance accepts connections and serves the
  * session protocol over them — opening sessions, admitting transactions,
@@ -2436,29 +2487,6 @@ export type EngineOpener = (
  * the default. It also reads and writes documents directly, outside any
  * session, for in-process callers such as blob uploads.
  */
-/** Whether every member of `subset` is in `superset`. */
-function isSubset(subset: Set<string>, superset: Set<string>): boolean {
-  for (const key of subset) if (!superset.has(key)) return false;
-  return true;
-}
-
-/**
- * The roots a planner delivery names, each keyed with its selector: a root
- * whose selector changed reaches different documents, which only a full
- * evaluation diffs out, so it is not the same root.
- */
-function deliveryRootKeys(delivery: readonly ViewQuery[]): Set<string> {
-  const keys = new Set<string>();
-  for (const query of delivery) {
-    for (const root of query.roots) {
-      keys.add(
-        JSON.stringify([root.scope ?? "space", root.id, root.selector]),
-      );
-    }
-  }
-  return keys;
-}
-
 export class Server {
   #sessions: SessionRegistry;
   #connections = new Map<string, Connection>();
@@ -6583,16 +6611,23 @@ export class Server {
       // the next frame carries the plans. One that delivers differently is
       // resolved to its schema and graph closure first, so a failed selection
       // leaves the session's existing delivery intact, and then rebuilds the
-      // graphs and diffs against the session's delivery state.
+      // graphs and diffs against the session's delivery state. The roots the
+      // current selection delivers were resolved when it was installed, so
+      // only the roots it does not deliver are resolved here
+      // (`deliveryToResolve`).
       const sameDelivery = (
         previous: ReturnType<SessionState["viewSelections"]["get"]>,
       ) =>
         previous !== undefined && previous.revision === handle.revision &&
         valueEqualByWalk(previous.delivery, selection.delivery);
-      if (!sameDelivery(session!.viewSelections.get(handle.viewId))) {
+      const installed = session!.viewSelections.get(handle.viewId);
+      if (!sameDelivery(installed)) {
         await this.evaluateWatchSet(
           space,
-          selection.delivery.map((query, index) => ({
+          deliveryToResolve(
+            selection.delivery,
+            installed?.revision === handle.revision ? installed : undefined,
+          ).map((query, index) => ({
             id: `selection:${index}`,
             kind: "graph" as const,
             query,

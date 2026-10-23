@@ -878,6 +878,63 @@ describe("view interests", () => {
     expect(ids).toEqual(["of:ordinary"]);
   });
 
+  it("resolves only the roots a selection adds to the view's installed delivery", async () => {
+    await set([], [view()]);
+    const [{ handle }] = server.viewInterestsForSpace(space);
+    await server.setViewSelection(space, handle, {
+      generation: 1,
+      delivery: [query("of:support")],
+    });
+    await server.flushSessions();
+    const evaluations = spy(server, "evaluateWatchSet");
+    try {
+      await server.setViewSelection(space, handle, {
+        generation: 2,
+        delivery: [query("of:support"), query("of:ordinary")],
+      });
+      expect(
+        evaluations.calls.map((call) =>
+          call.args[1].flatMap((watch) =>
+            (watch as { query: { roots: { id: string }[] } }).query.roots
+              .map((root) => root.id)
+          )
+        ),
+      ).toEqual([["of:ordinary"]]);
+    } finally {
+      evaluations.restore();
+    }
+  });
+
+  it("leaves the current delivery intact when a root a selection adds has an invalid schema", async () => {
+    await set([], [view()]);
+    const [{ handle }] = server.viewInterestsForSpace(space);
+    await server.setViewSelection(space, handle, {
+      generation: 1,
+      delivery: [query("of:support")],
+    });
+    await server.flushSessions();
+    await expect(server.setViewSelection(space, handle, {
+      generation: 2,
+      delivery: [query("of:support"), {
+        roots: [{
+          id: "of:ordinary",
+          selector: {
+            path: [],
+            schema: {
+              $ref:
+                "cid:bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku",
+            },
+          },
+        }],
+      }],
+    })).rejects.toThrow();
+    const sync = await set([]);
+    expect(sync.upserts.map((upsert) => upsert.id).toSorted()).toEqual([
+      "of:render",
+      "of:support",
+    ]);
+  });
+
   it("rebuilds only the support graphs for a plan that drops a delivered root", async () => {
     await set([], [view()]);
     const [{ handle }] = server.viewInterestsForSpace(space);
