@@ -592,6 +592,17 @@ export class Scheduler {
   #settleDeferredForLoadPark = false;
 
   /**
+   * Whether an action was invalidated outside a pass's event phases while a
+   * settle was deferred to a load park: work the deferring pass's events did
+   * not dirty, which the next pass settles rather than leave it waiting on
+   * the park.
+   */
+  #invalidatedWhileDeferred = false;
+
+  /** Whether a pass is running its event phases. */
+  #runningEventPhases = false;
+
+  /**
    * How many event handlers the event phases have started. A phase that
    * moves past its head without starting one dropped or deferred it.
    */
@@ -2807,9 +2818,16 @@ export class Scheduler {
     if (this.runningPromise) await this.runningPromise;
 
     this.#beginExecuteCycle();
-    const deferredBefore = this.#settleDeferredForLoadPark;
+    const invalidatedWhileDeferred = this.#invalidatedWhileDeferred;
+    this.#invalidatedWhileDeferred = false;
+    const deferredBefore = this.#settleDeferredForLoadPark &&
+      !invalidatedWhileDeferred;
+    this.#runningEventPhases = true;
     const { eventBlockingDeps, dispatched } = await this
-      .#processExecuteEventPhases();
+      .#processExecuteEventPhases()
+      .finally(() => {
+        this.#runningEventPhases = false;
+      });
     // Under the serving posture a head the preflight parked on its loads,
     // behind events this pass dispatched, ends the pass without its settle:
     // the pass the park's end queues dispatches it and settles behind it,
@@ -2820,10 +2838,12 @@ export class Scheduler {
     // ahead of the derivations over them (events.md §2). A head that parks
     // again before this pass dispatched anything keeps a settle the previous
     // pass deferred waiting with it; one that parks with no batch ahead of it
-    // lets the settle run.
+    // lets the settle run. So does a pass that finds work invalidated since a
+    // pass deferred, which those events did not dirty: a write from elsewhere
+    // waits on no park.
     this.#settleDeferredForLoadPark = this.runtime.servingPosture === true &&
-      (dispatched > 0 || deferredBefore) && eventBlockingDeps.size === 0 &&
-      this.#hasLoadParkedHeadEvent();
+      !invalidatedWhileDeferred && (dispatched > 0 || deferredBefore) &&
+      eventBlockingDeps.size === 0 && this.#hasLoadParkedHeadEvent();
     if (this.#settleDeferredForLoadPark) {
       this.#recordExecuteEndTelemetry();
       this.#applyExecuteContinuation();
@@ -3839,6 +3859,9 @@ export class Scheduler {
   ): void {
     const record = this.#nodes.get(action);
     if (!record) return;
+    if (this.#settleDeferredForLoadPark && !this.#runningEventPhases) {
+      this.#invalidatedWhileDeferred = true;
+    }
     markInvalidRecord(this.#nodes, action, cause, options);
     // A scheduler-owed retry (`options.retry`: a refused run re-queued after
     // its catch-up, or an empty rejection without an accepted result or live

@@ -192,7 +192,8 @@ describe("scheduler serving event batch", () => {
     releaseLoad = () => load.resolve();
 
     // Marked as running a pass, the scheduler latches the passes the events
-    // ask for rather than scheduling them; the pass the test runs ends that.
+    // ask for rather than scheduling them; the pass the test runs ends that,
+    // and `latch()` marks it so again.
     const access = runtime.scheduler.accessForTestingOnly;
     access.scheduled = true;
     return {
@@ -202,9 +203,52 @@ describe("scheduler serving event batch", () => {
       writing: writing.getAsNormalizedFullLink(),
       parking: parking.getAsNormalizedFullLink(),
       pass: () => access.execute(),
+      latch: () => {
+        access.scheduled = true;
+      },
       failLoad: (error: Error) => load.reject(error),
     };
   }
+
+  it("settles a write from elsewhere while the settle a pass deferred waits on its parked head", async () => {
+    // The deferral holds back the derivations the pass's own events dirtied,
+    // to run once behind the parked head; a write that did not come from
+    // those events is settled in the next pass, with them, while the park
+    // still holds.
+    const env = await parkingRuntime();
+    env.runtime.scheduler.queueEvent(env.writing, { value: 1 });
+    env.runtime.scheduler.queueEvent(env.parking, {});
+    await env.pass();
+    expect(env.derived).toEqual([0]);
+
+    env.latch();
+    const write = env.runtime.edit();
+    env.slot.withTx(write).set(2);
+    await write.commit().settled;
+    await env.pass();
+    expect(env.derived).toEqual([0, 2]);
+  });
+
+  it("keeps the settle a pass deferred waiting through a pass that only queued another event behind the parked head", async () => {
+    // An event queued behind the parked head dirties nothing, so the pass it
+    // asks for leaves the deferred settle to the park's end, which settles
+    // behind both events.
+    const env = await parkingRuntime();
+    env.runtime.scheduler.queueEvent(env.writing, { value: 1 });
+    env.runtime.scheduler.queueEvent(env.parking, {});
+    await env.pass();
+    expect(env.derived).toEqual([0]);
+
+    env.latch();
+    env.runtime.scheduler.queueEvent(env.writing, { value: 3 });
+    await env.pass();
+    expect(env.derived).toEqual([0]);
+
+    const settled = env.runtime.idle();
+    releaseLoad!();
+    await settled;
+    expect(env.derived).toEqual([0, 3]);
+  });
 
   it("settles the events a pass ran once a drop takes its parked head off the queue", async () => {
     // The flush deadline's purge drops a parked in-process event before its
