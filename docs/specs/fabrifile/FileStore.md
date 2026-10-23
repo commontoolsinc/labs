@@ -29,15 +29,15 @@ one.
 
 Two roots keep one this way: a FabriChat room that is its space's root
 ([`FabriChatRoom`](../fabrichat/FabriChatRoom.md)), in its `fileStore` input,
-and the Loom (`packages/patterns/loom/`), in its own. Each offers the store as
-`fileStore` and creates it with `ensureFileStore`. A FabriChat room that isn't
-its space's root uses the store its root keeps. The Loom offers its record as
-`fileStoreRecord`, beside the `chatRoom` it names its room with, both declared
-by FabriChat's `ChatContainer`, and the room reads its store from that record
-and creates it there. A root that offers no record gives
-its room no store, and the room's `ensureFileStore` does nothing. The root
-offers the record rather than a stream to create the store with, because a
-declared stream reads as present whether or not the root has one (see
+and the Loom (`packages/patterns/loom/`), in its own. The two offer the same
+shape: each links the store as `fileStore`, creates it with `ensureFileStore`,
+and offers the record itself as `fileStoreRecord`, which FabriChat's
+`ChatContainer` declares. A FabriChat room that isn't its space's root uses the
+store its root keeps: it reads its store from the record its root offers, and
+creates it there. A root that offers no record gives its room no store, and the
+room's `ensureFileStore` does nothing. A root offers the record rather than a
+stream to create the store with, because a declared stream reads as present
+whether or not the root has one (see
 [handlers](../../common/concepts/handler.md#exporting-handlers-as-streams)), so
 only a value can say whether the root keeps a store.
 

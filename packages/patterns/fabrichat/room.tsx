@@ -44,6 +44,7 @@ import {
 import type { FileStoreOutput } from "../fabrifile/schemas.tsx";
 import {
   ensureFileStore,
+  type FileStoreRecord,
   type FileStoreRecordCell,
 } from "../fabrifile/store.tsx";
 import {
@@ -1089,6 +1090,13 @@ export interface ChatRoomView {
    * space's root to, and does nothing in a space whose root keeps none.
    */
   ensureFileStore: Stream<void>;
+
+  /**
+   * Where the room keeps its space's file store, for a room that is its
+   * space's root, as a root offering its space's store does; absent for any
+   * other room, which keeps none.
+   */
+  fileStoreRecord?: Cell<FileStoreRecord>;
 }
 
 /** What a room offers everyone its space admits: `ChatRoomOutput`. */
@@ -1476,6 +1484,7 @@ export const FabriChatRoomCore = pattern<
       own: ensureFileStore({ fileStore }),
       root: ensureFileStore({ fileStore: rootFileStore }),
     }),
+    fileStoreRecord: ownSpace ? fileStore : undefined,
   };
   const closeThread = action(() => composer.key("thread").set(undefined));
   const cancelReply = action(() => composer.key("replyTo").set(undefined));
@@ -1759,6 +1768,7 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
       titleRequests: room.titleRequests,
       fileStore: room.fileStore,
       ensureFileStore: room.ensureFileStore,
+      fileStoreRecord: room.fileStoreRecord,
       [UI]: (
         <cf-screen>
           {room[UI]}

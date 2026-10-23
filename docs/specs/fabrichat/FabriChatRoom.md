@@ -25,11 +25,12 @@ The room keeps these `PerSpace` values, shared by everyone the space admits:
   and, where it is absent, from the title `about.record` holds.
 - Where the room keeps its space's file store, for a room that is its space's
   root: a `FileStoreRecord`, `{}` until `ensureFileStore` creates the store
-  (see [`FileStore`](../fabrifile/FileStore.md#where-it-lives)). A room that
-  isn't its space's root keeps none, and reads the record its container
-  offers as `fileStoreRecord` instead. `ensureFileStore` sends the store's
-  own handler only where the container offers one, since its binding to the
-  container's field reads as one whether or not it is there.
+  (see [`FileStore`](../fabrifile/FileStore.md#where-it-lives)), which it
+  offers as `fileStoreRecord`. A room that isn't its space's root keeps none,
+  and reads the record its container offers as `fileStoreRecord` instead.
+  `ensureFileStore` sends the store's own handler only where the container
+  offers one, since its binding to the container's field reads as one whether
+  or not it is there.
 
 `participants` is computed from those who joined, the participants the space's
 root lists when the room is not that root (`wish({ query: "#default" })`), and

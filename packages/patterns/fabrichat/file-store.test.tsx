@@ -1,8 +1,8 @@
 /**
  * A FabriChat room's space's file store: a room that is its space's root
- * creates and keeps its own, a room in a Loom's space uses the Loom's, and a
- * room whose space's root keeps none has none, and writes nothing into that
- * root.
+ * creates and keeps its own, and offers its record as a Loom does; a room
+ * whose space's root is a Loom, or such a room, uses that root's; and a room
+ * whose space's root keeps none has none, and writes nothing into that root.
  */
 import {
   action,
@@ -40,6 +40,14 @@ export default pattern(() => {
     fileStore: Writable.of<FileStoreRecord>({}),
   } as RoomArg);
   const heldRootStore = Writable.of<HeldStore>({});
+
+  // A room whose space's root is a room, offering its record as a Loom does.
+  const roomRoom = FabriChatRoomCore({
+    myProfile: profile,
+    container: rootRoom,
+    messages: Writable.of<MessagesValue>([] as MessagesValue),
+    fileStore: Writable.of<FileStoreRecord>({}),
+  } as RoomArg);
 
   // A space's own chat, in a Loom's space.
   const loom = Loom({});
@@ -79,6 +87,15 @@ export default pattern(() => {
           bare.key("fileStoreRecord").get() === undefined
         ),
       },
+      // Only the room that is its space's root offers a record, naming no store.
+      {
+        assertion: assert(() =>
+          rootRoom.fileStoreRecord?.get() !== undefined &&
+          rootRoom.fileStoreRecord.get()?.store === undefined &&
+          loomRoom.fileStoreRecord?.get() === undefined &&
+          bareRoom.fileStoreRecord?.get() === undefined
+        ),
+      },
       { action: ensureRoot },
       // The root room's store is a piece in its space, and starts out empty.
       {
@@ -95,6 +112,15 @@ export default pattern(() => {
         assertion: assert(() =>
           heldRootStore.get().store !== undefined &&
           rootRoom.fileStore?.equals(heldRootStore.key("store")) === true
+        ),
+      },
+      // Its record names that store, and a room whose root it is uses it.
+      {
+        assertion: assert(() =>
+          rootRoom.fileStoreRecord?.key("store").equals(
+              heldRootStore.key("store"),
+            ) === true &&
+          roomRoom.fileStore?.equals(heldRootStore.key("store")) === true
         ),
       },
       { action: ensureInLoom },

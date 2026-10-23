@@ -246,6 +246,10 @@ space.
   its space's root, the store the room names itself, and for any other, the
   one its space's root names. It is absent while that names none, and in a
   space whose root keeps no store.
+- **`fileStoreRecord`**, for a room that is its space's root, is where it keeps
+  that store, offered as any root offering its space's store offers it (see
+  [`FileStore`](../fabrifile/FileStore.md#where-it-lives)). Any other room
+  keeps none, and offers none.
 - The lists here are projections. An implementation may keep each message's
   reactions as a list of their own, as long as what it offers satisfies these
   rules.
