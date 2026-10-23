@@ -168,10 +168,15 @@ export async function startRoutedToolshed(config: RoutedToolshedFixture) {
 
   /** Reports admission pressure only once the backend is actually blocked. */
   const reportAdmissionWait = () => {
-    if (
-      admission?.report.blocked && admission.report.waitingBodyBytes > 0 &&
-      !admission.report.released
-    ) admission.waiting.resolve(Object.freeze({ ...admission.report }));
+    // A body completed just before the header that waits is handed to the
+    // connection on a later microtask; snapshot after a turn so the report
+    // counts it.
+    setTimeout(() => {
+      if (
+        admission?.report.blocked && admission.report.waitingBodyBytes > 0 &&
+        !admission.report.released
+      ) admission.waiting.resolve(Object.freeze({ ...admission.report }));
+    }, 0);
   };
   const connectRouted = server.connectRouted.bind(server);
   server.connectRouted = (send, owns) => {
