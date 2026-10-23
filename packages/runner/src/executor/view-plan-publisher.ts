@@ -81,7 +81,13 @@ export class ViewPlanPublisher {
   #fingerprints = new WeakMap<EntityDocument, Map<string, string>>();
   /** Each producer's write surface and basis reads, sorted and compacted, by
    * the observation they were taken from, so that a node that has not run
-   * again since the last plan sorts neither again. */
+   * again since the last plan sorts neither again. A node that ran again is
+   * a new key: `viewExecutionNodes` reports the log its last run handed the
+   * scheduler, and nothing changes a log once handed out, since a
+   * transaction builds a new one after any later read or write rather than
+   * appending to the old. The write surface is the node's declared one,
+   * which a change replaces rather than edits, and `writes` holds the one
+   * the entry was sorted from. */
   #surfaces = new WeakMap<TransactionReactivityLog, {
     writes: readonly IMemorySpaceAddress[];
     surface: IMemorySpaceAddress[];

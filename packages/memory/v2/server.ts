@@ -2456,7 +2456,14 @@ function deliveryRootKeys(delivery: readonly ViewQuery[]): Set<string> {
  * under the same revision, does not deliver on the same branch, each query
  * kept with those of its roots alone. Without such a selection it is all of
  * `delivery`. A root the installed selection delivers was resolved when that
- * selection was.
+ * selection was, and the session's refresh passes evaluate it whichever of
+ * the two selections is installed. A root that stops resolving in between,
+ * a schema it names gone, fails those passes either way: `refreshDirty`
+ * logs the failure, skips the session's frame and marks it for a full
+ * re-evaluation, which each later pass makes until the root resolves again
+ * or a selection without it is installed. Resolving the root here again
+ * would only refuse the new selection in favor of the installed one, which
+ * delivers the same root.
  */
 function deliveryToResolve(
   delivery: readonly ViewQuery[],

@@ -166,6 +166,28 @@ describe("view plan publisher", () => {
       .toEqual(previous);
   });
 
+  it("indexes a producer's basis again from the log its next run reports", async () => {
+    // The publisher keeps each producer's sorted surfaces by the log they
+    // were taken from. A node that runs again reports a new log, here one
+    // that reads another cell, and its basis must name that cell alone.
+    await publish();
+    const basisReadIds = () =>
+      fixture.publications.calls.at(-1)!.args[2].producers?.[0].basis?.reads
+        .map((read) => read.id);
+    expect(basisReadIds()).toEqual([
+      fixture.input.getAsNormalizedFullLink().id,
+    ]);
+    fixture.nodes[0].log = {
+      reads: [toMemorySpaceAddress(fixture.hidden.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [toMemorySpaceAddress(fixture.output.getAsNormalizedFullLink())],
+    };
+    await publish();
+    expect(basisReadIds()).toEqual([
+      fixture.hidden.getAsNormalizedFullLink().id,
+    ]);
+  });
+
   it("incorporates a handler's new observations without repeating the UI walk", async () => {
     const stream = fixture.runtime.getCell<unknown>(space, "click", {
       asCell: ["stream"],
