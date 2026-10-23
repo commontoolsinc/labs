@@ -75,9 +75,11 @@ interface RunSpec {
   minutesAgo?: number;
   branch?: string;
   stoppedJobs?: number; // jobs a runner stopped when the run was cancelled
+  stoppedBy?: string; // why, as their annotations say; TIMED_OUT unless given
   jobs?: { conclusion: string; runner_name: string | null }[]; // its whole listing
   status?: string; // "completed" unless the run is still going
-  ranMinutes?: number; // how long a completed run went on before it ended
+  startedMinutesAgo?: number; // when its latest attempt started, if not when it was created
+  ranMinutes?: number; // how long a completed attempt went on before it ended
   jobsStatus?: number; // the status its job-listing read answers with
   attempt?: number; // its latest attempt, 1 unless it was run again
 }
@@ -106,6 +108,13 @@ const loomCi = (runs: RunSpec[]): WorkflowSpec => ({
   runs,
 });
 const green: RunSpec[] = [{ conclusion: "success", minutesAgo: 30 }];
+
+// What GitHub annotates a job a runner was running with when the job runs past
+// its `timeout-minutes`, and when a concurrency group cancels it in favor of
+// a newer run.
+const TIMED_OUT = "The job has exceeded the maximum execution time of 1h10m0s";
+const REPLACED =
+  "Canceling since a higher priority waiting request for release-refs/heads/main exists";
 
 interface Wire {
   calls: string[];
@@ -139,6 +148,7 @@ async function withGitHub(
     repos.map((repo) => [`${ORG}/${repo.name}`, repo]),
   );
   const jobsById = new Map<number, RunSpec["jobs"]>();
+  const annotationsById = new Map<number, { message: string }[]>();
   const jobsStatusById = new Map<number, number>();
   const pages = Math.max(1, Math.ceil(repos.length / 100));
 
@@ -207,18 +217,35 @@ async function withGitHub(
     }
 
     const jobs = url.pathname.match(
-      /^\/repos\/(.+)\/actions\/runs\/(\d+)\/attempts\/1\/jobs$/,
+      /^\/repos\/(.+)\/actions\/runs\/(\d+)\/attempts\/\d+\/jobs$/,
     );
     if (jobs) {
       const failing = jobsStatusById.get(Number(jobs[2]));
       if (failing !== undefined) {
         return Promise.resolve(new Response("unavailable", { status: failing }));
       }
-      const listed = jobsById.get(Number(jobs[2])) ?? [];
+      // A job's id is its run's id times a hundred plus its place in the
+      // listing.
+      const listed = (jobsById.get(Number(jobs[2])) ?? []).map((job, index) => ({
+        id: Number(jobs[2]) * 100 + index,
+        ...job,
+      }));
       return Promise.resolve(Response.json({
         total_count: listed.length,
         jobs: listed,
       }));
+    }
+
+    const annotations = url.pathname.match(
+      /^\/repos\/(.+)\/check-runs\/(\d+)\/annotations$/,
+    );
+    if (annotations) {
+      const job = Number(annotations[2]);
+      const listed = jobsById.get(Math.floor(job / 100))?.[job % 100];
+      if (listed === undefined) throw new Error(`unexpected request ${url}`);
+      return Promise.resolve(
+        Response.json(annotationsById.get(Math.floor(job / 100)) ?? []),
+      );
     }
 
     // A run's id is its workflow's id times a hundred plus its place among
@@ -237,13 +264,15 @@ async function withGitHub(
             runner_name: "GitHub Actions 1",
           })),
       );
+      annotationsById.set(id, [{ message: run.stoppedBy ?? TIMED_OUT }]);
       if (run.jobsStatus !== undefined) {
         jobsStatusById.set(id, run.jobsStatus);
       }
       const createdAgo = run.minutesAgo ?? 0;
+      const startedAgo = run.startedMinutesAgo ?? createdAgo;
       const completed = (run.status ?? "completed") === "completed";
       const endedAgo = completed
-        ? Math.max(0, createdAgo - (run.ranMinutes ?? 10))
+        ? Math.max(0, startedAgo - (run.ranMinutes ?? 10))
         : 0;
       return {
         id,
@@ -255,7 +284,7 @@ async function withGitHub(
         head_sha: "sha",
         display_title: workflow.name,
         created_at: new Date(T0 - createdAgo * 60_000).toISOString(),
-        run_started_at: new Date(T0 - createdAgo * 60_000).toISOString(),
+        run_started_at: new Date(T0 - startedAgo * 60_000).toISOString(),
         updated_at: new Date(T0 - endedAgo * 60_000).toISOString(),
         html_url: `https://github.com/${repo}/actions/runs/${id}`,
         head_commit: null,
@@ -1099,7 +1128,13 @@ Deno.test("ci: a run cancelled because a newer one replaced it judges nothing", 
   await withGitHub(
     standingOrg(green, [
       { conclusion: null, status: "in_progress", minutesAgo: 5 },
-      { conclusion: "cancelled", minutesAgo: 40, ranMinutes: 36, stoppedJobs: 1 },
+      {
+        conclusion: "cancelled",
+        minutesAgo: 40,
+        ranMinutes: 36,
+        stoppedJobs: 1,
+        stoppedBy: REPLACED,
+      },
       { conclusion: "success", minutesAgo: 6 * 24 * 60 },
     ]),
     async () => {
@@ -1111,12 +1146,13 @@ Deno.test("ci: a run cancelled because a newer one replaced it judges nothing", 
   );
 });
 
-Deno.test("ci: a run cancelled before any newer run began is still a failure", async () => {
-  // It timed out, or somebody stopped it, and the push after it came later.
+Deno.test("ci: a run that timed out while a newer one was going is still a failure", async () => {
+  // A newer run of a workflow that does not cancel in progress waits for the
+  // older one, which ran past its `timeout-minutes` in the meantime.
   await withGitHub(
     standingOrg(green, [
       { conclusion: null, status: "in_progress", minutesAgo: 5 },
-      { conclusion: "cancelled", minutesAgo: 60, ranMinutes: 35, stoppedJobs: 1 },
+      { conclusion: "cancelled", minutesAgo: 40, ranMinutes: 36, stoppedJobs: 1 },
       { conclusion: "success", minutesAgo: 6 * 24 * 60 },
     ]),
     async () => {
@@ -1126,6 +1162,40 @@ Deno.test("ci: a run cancelled before any newer run began is still a failure", a
       assertEquals(view.value, "loom failing");
     },
   );
+});
+
+Deno.test("ci: a rerun of an older run is judged by why its own jobs were cancelled", async () => {
+  // An older run was run again after a newer run was created. The rerun
+  // concludes cancelled, and the run listing gives it the older run's
+  // creation time, from before the newer run.
+  const cases = [
+    { stoppedBy: TIMED_OUT, status: "bad", value: "loom failing" },
+    { stoppedBy: REPLACED, status: "good", value: "passing" },
+  ];
+  for (const { stoppedBy, status, value } of cases) {
+    await withGitHub(
+      standingOrg(green, [
+        { conclusion: null, status: "in_progress", minutesAgo: 60 },
+        {
+          conclusion: "cancelled",
+          attempt: 2,
+          minutesAgo: 120,
+          startedMinutesAgo: 20,
+          ranMinutes: 15,
+          stoppedJobs: 1,
+          stoppedBy,
+        },
+        { conclusion: "success", minutesAgo: 6 * 24 * 60 },
+      ]),
+      async (wire) => {
+        const view = await collectSwept(createCiHealth());
+
+        assertEquals(view.status, status);
+        assertEquals(view.value, value);
+        assert(wire.calls.some((call) => call.includes("/attempts/2/jobs")));
+      },
+    );
+  }
 });
 
 Deno.test("ci: a run still going is not a verdict", async () => {

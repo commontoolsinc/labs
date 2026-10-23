@@ -7,17 +7,19 @@
 import type { Ctx, Run, Tile, TileView } from "../types.ts";
 
 /**
- * What the stand-in answers one request with: an attempt, a job listing, or
- * an `Error` that rejects the request.
+ * What the stand-in answers one request with: an attempt, a job listing, a
+ * page of a check run's annotations, or an `Error` that rejects the request.
  */
 export type GithubAnswer =
   | Run
   | { readonly total_count: unknown; readonly jobs?: unknown }
+  | readonly { readonly message?: unknown }[]
   | Error;
 
 /**
  * Runs `body` with `fetch` standing in for GitHub's workflow-run attempt
- * endpoints: an attempt, and an attempt's job listing. Every request is
+ * endpoints: an attempt, an attempt's job listing, and a job's check run's
+ * annotations. Every request is
  * answered with `response`, or with what `response` returns for the request's
  * URL, as a JSON body, and an `Error` rejects the request. None reaches the
  * network, whatever token the environment holds. `body` receives the URLs
@@ -69,8 +71,8 @@ export function collectFromWorkingRuns(tile: Tile, ctx: Ctx): Promise<TileView> 
     {
       total_count: 2,
       jobs: [
-        { conclusion: "success", runner_name: "GitHub Actions 1" },
-        { conclusion: "success", runner_name: "GitHub Actions 2" },
+        { id: 1, conclusion: "success", runner_name: "GitHub Actions 1" },
+        { id: 2, conclusion: "success", runner_name: "GitHub Actions 2" },
       ],
     },
     () => tile.collect(ctx),
