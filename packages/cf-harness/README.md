@@ -2088,10 +2088,15 @@ than the keyword rule can state the tags (`--task-tags`) or the domains
 classifier's, which decides any part the caller leaves out; the record says
 `caller` for a part it stated. None of these grants authority. An agent-runner
 local job takes `depth`, `tags` and `domains` from its request, and
-`reasoningEffort` from its profile, which a request may lower but not raise.
-Only `deep` changes a run today, adding the opening research pass for a
-classified task in the `fabric` domain; an `author` task gets that pass at any
-depth. The effort applies to the job's own model calls and children on its
+`reasoningEffort` from its profile, which a request may lower but not raise. A
+`standard` run's prompt has no strategy section. A `quick` run is told to answer
+directly when it can, and otherwise to take the shortest path that does what was
+asked, adding nothing beyond it. A `deep` run is told to search every source of
+the person's data (`personal` domain) or to read several web sources (`web`), to
+leave only material worth opening, and to read its result back before it
+finishes (`src/strategy.ts`). A `deep` run also adds the opening research pass
+for a classified task in the `fabric` domain; an `author` task gets that pass at
+any depth. The effort applies to the job's own model calls and children on its
 model; research keeps its own effort setting.
 
 A tool descriptor is a contract: its name, its parameters with one-line

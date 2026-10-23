@@ -34,23 +34,24 @@ describe("strategy", () => {
     }
   });
 
-  it("tells a quick run to answer directly, or from the one tool call that matches the ask", () => {
+  it("tells a quick run to answer directly, or by the shortest path that does what was asked", () => {
     const quick = prompt("quick", ["personal"]);
 
     expect(quick).toContain(
       "Their words set the task; a quick run adds nothing beyond it.",
     );
     expect(quick).toContain("Answer directly when you can, without research");
+    expect(quick).toContain("take the shortest path that does what they asked");
+    expect(quick).toContain("only the further calls the ask itself needs");
     expect(quick).toContain(
-      "with the wrong arguments for what they asked, you may correct once",
+      "Do not add calls, delegation or research to be thorough.",
     );
     expect(quick).toContain(
-      "the one tool call that best matches what they asked",
+      "Correct a call that failed or used the wrong arguments",
     );
-    expect(quick).toContain(
-      "Chain further calls, delegate or research only where their words ask for that work.",
-    );
+    // No ceiling on calls that would leave a multi-step ask undoable.
     expect(quick).not.toContain("without chaining further calls");
+    expect(quick).not.toContain("correct once");
     expect(quick).not.toContain("Search every source");
     expect(quick).not.toContain("Before you finish");
   });
