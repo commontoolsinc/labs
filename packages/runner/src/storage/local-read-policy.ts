@@ -28,8 +28,10 @@ export class LocalReadUnavailable extends Error {
 /** Local eligibility in addition to replica coverage, such as producer currency. */
 type LocalReadPolicy = {
   permits?: () => (address: IMemorySpaceAddress) => boolean;
+
   /** The checker the transaction's reads share, made at its first read. */
   readPermits?: (address: IMemorySpaceAddress) => boolean;
+
   failure?: LocalReadUnavailable;
   basis: PathKeyMap<{ address: IMemorySpaceAddress; covered: () => boolean }>;
   conditions: { address: IMemorySpaceAddress; current: () => boolean }[];

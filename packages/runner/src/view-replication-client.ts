@@ -57,6 +57,7 @@ const UNPROVEN: ServerProof = { current: false, closure: [] };
 export type ViewProofPass = {
   /** The plan version the pass's proofs were made under. */
   version?: number;
+
   readonly proofs: Map<string, ServerProof>;
   readonly matched: Map<ViewValueBasis, boolean>;
   readonly ancestors: Map<ViewValueBasis, ReadonlySet<string>>;
