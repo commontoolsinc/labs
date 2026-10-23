@@ -42,7 +42,6 @@ import type {
   IExtendedStorageTransaction,
   MemorySpace,
   SealedCommitVerdict,
-  URI,
 } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { waitForSettled } from "../src/executor/watermark.ts";
@@ -3268,12 +3267,7 @@ describe("Phase 2 speculation overlay", () => {
     const gate = Promise.withResolvers<void>();
     const sealTx = {
       tx: {
-        getWriteAttemptLog: () => [{
-          space: otherSpace,
-          id: "of:quiescence" as URI,
-          path: ["value"],
-          journalIndex: 0,
-        }],
+        getWriteTargetSpaces: () => [otherSpace],
         markWholeDocumentWrites: () => {},
         sealInto: async (collector: {
           sealSpaceCommit: (
@@ -3357,6 +3351,7 @@ describe("Phase 2 speculation overlay", () => {
     const gate = Promise.withResolvers<void>();
     const sealTx = {
       tx: {
+        getWriteAttemptLog: () => [],
         markWholeDocumentWrites: () => {},
         sealInto: async (collector: {
           sealSpaceCommit: (

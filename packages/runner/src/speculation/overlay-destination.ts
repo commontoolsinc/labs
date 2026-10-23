@@ -102,7 +102,6 @@ import type {
 } from "../storage/interface.ts";
 import type { PostCommitSideEffect } from "../cfc/types.ts";
 import { createTransactionCommitReceipt } from "../storage/commit-receipt.ts";
-import { getTransactionWrittenSpaces } from "../storage/transaction-inspection.ts";
 import { CoalescedDocListener } from "./doc-notification-listener.ts";
 
 const logger = getLogger("speculation-overlay", {
@@ -269,8 +268,8 @@ type OverlayEntry = {
 type PendingSeal = {
   settled: Promise<Result<Unit, CommitError>>;
 
-  /** Absent only for legacy/custom transactions that expose no write log;
-   * those seals conservatively participate in every space's wait. */
+  /** Absent when a legacy/custom transaction exposes no exact target-space
+   * surface; those seals conservatively participate in every space's wait. */
   spaces?: ReadonlySet<MemorySpace>;
 };
 
@@ -598,16 +597,10 @@ export class SpeculationOverlayDestination
       // Ordinary writes use the store's verdict, coverage, and sync hold.
       return tx.tx.commit(options);
     }
-    let spaces: ReadonlySet<MemorySpace> | undefined;
-    try {
-      spaces = new Set(getTransactionWrittenSpaces(tx));
-    } catch {
-      // A custom transaction may offer no inspection surface. Its seal still
-      // has to close the empty-map window, so every space wait includes it.
-    }
+    const targetSpaces = tx.tx.getWriteTargetSpaces?.();
     const pending: PendingSeal = {
       settled: this.#sealSpeculative(tx),
-      spaces,
+      spaces: targetSpaces === undefined ? undefined : new Set(targetSpaces),
     };
     this.#pendingSeals.add(pending);
     return createTransactionCommitReceipt(
