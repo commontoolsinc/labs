@@ -106,8 +106,8 @@ export class ViewDependencyGraph {
     );
     const selected = new Set(handlers);
     // The edits a visible interaction can make, indexed by the entity they
-    // write, so that each ancestor's reads are tested only against the edits
-    // to the entities they name.
+    // write. The index holds each source's edits sliced by entity, so an
+    // ancestor's read is tested only against the edits to the entity it names.
     const editsByEntity = new Map<
       SpaceScopeAndURI,
       Set<readonly IMemorySpaceAddress[]>
@@ -118,14 +118,21 @@ export class ViewDependencyGraph {
         ...handlers.map((node) => node.writes),
       ]
     ) {
+      const slices = new Map<SpaceScopeAndURI, IMemorySpaceAddress[]>();
       for (const write of edits) {
         const key = entityNameKey(write);
-        let writers = editsByEntity.get(key);
-        if (writers === undefined) {
-          writers = new Set();
-          editsByEntity.set(key, writers);
+        let slice = slices.get(key);
+        if (slice === undefined) {
+          slice = [];
+          slices.set(key, slice);
+          let writers = editsByEntity.get(key);
+          if (writers === undefined) {
+            writers = new Set();
+            editsByEntity.set(key, writers);
+          }
+          writers.add(slice);
         }
-        writers.add(edits);
+        slice.push(write);
       }
     }
     const consumers = new Map<ViewExecutionNode, Set<ViewExecutionNode>>();
