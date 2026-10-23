@@ -2,7 +2,7 @@
 status: historical
 created: 2026-10-23
 archived: 2026-10-23
-reason: "Why a FabriChat message row derives what it shows in four computeds rather than sixteen: under server execution a computed that reads the viewer runs once per viewer, and one that reads the session once per session, so each flag cost a run per viewer per row. Folding them took the send burst's mean from 3.5 and 3.6 s to 2.8 and 2.9 s with the serving loop on in a worker; with it off, one pair showed no clear change. Measured on the served-vote branch (#9122) before the change was split out to land on its own."
+reason: "Why a FabriChat message row derives what it shows in four computeds rather than sixteen: under server execution a computed that reads the viewer runs once per viewer, and one that reads the session once per session, so each flag that reads the viewer cost a run per viewer per row, and each that reads the session a run per session. Folding them took the send burst's mean from 3.5 and 3.6 s to 2.8 and 2.9 s with the serving loop on in a worker; with it off, one pair showed no clear change. Measured on the served-vote branch (#9122) before the change was split out to land on its own."
 ---
 
 # A FabriChat row's derivations, one per reader
@@ -31,7 +31,8 @@ A message row derived each flag it shows in a computed of its own, sixteen in
 all. The viewer's rights, tallies and button displays read the viewer; the
 editor and picker state read the session. A runtime serving the room runs a
 computed that reads the viewer once for every viewer, and one that reads the
-session once for every session, so each flag cost a run per viewer per row.
+session once for every session, so each flag that reads the viewer cost a run
+per viewer per row, and each that reads the session a run per session per row.
 A client runtime runs its own viewer's instance of each.
 
 ## The change
