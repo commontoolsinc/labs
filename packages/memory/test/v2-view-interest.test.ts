@@ -431,6 +431,44 @@ describe("view interests", () => {
     }
   });
 
+  it("keeps delivering a document the support graph reaches after the rendered graph stops reaching it", async () => {
+    // The render graph and the support graph of one view are two graphs
+    // over one branch, and a refresh retires a document per graph.
+    const linkSchema = {
+      type: "object",
+      properties: {
+        primary: { type: "object", properties: { label: { type: "string" } } },
+      },
+    } as const;
+    const linked = (id: string) => ({
+      primary: { "/": { "link@1": { id, path: [], space } } },
+    });
+    const following = (id: string) => ({
+      roots: [{ id, selector: { path: [], schema: linkSchema } }],
+    });
+    await server.writeDocument(space, "of:shared", { label: "shared" });
+    await server.writeDocument(space, "of:render", linked("of:shared"));
+    await server.writeDocument(space, "of:support", linked("of:shared"));
+    await set([], [{ ...view(), query: following("of:render") }]);
+    const [{ handle }] = server.viewInterestsForSpace(space);
+    await server.setViewSelection(space, handle, {
+      generation: 1,
+      delivery: [following("of:support")],
+    });
+    await server.flushSessions();
+    messages.length = 0;
+    await server.writeDocument(space, "of:other", { label: "other" });
+    await server.writeDocument(space, "of:render", linked("of:other"));
+    await server.flushSessions();
+    const effects = messages.flatMap((message) =>
+      message.type === "session/effect" ? [message.effect] : []
+    );
+    expect(effects.flatMap((effect) => effect.upserts.map((entry) => entry.id)))
+      .toContain("of:other");
+    expect(effects.flatMap((effect) => effect.removes.map((entry) => entry.id)))
+      .not.toContain("of:shared");
+  });
+
   it("ignores unrelated commits without rebuilding queries or resending a manifest", async () => {
     await set([], [view()]);
     await server.flushSessions();

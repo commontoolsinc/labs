@@ -8743,6 +8743,8 @@ export class Server {
               // The delivered entries of the documents the re-walks retired:
               // the frame retracts them.
               const removed = new Map<string, SessionCacheEntry>();
+              const retired: Array<{ docKey: QueryDocKey; branch: string }> =
+                [];
               const changedInterests = new Set<string>();
               const walkStartedAt = performance.now();
 
@@ -8789,12 +8791,24 @@ export class Server {
                     );
                   }
                   for (const docKey of refreshed.removed) {
-                    const { id, scopeKey } = fromDocKey(docKey);
-                    const key = cacheKeyForEntity(graph.branch, id, scopeKey);
-                    const entry = session.entities.get(key);
-                    if (entry !== undefined) removed.set(key, entry);
-                    changedInterests.add(toDirtyKey(id, scopeKey));
+                    retired.push({ docKey, branch: graph.branch });
                   }
+                }
+                // A session with views holds a demand graph and a support
+                // graph over one branch, so a document one of them retired
+                // can still be one the other reaches. Only what no graph of
+                // the session over that branch tracks any more is retracted.
+                for (const { docKey, branch } of retired) {
+                  if (
+                    [...session.graphs.values()].some((other) =>
+                      other.branch === branch && other.tracker.has(docKey)
+                    )
+                  ) continue;
+                  const { id, scopeKey } = fromDocKey(docKey);
+                  const key = cacheKeyForEntity(branch, id, scopeKey);
+                  const entry = session.entities.get(key);
+                  if (entry !== undefined) removed.set(key, entry);
+                  changedInterests.add(toDirtyKey(id, scopeKey));
                 }
               } finally {
                 timing.time(
