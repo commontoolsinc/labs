@@ -45,7 +45,9 @@ The row derives in four computeds, and binds the UI to their fields:
 - the thread link.
 
 The room's contract changes only in its writers' module identity, recorded as
-a new pattern baseline.
+a new pattern baseline. The row's output still carries `tallies`, now a field
+of the viewer's computed, so whatever reads it depends on that whole computed: a
+change to the viewer's rights runs it again as well.
 
 ## Measured
 
