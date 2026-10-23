@@ -2,7 +2,7 @@
 status: historical
 created: 2026-10-23
 archived: 2026-10-23
-reason: "Why a view-scoped web client answers a basis check from the deep-frozen document it last observed, why a commit's own read validations stand on the scheduler's pre-commit pass for one synchronous stretch, and why that stretch ends when a replica applies a frame: over eight rendered lunch votes at 296 votes, local read validation went from 3,538 to 2,266 ms and then every validation pass from 2,551 to 1,066 ms, a vote from 1,216 to 1,027 ms. Measured on the served-vote branch (#9122) before the changes were split out to land on their own."
+reason: "Why a view-scoped web client observes nothing again for a basis check over the deep-frozen document it last observed, why a commit's own read validations stand on the scheduler's pre-commit pass for one synchronous stretch, and why that stretch ends when a replica applies a frame: over eight rendered lunch votes at 296 votes, local read validation went from 3,538 to 2,266 ms and then every validation pass from 2,551 to 1,066 ms, a vote from 1,216 to 1,027 ms. Measured on the served-vote branch (#9122) before the changes were split out to land on their own."
 ---
 
 # A committing run's local reads, validated once
@@ -34,7 +34,8 @@ basis against the replica. `ViewInputBasisCache.matches` observed each entry's
 path reachability and value again on every check, though a basis value last
 observed in a deep-frozen document version can observe nothing different
 there, and the replica hands back one such object per version. The check now
-answers from the earlier observation when the document is that same object.
+returns the earlier observation's result when the document is that same
+object.
 
 | Over eight votes | Before | After |
 | --- | ---: | ---: |
@@ -43,7 +44,7 @@ answers from the earlier observation when the document is that same object.
 | Timed votes, three alternating pairs | 1,220 ms | 1,176 ms |
 
 `isDeepFrozen` on the documents costs about 22 ms over the eight votes: the
-replica's documents are frozen once, and the memo answers every later check.
+replica's documents are frozen once, and the memo serves every later check.
 
 ## One validation for a commit
 
@@ -57,12 +58,15 @@ checker:
 4. the storage transaction's own commit;
 5. the scheduler again, once the commit was kicked off.
 
-Nothing between the first four changes what they check. The scheduler now
+Nothing between the first two changes what they check, and nothing between
+them and the fourth does unless preparing the commit reads more, as its CFC
+check reads the stored metadata of a document it writes. The scheduler now
 validates through `validateLocalReadBasisForCommit`, and the commit's own
 validations in the same synchronous stretch stand on that pass while the
-transaction reads and requires nothing new. The stretch ends at the next
-microtask checkpoint, and when the transaction hands its writes to the replica
-or a seal sink, so the fifth pass still checks again. Every other validation
+transaction reads and requires nothing new; a validation after such a read
+checks afresh. The stretch ends at the next microtask checkpoint, and when the
+transaction hands its writes to the replica or a seal sink, so the fifth pass
+still checks again. Every other validation
 checks afresh: the scheduler can unsubscribe a producer synchronously, and a
 reader validated after that must see it, which `view-server-currency.test.ts`
 holds.
@@ -80,9 +84,27 @@ take longer than the passes do.
 ## The stretch ends at a frame
 
 `56bab27a9`. A frame the replica applies can change what the pre-commit pass
-proved, so the stretch also ends once a frame is applied. Client session
-frames, the store read-through's feed and view plans all arrive through that
-one application. In `local-read-policy.test.ts` a frame lands between a passing
-pre-commit validation and the next one, and the second fails; without the end
-at the frame it stood on the first. The change ends the stretch earlier and
-was not measured on its own.
+proved, so the stretch also ends once a frame is applied. Client session frames,
+the store read-through's feed and the plans a session delivers arrive through
+that one application; the empty plans a replica publishes when its session is
+replaced or loses a capability arrive in an event of their own, after the
+stretch has ended. In `local-read-policy.test.ts` a frame lands between a
+passing pre-commit validation and the next one, and the second fails; without
+the end at the frame it stood on the first. The change ends the stretch earlier
+and was not measured on its own.
+
+## After review
+
+Two changes came after the measurements above, and each only makes a
+validation check again in a case the measured votes did not reach.
+
+- A pre-commit pass that applies a frame itself, as a store read-through can on
+  a replica miss, ends the stretch it began in. The pass now records the
+  stretch it began in, and leaves nothing to stand on when that one has ended.
+- The scheduler ends the stretch once its commit call returns. A commit that
+  handed nothing over, refused before storage, leaves the stretch open, and
+  its commit callbacks can have changed what the pre-commit pass proved, so the
+  fifth pass now checks again whatever the commit did.
+
+`local-read-policy.test.ts` holds both, and the hand-off's own end, each with a
+case that fails without it.

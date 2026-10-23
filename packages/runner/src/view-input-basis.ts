@@ -63,8 +63,7 @@ export class ViewInputBasisCache {
   /**
    * Reobserves path reachability and value on every currency check, except
    * in the deep-frozen document the basis was last observed in, which can
-   * only observe the same again. A replica hands back one such document per
-   * version, so a check repeated over an unchanged document observes nothing.
+   * only observe the same again.
    */
   matches(
     document: EntityDocument | undefined,

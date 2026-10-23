@@ -52,12 +52,15 @@ const policies = new WeakMap<object, LocalReadPolicy>();
 
 /**
  * The synchronous stretch a commit's validations share. It ends at the next
- * microtask checkpoint, or sooner when a transaction applies its writes to a
- * replica or a replica applies a frame.
+ * microtask checkpoint, and sooner wherever something can change what a
+ * validation in it proved (`endLocalReadValidationStretch()`). It belongs to
+ * the realm rather than to a runtime, because a microtask checkpoint does:
+ * whatever ends it for one runtime ends it for every runtime in the realm,
+ * which only ever makes a validation check again.
  */
 let validationStretch: object | undefined;
 
-/** The open stretch, opening one when none is. */
+/** Returns the open validation stretch, opening one when none is open. */
 function currentValidationStretch(): object {
   if (validationStretch === undefined) {
     const stretch = {};
@@ -71,9 +74,9 @@ function currentValidationStretch(): object {
 
 /**
  * Ends the open validation stretch, so that every validation after it checks
- * replica and local scheduler state again. A transaction calls this as it
- * applies its writes to a replica, and a replica once it has applied a
- * frame, since either can change what the validations before them proved.
+ * replica and local scheduler state again. Whatever can change what a
+ * validation proved, whether producer currency, a document's coverage or
+ * value, or a condition, ends the stretch first.
  */
 export function endLocalReadValidationStretch(): void {
   validationStretch = undefined;
@@ -84,7 +87,7 @@ export function endLocalReadValidationStretch(): void {
  * `permits` creates a checker. The transaction's reads share one, and each
  * validation pass makes its own, so what a read let through is checked again
  * before the transaction can seal. The passes a commit makes itself stand on
- * the one `validateLocalReadBasisForCommit` made just before it.
+ * the one `validateLocalReadBasisForCommit()` made just before it.
  */
 export function restrictToLocalReads(
   tx: IStorageTransaction,
@@ -168,7 +171,7 @@ export function localReadsReady(tx: object): boolean {
 
 /**
  * Rechecks residency and producer currency before a transaction can seal. A
- * transaction `validateLocalReadBasisForCommit` passed in the open stretch,
+ * transaction `validateLocalReadBasisForCommit()` passed in the open stretch,
  * having read and required nothing since, stands on that pass.
  */
 export function validateLocalReadBasis(
@@ -188,11 +191,11 @@ export function validateLocalReadBasis(
 }
 
 /**
- * Validates a transaction about to commit, as `validateLocalReadBasis` does,
+ * Validates a transaction about to commit, as `validateLocalReadBasis()` does,
  * for a caller that commits it next in the same synchronous stretch. The
  * validations the commit makes before it hands its writes over then stand on
- * this one, unless the transaction reads or requires more first: nothing they
- * check can change in between.
+ * this one, unless the transaction reads or requires more first, or the
+ * stretch ends: anything that changes what they check in between must end it.
  */
 export function validateLocalReadBasisForCommit(
   tx: object,
@@ -201,10 +204,14 @@ export function validateLocalReadBasisForCommit(
   if (policy === undefined || policy.failure !== undefined) {
     return policy?.failure;
   }
+  const stretch = currentValidationStretch();
   const failure = validatePolicy(policy);
-  if (failure === undefined) {
+  // A pass that applied a frame itself, as a store read-through can on a
+  // replica miss, ended the stretch it began in, and what it checked before
+  // the frame stands for nothing after it.
+  if (failure === undefined && validationStretch === stretch) {
     policy.validatedForCommit = {
-      stretch: currentValidationStretch(),
+      stretch,
       reads: policy.reads,
       conditions: policy.conditions.length,
     };
@@ -212,7 +219,11 @@ export function validateLocalReadBasisForCommit(
   return failure;
 }
 
-/** One full validation pass over `policy`, latching the first failure. */
+/**
+ * Helper for `validateLocalReadBasis()` and
+ * `validateLocalReadBasisForCommit()`, which makes one full validation pass
+ * over `policy` and latches the first failure.
+ */
 function validatePolicy(
   policy: LocalReadPolicy,
 ): LocalReadUnavailable | undefined {

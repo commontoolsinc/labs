@@ -17,6 +17,7 @@ import type {
   IMemorySpaceAddress,
 } from "../storage/interface.ts";
 import {
+  endLocalReadValidationStretch,
   localReadsReady,
   releaseLocalReadBasis,
   requireLocalReadCondition,
@@ -1300,6 +1301,10 @@ function finalizeReactiveActionCommit(
       }
     },
   });
+  // The commit's own validations stood on the one just before it. A commit
+  // that handed nothing over can still have changed what that one proved,
+  // through its commit callbacks for one, so the check below makes its own.
+  endLocalReadValidationStretch();
   if (parkUnavailableRun(state, args)) return;
   if (!log) {
     throw new Error("scheduler action commit did not build a reactivity log");

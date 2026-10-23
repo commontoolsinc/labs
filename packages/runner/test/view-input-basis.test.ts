@@ -78,7 +78,47 @@ describe("view input basis", () => {
     }
   });
 
-  it("answers again from the deep-frozen document a basis was last observed in", () => {
+  it("observes nothing again when a basis is checked over the deep-frozen document it was last observed in", () => {
+    const cache = new ViewInputBasisCache();
+    const nested = deepFreeze({ count: 1 });
+    let observedAgain = false;
+    let armed = false;
+    const value = Object.defineProperty({}, "nested", {
+      enumerable: true,
+      get: () => {
+        if (armed) observedAgain = true;
+        return nested;
+      },
+    });
+    const document = deepFreeze({ value });
+    const basis = viewInputBasis([{
+      space,
+      id: "of:cache",
+      type: "application/json",
+      path: ["value", "nested"],
+    }], () => document)[0];
+    expect(cache.matches(document, basis)).toBe(true);
+    armed = true;
+    expect(cache.matches(document, basis)).toBe(true);
+    expect(observedAgain).toBe(false);
+  });
+
+  it("observes again a frozen document whose interior is not frozen", () => {
+    const cache = new ViewInputBasisCache();
+    const interior = { count: 1 };
+    const document = Object.freeze({ value: interior });
+    const basis = viewInputBasis([{
+      space,
+      id: "of:cache",
+      type: "application/json",
+      path: ["value", "count"],
+    }], () => document)[0];
+    expect(cache.matches(document, basis)).toBe(true);
+    interior.count = 2;
+    expect(cache.matches(document, basis)).toBe(false);
+  });
+
+  it("observes another document version afresh, matching an equal value and refusing a changed one", () => {
     const cache = new ViewInputBasisCache();
     const first = deepFreeze({ value: { nested: { count: 1 } } });
     const basis = viewInputBasis([{
