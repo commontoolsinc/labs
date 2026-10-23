@@ -1,0 +1,689 @@
+/**
+ * Holds Home's record of which of a person's profiles acts in each social
+ * space to what its readers rely on. Home is the real pattern, compiled from
+ * this checkout, with two profiles its own `createProfile` made and the
+ * private inbox its own `ensurePrivateInbox` made. Offers reach it through the
+ * host's share intake, and a host's own registrations through Home's
+ * `registerSharedSpace`. A second host is a runtime of its own over the same
+ * store, as a person's second device is.
+ */
+
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+
+import { sharedSpaceProfileViewSchema } from "@commonfabric/home-schemas";
+import { createSession, Identity } from "@commonfabric/identity";
+import {
+  type Cell,
+  type IExtendedStorageTransaction,
+  type JSONSchema,
+  type MemorySpace,
+  type NormalizedFullLink,
+  Runtime,
+  type RuntimeProgram,
+  sendEvent,
+} from "@commonfabric/runner";
+import {
+  markRendererTrustedEvent,
+  reviewedActionProvenance,
+} from "@commonfabric/runner/cfc";
+import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
+import {
+  EmulatedStorageManager,
+  newLoopbackServer,
+} from "@commonfabric/runner/storage/cache.deno";
+import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
+
+import { PiecesController } from "../src/ops/pieces-controller.ts";
+import {
+  type ShareIntake,
+  startShareIntakeOf,
+} from "../src/ops/share-intake.ts";
+import { installCustomRoot } from "./install-custom-root.ts";
+
+const identity = await Identity.fromPassphrase("shared-space profiles owner");
+
+/** The principal the offers name as their sender. */
+const sender = (await Identity.fromPassphrase("shared-space profiles sender"))
+  .did();
+
+/** A profile that is none of the owner's. */
+const strangersProfile =
+  (await Identity.fromPassphrase("shared-space profiles stranger")).did();
+
+/** The origin of the host the runtimes are served by. */
+const HOST = "https://home.example";
+
+/**
+ * A stand-in for a Loom, with the public composition vetting a `loom` space
+ * checks of its root: `panels`, and the `addPanel` and `removePanel` streams.
+ */
+const loomProgram: RuntimeProgram = {
+  main: "/loom.tsx",
+  files: [{
+    name: "/loom.tsx",
+    contents: `
+import { handler, pattern, Writable } from "commonfabric";
+
+type Panel = { title: string };
+
+const addPanel = handler<{ panel: Panel }, { panels: Writable<Panel[]> }>(
+  (event, { panels }) => {
+    panels.push(event.panel);
+  },
+);
+
+const removePanel = handler<{ panel: Panel }, { panels: Writable<Panel[]> }>(
+  (event, { panels }) => {
+    panels.set(panels.get().filter((each) => each.title !== event.panel.title));
+  },
+);
+
+export default pattern(() => {
+  const panels = new Writable<Panel[]>([]).for("panels");
+  return {
+    panels,
+    addPanel: addPanel({ panels }),
+    removePanel: removePanel({ panels }),
+  };
+});`,
+  }],
+};
+
+/** The parts of Home these cases read, links read as links. */
+const homeSchema = {
+  type: "object",
+  properties: {
+    sharedSpaces: {
+      type: "object",
+      properties: { profiles: sharedSpaceProfileViewSchema },
+    },
+    sharedSpaceCatalog: {
+      type: "object",
+      properties: {
+        entries: { type: "object", additionalProperties: true },
+        offers: { type: "object", additionalProperties: true },
+      },
+    },
+    sharedSpaceProfiles: { type: "object", additionalProperties: true },
+    privateInbox: {
+      type: "object",
+      properties: { piece: { type: "unknown", asCell: ["cell"] } },
+    },
+    profiles: {
+      type: "array",
+      items: { type: "unknown", asCell: ["cell"] },
+    },
+  },
+} as const satisfies JSONSchema;
+
+/** An offer as an inbox holds it. */
+type Row = Record<string, unknown>;
+
+/** One runtime over the shared store, acting as the owner. */
+interface Host {
+  runtime: Runtime;
+  storage: EmulatedStorageManager;
+  controller: PiecesController;
+}
+
+describe("shared-space-profiles", () => {
+  let server: ReturnType<typeof newLoopbackServer>;
+  let hosts: Host[];
+  let first: Host;
+  let runtime: Runtime;
+  let home: Cell<Record<string, unknown>>;
+  let homeResultSchema: JSONSchema | undefined;
+  let inbox: Cell<unknown>;
+  let personal: Cell<unknown>;
+  let work: Cell<unknown>;
+  let intake: ShareIntake | undefined;
+
+  beforeEach(async () => {
+    server = newLoopbackServer({ subscriptionRefreshDelayMs: 0 });
+    hosts = [];
+    first = await open();
+    runtime = first.runtime;
+    const program = await resolveLocalProgram(
+      (resolver) => runtime.harness.resolve(resolver),
+      {
+        main: new URL("../../patterns/system/home.tsx", import.meta.url)
+          .pathname,
+        root: new URL("../../..", import.meta.url).pathname.replace(/\/$/, ""),
+      },
+    );
+    const tx = runtime.edit();
+    const pattern = await runtime.patternManager.compilePattern(program, {
+      space: identity.did(),
+      tx,
+    });
+    homeResultSchema = pattern.resultSchema;
+    home = runtime.getCell<Record<string, unknown>>(
+      identity.did(),
+      "shared-space profiles home",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, pattern, {}, home);
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit().settled).error).toBeUndefined();
+    await result.pull();
+    await first.controller.linkDefaultPattern(home);
+    // The profile made first is the one `#profile` returns, so that `work`
+    // can be retired.
+    await create("Personal");
+    await create("Work");
+    [personal, work] = read(home).key("profiles").get() ?? [];
+    await send("ensurePrivateInbox", {});
+    const piece = read(home).key("privateInbox").key("piece").get();
+    if (piece === undefined) throw new Error("Home made no private inbox.");
+    inbox = piece.resolveAsCell();
+  });
+
+  afterEach(async () => {
+    intake?.stop();
+    intake = undefined;
+    for (const each of hosts) {
+      await each.controller.dispose();
+      await each.storage.close();
+    }
+    await server.close();
+  });
+
+  /** Opens a runtime of its own over the shared store, as the owner. */
+  async function open(): Promise<Host> {
+    const storage = EmulatedStorageManager.connectTo(server, { as: identity });
+    const runtime = new Runtime({
+      apiUrl: new URL(HOST),
+      storageManager: storage,
+      experimental: { serverExecution: false },
+    });
+    const controller = new PiecesController(
+      createSession({ identity, spaceDid: identity.did() }),
+      runtime,
+    );
+    await controller.synced();
+    const host = { runtime, storage, controller };
+    hosts.push(host);
+    return host;
+  }
+
+  /** Disposes `host`, as a host that stops does. */
+  async function close(host: Host): Promise<void> {
+    hosts = hosts.filter((each) => each !== host);
+    await host.controller.dispose();
+    await host.storage.close();
+  }
+
+  /** `root`, a Home, read through the parts these cases read. */
+  function read(root: Cell<unknown>) {
+    return root.asSchema(homeSchema);
+  }
+
+  /** The space `cell` lives in. */
+  function spaceOf(cell: Cell<unknown>): string {
+    return cell.getAsNormalizedFullLink().space;
+  }
+
+  /** Sends `event` on Home's stream `stream`, and settles. */
+  async function send(stream: string, event: unknown): Promise<void> {
+    const tx = runtime.edit();
+    home.withTx(tx).key(stream).send(event);
+    await tx.commit().settled;
+    await runtime.idle();
+    await home.pull();
+  }
+
+  /** Creates a profile named `name`, as a click on the create form does. */
+  async function create(name: string): Promise<void> {
+    const event = {
+      type: "click",
+      name,
+      provenance: reviewedActionProvenance("dom", {
+        surface: "ProfileCreateSurface",
+        action: "CreateProfile",
+      }),
+    };
+    markRendererTrustedEvent(event);
+    await send("createProfile", event);
+  }
+
+  /**
+   * Registers a space through Home's `registerSharedSpace`, as a host's own
+   * join does, and returns the result Home's handling receipt holds.
+   */
+  async function register(event: Record<string, unknown>): Promise<unknown> {
+    const handled = Promise.withResolvers<NormalizedFullLink | undefined>();
+    sendEvent(
+      home.key("registerSharedSpace"),
+      event,
+      (tx) => handled.resolve(tx.handlingReceiptLink),
+    );
+    const link = await handled.promise;
+    await runtime.idle();
+    await home.pull();
+    return link === undefined
+      ? undefined
+      : await runtime.getCellFromLink(link).pull();
+  }
+
+  /** The registration of `space` a host makes from an offer it holds. */
+  function registrationOf(
+    space: string,
+    fields: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    return { space, host: HOST, kind: "loom", ...fields };
+  }
+
+  /**
+   * A space granting the sender `WRITE`, owned by the owner, declaring the
+   * `loom` kind, whose root is a Loom stand-in.
+   */
+  async function loomSpace(): Promise<MemorySpace> {
+    const space = await runtime.createSpace({
+      grants: { [sender]: "WRITE" },
+      spaceKind: "loom",
+    });
+    await replaceRoot(space);
+    return space;
+  }
+
+  /** Runs a new Loom stand-in in `space` and links it as the space's root. */
+  async function replaceRoot(space: MemorySpace): Promise<void> {
+    // Disposing a controller disposes the runtime, which `afterEach` does
+    // through the Home space's controller.
+    const roots = new PiecesController(
+      createSession({ identity, spaceDid: space }),
+      runtime,
+    );
+    await roots.synced();
+    await installCustomRoot(runtime, roots, loomProgram);
+  }
+
+  /** The root `space` links, by its address. */
+  async function rootOf(space: MemorySpace): Promise<string | undefined> {
+    const root = await runtime.getSpaceCell(space).key("defaultPattern")
+      .asSchema({ type: "unknown", asCell: ["cell"] }).pull();
+    return root?.getAsNormalizedFullLink().id;
+  }
+
+  /**
+   * An offer of `space` from the sender keyed `id`, addressed to the profile
+   * `to` when there is one.
+   */
+  function offerOf(space: string, id: string, to?: Cell<unknown>): Row {
+    return {
+      kind: "loom",
+      id,
+      space,
+      host: HOST,
+      ownerOrigin: HOST,
+      title: `Loom ${id}`,
+      from: sender,
+      sharedAt: 1_700_000_000_000,
+      receivedAt: 1_700_000_000_000,
+      ...(to === undefined ? {} : { toProfile: { space: spaceOf(to) } }),
+    };
+  }
+
+  /** Appends `rows` to the offers Home's private inbox holds. */
+  async function deliver(rows: Row[]): Promise<void> {
+    await runtime.editWithRetry((tx) => {
+      // The inbox's `offers` is a redirect to the cell holding the list,
+      // which is the one written.
+      const offers = inbox.withTx(tx).key("offers" as never).resolveAsCell();
+      offers.set([...(offers.get() as Row[] ?? []), ...rows] as never);
+    });
+  }
+
+  /**
+   * Starts the share intake over Home, if it has not started, and returns
+   * once Home's catalog holds a receipt for the offer from the sender keyed
+   * `id` and the intake has taken up all it was told of. Each read is a
+   * `pull()` the catalog's sink wakes.
+   */
+  async function receivedThrough(id: string): Promise<void> {
+    intake ??= startShareIntakeOf(runtime, home, identity.did());
+    if (intake === undefined) throw new Error("Home has no stream");
+    const offers = read(home).key("sharedSpaceCatalog").key("offers");
+    let changed = Promise.withResolvers<void>();
+    const cancel = offers.sink(() => {
+      changed.resolve();
+      changed = Promise.withResolvers<void>();
+    });
+    try {
+      while (true) {
+        const next = changed.promise;
+        const held = await offers.pull() ?? {};
+        if (Object.hasOwn(held, JSON.stringify([sender, id]))) break;
+        await next;
+      }
+    } finally {
+      cancel();
+    }
+    await intake.idle();
+    await runtime.idle();
+  }
+
+  /** Whether Home's catalog holds a receipt for the offer keyed `id`. */
+  async function received(id: string): Promise<boolean> {
+    const offers = await read(home).key("sharedSpaceCatalog").key("offers")
+      .pull() ?? {};
+    return Object.hasOwn(offers, JSON.stringify([sender, id]));
+  }
+
+  /**
+   * Which profile Home's `sharedSpaces.profiles` says acts in `space`, as
+   * `root`, the Home a host holds, reads it, or the observation itself while
+   * it is unavailable.
+   */
+  async function profileIn(
+    space: string,
+    root: Cell<unknown> = home,
+  ): Promise<unknown> {
+    const view = await read(root).key("sharedSpaces").key("profiles").pull();
+    return view?.status === "ready" ? view.spaces[space] : view;
+  }
+
+  /** How many conflicts from Home's handler the intake has logged. */
+  function conflictsLogged(): number {
+    return getLoggerCountsBreakdown()["piece.share-intake"]
+      ?.["registration-conflict"]?.warn ?? 0;
+  }
+
+  /**
+   * Commits what `write` writes with no handler's authority, and returns the
+   * commit's error message.
+   */
+  async function untrusted(
+    write: (tx: IExtendedStorageTransaction) => void,
+  ): Promise<string | undefined> {
+    const tx = runtime.edit();
+    write(tx);
+    tx.prepareCfc();
+    const { error } = await tx.commit().settled;
+    await runtime.idle();
+    return error?.message;
+  }
+
+  describe("an offer naming the profile it is for", () => {
+    it("records that profile as the one acting in the offered space", async () => {
+      const space = await loomSpace();
+
+      await deliver([offerOf(space, "first", work)]);
+      await receivedThrough("first");
+
+      expect(await profileIn(space)).toEqual({
+        status: "live",
+        profile: spaceOf(work),
+      });
+    });
+
+    it("records the profile the first names, and registers none of a second naming another", async () => {
+      const space = await loomSpace();
+      const conflicts = conflictsLogged();
+      const barrier = await loomSpace();
+
+      await deliver([
+        offerOf(space, "work", work),
+        offerOf(space, "personal", personal),
+        offerOf(barrier, "barrier"),
+      ]);
+      await receivedThrough("barrier");
+
+      expect(await profileIn(space)).toEqual({
+        status: "live",
+        profile: spaceOf(work),
+      });
+      expect(await received("work")).toBe(true);
+      expect(await received("personal")).toBe(false);
+      expect(conflictsLogged()).toBe(conflicts + 1);
+    });
+
+    it("records nothing for a space when the profile it names is none of the owner's", async () => {
+      const space = await loomSpace();
+      const conflicts = conflictsLogged();
+      const barrier = await loomSpace();
+
+      await deliver([
+        {
+          ...offerOf(space, "stranger"),
+          toProfile: { space: strangersProfile },
+        },
+        offerOf(barrier, "barrier"),
+      ]);
+      await receivedThrough("barrier");
+
+      expect(await received("stranger")).toBe(false);
+      expect(await profileIn(space)).toBeUndefined();
+      expect(conflictsLogged()).toBe(conflicts + 1);
+    });
+  });
+
+  describe("an offer naming no profile", () => {
+    it("records no profile, which a reader can tell from every recorded one", async () => {
+      const space = await loomSpace();
+
+      await deliver([offerOf(space, "legacy")]);
+      await receivedThrough("legacy");
+
+      expect(await profileIn(space)).toEqual({ status: "unrecorded" });
+    });
+  });
+
+  describe("the two producers of a registration", () => {
+    it("agree when the share intake registers an offer before a host registers it", async () => {
+      const space = await loomSpace();
+      await deliver([offerOf(space, "first", work)]);
+      await receivedThrough("first");
+
+      expect(
+        await register(registrationOf(space, {
+          offer: { from: sender, id: "first" },
+          profile: spaceOf(work),
+        })),
+      ).toEqual({ status: "existing", space });
+      expect(
+        await register(registrationOf(space, {
+          offer: { from: sender, id: "first" },
+        })),
+      ).toEqual({ status: "existing", space });
+      expect(await profileIn(space)).toEqual({
+        status: "live",
+        profile: spaceOf(work),
+      });
+    });
+
+    it("agree when a host registers an offer naming no profile before the share intake registers it naming one", async () => {
+      const space = await loomSpace();
+      expect(
+        await register(registrationOf(space, {
+          offer: { from: sender, id: "first" },
+        })),
+      ).toEqual({ status: "registered", space });
+      expect(await profileIn(space)).toEqual({ status: "unrecorded" });
+
+      const barrier = await loomSpace();
+      await deliver([
+        offerOf(space, "first", work),
+        offerOf(barrier, "barrier"),
+      ]);
+      await receivedThrough("barrier");
+
+      expect(await profileIn(space)).toEqual({
+        status: "live",
+        profile: spaceOf(work),
+      });
+    });
+
+    it("conflict, recording nothing, when a host names another profile than the share intake recorded", async () => {
+      const space = await loomSpace();
+      await deliver([offerOf(space, "first", work)]);
+      await receivedThrough("first");
+
+      expect(
+        await register(registrationOf(space, { profile: spaceOf(personal) })),
+      ).toEqual({ status: "conflict", reason: "profile" });
+      expect(await profileIn(space)).toEqual({
+        status: "live",
+        profile: spaceOf(work),
+      });
+    });
+  });
+
+  describe("a recorded profile", () => {
+    it("is what a second host that brings Home up reads, with no profile of its own chosen", async () => {
+      const space = await loomSpace();
+      await deliver([offerOf(space, "first", work)]);
+      await receivedThrough("first");
+      await first.storage.synced();
+
+      const second = await open();
+      const root = await second.controller.getDefaultPattern();
+      if (root === undefined) throw new Error("The second host finds no Home.");
+      await second.runtime.idle();
+
+      expect(await profileIn(space, root)).toEqual({
+        status: "live",
+        profile: spaceOf(work),
+      });
+    });
+
+    it("reads as retired once its profile is retired, on a host that brings Home up again after the first stops", async () => {
+      const space = await loomSpace();
+      await deliver([offerOf(space, "first", work)]);
+      await receivedThrough("first");
+      await send("retireProfile", { profile: work });
+      expect(await profileIn(space)).toEqual({
+        status: "retired",
+        profile: spaceOf(work),
+      });
+      intake?.stop();
+      intake = undefined;
+      await first.storage.synced();
+      await close(first);
+
+      const second = await open();
+      const root = await second.controller.getDefaultPattern();
+      if (root === undefined) throw new Error("The second host finds no Home.");
+      await second.runtime.idle();
+
+      expect(await profileIn(space, root)).toEqual({
+        status: "retired",
+        profile: spaceOf(work),
+      });
+    });
+
+    it("is kept when the space's root is replaced and the space is offered again", async () => {
+      const space = await loomSpace();
+      await deliver([offerOf(space, "first", work)]);
+      await receivedThrough("first");
+      const before = await rootOf(space);
+
+      await replaceRoot(space);
+      expect(await rootOf(space)).not.toBe(before);
+      await deliver([offerOf(space, "again", work)]);
+      await receivedThrough("again");
+
+      expect(await profileIn(space)).toEqual({
+        status: "live",
+        profile: spaceOf(work),
+      });
+      expect(
+        await register(registrationOf(space, { profile: spaceOf(personal) })),
+      ).toEqual({ status: "conflict", reason: "profile" });
+    });
+
+    it("is kept when its space is archived and restored", async () => {
+      const space = await loomSpace();
+      await register(registrationOf(space, { profile: spaceOf(work) }));
+      const revision = () =>
+        read(home).key("sharedSpaceCatalog").key("entries").get()?.[space]
+          ?.revision;
+
+      await send("changeSharedSpaceMembership", {
+        space,
+        id: "archive",
+        expectedRevision: revision(),
+        state: "archived",
+      });
+      expect(await profileIn(space)).toEqual({
+        status: "live",
+        profile: spaceOf(work),
+      });
+      await send("changeSharedSpaceMembership", {
+        space,
+        id: "restore",
+        expectedRevision: revision(),
+        state: "saved",
+      });
+
+      expect(
+        read(home).key("sharedSpaceCatalog").key("entries").get()?.[space]
+          ?.state,
+      ).toBe("saved");
+      expect(await profileIn(space)).toEqual({
+        status: "live",
+        profile: spaceOf(work),
+      });
+    });
+
+    it("is removed with its space's entry, so that a later registration records another", async () => {
+      const space = await loomSpace();
+      await register(registrationOf(space, { profile: spaceOf(work) }));
+      const revision = read(home).key("sharedSpaceCatalog").key("entries")
+        .get()?.[space]?.revision;
+
+      await send("removeSharedSpace", { space, expectedRevision: revision });
+      expect(read(home).key("sharedSpaceCatalog").key("entries").get()?.[space])
+        .toBeUndefined();
+      expect(
+        Object.hasOwn(read(home).key("sharedSpaceProfiles").get() ?? {}, space),
+      ).toBe(false);
+
+      expect(
+        await register(registrationOf(space, { profile: spaceOf(personal) })),
+      ).toEqual({ status: "registered", space });
+      expect(await profileIn(space)).toEqual({
+        status: "live",
+        profile: spaceOf(personal),
+      });
+    });
+  });
+
+  describe("Home's records", () => {
+    it("refuse a write by anything but Home's handlers, whole, at a space or at a field", async () => {
+      const space = await loomSpace();
+      await register(registrationOf(space, { profile: spaceOf(work) }));
+      const viaResult = (tx: IExtendedStorageTransaction) =>
+        runtime.getCell(
+          identity.did(),
+          "shared-space profiles home",
+          homeResultSchema,
+          tx,
+        ).key("sharedSpaceProfiles");
+      const stored = (tx: IExtendedStorageTransaction) =>
+        home.withTx(tx).key("sharedSpaceProfiles").resolveAsCell();
+      const replacement = { space, profile: spaceOf(personal) };
+
+      expect(await untrusted((tx) => viaResult(tx).set({}))).toContain(
+        "writePolicyAnyOf failed",
+      );
+      expect(await untrusted((tx) => stored(tx).set({}))).toContain(
+        "writePolicyAnyOf failed",
+      );
+      expect(
+        await untrusted((tx) => stored(tx).key(space).set(replacement)),
+      ).toContain("writePolicyAnyOf failed");
+      expect(
+        await untrusted((tx) =>
+          stored(tx).key(space).key("profile").set(spaceOf(personal))
+        ),
+      ).toContain("writePolicyAnyOf failed");
+      expect(await profileIn(space)).toEqual({
+        status: "live",
+        profile: spaceOf(work),
+      });
+    });
+  });
+});

@@ -21,6 +21,11 @@ import ProfileHome, {
   type ProfileInbox,
   type SetProfileNameEvent,
 } from "./profile-home.tsx";
+import {
+  profileLinks,
+  profileLinkSchema,
+  profileLinkSpace,
+} from "./profile-links.ts";
 
 // Trusted UI surfaces / actions. The create surface authorizes appending a new
 // profile to the home `profiles` list; the picker surface authorizes setting the
@@ -30,51 +35,6 @@ export const TRUSTED_PROFILE_CREATE_ACTION = "CreateProfile";
 export const TRUSTED_PROFILE_PICKER_SURFACE = "ProfilePickerSurface";
 export const TRUSTED_PROFILE_SET_DEFAULT_ACTION = "SetDefaultProfile";
 export const TRUSTED_PROFILE_SET_MRU_ACTION = "SetMruProfile";
-
-// Read a profile link (or list of links) as cell REFERENCES (`asCell`), not
-// inlined values. A plain `.get()` deep-resolves each element and collapses the
-// whole read to `undefined` when any element links into a space not yet loaded
-// in this context (e.g. a freshly-created profile living in its own `inSpace`
-// space). Item type is `unknown` to keep the sync shallow (links only). Mirrors
-// wish.ts `profileLinkListSchema`; identity comparisons use `equals` on the
-// resulting link cells, which never deep-resolves.
-//
-// These are functions (not const object literals) so the schema object is built
-// per call inside the function body — module-top-level mutable data is rejected
-// under SES (`__cf_data()`); a function returning a fresh literal is not.
-// deno-lint-ignore no-explicit-any
-export const profileLinkListSchema = (): any => ({
-  type: "array",
-  items: { type: "unknown", asCell: ["cell"] },
-});
-// deno-lint-ignore no-explicit-any
-export const profileLinkSchema = (): any => ({
-  type: "unknown",
-  asCell: ["cell"],
-});
-
-/**
- * The space `cell` lives in: for a profile link, the profile's own space,
- * which is what identifies a profile. `undefined` when `cell` is not a
- * resolvable link. The pattern-facing `Cell` has no typed space accessor, so
- * the link is read through `any`.
- */
-export const profileLinkSpace = (cell: unknown): string | undefined => {
-  try {
-    // deno-lint-ignore no-explicit-any
-    return (cell as any)?.getAsNormalizedFullLink?.()?.space;
-  } catch {
-    return undefined;
-  }
-};
-
-/**
- * The links the profile list `list` holds, read as link cells
- * (`profileLinkListSchema()`).
- */
-export const profileLinks = (list: unknown): unknown[] =>
-  // deno-lint-ignore no-explicit-any
-  (list as any).asSchema(profileLinkListSchema()).get() ?? [];
 
 export type CreateProfileEvent = {
   detail?: { message?: string };

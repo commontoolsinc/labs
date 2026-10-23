@@ -73,6 +73,9 @@ interface VettableOffer {
   host: string;
   title: string;
   from: DID;
+
+  /** The space DID of the recipient's profile the offer names, if any. */
+  profile?: DID;
 }
 
 const pointerSchema = {
@@ -96,6 +99,26 @@ const catalogSchema = {
   type: "object",
   properties: { offers: { type: "object", additionalProperties: true } },
 } as const;
+
+// The spaces Home's profile records observation lists, read loosely, since
+// the intake only asks which of them Home records no profile for.
+const profilesSchema = {
+  type: "object",
+  properties: {
+    status: { type: "string" },
+    spaces: { type: "object", additionalProperties: true },
+  },
+} as const;
+
+/**
+ * What the intake reads of Home before deciding the rows of an inbox: the
+ * offers its catalog holds receipts for, by {@link offerIdentity}, and the
+ * spaces it records no profile for.
+ */
+interface HomeReceipts {
+  received: Set<string>;
+  unrecorded: Set<string>;
+}
 
 /**
  * Starts following the offers in `home`'s private inboxes, the one it holds
@@ -122,12 +145,17 @@ export function startShareIntakeOf(
  * them, is taken up as it lands.
  *
  * An offer is skipped, without being vetted, when the catalog already holds a
- * receipt for its sender and `id`. Any other offer is registered, with its
- * sender and `id`, its `kind`, `host` and `title`, when:
+ * receipt for its sender and `id`, unless the offer names a `toProfile` and
+ * Home's `sharedSpaces.profiles` says Home records no profile for its space,
+ * as it does for a space registered by a registration that named none. Any
+ * other offer is registered, with its sender and `id`, its `kind`, `host` and
+ * `title`, and as `profile` the space of the profile its `toProfile` names,
+ * if it names one, when:
  *
  * - its envelope is well formed: `space` and `from` are well-formed DIDs,
  *   `host` and a nonempty `ownerOrigin` are each an origin, as
- *   `normalizeSpaceHost()` reads one, and every string fits the bounds the
+ *   `normalizeSpaceHost()` reads one, a `toProfile`, if there is one, names a
+ *   well-formed DID as its `space`, and every string fits the bounds the
  *   inbox cuts to;
  * - its `kind` is one of {@link ADMITTED_SPACE_KINDS};
  * - its `host` is this runtime's own, compared as `normalizeSpaceHost()`
@@ -166,7 +194,10 @@ export function startShareIntakeOf(
  *
  * Registration is Home's handler's, so an offer already registered under
  * another sender or `id` leaves the entry as it is, archived or not, and adds
- * a receipt for this offer.
+ * a receipt for this offer. Home records the offer's profile as the one
+ * acting in the space when it records none for the space, keeps the one it
+ * records when the offer names that one or none, and returns a `conflict`,
+ * recording no receipt, when the offer names another.
  *
  * Once Home's handler returns `registered`, a new entry, for a
  * `fabrichat-room` offer, the intake sends the space's root to Home's
@@ -349,7 +380,7 @@ export class ShareIntake {
       return inbox === undefined ? [] : [inbox];
     });
     if (inboxes.length === 0) return;
-    const receipts = await this.#receipts();
+    const receipts = await this.#homeReceipts();
     for (const inbox of inboxes) {
       const offers = await inbox.key("offers").asSchema(offersSchema).pull();
       for (const raw of Array.isArray(offers) ? offers : []) {
@@ -404,6 +435,50 @@ export class ShareIntake {
   }
 
   /**
+   * The offers Home's catalog holds receipts for and the spaces Home records
+   * no profile for, as {@link HomeReceipts} holds them.
+   */
+  async #homeReceipts(): Promise<HomeReceipts> {
+    return {
+      received: await this.#receipts(),
+      unrecorded: await this.#unrecorded(),
+    };
+  }
+
+  /**
+   * The spaces Home's `sharedSpaces.profiles` says Home records no profile
+   * for, or none while that observation is unavailable, absent, or cannot be
+   * read, since then there is nothing to tell an offer's registration from
+   * one that recorded its profile.
+   */
+  async #unrecorded(): Promise<Set<string>> {
+    let view;
+    try {
+      view = await this.#home.key("sharedSpaces").key("profiles").asSchema(
+        profilesSchema,
+      ).pull();
+    } catch (error) {
+      if (!this.#halted) {
+        logger.warn("profiles-unreadable", () => [
+          "Reading the profiles Home records for its spaces:",
+          error,
+        ]);
+      }
+      return new Set();
+    }
+    const unrecorded = new Set<string>();
+    if (view?.status !== "ready" || !isObjectNotArray(view.spaces)) {
+      return unrecorded;
+    }
+    for (const [space, profile] of Object.entries(view.spaces)) {
+      if (isObjectNotArray(profile) && profile.status === "unrecorded") {
+        unrecorded.add(space);
+      }
+    }
+    return unrecorded;
+  }
+
+  /**
    * The offers Home's catalog holds receipts for, by {@link offerIdentity}, or
    * none while the catalog cannot be read, since Home's handler refuses a
    * duplicate in any case. Each is read from the `from` and `id` its receipt
@@ -437,12 +512,16 @@ export class ShareIntake {
   }
 
   /** Decides `raw`, a row of an inbox's offers, unless it is decided already. */
-  async #consider(raw: unknown, receipts: Set<string>): Promise<void> {
+  async #consider(raw: unknown, receipts: HomeReceipts): Promise<void> {
     if (!isObjectNotArray(raw)) return;
     const row = rowKey(raw);
     if (this.#settled.has(row)) return;
     const receipt = offerIdentity(raw.from, raw.id);
-    if (receipts.has(receipt)) {
+    if (
+      receipts.received.has(receipt) &&
+      !(raw.toProfile !== undefined && typeof raw.space === "string" &&
+        receipts.unrecorded.has(raw.space))
+    ) {
       this.#decide(row, raw, "received");
       return;
     }
@@ -494,6 +573,7 @@ export class ShareIntake {
           kind: offer.kind,
           ...(offer.title === "" ? {} : { title: offer.title }),
           offer: { from: offer.from, id: offer.id },
+          ...(offer.profile === undefined ? {} : { profile: offer.profile }),
         },
         (tx) => handled.resolve(tx.handlingReceiptLink),
       );
@@ -677,6 +757,11 @@ function wellFormedOffer(
   const origin = boundedString(host, ADDRESS_MAX_LENGTH)
     ? originOf(host)
     : undefined;
+  const profile = raw.toProfile === undefined
+    ? undefined
+    : isObjectNotArray(raw.toProfile)
+    ? raw.toProfile.space
+    : null;
   if (
     origin === undefined ||
     !boundedString(kind, KIND_MAX_LENGTH) ||
@@ -687,9 +772,19 @@ function wellFormedOffer(
     !boundedString(ownerOrigin, ADDRESS_MAX_LENGTH, true) ||
     (ownerOrigin !== "" && originOf(ownerOrigin) === undefined) ||
     typeof sharedAt !== "number" || !Number.isSafeInteger(sharedAt) ||
-    sharedAt < 0
+    sharedAt < 0 ||
+    (profile !== undefined &&
+      !(boundedString(profile, ADDRESS_MAX_LENGTH) && isWellFormedDID(profile)))
   ) return undefined;
-  return { kind, id, space, host: origin, title, from };
+  return {
+    kind,
+    id,
+    space,
+    host: origin,
+    title,
+    from,
+    ...(profile === undefined ? {} : { profile }),
+  };
 }
 
 /** Whether `value` is a string no longer than `max`, and nonempty unless `empty`. */

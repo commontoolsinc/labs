@@ -2090,6 +2090,9 @@
           "imports": {
             "$ref": "#/$defs/SharedSpaceImportCommands"
           },
+          "profiles": {
+            "$ref": "#/$defs/SharedSpaceProfileView"
+          },
           "receipts": {
             "$ref": "#/$defs/SharedSpaceReceiptView"
           },
@@ -2100,6 +2103,7 @@
         "required": [
           "view",
           "receipts",
+          "profiles",
           "commands",
           "imports"
         ],
@@ -2189,6 +2193,86 @@
         ],
         "type": "object"
       },
+      "SharedSpaceProfile": {
+        "anyOf": [
+          {
+            "properties": {
+              "status": {
+                "enum": [
+                  "unrecorded",
+                  "unreadable"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "profile": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "live",
+                  "retired"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "profile"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "SharedSpaceProfileRecord": {
+        "properties": {
+          "profile": {
+            "type": "string"
+          },
+          "space": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "space",
+          "profile"
+        ],
+        "type": "object"
+      },
+      "SharedSpaceProfileView": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/SharedSpaceUnavailable"
+          },
+          {
+            "properties": {
+              "spaces": {
+                "additionalProperties": {
+                  "$ref": "#/$defs/SharedSpaceProfile"
+                },
+                "properties": {},
+                "type": "object"
+              },
+              "status": {
+                "enum": [
+                  "ready"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "spaces"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "SharedSpaceReceiptView": {
         "anyOf": [
           {
@@ -2243,6 +2327,10 @@
               "id"
             ],
             "type": "object"
+          },
+          "profile": {
+            "description": "The space DID of the person's profile that acts in the space, recorded\nwhen Home records none for the space. A recorded profile is never\nreplaced.",
+            "type": "string"
           },
           "since": {
             "type": "number"
@@ -2330,7 +2418,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-create.tsx",
-                  "moduleIdentity": "z-8t3FsRQ4FksWC5mp7-Zb3RQ2tTtm8Yknb34Eh--24",
+                  "moduleIdentity": "aMTdvpLPyz9yqwAHeK8J18X4cr0Ls75a-qE1nOHUWw8",
                   "path": [
                     "setDefaultProfile"
                   ]
@@ -2358,7 +2446,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-create.tsx",
-              "moduleIdentity": "z-8t3FsRQ4FksWC5mp7-Zb3RQ2tTtm8Yknb34Eh--24",
+              "moduleIdentity": "aMTdvpLPyz9yqwAHeK8J18X4cr0Ls75a-qE1nOHUWw8",
               "path": [
                 "submitProfileCreation"
               ]
@@ -2374,7 +2462,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-create.tsx",
-              "moduleIdentity": "z-8t3FsRQ4FksWC5mp7-Zb3RQ2tTtm8Yknb34Eh--24",
+              "moduleIdentity": "aMTdvpLPyz9yqwAHeK8J18X4cr0Ls75a-qE1nOHUWw8",
               "path": [
                 "submitProfileCreation"
               ]
@@ -2394,7 +2482,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-create.tsx",
-              "moduleIdentity": "z-8t3FsRQ4FksWC5mp7-Zb3RQ2tTtm8Yknb34Eh--24",
+              "moduleIdentity": "aMTdvpLPyz9yqwAHeK8J18X4cr0Ls75a-qE1nOHUWw8",
               "path": [
                 "setMruProfile"
               ]
@@ -2418,7 +2506,7 @@
             "writeAuthorizedBy": {
               "__ctWriterIdentityOf": {
                 "file": "/packages/patterns/system/profile-create.tsx",
-                "moduleIdentity": "z-8t3FsRQ4FksWC5mp7-Zb3RQ2tTtm8Yknb34Eh--24",
+                "moduleIdentity": "aMTdvpLPyz9yqwAHeK8J18X4cr0Ls75a-qE1nOHUWw8",
                 "path": [
                   "setMruProfile"
                 ]
@@ -2438,7 +2526,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-create.tsx",
-                  "moduleIdentity": "z-8t3FsRQ4FksWC5mp7-Zb3RQ2tTtm8Yknb34Eh--24",
+                  "moduleIdentity": "aMTdvpLPyz9yqwAHeK8J18X4cr0Ls75a-qE1nOHUWw8",
                   "path": [
                     "retireProfile"
                   ]
@@ -2449,7 +2537,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-create.tsx",
-                  "moduleIdentity": "z-8t3FsRQ4FksWC5mp7-Zb3RQ2tTtm8Yknb34Eh--24",
+                  "moduleIdentity": "aMTdvpLPyz9yqwAHeK8J18X4cr0Ls75a-qE1nOHUWw8",
                   "path": [
                     "restoreProfile"
                   ]
@@ -2469,7 +2557,7 @@
                 "writeAuthorizedBy": {
                   "__ctWriterIdentityOf": {
                     "file": "/packages/patterns/system/profile-create.tsx",
-                    "moduleIdentity": "z-8t3FsRQ4FksWC5mp7-Zb3RQ2tTtm8Yknb34Eh--24",
+                    "moduleIdentity": "aMTdvpLPyz9yqwAHeK8J18X4cr0Ls75a-qE1nOHUWw8",
                     "path": [
                       "retireProfile"
                     ]
@@ -2480,7 +2568,7 @@
                 "writeAuthorizedBy": {
                   "__ctWriterIdentityOf": {
                     "file": "/packages/patterns/system/profile-create.tsx",
-                    "moduleIdentity": "z-8t3FsRQ4FksWC5mp7-Zb3RQ2tTtm8Yknb34Eh--24",
+                    "moduleIdentity": "aMTdvpLPyz9yqwAHeK8J18X4cr0Ls75a-qE1nOHUWw8",
                     "path": [
                       "restoreProfile"
                     ]
@@ -2491,6 +2579,65 @@
           }
         },
         "type": "array"
+      },
+      "TrustedSharedSpaceProfiles": {
+        "additionalProperties": {
+          "$ref": "#/$defs/SharedSpaceProfileRecord",
+          "ifc": {
+            "writePolicyAnyOf": [
+              {
+                "writeAuthorizedBy": {
+                  "__ctWriterIdentityOf": {
+                    "file": "/packages/patterns/system/shared-space-catalog.ts",
+                    "moduleIdentity": "UnmySU3DUdJRL9klxe4z77xdLTV9WWsv_JQ1Axn44zs",
+                    "path": [
+                      "registerSharedSpace"
+                    ]
+                  }
+                }
+              },
+              {
+                "writeAuthorizedBy": {
+                  "__ctWriterIdentityOf": {
+                    "file": "/packages/patterns/system/shared-space-catalog.ts",
+                    "moduleIdentity": "UnmySU3DUdJRL9klxe4z77xdLTV9WWsv_JQ1Axn44zs",
+                    "path": [
+                      "removeSharedSpace"
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "ifc": {
+          "writePolicyAnyOf": [
+            {
+              "writeAuthorizedBy": {
+                "__ctWriterIdentityOf": {
+                  "file": "/packages/patterns/system/shared-space-catalog.ts",
+                  "moduleIdentity": "UnmySU3DUdJRL9klxe4z77xdLTV9WWsv_JQ1Axn44zs",
+                  "path": [
+                    "registerSharedSpace"
+                  ]
+                }
+              }
+            },
+            {
+              "writeAuthorizedBy": {
+                "__ctWriterIdentityOf": {
+                  "file": "/packages/patterns/system/shared-space-catalog.ts",
+                  "moduleIdentity": "UnmySU3DUdJRL9klxe4z77xdLTV9WWsv_JQ1Axn44zs",
+                  "path": [
+                    "removeSharedSpace"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "properties": {},
+        "type": "object"
       },
       "VerifiedExternalIdentity": {
         "$ref": "#/$defs/ExternalIdentityAssertion",
@@ -2758,6 +2905,9 @@
       "sharedSpaceCatalog": {
         "$ref": "#/$defs/SharedSpaceCatalog"
       },
+      "sharedSpaceProfiles": {
+        "$ref": "#/$defs/TrustedSharedSpaceProfiles"
+      },
       "sharedSpaces": {
         "$ref": "#/$defs/SharedSpaceInterface"
       },
@@ -2790,6 +2940,7 @@
       "privateInboxReplacement",
       "sharedSpaces",
       "sharedSpaceCatalog",
+      "sharedSpaceProfiles",
       "registerSharedSpace",
       "changeSharedSpaceMembership",
       "removeSharedSpace",

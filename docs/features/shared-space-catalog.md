@@ -30,6 +30,7 @@ its stable cause. Importing Home's full output type or binding the whole
 | `sharedSpaces.commands.changeMembership` | Archive or restore at the observed revision |
 | `sharedSpaces.view` | Validated collection observation and membership lists |
 | `sharedSpaces.receipts` | Validated offer-admission evidence |
+| `sharedSpaces.profiles` | Which of the person's profiles acts in each space |
 | `sharedSpaces.imports.remove` | An application's undo of its own import |
 
 Pattern consumers can wish for `#default/sharedSpaces/commands` with
@@ -41,7 +42,8 @@ current social space's root. No catalog-specific wish builtin is required.
 
 Host projections are exported by `@commonfabric/home-schemas`:
 `sharedSpaceCommandsSchema`, `sharedSpaceCollectionViewSchema`,
-`sharedSpaceReceiptViewSchema`, and `sharedSpaceImportCommandsSchema`. Apply a
+`sharedSpaceReceiptViewSchema`, `sharedSpaceProfileViewSchema`, and
+`sharedSpaceImportCommandsSchema`. Apply a
 projection to its individual role cell, for example
 `home.key("sharedSpaces").key("view").asSchema(sharedSpaceCollectionViewSchema)`.
 The host's materialized view type is `HomeSharedSpaceCollectionView`; the
@@ -152,6 +154,10 @@ entry with its stale collection. A legacy binding may supply
 `initialState: "archived"` to insert an archived entry in the same commit;
 omitted `initialState` means saved. This hint never overrides an existing Home
 entry.
+
+A registration may also name `profile`, the space DID of the person's profile
+that acts in the space. "The profile acting in a space" below says what Home
+records of it.
 
 The whole of what `registerSharedSpace` does is `registerSharedSpaceIn()`,
 exported beside it, which takes the catalog's writable cell and a registration
@@ -265,6 +271,67 @@ An operation result describes the request and contains only its outcome and
 identifiers. Consumers obtain current membership from the catalog's reactive
 read surface. They never install membership from an operation reply. `confirmed`
 means the action was applied, not that it remains the latest choice.
+
+## The profile acting in a space
+
+A person can have several profiles, and acts in each social space as one of
+them. Which one is part of the person's membership in the space, so Home
+records it beside the catalog, in `sharedSpaceProfiles`: a record per space,
+keyed by the space's DID as the space's entry is, holding `{ space, profile }`,
+where `profile` is the profile's own space DID. A record belongs to the space,
+not to any root the space has, so replacing the space's root, archiving and
+restoring its entry, a restart, and a host reading Home afresh all leave it as
+it is.
+
+A registration naming `profile` records it when Home records no profile for
+the space, whether the registration admits a new entry or names one already
+there. That is how an explicit join or socialize records the profile it acts
+as, and how the share intake records the profile an offer's `toProfile` names
+([the private inbox](private-inbox.md#the-share-intake)). Repeating the
+profile Home records is a replay: the result is the one the registration
+would have without it, and nothing about the record changes. A registration
+naming no profile leaves the record as it is. A record is never replaced.
+Registration returns `conflict` and writes nothing, no entry, receipt or
+record, when:
+
+- Home records another profile for the space, or holds a record for it that
+  this writer cannot read (`profile`);
+- the named profile is not one Home's `profiles` list holds (`unknown-profile`).
+  A retired profile is one Home lists, so a registration can name it.
+
+Home records no profile that no registration named. There is no rule that
+infers one for a space registered without a profile, and nothing chooses the
+person's default profile for such a space.
+
+`removeSharedSpace` takes a space's record out with its entry, so a later
+registration of the space records whatever profile it names.
+
+`sharedSpaceProfiles` carries its write contract on the stored document
+itself, as `retiredProfiles` does: `registerSharedSpace` and
+`removeSharedSpace` alone write it, the whole and each record alike, through
+`writePolicyAnyOf`, and any other write is refused. Neither handler asks for a
+gesture, so any pattern that reaches Home's streams can record a profile for
+a space that has none by registering it.
+
+`sharedSpaces.profiles` is the reader's view. It is `unavailable`, as the
+collection view is, while the catalog, the records or Home's retired list is
+unfinished (`loading`) or malformed (`malformed`). A ready view has `spaces`,
+which holds, for each space the catalog has an entry for, one of:
+
+| `status` | Meaning |
+| --- | --- |
+| `unrecorded` | Home records no profile for the space, as for a space registered by a registration naming none |
+| `unreadable` | Home holds a record for the space that this reader cannot read |
+| `live` | The record names `profile`, one of the person's profiles |
+| `retired` | The record names `profile`, a profile the person retired |
+
+A space the catalog has no entry for has no key in `spaces`. None of the four
+states means the person's default profile: a host that needs to know which
+profile acts in a space and reads `unrecorded`, `unreadable`, or `retired`
+waits for the person, or for a registration, to settle it. A host reads it as
+`home.key("sharedSpaces").key("profiles").asSchema(sharedSpaceProfileViewSchema)`,
+and gets an `undefined` value, as for the collection view, until Home has
+produced it.
 
 ## Confirmation and unavailable data
 

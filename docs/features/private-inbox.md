@@ -720,12 +720,15 @@ restart. It reads the pointers through `inboxPieceLinkSchema`, as the ensure
 does.
 
 An offer whose `from` and `id` already key a receipt in the catalog is
-skipped. Any other offer is registered when:
+skipped, unless it names a `toProfile` and Home's `sharedSpaces.profiles` says
+Home records no profile for its space, as for a space a registration naming no
+profile admitted first. Any other offer is registered when:
 
 - its envelope is well formed: `space` and `from` are well-formed DIDs, `host`
   is an origin, as `normalizeSpaceHost()` reads one, `ownerOrigin` is empty,
   as `receive` keeps one it was not given or could not read, or else such an
-  origin, every string fits the length `receive` cuts it to, and `sharedAt` is
+  origin, a `toProfile`, when there is one, names a well-formed DID as its
+  `space`, every string fits the length `receive` cuts it to, and `sharedAt` is
   a nonnegative integer;
 - its `kind` is one the intake admits, which `ADMITTED_SPACE_KINDS` in the
   intake's module lists: `fabrichat-room` and `loom`, kinds of space as
@@ -793,14 +796,20 @@ the paragraph below on deciding rows says:
 | `space-root-mismatch` | names a `loom` space whose root's result schema is not a Loom's composition | no |
 
 The intake sends Home's `registerSharedSpace` the offer's `space`, its `host` as
-normalized, its `kind`, its `title` unless it is empty, and `{ from, id }`. It
+normalized, its `kind`, its `title` unless it is empty, `{ from, id }`, and, as
+`profile`, the space its `toProfile` names, when it names one. It
 sends no `since`, so Home's handler records the time it admits the entry, as the
 catalog's `since` requires, rather than the sender's `sharedAt`. The handler
 reads only Home's own catalog, never an inbox pointer, so the hazard an untyped
 pointer read carries, above, cannot reach it. Registration is insert-if-absent,
 so an offer of a space already in the catalog under the same host and kind,
 archived or not, adds a receipt and leaves the entry as it is; one under another
-host or kind is a `conflict`, which writes nothing.
+host or kind is a `conflict`, which writes nothing. Home records the offer's
+`profile` as the profile acting in the space when it records none for the space
+and the profile is one Home lists; an offer naming another profile than the one
+Home records, or a profile Home does not list, is a `conflict` too, as
+"The profile acting in a space" in
+[`shared-space-catalog.md`](shared-space-catalog.md) describes.
 
 When Home's handler returns `registered`, a new entry, for a `fabrichat-room`
 offer, the intake then accepts the room on the owner's behalf: it sends the

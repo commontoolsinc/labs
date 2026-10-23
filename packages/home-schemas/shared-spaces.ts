@@ -93,6 +93,55 @@ export const sharedSpaceReceiptViewSchema = {
 } as const satisfies JSONSchema;
 
 /**
+ * Reads `Home.sharedSpaces.profiles`: which of the person's profiles acts in
+ * each space the catalog holds an entry for, keyed by the space's DID. A
+ * space's value is `unrecorded` when Home records no profile for it,
+ * `unreadable` when Home's record cannot be read, and `live` or `retired`,
+ * with the `profile`'s space DID, when the record names one of the person's
+ * profiles or a profile they retired. None of these means the person's
+ * default profile.
+ */
+export const sharedSpaceProfileViewSchema = {
+  anyOf: [
+    unavailable,
+    {
+      type: "object",
+      properties: {
+        status: { const: "ready" },
+        spaces: {
+          type: "object",
+          additionalProperties: {
+            anyOf: [
+              {
+                type: "object",
+                properties: {
+                  status: { enum: ["unrecorded", "unreadable"] },
+                },
+                required: ["status"],
+              },
+              {
+                type: "object",
+                properties: {
+                  status: { enum: ["live", "retired"] },
+                  profile: { type: "string" },
+                },
+                required: ["status", "profile"],
+              },
+            ],
+          },
+        },
+      },
+      required: ["status", "spaces"],
+    },
+  ],
+} as const satisfies JSONSchema;
+
+/** A host's materialized profile observation, including explicit availability. */
+export type HomeSharedSpaceProfileView = Schema<
+  typeof sharedSpaceProfileViewSchema
+>;
+
+/**
  * Reads only command bindings at `Home.sharedSpaces.commands`. Event schemas
  * retain every field so Home's authored validator sees malformed optional data.
  * Host callers observe completion through ordinary handling receipts.

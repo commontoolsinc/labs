@@ -29,6 +29,7 @@ import SharedSpaceCollection, {
 import {
   sharedSpaceCollectionViewOf,
   type SharedSpaceInterface,
+  sharedSpaceProfileViewOf,
   sharedSpaceReceiptViewOf,
 } from "./shared-space-interface.ts";
 import {
@@ -44,6 +45,7 @@ import {
   type SharedSpaceRegistrationResult,
   type SharedSpaceRemoval,
   type SharedSpaceRemovalResult,
+  type TrustedSharedSpaceProfiles,
 } from "./shared-space-catalog.ts";
 import {
   type CreateProfileEvent,
@@ -57,6 +59,7 @@ import {
   type TrustedProfileMru,
   type TrustedRetiredProfileList,
 } from "./profile-create.tsx";
+import { profileLinkSpace } from "./profile-links.ts";
 import ProfilePicker from "./profile-picker.tsx";
 import { refusalReasonText } from "./private-inbox-refusal-text.ts";
 import type { BackwardsCompatibleProfile } from "./profile-home.tsx";
@@ -181,10 +184,20 @@ export type HomeOutput = {
   // notice. No `replacement` before the first.
   privateInboxReplacement: Writable<PrivateInboxReplacementHolder>;
   // Independent roles for product consumers. Select `commands` for writes,
-  // `view` for collection lists, and `receipts` for offer admission evidence.
+  // `view` for collection lists, `receipts` for offer admission evidence, and
+  // `profiles` for which of the person's profiles acts in each space.
   sharedSpaces: SharedSpaceInterface;
   // Flat aliases address the same catalog and command streams.
   sharedSpaceCatalog: SharedSpaceCatalog;
+  // Which of the person's profiles acts in each space, by the space's DID, as
+  // `registerSharedSpace` records it and `removeSharedSpace` removes it, and
+  // no other handler writes it. `sharedSpaces.profiles` reads it for a
+  // reader, saying also which records it cannot read and which name a
+  // retired profile.
+  sharedSpaceProfiles: TrustedSharedSpaceProfiles;
+  // Registers a space the caller vetted, and records the profile the
+  // registration names as the one acting in the space, unless Home records
+  // one already (see `registerSharedSpaceIn`).
   registerSharedSpace: Stream<
     SharedSpaceRegistration,
     SharedSpaceRegistrationResult
@@ -386,6 +399,10 @@ const Home = pattern(
       entries: {},
       offers: {},
     }).for("sharedSpaceCatalog");
+    // Which of the person's profiles acts in each space the catalog holds,
+    // written by `registerSharedSpace` and `removeSharedSpace` alone.
+    const sharedSpaceProfiles = new Writable<TrustedSharedSpaceProfiles>({})
+      .for("sharedSpaceProfiles");
     const defaultAppUrl = new Writable("").for("defaultAppUrl");
     // NOTE(CT-1628): the `as any` casts around the profile cells below are
     // required because the CFC wrapper types (TrustedProfile*) don't yet compose
@@ -523,6 +540,19 @@ const Home = pattern(
     const sharedSpaces = {
       view: computed(() => sharedSpaceCollectionViewOf(catalog.get())),
       receipts: computed(() => sharedSpaceReceiptViewOf(catalog.get())),
+      // The builder numbers unnamed nodes in the order it reaches them, and
+      // it reaches whatever Home's cells lead to from the first place it
+      // visits them, such as the profile tab. This reads Home's own result,
+      // which leads nowhere, so that every unnamed node keeps its number.
+      // The retired list's elements are links, read as links.
+      profiles: computed(() => {
+        const retired = home.retiredProfiles;
+        return sharedSpaceProfileViewOf(
+          home.sharedSpaces.view,
+          home.sharedSpaceProfiles,
+          Array.isArray(retired) ? retired.map(profileLinkSpace) : undefined,
+        );
+      }),
       commands: {
         register: home.registerSharedSpace,
         changeMembership: home.changeSharedSpaceMembership,
@@ -728,11 +758,16 @@ const Home = pattern(
 
       sharedSpaces,
       sharedSpaceCatalog: computed(() => readSharedSpaceCatalog(catalog)),
+      sharedSpaceProfiles: sharedSpaceProfiles as any,
 
       // Exported handlers
-      registerSharedSpace: registerSharedSpace({ catalog }),
+      registerSharedSpace: registerSharedSpace({
+        catalog,
+        sharedSpaceProfiles,
+        profiles: home.profiles,
+      }),
       changeSharedSpaceMembership: changeSharedSpaceMembership({ catalog }),
-      removeSharedSpace: removeSharedSpace({ catalog }),
+      removeSharedSpace: removeSharedSpace({ catalog, sharedSpaceProfiles }),
       addFavorite: addFavorite({ favorites }),
       removeFavorite: removeFavorite({ favorites }),
       addJournalEntry: addJournalEntry({ journal }),

@@ -123,7 +123,9 @@ most-recently-used (MRU) ordering:
   joined. Its principal, which the person's other profiles share, keeps the
   access those rosters give it. An offer addressed to it (`toProfile`) still
   lands in the inbox it points at, which is normally the private inbox all of
-  the person's profiles share.
+  the person's profiles share. A space whose recorded profile is retired
+  keeps that record, and `sharedSpaces.profiles` reads it as `retired`
+  ([Social-space collection](#social-space-collection)).
 
 Each profile lives in its own space, created with the anonymous
 `PatternFactory.inSpace()` — one allocation per creation, each a new space with
@@ -381,6 +383,22 @@ the rendered control showed and leave space access unchanged. Unfamiliar states
 remain visible in **Other states**. An unavailable collection has an explicit
 notice rather than an empty list. Ordinary space navigation opens a listed
 space using the runtime's configured routing.
+
+Home also records which of the person's profiles acts in each space, as part of
+their membership in it: `sharedSpaceProfiles` holds one record per space, keyed
+by the space's DID, naming the profile by its own space DID. A registration
+that names a profile records it when Home records none for the space: an
+explicit join or socialize names the profile the person acts as, and the share
+intake names the profile an offer's `toProfile` addresses. Home never replaces a
+record; a registration naming another profile is a `conflict`, and so is one
+naming a profile Home does not list. The record outlasts the space's root, and
+archive and restore leave it, while `removeSharedSpace` takes it out with the
+entry. Like `retiredProfiles`, the stored document carries its write contract
+itself, naming `registerSharedSpace` and `removeSharedSpace` as its only
+writers. A reader reads `sharedSpaces.profiles`, which says, for each space in
+the catalog, whether Home records no profile for it, holds a record it cannot
+read, or names a live or a retired profile; none of these is the default
+profile.
 
 This collection is independent of the navigation list, routing hints, favorites,
 and browser recents. See [the catalog interface](../../features/shared-space-catalog.md)

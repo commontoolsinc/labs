@@ -7,6 +7,8 @@
 import type { Stream } from "commonfabric";
 import {
   isSharedSpaceCatalog,
+  isSharedSpaceProfileRecord,
+  isSharedSpaceProfileStorage,
   type SharedSpaceEntry,
   type SharedSpaceMembershipChange,
   type SharedSpaceMembershipResult,
@@ -64,10 +66,34 @@ export type SharedSpaceReceiptView = SharedSpaceUnavailable | {
   offers: Record<string, SharedSpaceOfferReceipt>;
 };
 
+/**
+ * Which of the person's profiles acts in one social space, as Home records
+ * it. `unrecorded`: Home records none, as for a space registered before
+ * profiles were recorded or by a registration that named none. `unreadable`:
+ * Home holds a record this reader cannot read. `live`: the record names
+ * `profile`, one of the person's profiles. `retired`: the record names
+ * `profile`, which the person has retired. None of the four means the
+ * person's default profile.
+ */
+export type SharedSpaceProfile =
+  | { status: "unrecorded" | "unreadable" }
+  | { status: "live" | "retired"; profile: string };
+
+/**
+ * The profile acting in each space the catalog holds an entry for, keyed by
+ * the space's DID, observed as the collection is. A space the catalog holds
+ * no entry for has no key.
+ */
+export type SharedSpaceProfileView = SharedSpaceUnavailable | {
+  status: "ready";
+  spaces: Record<string, SharedSpaceProfile>;
+};
+
 /** Home's grouped social-space surface; consumers project individual roles. */
 export interface SharedSpaceInterface {
   view: SharedSpaceCollectionView;
   receipts: SharedSpaceReceiptView;
+  profiles: SharedSpaceProfileView;
   commands: SharedSpaceCommands;
   imports: SharedSpaceImportCommands;
 }
@@ -143,4 +169,39 @@ export function sharedSpaceReceiptViewOf(
       status: "unavailable",
       reason: value === undefined ? "loading" : "malformed",
     };
+}
+
+/**
+ * Says which profile acts in each space `collection` lists, from `records`,
+ * Home's records of the profile acting in each space, and `retired`, the
+ * spaces of the profiles Home lists as retired. The observation is
+ * unavailable for the reason `collection` is, while `records` or `retired` is
+ * unfinished, `undefined`, and as malformed when `records` is malformed or a
+ * retired profile's space cannot be read.
+ */
+export function sharedSpaceProfileViewOf(
+  collection: SharedSpaceCollectionView | undefined,
+  records: unknown,
+  retired: readonly (string | undefined)[] | undefined,
+): SharedSpaceProfileView {
+  if (collection?.status === "unavailable") return collection;
+  if (
+    collection === undefined || records === undefined || retired === undefined
+  ) return { status: "unavailable", reason: "loading" };
+  if (!isSharedSpaceProfileStorage(records) || retired.includes(undefined)) {
+    return { status: "unavailable", reason: "malformed" };
+  }
+  const spaces: Record<string, SharedSpaceProfile> = Object.create(null);
+  for (const space of Object.keys(collection.entries)) {
+    const record = Object.hasOwn(records, space) ? records[space] : undefined;
+    spaces[space] = record === undefined
+      ? { status: "unrecorded" }
+      : !isSharedSpaceProfileRecord(record, space)
+      ? { status: "unreadable" }
+      : {
+        status: retired.includes(record.profile) ? "retired" : "live",
+        profile: record.profile,
+      };
+  }
+  return { status: "ready", spaces };
 }
