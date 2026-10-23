@@ -107,11 +107,12 @@ revision.
 Pattern code edits a collaborative field with `Writable<string>.applyChanges()`,
 which takes changes in the shape of a CodeMirror change spec against the value
 the handler read. The handler's commit carries them as an `apply-op` with no
-base, beside the handler's read of the field, which is what the edit is
-against: the read refuses the commit as an ordinary conflict once the field
-moves, and the scheduler runs the handler again against the new text. Where the
-read holds, the edit lands at the field's current version with nothing to be
-rebased over. The document's patch in that commit
+base, carrying the hash of the value read, beside the handler's read of the
+field. The read refuses the commit as an ordinary conflict once the field
+moves, and the scheduler runs the handler again against the new text. Under
+server execution a wave drops the reads of what it seals, and the hash is what
+refuses a stale edit there. Where neither refuses it, the edit lands at the
+field's current version with nothing to be rebased over. The document's patch in that commit
 leaves the field to the `apply-op`, while the handler's own view and the
 replica's pending layer show the changed text from the start. An `applyChanges()`
 on a field no editor has opened activates it from the value read.

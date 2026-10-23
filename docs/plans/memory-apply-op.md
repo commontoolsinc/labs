@@ -559,20 +559,22 @@ Purpose: let a handler edit an active collaborative string, which an ordinary
 write may not change (§7.6), with an edit the open editors merge like any
 other.
 
-- [x] Let `apply-op` name no base: the commit's recursive read of the field is
-      what it was written against, so it applies at the field's current
-      version with nothing to rebase over, and activates an inactive field from
-      that value. The engine states that base before applying it, as the
-      field's current cursor or as `null` with the current value's hash, so
-      the apply path itself is unchanged. Without such a read, or after an
-      earlier operation in the commit wrote the field, it is rejected (§7.6,
-      §7.7.1).
+- [x] Let `apply-op` name no base: it was computed from the field's current
+      value and applies at the current version with nothing to rebase over,
+      and activates an inactive field from that value. A `baselineHash` names
+      the value, or, without one, the commit's recursive read of the field
+      stands for it; the engine states the base before applying it, so the
+      apply path itself is unchanged (§7.6, §7.7.1). A stale hash in a wave
+      commit is a conflict on that document.
 - [x] Add `Writable<string>.applyChanges()`, taking changes in the shape of a
       CodeMirror change spec against the value the handler read. The handler's
       transaction records them and writes the changed text, so CFC, its later
       reads, and reactivity see an ordinary write.
 - [x] Carry the recorded changes in the handler's own commit as one `apply-op`
-      per field, after the document writes, whose patch leaves the field out.
+      per field, after the document writes, whose patch leaves the field out,
+      with the hash of the value the handler read. Carry them through a
+      sealed commit the same way, and leave them out of the client overlay's
+      whole-document seal, whose `set` carries the changed text.
       The handler's read of the field rides the same commit, so a field that
       moved refuses it as an ordinary conflict and the scheduler runs the
       handler again; the handler's receipt makes the commit, and the edit with
@@ -597,6 +599,9 @@ Required tests:
       same document, shows in the writer's view before the server's echo, and
       a field that moved after the read refuses the commit.
 - [x] The payload encoding applies under CodeMirror exactly as the changes do.
+- [x] A served handler's edit commits through its wave, two in one wave both
+      land, and one computed before a keystroke its replica never saw is
+      refused rather than replacing it.
 
 Files:
 

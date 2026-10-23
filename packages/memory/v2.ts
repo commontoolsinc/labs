@@ -900,12 +900,17 @@ export type ApplyOpOperation = OperationFieldAddress & {
   /**
    * What the payload was written against: a cursor in the field's epoch, or
    * `null` for the field's baseline. Absent, the payload was computed from the
-   * value the same commit reads at the field, and applies at the version the
-   * field holds; the commit must then carry a recursive read of the field.
+   * value the field holds, and applies at the version the field holds; the
+   * `baselineHash` names that value, or, without one, the commit's recursive
+   * read of the field stands for it.
    */
   base?: OpCursor | null;
 
-  /** Hash of the field's baseline value, required exactly when `base` is `null`. */
+  /**
+   * Hash of the value the payload was written against: the field's baseline,
+   * required when `base` is `null`, or the value it holds now, optional when
+   * `base` is absent. Not allowed with a cursor.
+   */
   baselineHash?: string;
 
   payload: FabricValue;

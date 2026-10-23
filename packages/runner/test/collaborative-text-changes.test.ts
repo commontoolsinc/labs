@@ -164,7 +164,7 @@ describe("collaborative-text-changes", () => {
     });
   });
 
-  it("sends the edit as an `apply-op` without a base, after a patch that leaves the field alone", async () => {
+  it("sends the edit as an `apply-op` without a base, carrying the hash of the value read, after a patch that leaves the field alone", async () => {
     const note = await seed();
     await openAsEditor(note);
 
@@ -178,12 +178,12 @@ describe("collaborative-text-changes", () => {
 
     expect(native?.applyOps).toHaveLength(1);
     const edit = native?.applyOps?.[0];
-    expect(edit).toMatchObject({ op: "apply-op", path: ["body"] });
-    // The commit's read of the field is the base.
+    expect(edit).toMatchObject({
+      op: "apply-op",
+      path: ["body"],
+      baselineHash: operationBaselineHash("abc"),
+    });
     expect(edit !== undefined && Object.hasOwn(edit, "base")).toBe(false);
-    expect(edit !== undefined && Object.hasOwn(edit, "baselineHash")).toBe(
-      false,
-    );
     const patch = native?.operations.find((operation) =>
       operation.op === "patch"
     );
@@ -245,6 +245,26 @@ describe("collaborative-text-changes", () => {
     await rt.storageManager.synced();
 
     expect(await readDurable(server)).toEqual({ title: "Notes", body: "abcd" });
+  });
+
+  it("carries the changed text in a whole-document write, with no `apply-op`", async () => {
+    // A whole-document transaction that is not authoritative is the client
+    // speculation overlay's seal, whose entries never reach the store.
+
+    const note = await seed();
+    await openAsEditor(note);
+
+    const tx = rt.edit();
+    note.withTx(tx).key("body").applyChanges({ from: 3, insert: "d" });
+    tx.tx.markWholeDocumentWrites!();
+    const native = getDirectTransactionNativeCommit(tx, space);
+
+    expect(native?.applyOps).toBeUndefined();
+    expect(native?.operations).toMatchObject([{
+      op: "set",
+      value: { value: { title: "Notes", body: "abcd" } },
+    }]);
+    tx.abort();
   });
 
   it("activates an inactive field from the value the transaction read", async () => {

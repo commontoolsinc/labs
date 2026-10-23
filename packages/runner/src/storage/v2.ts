@@ -617,8 +617,8 @@ const withTextEditsShown = (
 };
 
 /**
- * Throws when `transaction` carries collaborative-field edits, which reach the
- * store only through `commitNative()`: `what` names the path refusing them.
+ * Throws when `transaction` carries collaborative-field edits, which a commit
+ * built ahead of its seal does not carry: `what` names the path refusing them.
  */
 const refuseApplyOps = (transaction: NativeStorageCommit, what: string) => {
   if (transaction.applyOps?.length) {
@@ -7503,7 +7503,6 @@ export class SpaceReplica
       readonly reads?: ClientCommit["reads"];
     },
   ): SealedNativeCommit {
-    refuseApplyOps(transaction, "a sealed commit");
     return this.#sealOperations(
       this.#wholeOverLocalFolds(
         documentOperationsOf(transaction),
@@ -7514,6 +7513,7 @@ export class SpaceReplica
       transaction.sqliteOps ?? [],
       verdict,
       options,
+      transaction.applyOps ?? [],
     );
   }
 
@@ -7565,6 +7565,7 @@ export class SpaceReplica
       readonly identity?: ScopeKeyIdentity;
       readonly reads?: ClientCommit["reads"];
     },
+    applyOps: readonly ApplyOpOperation[] = [],
   ): SealedNativeCommit {
     // The tx→replica identity seam (server-execution v2 stage A, OW17): a
     // served per-instance run seals under ITS identity — its ops apply to
@@ -7584,10 +7585,10 @@ export class SpaceReplica
         options?.reads ?? this.#buildReads(source, localSeq, identity),
         identity,
       ),
-      // Cell ops first, folded SQLite ops last — the same commit shape
-      // commitOperations builds, so the wave batch is made of ordinary
-      // client commits.
-      operations: storeOperationsOf(operations, sqliteOps),
+      // Cell ops first, then folded SQLite ops, then collaborative-field
+      // edits — the same commit shape commitOperations builds, so the wave
+      // batch is made of ordinary client commits.
+      operations: storeOperationsOf(operations, sqliteOps, applyOps),
       ...(preconditions.length > 0
         ? { preconditions: [...preconditions] }
         : {}),
@@ -7618,7 +7619,12 @@ export class SpaceReplica
     }
 
     for (const operation of operations) {
-      this.#applyPending(operation, localSeq, commit.reads, identity);
+      this.#applyPending(
+        withTextEditsShown(operation, applyOps),
+        localSeq,
+        commit.reads,
+        identity,
+      );
     }
 
     if (before !== undefined) {

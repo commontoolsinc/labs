@@ -4522,7 +4522,17 @@ export const applyWaveCommit = (
       if (failedPreconditions.length > 0) {
         throw new WavePreconditionError(failedPreconditions, firstDetail);
       }
-      const applied = applyCommitTransaction(txEngine, applyOptions);
+      let applied: AppliedCommit;
+      try {
+        applied = applyCommitTransaction(txEngine, applyOptions);
+      } catch (error) {
+        // A stale edit is a conflict on its document, so that the wave
+        // requeues the contributions writing it rather than all of them.
+        if (error instanceof StaleOperationBaselineError) {
+          throw new WaveCommitConflictError([error.doc]);
+        }
+        throw error;
+      }
       for (const instance of basisInstances ?? []) {
         replaceSchedulerBasisRows(txEngine, {
           branch,
@@ -4830,13 +4840,33 @@ const commitReadIsFieldBase = (
 type BasedApplyOpOperation = ApplyOpOperation & { base: OpCursor | null };
 
 /**
- * Returns `operation` with its base stated. One that names none is written
- * against its commit's read of the field (`commitReadIsFieldBase()`), and the
- * field holds what that read saw, so its base is the field's current cursor,
- * or, for a field with no active epoch, `null` with the hash of the value the
- * field holds. Either way it applies with nothing to rebase over.
+ * An `apply-op` without a base whose `baselineHash` names a value the field no
+ * longer holds. `doc` is the document's instance key, `${id} ${scopeKey}`, so
+ * that a wave commit can name the conflict (`WaveCommitConflictError`).
+ */
+class StaleOperationBaselineError extends OpFieldBaselineMismatchError {
+  readonly doc: string;
+
+  /** Constructs an instance naming the document instance `doc`. */
+  constructor(doc: string) {
+    super("operation field value no longer matches its baseline hash");
+    this.doc = doc;
+  }
+}
+
+/**
+ * Returns `operation` with its base stated. One that names none was computed
+ * from the field's value as it stands, which its `baselineHash` names or, with
+ * no hash, its commit's read of the field stands for
+ * (`commitReadIsFieldBase()`). Either way it applies at the field's current
+ * version with nothing to rebase over: its base is the current cursor, or, for
+ * a field with no active epoch, `null` with the hash of the value the field
+ * holds.
  *
- * @throws OpCursorMismatchError when the commit does not stand as the base.
+ * @throws StaleOperationBaselineError when the field no longer holds the value
+ *   the hash names.
+ * @throws OpCursorMismatchError when, with no hash, the commit does not stand
+ *   as the base.
  */
 const withStatedBase = (
   engine: Engine,
@@ -4853,35 +4883,42 @@ const withStatedBase = (
     return { ...operation, base: operation.base };
   }
   validateOperationPath(operation.path);
-  if (!commitReadIsFieldBase(commit, branch, opIndex, operation)) {
-    throw new OpCursorMismatchError(
-      "an apply-op without a base needs the commit's recursive read of the " +
-        "field, and no earlier operation in the commit writing it",
-    );
-  }
-  const field = selectOperationField(
-    engine,
-    operationFieldParams(branch, operation.id, scopeKey, operation.path),
-  );
-  if (field?.active === 1) {
-    return {
-      ...operation,
-      base: { epoch: field.epoch, version: field.version },
-    };
-  }
+  const { baselineHash, ...unhashed } = operation;
   const document = readStateForScopeKey(engine, {
     branch,
     id: operation.id,
     scope: normalizeScope(operation.scope),
     scopeKey,
   })?.document ?? null;
-  return {
-    ...operation,
-    base: null,
-    baselineHash: operationBaselineHash(
-      valueAtOperationPath(document, operation.path),
-    ),
-  };
+  const currentHash = operationBaselineHash(
+    valueAtOperationPath(document, operation.path),
+  );
+  // TODO(ubik2): Drop the hash form once a served handler's reads reach its
+  // wave commit, so that the commit's read is the edit's base on every path.
+  // A wave drops the reads of what it seals, and the hash is what still says
+  // which value the edit was computed from.
+  if (baselineHash !== undefined) {
+    if (typeof baselineHash !== "string" || baselineHash.length === 0) {
+      throw new OpFieldBaselineMismatchError(
+        "apply-op baselineHash is malformed",
+      );
+    }
+    if (baselineHash !== currentHash) {
+      throw new StaleOperationBaselineError(`${operation.id} ${scopeKey}`);
+    }
+  } else if (!commitReadIsFieldBase(commit, branch, opIndex, operation)) {
+    throw new OpCursorMismatchError(
+      "an apply-op without a base needs a baseline hash, or the commit's " +
+        "recursive read of the field and no earlier operation writing it",
+    );
+  }
+  const field = selectOperationField(
+    engine,
+    operationFieldParams(branch, operation.id, scopeKey, operation.path),
+  );
+  return field?.active === 1
+    ? { ...unhashed, base: { epoch: field.epoch, version: field.version } }
+    : { ...unhashed, base: null, baselineHash: currentHash };
 };
 
 const storedOperationResolution = (

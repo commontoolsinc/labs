@@ -18,6 +18,7 @@ import {
   codeMirrorTextChangesPayload,
   type CommitPrecondition,
   getCommitPreconditionsConfig,
+  operationBaselineHash,
   type PatchOp,
   resolveScopeKey,
   type ScopeKey,
@@ -1285,6 +1286,17 @@ export class V2StorageTransaction implements IStorageTransaction {
     return this.#authoritativeWrites || this.#wholeDocumentWrites;
   }
 
+  /**
+   * Whether a text-changed field rides its document's whole-document `set`,
+   * which carries the changed text, rather than an `apply-op`. A
+   * whole-document transaction that is not authoritative is the client
+   * speculation overlay's seal, which stays in this process; a store would
+   * refuse such a `set` over an active field rather than take it.
+   */
+  get #textChangesAsWholeDocuments(): boolean {
+    return this.#wholeDocumentWrites && !this.#authoritativeWrites;
+  }
+
   static create(manager: IStorageManager): IStorageTransaction {
     return new this(manager);
   }
@@ -1650,7 +1662,9 @@ export class V2StorageTransaction implements IStorageTransaction {
         continue;
       }
       const { id, type, scope } = this.#parseDocKey(key);
-      const textChanges = this.#pendingTextChanges(space, key);
+      const textChanges = this.#textChangesAsWholeDocuments
+        ? undefined
+        : this.#pendingTextChanges(space, key);
       // Doc-level no-op elision — except for authoritative transactions
       // (markAuthoritativeWrites): `doc.initial` is the transaction-START
       // view, which may extrapolate over a DOOMED sealed overlay, so a
@@ -1810,7 +1824,9 @@ export class V2StorageTransaction implements IStorageTransaction {
       for (const redelivery of redeliveries) operations.push(redelivery);
     }
 
-    const applyOps = this.#textChangeOperations(space);
+    const applyOps = this.#textChangesAsWholeDocuments
+      ? []
+      : this.#textChangeOperations(space);
     return {
       operations,
       ...(nativePreconditions.length
@@ -1862,10 +1878,10 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   /**
    * Helper for `getNativeCommit()`, which builds one `apply-op` per field the
-   * transaction changed the text of in `space`. None names a base: the commit
-   * carries the transaction's read of the field, which refuses the commit once
-   * the field moves, so the server applies each at the version the field
-   * holds, with nothing to merge it over.
+   * transaction changed the text of in `space`. None names a base: each
+   * carries the hash of the value the transaction read at the field, and
+   * applies at the version the field holds only while the field still holds
+   * that value, so the server has nothing to merge it over.
    */
   #textChangeOperations(space: MemorySpace): ApplyOpOperation[] {
     const operations: ApplyOpOperation[] = [];
@@ -1879,6 +1895,11 @@ export class V2StorageTransaction implements IStorageTransaction {
           path: toValuePath(intent.path.slice(1)),
           codec: CODEMIRROR_CHANGESET_CODEC,
           submissionId: intent.submissionId,
+          // TODO(ubik2): Drop the hash once a served handler's reads reach
+          // its wave commit. The transaction's read of the field, which a
+          // direct commit carries, already refuses a stale edit; a wave drops
+          // that read, and the hash is what still refuses one there.
+          baselineHash: operationBaselineHash(intent.baseline),
           payload: codeMirrorTextChangesPayload(
             intent.baseline,
             intent.batches,

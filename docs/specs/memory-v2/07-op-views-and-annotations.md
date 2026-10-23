@@ -199,7 +199,8 @@ baseline hash is interpreted as version zero of that epoch and rebased over the
 operations already accepted there. A different codec or baseline is rejected.
 
 An `apply-op` with no base activates an inactive field from its current
-value, which the commit's own read of the field saw (§7.7.1).
+value, which its `baselineHash` names or the commit's own read of the field
+saw (§7.7.1).
 
 Within an active epoch:
 
@@ -207,7 +208,8 @@ Within an active epoch:
 - `apply-op` may use an older version in the same epoch and is rebased over the
   intervening integrated suffix
 - `apply-op` may name no base, and then applies at the current version with
-  no suffix to rebase over, against the commit's read of the field
+  no suffix to rebase over, against the value its `baselineHash` names or the
+  commit's read of the field
 - a future version or different epoch is rejected
 - a submission id is unique within the epoch
 
@@ -241,8 +243,9 @@ ApplyOpOperation {
   path: ValuePath
   codec: OpCodecId
   submissionId: string
-  base?: OpCursor | null      // absent: the commit's read of the field
-  baselineHash?: string       // required exactly when base is null
+  base?: OpCursor | null      // absent: the field's current value
+  baselineHash?: string       // required when base is null; optional when
+                              // absent; not allowed with a cursor
   payload: JSONValue          // codec-defined submitted batch
 }
 
@@ -283,21 +286,30 @@ cursor is the field-specific concurrency precondition, and stale bases are
 mergeable through the codec. Other reads in the commit retain normal Memory
 conflict semantics.
 
-An `apply-op` with no base takes the commit's read of the field as what it was
-written against. The commit must carry a recursive read, confirmed or pending,
-of the field or of a path above it on the commit's branch, and no operation
-ahead of the `apply-op` in
-the commit may write the field; otherwise the engine rejects it with
-`OpCursorMismatchError`. Reads are validated before operations apply, so where
-the field moved since the read, the read refuses the whole commit as an
-ordinary `ConflictError` before the `apply-op` is considered. Where it did not,
-the field holds exactly what the read saw, so the engine takes the current
-version as the base and step 5 rebases over nothing. This is the form pattern
-code's `applyChanges()` sends in its handler's commit, which computes its
-payload from the value it read rather than following the field's operation
-stream; the handler runs again against the new value after a conflict.
-Ordinary writes in the same commit may change other paths of the document, as
-§7.6 allows any write to.
+An `apply-op` with no base was computed from the field's value as it stands,
+and applies at the current version, so step 5 rebases over nothing. What
+establishes that the field still holds that value takes one of two forms:
+
+- **A `baselineHash`.** The engine compares the hash of the field's value, as it
+  stands at that point in the commit, with `baselineHash`, and rejects a
+  mismatch with `OpFieldBaselineMismatchError`. In a wave commit
+  (serving-loop.md §3d), the mismatch is a `WaveCommitConflictError` naming the
+  document, so that only the contributions writing it are requeued.
+- **No hash: the commit's read.** The commit must carry a recursive read,
+  confirmed or pending, of the field or of a path above it on the commit's
+  branch, and no operation ahead of the `apply-op` in the commit may write the
+  field; otherwise the engine rejects it with `OpCursorMismatchError`. Reads
+  are validated before operations apply, so where the field moved since the
+  read, the read refuses the whole commit as an ordinary `ConflictError` before
+  the `apply-op` is considered. Where it did not, the field holds exactly what
+  the read saw.
+
+Pattern code's `applyChanges()` sends the hash form, beside its handler's read
+of the field. Outside server execution, that read refuses a stale edit first,
+and the handler runs again against the new value. A wave drops the reads of
+the transactions it seals, and the hash is then what refuses one. Ordinary
+writes in the same commit may change other paths of the document, as §7.6
+allows any write to.
 
 ### 7.7.2 Submission idempotency
 
