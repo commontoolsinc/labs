@@ -2852,6 +2852,7 @@ export class Server {
       operationCodecs: this.#operationCodecs.ids(),
       connectionAuth: this.options.authorizeConnection !== undefined,
       routedAuthV1: false,
+      routedCompressionV1: false,
     };
   }
 

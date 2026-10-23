@@ -56,6 +56,7 @@ import {
   decodeRouterRecord,
   ROUTER_MAX_REQUEST_ORDINAL,
   ROUTER_PROTOCOL_VERSION,
+  ROUTER_REQUEST_WINDOW,
   RouterAssembler,
   routerRoute,
   RouterSender,
@@ -262,12 +263,6 @@ type DataSocketLifecycle = {
 
   /** Reserved bytes belonging to the incomplete logical input body. */
   readonly assemblingBytes: number;
-
-  /** Declared bytes waiting for capacity, without an allocated body. */
-  readonly waitingHeaderBytes: number;
-
-  /** Whether the reserved body is waiting for its admission write callback. */
-  readonly admissionWriting: boolean;
 
   /** Logical output bytes retained by the sender. */
   readonly outputBytes: number;
@@ -1391,6 +1386,7 @@ export class RoutedMemoryHost {
             ...this.#options.server.memoryProtocolFlags(),
             connectionAuth: true,
             routedAuthV1: true,
+            routedCompressionV1: true,
             routerEncodingNegotiation: true,
             routerRequestAdmission: true,
           }, false),
@@ -1934,15 +1930,6 @@ export class RoutedMemoryHost {
     let pendingBytes = 0;
     let assemblingBytes = 0;
     let lastRequestOrdinal = 0;
-    let waitingHeader: {
-      /** Bounded start record; the body has not been allocated. */
-      record: Uint8Array;
-      /** Declared body reservation to acquire. */
-      bytes: number;
-      /** Strictly increasing socket-local identity. */
-      ordinal: number;
-    } | undefined;
-    let admissionWriting = false;
     const pending = new Set<string>();
     const sessions = new Map<string, RoutedSession>();
     const opens = new Map<
@@ -2006,8 +1993,6 @@ export class RoutedMemoryHost {
     const cancel = (): void => {
       if (failed) return;
       failed = true;
-      waitingHeader = undefined;
-      admissionWriting = false;
       clearTimeout(deadline);
       outputPaused = false;
       outputResumed?.resolve(false);
@@ -2098,34 +2083,11 @@ export class RoutedMemoryHost {
       // the low mark. Finish an admitted input body before pausing, including
       // buffered records delivered by ws after pause. Its reservation still
       // obeys the hard cap.
-      const pause = waitingHeader !== undefined || admissionWriting ||
-        outputPaused && !incoming.receiving;
+      const pause = outputPaused && !incoming.receiving;
       if (pause === readsPaused) return;
       readsPaused = pause;
       if (pause) socket.pause();
       else socket.resume();
-    };
-
-    /** Reserves a held header and grants its body when request credit is free. */
-    const admitHeader = (): void => {
-      if (
-        failed || waitingHeader === undefined ||
-        pendingBytes + waitingHeader.bytes > ROUTED_QUEUE_LIMIT
-      ) return;
-      const header = waitingHeader;
-      waitingHeader = undefined;
-      admissionWriting = true;
-      try {
-        incoming.receive(header.record);
-        updateReadFlow();
-        outgoing.sendAdmission(header.bytes, header.ordinal, () => {
-          if (failed) return;
-          admissionWriting = false;
-          updateReadFlow();
-        });
-      } catch {
-        fail("data-protocol");
-      }
     };
 
     dataSocketLifecycles.set(socket, {
@@ -2135,12 +2097,6 @@ export class RoutedMemoryHost {
       },
       get assemblingBytes() {
         return assemblingBytes;
-      },
-      get waitingHeaderBytes() {
-        return waitingHeader?.bytes ?? 0;
-      },
-      get admissionWriting() {
-        return admissionWriting;
       },
       get outputBytes() {
         return outgoing.bufferedBytes;
@@ -2175,6 +2131,7 @@ export class RoutedMemoryHost {
       if (message.type === "hello.ok") {
         message.flags.connectionAuth = true;
         message.flags.routedAuthV1 = true;
+        message.flags.routedCompressionV1 = true;
         sendBounded(
           socket,
           JSON.stringify({
@@ -2189,6 +2146,10 @@ export class RoutedMemoryHost {
           rememberClose,
           "data",
         );
+        // The socket is ready: the router may now send requests within the
+        // whole input budget, and gets each request's bytes back as its turn
+        // ends.
+        outgoing.sendCredit(ROUTER_REQUEST_WINDOW);
         return;
       }
       const route = routerRoute(message);
@@ -2286,8 +2247,9 @@ export class RoutedMemoryHost {
       }
       const payload = encodeMemoryBoundary(message);
       const bytes = new TextEncoder().encode(payload);
-      // A client that negotiated `messageCompressionV1` receives each message
-      // of 1 KiB or more as the routed compression envelope, which the router
+      // A client that negotiated `messageCompressionV1` and
+      // `routedCompressionV1` receives each message of 1 KiB or more as the
+      // routed compression envelope, which the router
       // forwards as an opaque binary body. The output bounds apply to what
       // goes on the socket.
       const frame = sendCompression
@@ -2338,10 +2300,7 @@ export class RoutedMemoryHost {
         try {
           requireRouted(frame instanceof Uint8Array);
           if (decodeRouterRecord(frame).kind === 0) {
-            requireRouted(
-              waitingHeader === undefined && !incoming.receiving &&
-                !admissionWriting,
-            );
+            requireRouted(!incoming.receiving);
             const header = decodeRouterHeader(frame);
             requireRouted(
               header.requestOrdinal !== undefined &&
@@ -2353,19 +2312,14 @@ export class RoutedMemoryHost {
               return;
             }
             lastRequestOrdinal = header.requestOrdinal;
-            waitingHeader = {
-              record: frame.slice(),
-              bytes: header.bytes,
-              ordinal: header.requestOrdinal,
-            };
+            // The router sends a header only within the request credit this
+            // socket granted, so the reservation it starts fits the input
+            // budget; the assembler refuses one that does not.
+            incoming.receive(frame);
             updateReadFlow();
-            admitHeader();
             return;
           }
-          requireRouted(
-            waitingHeader === undefined && !admissionWriting &&
-              incoming.receiving,
-          );
+          requireRouted(incoming.receiving);
           const complete = incoming.receive(frame);
           if (complete !== undefined) assemblingBytes = 0;
           updateReadFlow();
@@ -2402,7 +2356,11 @@ export class RoutedMemoryHost {
       const release = (): void => {
         if (refusedRequest !== undefined) dispatchRoutes.delete(refusedRequest);
         pendingBytes -= frameBytes;
-        admitHeader();
+        // A request's turn has ended: its declared bytes go back to the router
+        // as credit for the next requests.
+        if (reservedBytes !== undefined && !failed) {
+          outgoing.sendCredit(reservedBytes);
+        }
         updateReadFlow();
       };
       chain = chain.then(async () => {
@@ -2469,6 +2427,7 @@ export class RoutedMemoryHost {
             ...this.#options.server.memoryProtocolFlags(),
             connectionAuth: true,
             routedAuthV1: true,
+            routedCompressionV1: true,
           });
           const encodingBytes = validatedRoutedEncodingFlags(
             body.negotiatedMemoryFlags,
@@ -2558,7 +2517,11 @@ export class RoutedMemoryHost {
               }
             }
           }
-          compression = negotiatedMemoryFlags.messageCompressionV1 === true;
+          // Bodies are compressed end to end only for a client that offered
+          // `routedCompressionV1`: an older SDK takes binary frames on a
+          // credited connection for router credit.
+          compression = negotiatedMemoryFlags.messageCompressionV1 === true &&
+            negotiatedMemoryFlags.routedCompressionV1 === true;
           sendCompression = compression;
           const hello = {
             type: "hello",
@@ -2797,7 +2760,7 @@ export class RoutedMemoryHost {
         // commits (04-protocol.md section 4.13.4); a hand-off that waited kept
         // that queue empty, so every commit ran its own refresh pass and the
         // socket carried one request at a time. The reservation, the route and
-        // the next header's admission wait for the turn.
+        // the request credit the router gets back wait for the turn.
         handedOver = true;
         const turn: Promise<void> = backend.receive(parsed.payload).catch(
           () => {

@@ -2317,9 +2317,10 @@ ACL/ownership checks. Direct Memory hosts keep the protocol described above.
 
 Private router-to-toolshed requests additionally use
 [header admission](routed-mode-a.md#private-request-body-admission): a consecutive
-per-socket request ordinal and an exact 16-byte binary `mri\x01` grant bind each
-body to reserved endpoint input capacity before any body or completion record
-is sent. Public upload and private response headers carry no request ordinal.
+per-socket request ordinal and 8-byte binary `mri\x02` request credit bind each
+body to reserved endpoint input capacity: the endpoint grants its input budget
+once the socket is ready and returns each request's bytes when its turn ends,
+and the router sends a request only within the credit it holds. Public upload and private response headers carry no request ordinal.
 The private `routerRequestAdmission` capability is required on authenticated
 peers and excluded from public and effective Memory flags. It changes neither
 logical Memory messages nor public `mrt\x01` framing and `mrc\x01` upload credits.

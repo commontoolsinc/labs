@@ -59,11 +59,16 @@ function requestAdmissionReport() {
     backendRequests: 0,
     declaredBytes: 0,
     maxPendingBytes: 0,
+    /** Declared bytes of the last held request the router sent. */
+    lastRequestBytes: 0,
+    /**
+     * Whether the router's credit, the input budget less the reservations,
+     * stopped covering another request like the last one while all were held.
+     */
+    exhausted: false,
     pendingBytesAtWait: 0,
     assemblingBytesAtWait: 0,
-    waitingBodyBytes: 0,
-    waitingHeaderBytes: 0,
-    bodyRecordsWhileWaiting: 0,
+    creditAtWait: 0,
   };
 }
 
@@ -168,12 +173,11 @@ export async function startRoutedToolshed(config: RoutedToolshedFixture) {
 
   /** Reports admission pressure only once the backend is actually blocked. */
   const reportAdmissionWait = () => {
-    // A body completed just before the header that waits is handed to the
-    // connection on a later microtask; snapshot after a turn so the report
-    // counts it.
+    // The body that exhausts the credit is handed to the connection on a
+    // later microtask; snapshot after a turn so the report counts it.
     setTimeout(() => {
       if (
-        admission?.report.blocked && admission.report.waitingBodyBytes > 0 &&
+        admission?.report.blocked && admission.report.exhausted &&
         !admission.report.released
       ) admission.waiting.resolve(Object.freeze({ ...admission.report }));
     }, 0);
@@ -231,9 +235,8 @@ export async function startRoutedToolshed(config: RoutedToolshedFixture) {
     if (endpoint !== "/memory/router-data") return;
     let hold: typeof admission;
     let transaction = false;
-    let waitingBody = false;
     // Registered after the host so counters include its reservation for this
-    // record. The held header itself must reserve no body bytes.
+    // record.
     socket.on("message", (bytes, binary) => {
       if (
         admission === undefined || !binary || !(bytes instanceof ArrayBuffer)
@@ -247,30 +250,25 @@ export async function startRoutedToolshed(config: RoutedToolshedFixture) {
         transaction = admission !== undefined &&
           header.route.type === "transact" &&
           header.route.sessionId === admission.sessionId;
-        waitingBody = false;
         if (!transaction) return;
         hold = admission;
         if (hold === undefined) throw new Error("Missing admission hold");
         hold.report.headers++;
         hold.report.declaredBytes += header.bytes;
+        hold.report.lastRequestBytes = header.bytes;
+      } else if (transaction && hold !== undefined && record.kind === 2) {
+        hold.report.completed++;
         const state = host.accessForTestingOnly.dataSocket(socket);
         if (
           !hold.report.released && state !== undefined &&
           socket.readyState === socket.OPEN && state.assemblingBytes === 0 &&
-          state.waitingHeaderBytes === header.bytes &&
-          state.pendingBytes + header.bytes > ROUTED_QUEUE_LIMIT
+          ROUTED_QUEUE_LIMIT - state.pendingBytes < hold.report.lastRequestBytes
         ) {
-          waitingBody = true;
+          hold.report.exhausted = true;
           hold.report.pendingBytesAtWait = state.pendingBytes;
           hold.report.assemblingBytesAtWait = state.assemblingBytes;
-          hold.report.waitingBodyBytes = header.bytes;
-          hold.report.waitingHeaderBytes = frame.byteLength;
+          hold.report.creditAtWait = ROUTED_QUEUE_LIMIT - state.pendingBytes;
         }
-      } else if (transaction && hold !== undefined) {
-        if (waitingBody && !hold.report.released) {
-          hold.report.bodyRecordsWhileWaiting++;
-        }
-        if (record.kind === 2) hold.report.completed++;
       }
       if (hold !== undefined) {
         const state = host.accessForTestingOnly.dataSocket(socket);

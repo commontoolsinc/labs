@@ -110,24 +110,24 @@ deployment; endpoint upgrades cannot enable unadvertised encodings until the
 router restarts. Public streaming and credit framing are unchanged.
 
 Private request headers carry consecutive per-socket `requestOrdinal` values
-starting at `1`, without wrapping past `2^53 - 1`. The router sends only the
-header until a matching 16-byte binary `mri\x01` grant confirms the declared
-body-byte reservation and ordinal. This covers streamed requests, buffered
-controls and legacy uploads. Both private `router.hello` and `router.ready`
-require `routerRequestAdmission: true`; that flag is excluded from public and
-effective Memory descriptors. Public upload and private response headers must
-not carry request ordinals.
+starting at `1`, without wrapping past `2^53 - 1`. Admission is by credit: once
+the data socket is ready the host grants its whole 4 MiB pending-input budget as
+an 8-byte binary `mri\x02` record, the router sends a header only within the
+credit it holds and the body right behind it, and the host returns each
+request's declared bytes when its turn ends. This covers streamed requests,
+buffered controls and legacy uploads. Both private `router.hello` and
+`router.ready` require `routerRequestAdmission: true`; that flag is excluded
+from public and effective Memory descriptors. Public upload and private response
+headers must not carry request ordinals.
 
-The host retains at most one 4 KiB header while its 4 MiB pending-input budget
-lacks capacity, without allocating the body. Request finalization releases
-capacity; a successful grant-write callback enables body reception. One sender
-control slot lets grants interleave between response records without releasing
-logical output-body counts. The router consumes grants before response assembly
-and public ownership checks. An owned response can finish while an upload waits;
-a blocked public downstream may delay its grant without unbounded read-ahead.
-Invalid grants or premature body records close the connection, and cancellation
-releases each owned reservation exactly once. Admission uses explicit capacity
-grants under the existing caps, independently of public `mrc\x01` credits.
+The host's assembler refuses a header past its budget, so a router that ignores
+its credit closes its socket. One sender counter lets credit interleave between
+response records, coalesced, without releasing logical output-body counts. The
+router consumes credit before response assembly and public ownership checks; a
+blocked public downstream may delay credit without unbounded read-ahead.
+Malformed credit or out-of-order records close the connection, and cancellation
+releases each owned reservation exactly once. Request credit is independent of
+public `mrc\x01` credits.
 
 The measured savings behind the label tables (3,930,754 to 669,274 bytes and
 211,817 to 58,476 values on a rehearsal sync) were taken before labs #8767,

@@ -175,12 +175,15 @@ export type Transport = {
    * the transport selects credits only when it supports the advertised window.
    * `frameSlots` is a positive safe integer or `null` to disable slot counting;
    * an omitted value selects the transport's default bound.
+   * `compressedBodies` selects the routed compression envelope for streamed
+   * bodies in both directions, once `routedCompressionV1` was negotiated.
    */
   setRoutedMessagesEnabled?(
     enabled: boolean,
     transportVersion?: number,
     uploadWindow?: number,
     frameSlots?: number | null,
+    compressedBodies?: boolean,
   ): void;
 
   /**
@@ -1810,6 +1813,9 @@ export class Client {
       watchRemoveV1: _removalServerOnly,
       ...expectedFlags
     } = getMemoryProtocolFlags();
+    const offerRoutedCompression = expectedFlags.messageCompressionV1 &&
+      this.#transport.supportsMessageCompression === true &&
+      this.#transport.supportsRouterStreaming === true;
     try {
       const hello = {
         type: "hello",
@@ -1819,6 +1825,8 @@ export class Client {
           routedAuthV1: this.#transport.setRoutedMessagesEnabled !== undefined,
           messageCompressionV1: expectedFlags.messageCompressionV1 &&
             this.#transport.supportsMessageCompression === true,
+          // End-to-end compression of streamed bodies through a router.
+          routedCompressionV1: offerRoutedCompression,
         },
       };
       const encoded = encodeMemoryBoundary(hello);
@@ -1960,6 +1968,12 @@ export class Client {
             : undefined,
           helloOk.routerUploadWindow,
           routed ? helloOk.routerFrameSlots : undefined,
+          // Offered in this hello and in the router's: the same expression.
+          routed && expectedFlags.messageCompressionV1 &&
+            this.#transport.supportsMessageCompression === true &&
+            this.#transport.supportsRouterStreaming === true &&
+            helloOk.flags.messageCompressionV1 &&
+            helloOk.flags.routedCompressionV1 === true,
         );
         this.#transport.setMessageCompressionEnabled?.(
           expectedFlags.messageCompressionV1 &&

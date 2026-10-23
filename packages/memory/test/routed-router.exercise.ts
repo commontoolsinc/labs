@@ -2248,6 +2248,7 @@ finally:
     connectionAuth: true,
     routedAuthV1: true,
     messageCompressionV1: true,
+    routedCompressionV1: true,
   });
   assertEquals(
     (compressing.hello.flags as Record<string, unknown>).messageCompressionV1,
@@ -2306,8 +2307,43 @@ finally:
       .enabled,
     true,
   );
+  // A client that predates `routedCompressionV1` gets the same effect as text.
+  const older = new Client("127.0.0.54");
+  clients.push(older);
+  await older.start({
+    ...getMemoryProtocolFlags(),
+    connectionAuth: true,
+    routedAuthV1: true,
+    messageCompressionV1: true,
+  });
+  await older.authenticate(alice, 120, true);
+  const olderSession = ((await older.request({
+    type: "session.open",
+    space: spaces[0],
+    principal: alice.did(),
+    session: {},
+  })).ok as { sessionId: string }).sessionId;
+  await older.request({
+    type: "session.watch.set",
+    space: spaces[0],
+    sessionId: olderSession,
+    watches: [{
+      id: "large",
+      kind: "graph",
+      query: {
+        roots: [{ id: "of:compressed", selector: { path: [], schema: false } }],
+      },
+    }],
+  });
+  const olderEffect = await older.take((message) =>
+    message.type === "session/effect" && message.sessionId === olderSession
+  );
+  assert(JSON.stringify(olderEffect).includes("routed compression entry 399"));
+  assertEquals(older.binaryFrames, 0);
+  older.close();
+  await older.closed.promise;
   pass(
-    "a compression-capable client receives large bodies as the toolshed's compression envelope, forwarded opaquely, and a truthful acknowledgement",
+    "a client that negotiated routedCompressionV1 receives large bodies as the toolshed's compression envelope, forwarded opaquely, with a truthful acknowledgement; one that predates it receives text",
   );
   // The toolshed answers each of these, so the ID was in flight and retired.
   for (let i = 0; i < 2; i++) {
@@ -3872,25 +3908,25 @@ finally:
           expect(held.blocked).toBe(true);
           expect(held.released).toBe(false);
           expect(held.closed).toBe(false);
-          // Every assembled body is handed to the connection, which orders
-          // the held session's turns itself; the host holds only the input
-          // budget, so the body that would exceed it waits at its header.
+          // The router sent headers and bodies back to back while the
+          // toolshed's credit covered them; every assembled body is handed to
+          // the connection, which orders the held session's turns itself. The
+          // rest wait at the router, with the client's input, for credit the
+          // held turns have not returned.
+          expect(held.headers).toBe(held.completed);
           expect(held.backendRequests).toBe(held.completed);
           expect(held.backendRequests).toBeGreaterThan(1);
-          expect(held.declaredBytes).toBeGreaterThan(fourMiB);
-          expect(held.declaredBytes).toBeLessThan(
-            activeConfig.max_in_flight_bytes_per_connection,
-          );
+          expect(held.headers).toBeLessThan(payloads.length);
+          expect(held.declaredBytes).toBeLessThanOrEqual(fourMiB);
           expect(held.maxPendingBytes).toBeLessThanOrEqual(fourMiB);
-          expect(held.pendingBytesAtWait).toBeGreaterThan(0);
-          expect(held.pendingBytesAtWait).toBeLessThanOrEqual(fourMiB);
-          expect(held.pendingBytesAtWait + held.waitingBodyBytes)
-            .toBeGreaterThan(fourMiB);
+          expect(held.pendingBytesAtWait).toBe(held.declaredBytes);
           expect(held.assemblingBytesAtWait).toBe(0);
-          expect(held.waitingHeaderBytes).toBeGreaterThan(0);
-          expect(held.waitingHeaderBytes).toBeLessThanOrEqual(4096);
-          expect(held.bodyRecordsWhileWaiting).toBe(0);
-          expect(held.headers).toBe(held.completed + 1);
+          expect(held.creditAtWait).toBe(fourMiB - held.declaredBytes);
+          expect(held.creditAtWait).toBeLessThan(held.lastRequestBytes);
+          expect(
+            trace.headers.filter((header) => header.route.type === "transact")
+              .length,
+          ).toBeGreaterThan(held.headers);
           expect(trace.transactionReplies).toBe(0);
           expect(traces).toHaveLength(firstTrace + 1);
           expect(trace.socket.readyState).toBe(WebSocket.OPEN);
@@ -3906,7 +3942,6 @@ finally:
           expect(admitted.completed).toBe(payloads.length);
           expect(admitted.backendRequests).toBe(payloads.length);
           expect(admitted.maxPendingBytes).toBeLessThanOrEqual(fourMiB);
-          expect(admitted.bodyRecordsWhileWaiting).toBe(0);
           expect(trace.transactionReplies).toBe(payloads.length);
           const uploads = trace.headers.filter((header) =>
             header.route.type === "transact"
@@ -3951,7 +3986,7 @@ finally:
       expect(Deno.readTextFileSync(activeConfigPath)).toBe(priorConfigText);
     }
     pass(
-      "private request admission with an 8 MiB router in-flight quota holds one unallocated header at the endpoint's hard 4 MiB input limit, then commits and reads back the queued burst on the same socket and restores the router configuration",
+      "private request credit with an 8 MiB router in-flight quota holds the burst at the router once the endpoint's 4 MiB input budget is spent, then commits and reads back the queued burst on the same socket and restores the router configuration",
     );
 
     /** Opens an SDK peer while retaining public requests and raw responses. */

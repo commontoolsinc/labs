@@ -34,13 +34,18 @@ clients use its `hello`, `connection.challenge`, `connection.auth`,
   two-byte space-hint length, canonical DID bytes and one minimal gzip member.
   Version 1 has no routing hint and is refused. Uncompressed `fvj1` text still
   uses the Fabric codec after strict JSON validation. When the client
-  negotiated `messageCompressionV1`, its streamed uploads and the toolshed's
-  responses carry messages of 1 KiB or more in this envelope, end to end: the
+  negotiated both `messageCompressionV1` and `routedCompressionV1`, its streamed
+  uploads and the toolshed's responses carry messages of 1 KiB or more in this
+  envelope, end to end: the
   record header says `binary:true`, the toolshed or the SDK expands the body,
   and the router expands only the controls it reads (`connection.*`,
   `memory.compression`, `session.open`, `session.watch.*`). The sender keeps a
   message as text when it is under 1 KiB, over the 16 MiB expanded bound, or
-  would pass the 32-times expansion bound. Legacy public uploads may use the
+  would pass the 32-times expansion bound. `routedCompressionV1` is a public
+  capability the SDK offers only with streaming, toolsheds advertise on their
+  signed link, and the router's offer carries; a client without it, such as an
+  SDK that predates it, receives text bodies, since it would take a binary body
+  on a credited connection for router credit. Legacy public uploads may use the
   envelope too, and the router expands them.
 - The router offers `routerTransport:1` and `routerUploadWindow:262144` in
   `hello.ok`. A supporting client selects
@@ -348,9 +353,9 @@ refuses a data hello without the separate selected descriptor, both signed
 hashes, or the request-admission assertion.
 Private transport version 1, public `mrt\x01` streaming, binary `mrc\x01` upload
 credits and the signed ASCII `mrc1` challenge issuance format keep their
-existing framing. The binary prefixes `mrt\x01`, `mrc\x01` and `mri\x01` end in
-byte `0x01`; the signed record tags in the table above, `mrc1` among them, end
-in the ASCII digit `1`.
+existing framing. The binary prefixes `mrt\x01` and `mrc\x01` end in byte
+`0x01` and the request credit prefix `mri\x02` in byte `0x02`; the signed record
+tags in the table above, `mrc1` among them, end in the ASCII digit `1`.
 
 Every data record is one complete binary WebSocket message. It starts with bytes
 `6d 72 74 01` and a one-byte kind:
@@ -394,51 +399,48 @@ Every private request's `mrt\x01` header carries a router-assigned
 `requestOrdinal`. It is a safe integer starting at `1` on each data socket and
 increasing by exactly one through `2^53 - 1`, without wrapping. Ordinals belong
 to that socket, not to a session, a request ID, or a replacement connection.
-The router sends the header, then sends neither a body chunk nor the completion
-record until the endpoint grants that exact request. This applies to ordinary
+Public upload headers do not supply ordinals.
+
+Admission is by credit, in declared body bytes. Once the data socket is ready,
+right after `router.ready`, the endpoint grants its whole 4 MiB pending-input
+budget (`ROUTER_REQUEST_WINDOW`, infra `REQUEST_WINDOW`). The router sends a
+request header only when the credit it holds covers the header's declared
+bytes, spends them as it sends the header, and sends the body and completion
+record right behind it. A header the credit does not cover waits at the router,
+and so does the client's input behind it, bounded like the router's other
+pauses (`admission-timeout`). When a request's turn ends, answered or refused,
+the endpoint releases its reservation and returns its declared bytes as credit.
+So requests are pipelined up to the budget with no round trip per request, and
+the budget still bounds what the endpoint buffers. This applies to ordinary
 streamed requests, buffered control messages and legacy public envelopes
-forwarded over the private socket. Public upload headers do not supply ordinals.
+forwarded over the private socket.
 
-The endpoint reserves the declared body bytes against its 4 MiB pending-input
-budget before allocating the body. If existing requests leave insufficient
-capacity, it retains at most one header, of at most 4,096 bytes including the
-record prefix, without allocating its body. A body larger than the total budget
-is refused. Releasing a request's reservation in its finalizer reconsiders the
-waiting header; capacity is signaled by that release, not inferred from spare
-TCP buffering or a larger queue cap.
-
-Once reserved, the endpoint sends one binary WebSocket admission grant of
-exactly 16 bytes:
+Credit is a binary WebSocket record of exactly 8 bytes:
 
 | Offset | Width | Value |
 | --- | --- | --- |
-| 0 | 4 bytes | `6d 72 69 01` (`mri\x01`) |
-| 4 | 4 bytes | unsigned big-endian declared body byte count |
-| 8 | 8 bytes | unsigned big-endian `requestOrdinal` |
+| 0 | 4 bytes | `6d 72 69 02` (`mri\x02`) |
+| 4 | 4 bytes | unsigned big-endian count of declared body bytes, 1 through 4 MiB |
 
-Both count and ordinal must equal the outstanding header's values. The ordinal
-must also be in the safe-integer range above. The host enables body reception
-only after the grant's successful socket-write callback. A grant reserves input
+Credit is additive: the router adds each record to what it holds, and refuses
+a record that would take its credit past the window. It reserves input
 capacity; it does not acknowledge execution or replenish public upload credit.
-Public `mrc\x01` credit retains its independent record-byte accounting and
-format.
+Public `mrc\x01` credit keeps its independent record-byte accounting and format.
 
-The endpoint sender has one grant slot, holding at most one grant, serialized
-with response-record writes. A grant may appear between private response
-records; the router intercepts it before response assembly and public-output ownership
-checks, never forwarding it to the public client. Sending or completing a grant
-does not release retained logical response-body bytes or change the retained
-output that holds request dispatch at the high mark. A response already owning
-public output can finish while an upload waits for admission. A blocked public
-downstream may delay a grant: the router keeps public output owned by one
-response at a time and does not read arbitrarily ahead to find one.
+The endpoint sender returns credit at the next record boundary, ahead of
+further response-body records, and joins returns not yet written into one
+record. Credit may appear between private response records; the router
+intercepts it before response assembly and public-output ownership checks,
+never forwarding it to the public client. Returning credit does not release
+retained logical response-body bytes or change the retained output that holds
+request dispatch at the high mark. A blocked public downstream may delay
+credit: the router keeps public output owned by one response at a time and
+does not read arbitrarily ahead to find one.
 
-A wrong or reused ordinal, duplicate or unsolicited grant, mismatched byte
-count, malformed record, second waiting header, or body/end record received
-before admission completes closes the affected connection. Close, cancellation
-and write failure discard the waiting header and pending grant and release each
-owned input reservation exactly once. Late callbacks cannot grant a request on
-a closed or replacement socket.
+A wrong or reused ordinal, a header past the endpoint's budget, a header inside
+a body, a body record without a header, malformed or over-window credit closes
+the affected connection. Close and cancellation release each owned input
+reservation exactly once.
 
 ### Endpoint buffering and dispatch
 

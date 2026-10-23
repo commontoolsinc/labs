@@ -1,19 +1,20 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import { ROUTED_RAW_LIMIT } from "../v2/routed-parser.ts";
+import { ROUTED_QUEUE_LIMIT, ROUTED_RAW_LIMIT } from "../v2/routed-parser.ts";
 import {
-  decodeRouterAdmission,
   decodeRouterHeader,
   decodeRouterRecord,
-  encodeRouterAdmission,
+  decodeRouterRequestCredit,
   encodeRouterHeader,
-  isRouterAdmission,
+  encodeRouterRequestCredit,
   isRouterControl,
+  isRouterRequestCredit,
   ROUTER_CHUNK_BYTES,
   ROUTER_CHUNK_COUNT,
   ROUTER_HELLO_FRAME_SLOTS_POLICY,
   ROUTER_MAX_REQUEST_ORDINAL,
+  ROUTER_REQUEST_WINDOW,
   ROUTER_SEND_WINDOW_BYTES,
   ROUTER_UPLOAD_WINDOW,
   RouterAssembler,
@@ -157,16 +158,31 @@ describe("router-protocol", () => {
     expect(reserved).toEqual([7]);
   });
 
-  it("encodes admission bytes and ordinals in the exact private record layout", () => {
-    expect([...encodeRouterAdmission(0x010203, 0x010203040506)])
-      .toEqual([109, 114, 105, 1, 0, 1, 2, 3, 0, 0, 1, 2, 3, 4, 5, 6]);
+  it("encodes request credit in the exact private record layout and bounds it by the window", () => {
+    // The infra router's `tests/protocol.rs` decodes the same vector.
+    expect([...encodeRouterRequestCredit(0x010203)])
+      .toEqual([109, 114, 105, 2, 0, 1, 2, 3]);
+    // The window is the host's whole input budget.
+    expect(ROUTER_REQUEST_WINDOW).toBe(ROUTED_QUEUE_LIMIT);
+    for (const bytes of [1, ROUTER_REQUEST_WINDOW]) {
+      expect(decodeRouterRequestCredit(encodeRouterRequestCredit(bytes)))
+        .toBe(bytes);
+    }
+    for (const bytes of [0, -1, 1.5, ROUTER_REQUEST_WINDOW + 1]) {
+      expect(() => encodeRouterRequestCredit(bytes)).toThrow();
+    }
+    const valid = encodeRouterRequestCredit(1);
+    expect(() => decodeRouterRequestCredit(valid.subarray(1))).toThrow();
+    expect(() => decodeRouterRequestCredit(new Uint8Array([...valid, 0])))
+      .toThrow();
+    const version = valid.slice();
+    version[3] = 1;
+    expect(isRouterRequestCredit(version)).toBe(false);
+    expect(() => decodeRouterRequestCredit(version)).toThrow();
+    const over = valid.slice();
+    new DataView(over.buffer).setUint32(4, ROUTER_REQUEST_WINDOW + 1);
+    expect(() => decodeRouterRequestCredit(over)).toThrow();
     for (const requestOrdinal of [1, Number.MAX_SAFE_INTEGER]) {
-      expect(
-        decodeRouterAdmission(
-          encodeRouterAdmission(4 * 1024 * 1024, requestOrdinal),
-        ),
-      )
-        .toEqual({ bytes: 4 * 1024 * 1024, requestOrdinal });
       expect(
         decodeRouterHeader(
           encodeRouterHeader({
@@ -176,11 +192,9 @@ describe("router-protocol", () => {
             requestOrdinal,
           }),
         ).requestOrdinal,
-      )
-        .toBe(requestOrdinal);
+      ).toBe(requestOrdinal);
     }
     for (const ordinal of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
-      expect(() => encodeRouterAdmission(1, ordinal)).toThrow();
       expect(() =>
         encodeRouterHeader({
           route,
@@ -190,42 +204,29 @@ describe("router-protocol", () => {
         })
       ).toThrow();
     }
-    for (const bytes of [0, 4 * 1024 * 1024 + 1]) {
-      expect(() => encodeRouterAdmission(bytes, 1)).toThrow();
-    }
-    const valid = encodeRouterAdmission(1, 1);
-    expect(() => decodeRouterAdmission(valid.subarray(1))).toThrow();
-    const unsafe = valid.slice();
-    new DataView(unsafe.buffer).setBigUint64(8, 1n << 53n);
-    expect(() => decodeRouterAdmission(unsafe)).toThrow();
   });
 
-  it("inserts one admission after the records already passed to the socket without releasing body credit", async () => {
+  it("returns credit after the records already passed to the socket, coalescing returns not yet written", async () => {
     const { sender, writes, callbacks } = heldSender(4 * 1024 * 1024);
     sender.send(route, "body");
     const drained = sender.drain();
-    // A small body is passed to the socket whole; the admission follows its
-    // end record and enables input only on its own callback.
+    // A small body is passed to the socket whole; the credit follows its end
+    // record and is not part of the body's output.
     expect(writes.map((record) => decodeRouterRecord(record).kind)).toEqual([
       0,
       1,
       2,
     ]);
-    let admitted = false;
-    sender.sendAdmission(3, 1, () => admitted = true);
+    sender.sendCredit(3);
     expect(writes).toHaveLength(4);
-    expect(decodeRouterAdmission(writes[3])).toEqual({
-      bytes: 3,
-      requestOrdinal: 1,
-    });
-    expect(() => sender.sendAdmission(3, 2, () => {})).toThrow();
+    expect(decodeRouterRequestCredit(writes[3])).toBe(3);
     expect(sender.bufferedBytes).toBe(4);
     for (let i = 0; i < 3; i++) callbacks.shift()!();
-    expect(admitted).toBe(false);
     expect(await drained).toBe(true);
     expect(sender.bufferedBytes).toBe(0);
     callbacks.shift()!();
-    expect(admitted).toBe(true);
+    // A return beyond the window is refused before it is written.
+    expect(() => sender.sendCredit(ROUTER_REQUEST_WINDOW + 1)).toThrow();
     const receiver = new RouterAssembler();
     receiver.receive(writes[0]);
     receiver.receive(writes[1]);
@@ -234,7 +235,7 @@ describe("router-protocol", () => {
   });
 
   for (const acknowledged of [0, 1, 2]) {
-    it(`inserts an admission before the next body record after \`${acknowledged}\` callbacks on a full window, and attributes completion only to the response end`, async () => {
+    it(`returns credit before the next body record after \`${acknowledged}\` callbacks on a full window, as one record for every return still waiting`, async () => {
       const held = heldSender(ROUTED_RAW_LIMIT);
       const { sender, writes, ack, inFlight } = held;
       const bytes = 16 * ROUTER_CHUNK_BYTES;
@@ -243,48 +244,45 @@ describe("router-protocol", () => {
       for (let i = 0; i < acknowledged; i++) ack();
       const pipelined = writes.length;
       const drained = sender.drain();
-      let admitted = false;
-      // Each callback refills the window at once, so the admission finds it
-      // full and waits; it is still the next record passed to the socket,
-      // ahead of the body's remaining records.
+      // Each callback refills the window at once, so the credit finds it full
+      // and waits; it is still the next record passed to the socket, ahead of
+      // the body's remaining records, and later returns join it.
       expect(inFlight()).toBeGreaterThanOrEqual(ROUTER_SEND_WINDOW_BYTES);
-      sender.sendAdmission(4, 7, () => admitted = true);
+      sender.sendCredit(4);
+      sender.sendCredit(6);
       expect(writes).toHaveLength(pipelined);
       while (writes.length === pipelined) ack();
-      expect(decodeRouterAdmission(writes[pipelined])).toEqual({
-        bytes: 4,
-        requestOrdinal: 7,
-      });
-      expect(writes.slice(0, pipelined).some(isRouterAdmission)).toBe(false);
-      while (held.acknowledged < pipelined) ack();
-      expect(admitted).toBe(false);
+      expect(decodeRouterRequestCredit(writes[pipelined])).toBe(10);
+      expect(writes.slice(0, pipelined).some(isRouterRequestCredit)).toBe(
+        false,
+      );
       expect(sender.bufferedBytes).toBe(bytes);
-      ack();
-      expect(admitted).toBe(true);
-      expect(sender.bufferedBytes).toBe(bytes);
-      expect(sender.snapshot().pendingRecordKind).toBe(1);
       while (held.callbacks.length) ack();
       expect(await drained).toBe(true);
       expect(sender.snapshot().completedBodies).toBe(1);
       expect(sender.snapshot().completedBytes).toBe(bytes);
-      expect(writes.filter(isRouterAdmission)).toHaveLength(1);
+      expect(writes.filter(isRouterRequestCredit)).toHaveLength(1);
     });
   }
 
   for (const failure of ["close", "write-error"] as const) {
-    it(`cancels an admission on \`${failure}\` without enabling input through a late callback`, () => {
+    it(`drops waiting credit on \`${failure}\` and refuses more`, () => {
       let done: (error?: Error | null) => void = () => {};
-      let admitted = false;
+      const writes: Uint8Array[] = [];
       const sender = new RouterSender(
-        (_record, callback) => done = callback,
+        (record, callback) => {
+          writes.push(record);
+          done = callback;
+        },
         () => {},
         1024,
       );
-      sender.sendAdmission(1, 1, () => admitted = true);
+      sender.sendCredit(1);
       if (failure === "close") sender.close();
       else done(new Error("write"));
       done();
-      expect(admitted).toBe(false);
+      expect(() => sender.sendCredit(1)).toThrow();
+      expect(writes).toHaveLength(1);
       expect(sender.bufferedBytes).toBe(0);
     });
   }

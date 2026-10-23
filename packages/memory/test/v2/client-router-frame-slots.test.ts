@@ -55,7 +55,7 @@ describe("client-router-frame-slots", () => {
       try {
         expect(p.selections).toEqual([
           [false],
-          [true, undefined, undefined, limit],
+          [true, undefined, undefined, limit, false],
         ]);
       } finally {
         await client.close();
@@ -81,7 +81,7 @@ describe("client-router-frame-slots", () => {
     try {
       expect(p.selections).toEqual([
         [false],
-        [false, undefined, undefined, undefined],
+        [false, undefined, undefined, undefined, false],
       ]);
     } finally {
       await client.close();
@@ -98,11 +98,11 @@ describe("client-router-frame-slots", () => {
       await client.restoreConnection();
       expect(p.selections).toEqual([
         [false],
-        [true, undefined, undefined, null],
+        [true, undefined, undefined, null, false],
         [false],
-        [true, undefined, undefined, undefined],
+        [true, undefined, undefined, undefined, false],
         [false],
-        [true, undefined, undefined, 97],
+        [true, undefined, undefined, 97, false],
       ]);
     } finally {
       await client.close();

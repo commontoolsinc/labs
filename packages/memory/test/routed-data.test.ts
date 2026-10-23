@@ -56,11 +56,12 @@ import {
   verifyRoutedRecord,
 } from "../v2/routed-wire.ts";
 import {
-  decodeRouterAdmission,
   decodeRouterHeader,
   decodeRouterRecord,
+  decodeRouterRequestCredit,
   encodeRouterHeader,
-  isRouterAdmission,
+  isRouterRequestCredit,
+  ROUTER_REQUEST_WINDOW,
   ROUTER_SEND_WINDOW_BYTES,
   RouterAssembler,
   type RouterHeader,
@@ -87,9 +88,10 @@ class FramedSocket extends EventTarget {
   closed = Promise.withResolvers<void>();
   negotiatedMemoryFlags: unknown;
   requestOrdinal = 0;
-  uploads: (() => void)[] = [];
-  uploadActive = false;
-  admission: { bytes: number; ordinal: number; finish: () => void } | undefined;
+  /** Request credit the toolshed has returned and this router has not spent. */
+  credit = 0;
+  /** Uploads waiting for credit, in order, by declared body bytes. */
+  uploads: { bytes: number; send: () => void }[] = [];
 
   /** Records read flow; `deliver()` can model ws callbacks already buffered. */
   pause() {
@@ -102,18 +104,12 @@ class FramedSocket extends EventTarget {
   }
 
   send(bytes: string | Uint8Array, done?: (error?: Error) => void) {
-    if (bytes instanceof Uint8Array && isRouterAdmission(bytes)) {
-      const grant = decodeRouterAdmission(bytes);
-      const admission = this.admission;
-      assert(admission);
-      expect(grant).toEqual({
-        bytes: admission.bytes,
-        requestOrdinal: admission.ordinal,
-      });
-      this.admission = undefined;
+    if (bytes instanceof Uint8Array && isRouterRequestCredit(bytes)) {
+      this.credit += decodeRouterRequestCredit(bytes);
+      expect(this.credit).toBeLessThanOrEqual(ROUTER_REQUEST_WINDOW);
       queueMicrotask(() => {
         done?.();
-        if (this.readyState === WebSocket.OPEN) admission.finish();
+        this.pumpUploads();
       });
       return;
     }
@@ -191,24 +187,21 @@ class FramedSocket extends EventTarget {
       try {
         const decoded = decodeRoutedFrame(bytes, true, FRAME_SLOTS, null);
         const completed = Promise.withResolvers<void>();
-        this.uploads.push(() => {
-          const records = routerRecords(
-            routerRoute(decoded.body),
-            bytes,
-            ++this.requestOrdinal,
-          );
-          const header = records.next().value!;
-          this.admission = {
-            bytes: decodeRouterHeader(header).bytes,
-            ordinal: this.requestOrdinal,
-            finish: () => {
-              for (const record of records) this.deliver(record);
-              completed.resolve();
-              this.uploadActive = false;
-              this.pumpUploads();
-            },
-          };
-          this.deliver(header);
+        this.uploads.push({
+          bytes: typeof bytes === "string"
+            ? new TextEncoder().encode(bytes).length
+            : bytes.length,
+          send: () => {
+            // Within credit the body follows its header at once.
+            for (
+              const record of routerRecords(
+                routerRoute(decoded.body),
+                bytes,
+                ++this.requestOrdinal,
+              )
+            ) this.deliver(record);
+            completed.resolve();
+          },
         });
         this.pumpUploads();
         return completed.promise;
@@ -216,27 +209,36 @@ class FramedSocket extends EventTarget {
     }
     this.deliver(bytes);
   }
-  /** Starts one private upload and waits for its ordinal-bound grant. */
+  /** Sends the waiting uploads, in order, while the credit covers them. */
   pumpUploads() {
-    if (this.uploadActive || this.readyState !== WebSocket.OPEN) return;
-    const next = this.uploads.shift();
-    if (next !== undefined) {
-      this.uploadActive = true;
-      next();
+    while (
+      this.readyState === WebSocket.OPEN && this.uploads.length > 0 &&
+      this.uploads[0].bytes <= this.credit
+    ) {
+      const next = this.uploads.shift()!;
+      this.credit -= next.bytes;
+      next.send();
     }
   }
 
-  /** Sends a manual request header; callers deliver chunks after admission. */
+  /**
+   * Sends a manual request header once the credit covers it, as the router
+   * does; callers deliver the body after it.
+   */
   header(header: RouterHeader): Promise<void> {
-    const ordinal = header.requestOrdinal ?? ++this.requestOrdinal;
-    const admitted = Promise.withResolvers<void>();
-    this.admission = {
+    const sent = Promise.withResolvers<void>();
+    this.uploads.push({
       bytes: header.bytes,
-      ordinal,
-      finish: () => admitted.resolve(),
-    };
-    this.deliver(encodeRouterHeader({ ...header, requestOrdinal: ordinal }));
-    return admitted.promise;
+      send: () => {
+        const ordinal = header.requestOrdinal ?? ++this.requestOrdinal;
+        this.deliver(
+          encodeRouterHeader({ ...header, requestOrdinal: ordinal }),
+        );
+        sent.resolve();
+      },
+    });
+    this.pumpUploads();
+    return sent.promise;
   }
   deliver(bytes: string | Uint8Array) {
     this.dispatchEvent(
@@ -260,11 +262,11 @@ class FramedSocket extends EventTarget {
   }
 }
 
-/** Stalls response writes while the fixture keeps handling admission controls. */
+/** Stalls response writes while the fixture keeps taking request credit. */
 function stubOutput(socket: FramedSocket, send: FramedSocket["send"]) {
   const original = socket.send.bind(socket);
   return stub(socket, "send", (bytes, done) => {
-    if (bytes instanceof Uint8Array && isRouterAdmission(bytes)) {
+    if (bytes instanceof Uint8Array && isRouterRequestCredit(bytes)) {
       original(bytes, done);
     } else send(bytes, done);
   });
@@ -385,6 +387,9 @@ async function fixture(
   const flagObject = Object.fromEntries(
     Object.entries({
       ...server.memoryProtocolFlags(),
+      // A current SDK offers end-to-end compression; a test overrides it to
+      // model an older one.
+      routedCompressionV1: true,
       ...clientFlags,
       modernCellRep: clientModernCellRep,
       connectionAuth: true,
@@ -3098,12 +3103,21 @@ describe("routed encoding handshake", () => {
     }
   });
 
-  it("sends a client that negotiated compression its large bodies as the routed envelope, until it asks for text", async () => {
-    for (const negotiated of [true, false]) {
-      const f = await fixture(
-        `encoding-compressed-output-${negotiated}`,
-        negotiated ? {} : { negotiatedFlags: { messageCompressionV1: false } },
-      );
+  it("sends a client that negotiated end-to-end compression its large bodies as the routed envelope, until it asks for text", async () => {
+    for (
+      const [name, negotiated, options] of [
+        ["both", true, {}],
+        // An SDK that predates `routedCompressionV1`: binary bodies would read
+        // as router credit to it, so it gets text.
+        ["older-client", false, {
+          clientFlags: { routedCompressionV1: false },
+        }],
+        ["no-message-compression", false, {
+          negotiatedFlags: { messageCompressionV1: false },
+        }],
+      ] as const
+    ) {
+      const f = await fixture(`encoding-compressed-output-${name}`, options);
       try {
         const session = await f.open();
         const value = Array.from({ length: 400 }, (_, i) => `entry ${i}`)
@@ -3592,53 +3606,88 @@ describe("routed control progress", () => {
 });
 
 describe("private request credits", () => {
-  for (const next of ["header", "body"] as const) {
-    it(`rejects an extra \`${next}\` while a declaration waits for capacity`, async () => {
-      const entered = Promise.withResolvers<void>();
-      const release = Promise.withResolvers<void>();
-      const f = await routedRequestFixture(`input-wait-${next}`, async () => {
+  /** Waits, a bounded number of turns, for the router peer's credit. */
+  const creditReaches = async (socket: FramedSocket, credit: number) => {
+    for (let i = 0; i < 100 && socket.credit !== credit; i++) {
+      await setImmediate();
+    }
+    expect(socket.credit).toBe(credit);
+  };
+
+  it("grants the whole input budget once ready and returns each request's declared bytes as its turn ends", async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const second = Promise.withResolvers<void>();
+    const f = await routedRequestFixture("credit-window", async (id) => {
+      if (id === "first") {
         entered.resolve();
         await release.promise;
-      });
-      try {
-        const body = {
-          ...decodeRoutedFrame(f.request("first"), true, FRAME_SLOTS).body,
-          padding: "x".repeat(3 * 1024 * 1024),
-        };
-        f.socket.receive(encodeMemoryBoundary(body));
-        await entered.promise;
-        void f.socket.header({
-          route: { type: "transact", requestId: "held" },
-          bytes: 2 * 1024 * 1024,
-          binary: true,
-        });
-        const state = f.host.accessForTestingOnly.dataSocket(
-          f.socket as unknown as WebSocket,
-        )!;
-        expect(state.waitingHeaderBytes).toBe(2 * 1024 * 1024);
-        expect(state.assemblingBytes).toBe(0);
-        f.socket.deliver(
-          next === "body"
-            ? routerRecord(1, new Uint8Array(1))
-            : encodeRouterHeader({
-              route: { type: "transact", requestId: "extra" },
-              bytes: 1,
-              binary: true,
-              requestOrdinal: f.socket.requestOrdinal + 1,
-            }),
-        );
-        await f.socket.closed.promise;
-        release.resolve();
-        await state.settled;
-        expect(state.waitingHeaderBytes).toBe(0);
-        expect(state.pendingBytes).toBe(0);
-        expect(f.handled).toEqual(["first"]);
-      } finally {
-        release.resolve();
-        await f.close();
-      }
+      } else second.resolve();
     });
-  }
+    try {
+      const state = f.host.accessForTestingOnly.dataSocket(
+        f.socket as unknown as WebSocket,
+      )!;
+      await creditReaches(f.socket, ROUTER_REQUEST_WINDOW);
+      const first = f.request("first");
+      const firstBytes = new TextEncoder().encode(first).length;
+      f.socket.receive(first);
+      await entered.promise;
+      expect(state.pendingBytes).toBe(firstBytes);
+      expect(f.socket.credit).toBe(ROUTER_REQUEST_WINDOW - firstBytes);
+      // The next request goes, header and body, while the first's turn is
+      // open: no round trip per request.
+      f.socket.receive(f.request("second"));
+      await second.promise;
+      expect(f.handled).toEqual(["first", "second"]);
+      // Its turn has ended and its bytes are back; the first's are not.
+      await creditReaches(f.socket, ROUTER_REQUEST_WINDOW - firstBytes);
+      release.resolve();
+      await state.settled;
+      await creditReaches(f.socket, ROUTER_REQUEST_WINDOW);
+      expect(state.pendingBytes).toBe(0);
+      expect(f.socket.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      release.resolve();
+      await f.close();
+    }
+  });
+
+  it("refuses a header past the credit it granted", async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const f = await routedRequestFixture("credit-overspend", async () => {
+      entered.resolve();
+      await release.promise;
+    });
+    try {
+      const state = f.host.accessForTestingOnly.dataSocket(
+        f.socket as unknown as WebSocket,
+      )!;
+      const body = {
+        ...decodeRoutedFrame(f.request("first"), true, FRAME_SLOTS).body,
+        padding: "x".repeat(3 * 1024 * 1024),
+      };
+      f.socket.receive(encodeMemoryBoundary(body));
+      await entered.promise;
+      // A router that ignores its credit: two more MiB pass the 4 MiB budget.
+      f.socket.deliver(encodeRouterHeader({
+        route: { type: "transact", requestId: "over" },
+        bytes: 2 * 1024 * 1024,
+        binary: false,
+        requestOrdinal: f.socket.requestOrdinal + 1,
+      }));
+      await f.socket.closed.promise;
+      expect(f.handled).toEqual(["first"]);
+      release.resolve();
+      await state.settled;
+      expect(state.pendingBytes).toBe(0);
+      expect(f.link.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      release.resolve();
+      await f.close();
+    }
+  });
 
   for (const capability of [undefined, false]) {
     it(`rejects private hello admission capability \`${capability}\` before replacing the live socket or consuming its ticket`, async () => {
@@ -3670,98 +3719,44 @@ describe("private request credits", () => {
     });
   }
 
-  it("defers an overlapping declaration without allocation and grants it when the prior request releases capacity", async () => {
-    const entered = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<void>();
-    const second = Promise.withResolvers<void>();
-    const f = await routedRequestFixture("input-capacity", async (id) => {
-      if (id === "first") {
-        entered.resolve();
-        await release.promise;
-      } else second.resolve();
-    });
-    const padded = (id: string, bytes: number) => {
-      const body = {
-        ...decodeRoutedFrame(f.request(id), true, FRAME_SLOTS).body,
-        padding: "",
-      };
-      const base = encodeMemoryBoundary(body);
-      return encodeMemoryBoundary({
-        ...body,
-        padding: "x".repeat(bytes - new TextEncoder().encode(base).length),
-      });
-    };
-    try {
-      f.socket.receive(padded("first", 3 * 1024 * 1024));
-      await entered.promise;
-      const state = f.host.accessForTestingOnly.dataSocket(
-        f.socket as unknown as WebSocket,
-      )!;
-      const uploaded = f.socket.receive(padded("second", 2 * 1024 * 1024));
-      expect(state.pendingBytes).toBe(3 * 1024 * 1024);
-      expect(state.assemblingBytes).toBe(0);
-      expect(state.waitingHeaderBytes).toBe(2 * 1024 * 1024);
-      expect(state.admissionWriting).toBe(false);
-      expect(f.socket.isPaused).toBe(true);
-      expect(f.handled).toEqual(["first"]);
-      release.resolve();
-      await uploaded;
-      await second.promise;
-      await state.settled;
-      expect(state.pendingBytes).toBe(0);
-      expect(state.waitingHeaderBytes).toBe(0);
-      expect(f.handled).toEqual(["first", "second"]);
-      expect(f.socket.readyState).toBe(WebSocket.OPEN);
-    } finally {
-      release.resolve();
-      await f.close();
-    }
-  });
-
   for (
     const ending of [
-      "premature-data",
       "premature-end",
+      "header-inside-body",
       "local-close",
-      "callback-error",
+      "peer-close",
     ] as const
   ) {
-    it(`releases the reserved body on \`${ending}\` while its admission write is pending`, async () => {
+    it(`releases an incomplete body's reservation on \`${ending}\``, async () => {
       const f = await routedRequestFixture(`input-${ending}`, () => {});
-      let done: ((error?: Error) => void) | undefined;
-      using _send = stub(
-        f.socket,
-        "send",
-        (_bytes, callback) => done = callback,
-      );
-      using resume = spy(f.socket, "resume");
       try {
         const state = f.host.accessForTestingOnly.dataSocket(
           f.socket as unknown as WebSocket,
         )!;
         await state.settled;
-        void f.socket.header({
+        await f.socket.header({
           route: { type: "transact", requestId: "pending" },
           bytes: 4 * 1024 * 1024,
           binary: true,
         });
+        f.socket.deliver(routerRecord(1, new Uint8Array(1)));
         expect(state.pendingBytes).toBe(4 * 1024 * 1024);
         expect(state.assemblingBytes).toBe(4 * 1024 * 1024);
-        expect(state.admissionWriting).toBe(true);
-        expect(f.socket.isPaused).toBe(true);
         if (ending === "local-close") f.host.close();
-        else if (ending === "callback-error") done!(new Error("write"));
-        else {f.socket.deliver(
-            ending === "premature-data"
-              ? routerRecord(1, new Uint8Array(1))
-              : routerRecord(2),
-          );}
+        else if (ending === "peer-close") f.socket.close();
+        else {
+          f.socket.deliver(
+            ending === "premature-end" ? routerRecord(2) : encodeRouterHeader({
+              route: { type: "transact", requestId: "inside" },
+              bytes: 1,
+              binary: false,
+              requestOrdinal: f.socket.requestOrdinal + 1,
+            }),
+          );
+        }
         await f.socket.closed.promise;
-        done!();
         expect(state.pendingBytes).toBe(0);
         expect(state.assemblingBytes).toBe(0);
-        expect(state.admissionWriting).toBe(false);
-        expect(resume.calls).toHaveLength(0);
         expect(f.handled).toEqual([]);
       } finally {
         await f.close();
@@ -3799,47 +3794,6 @@ describe("private request credits", () => {
       }
     });
   }
-
-  it("cancels an unallocated waiting header when the local context closes", async () => {
-    const entered = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<void>();
-    const f = await routedRequestFixture("input-wait-close", async () => {
-      entered.resolve();
-      await release.promise;
-    });
-    try {
-      const body = {
-        ...decodeRoutedFrame(f.request("first"), true, FRAME_SLOTS).body,
-        padding: "x".repeat(3 * 1024 * 1024),
-      };
-      f.socket.receive(encodeMemoryBoundary(body));
-      await entered.promise;
-      void f.socket.header({
-        route: { type: "transact", requestId: "held" },
-        bytes: 2 * 1024 * 1024,
-        binary: false,
-      });
-      const state = f.host.accessForTestingOnly.dataSocket(
-        f.socket as unknown as WebSocket,
-      )!;
-      expect(state.waitingHeaderBytes).toBe(2 * 1024 * 1024);
-      expect(state.assemblingBytes).toBe(0);
-      const finishClose = f.socket.close.bind(f.socket);
-      using _close = stub(f.socket, "close", () => {
-        f.socket.readyState = WebSocket.CLOSING;
-      });
-      f.host.close();
-      expect(state.waitingHeaderBytes).toBe(0);
-      release.resolve();
-      await state.settled;
-      expect(state.pendingBytes).toBe(0);
-      expect(f.handled).toEqual(["first"]);
-      finishClose();
-    } finally {
-      release.resolve();
-      await f.close();
-    }
-  });
 });
 
 describe("routed output high and low marks", () => {
@@ -4069,10 +4023,10 @@ describe("routed output high and low marks", () => {
     }
   });
 
-  it("sends the admission grant between the records of a draining response and dispatches the admitted body", async () => {
+  it("returns a finished request's credit between the records of its draining response", async () => {
     const produced = Promise.withResolvers<void>();
     const second = Promise.withResolvers<void>();
-    const f = await routedRequestFixture("flow-grant", (requestId, send) => {
+    const f = await routedRequestFixture("flow-credit", (requestId, send) => {
       send({ type: "response", requestId, ok: "x".repeat(1024 * 1024) });
       (requestId === "first" ? produced : second).resolve();
     });
@@ -4081,8 +4035,8 @@ describe("routed output high and low marks", () => {
     const send = f.socket.send.bind(f.socket);
     using _send = stub(f.socket, "send", (bytes, done) => {
       assert(bytes instanceof Uint8Array && done);
-      if (isRouterAdmission(bytes)) {
-        order.push("grant");
+      if (isRouterRequestCredit(bytes)) {
+        order.push("credit");
         send(bytes, done);
         return;
       }
@@ -4090,29 +4044,31 @@ describe("routed output high and low marks", () => {
       callbacks.push(done);
     });
     try {
-      f.socket.receive(f.request("first"));
+      const first = f.request("first");
+      f.socket.receive(first);
       await produced.promise;
-      // The first request's own grant preceded its response, which fills the
-      // send window; the response's remaining records wait.
-      expect(order.shift()).toBe("grant");
+      // Let the turn end: its credit then waits behind the full send window.
+      await setImmediate();
+      // The response fills the send window; the turn has ended, so its
+      // credit waits at the head of what remains.
       const pipelined = callbacks.length;
       expect(order).toEqual(["0", ...Array<string>(pipelined - 1).fill("1")]);
-      const payload = f.request("second");
-      const route = decodeRoutedFrame(payload, true, FRAME_SLOTS).body;
-      const records = [...routerRecords(routerRoute(route), payload)];
-      const admitted = f.socket.header(decodeRouterHeader(records[0]));
-      expect(order).not.toContain("grant");
-      while (!order.includes("grant")) callbacks.shift()!();
-      // The grant is the first record passed to the socket after the header
-      // arrived, ahead of the response's remaining records.
-      expect(order.indexOf("grant")).toBe(pipelined);
-      await admitted;
-      for (const record of records.slice(1)) f.socket.deliver(record);
+      // The header's callback frees too little of the window; the first
+      // chunk's frees a record's worth, and the credit goes first.
+      callbacks.shift()!();
+      expect(order).toHaveLength(pipelined);
+      callbacks.shift()!();
+      expect(order[pipelined]).toBe("credit");
+      expect(order.slice(pipelined + 1)).not.toContain("2");
+      // The next request did not wait for that credit: the window held room.
+      f.socket.receive(f.request("second"));
       await second.promise;
       expect(f.handled).toEqual(["first", "second"]);
-      expect(order.slice(0, pipelined)).not.toContain("2");
+      // Once the second turn ends, its credit follows too.
+      await setImmediate();
       while (callbacks.length) callbacks.shift()!();
       expect(order.filter((kind) => kind === "2")).toHaveLength(2);
+      expect(order.filter((kind) => kind === "credit")).toHaveLength(2);
       expect(f.socket.readyState).toBe(WebSocket.OPEN);
     } finally {
       await f.close();
@@ -4210,11 +4166,9 @@ describe("routed output high and low marks", () => {
       const payload = f.request("second");
       const route = decodeRoutedFrame(payload, true, FRAME_SLOTS).body;
       const records = [...routerRecords(routerRoute(route), payload)];
-      const admitted = f.socket.header(decodeRouterHeader(records[0]));
-      expect(f.socket.isPaused).toBe(true);
-      expect(resume.calls).toHaveLength(resumed);
-      // The grant needs no response callback: the window has room.
-      await admitted;
+      // Within credit the header is sent at once, and reads resume to take
+      // its body before pausing again at the body's boundary.
+      await f.socket.header(decodeRouterHeader(records[0]));
       expect(resume.calls).toHaveLength(resumed + 1);
       expect(f.socket.isPaused).toBe(false);
       f.socket.deliver(records[1]);
@@ -4494,10 +4448,10 @@ describe("routed output high and low marks", () => {
     }
   });
 
-  it("keeps the hard input reservation bound for callbacks arriving after pause", async () => {
+  it("keeps the hard input reservation bound for requests arriving after pause", async () => {
     const produced = Promise.withResolvers<void>();
     // A lone response at the bound, wider than the send window, reaches the
-    // high mark and keeps the next grant waiting.
+    // high mark and holds dispatch.
     const bound = 2 * ROUTER_SEND_WINDOW_BYTES;
     const f = await routedRequestFixture(
       "flow-input-limit",
@@ -4513,18 +4467,29 @@ describe("routed output high and low marks", () => {
       await produced.promise;
       await setImmediate();
       expect(f.socket.isPaused).toBe(true);
-      const route = { type: "transact", requestId: "buffered" };
-      void f.socket.header({
-        route,
-        bytes: 3 * 1024 * 1024,
-        binary: true,
-      });
       const state = f.host.accessForTestingOnly.dataSocket(
         f.socket as unknown as WebSocket,
       )!;
+      // A body already buffered above the socket completes and keeps its
+      // reservation while dispatch is held.
+      await f.socket.header({
+        route: { type: "transact", requestId: "buffered" },
+        bytes: 3 * 1024 * 1024,
+        binary: true,
+      });
+      for (let i = 0; i < 96; i++) {
+        f.socket.deliver(routerRecord(1, new Uint8Array(32 * 1024)));
+      }
+      f.socket.deliver(routerRecord(2));
       expect(state.pendingBytes).toBe(3 * 1024 * 1024);
-      expect(state.admissionWriting).toBe(true);
-      f.socket.deliver(routerRecord(1, new Uint8Array(1)));
+      expect(state.assemblingBytes).toBe(0);
+      // One more request past the 4 MiB budget is refused, credit or not.
+      f.socket.deliver(encodeRouterHeader({
+        route: { type: "transact", requestId: "over" },
+        bytes: 2 * 1024 * 1024,
+        binary: true,
+        requestOrdinal: f.socket.requestOrdinal + 1,
+      }));
       await f.socket.closed.promise;
       expect(f.handled).toEqual(["first"]);
       expect(f.link.readyState).toBe(WebSocket.OPEN);
@@ -4861,7 +4826,11 @@ describe("routed close diagnostics", () => {
           expect(diagnostics.sender.oldestQueuedAgeMs).toBeGreaterThanOrEqual(
             0,
           );
-          expect(diagnostics.sender.lastCallbackAgeMs).toBeNull();
+          // Only the socket's initial request credit has been written.
+          expect(diagnostics.sender.completedRecords).toBe(1);
+          expect(diagnostics.sender.lastCallbackAgeMs).toBeGreaterThanOrEqual(
+            0,
+          );
           expect(diagnostics.eventLoop.executed).toBe(
             opportunity === "executed",
           );
@@ -5647,12 +5616,32 @@ Deno.test("private TLS listener accepts bounded binary links and rejects HTTP, O
       .fixed(new Uint8Array(16).fill(11)).fixed(f.context).fixed(ticket)
       .fixed(nonce).time(issued).fixed(sha256(f.flags))
       .fixed(sha256(routedFlags(f.encodingFlags))).sign(f.router);
-    const ready = new Promise<string>((resolve) =>
-      data.once("message", (bytes, binary) => {
-        expect(binary).toBe(false);
-        resolve(bytes.toString());
-      })
-    );
+    // The toolshed's ready and its first credit can arrive in one read, so
+    // one listener takes both, in order.
+    const ready = Promise.withResolvers<string>();
+    const credits: number[] = [];
+    const granted = Promise.withResolvers<void>();
+    const assembler = new RouterAssembler();
+    const responses: ((body: Record<string, unknown>) => void)[] = [];
+    data.on("message", (bytes, binary) => {
+      if (!binary) {
+        ready.resolve(bytes.toString());
+        return;
+      }
+      const record = new Uint8Array(bytes as ArrayBuffer);
+      if (isRouterRequestCredit(record)) {
+        credits.push(decodeRouterRequestCredit(record));
+        granted.resolve();
+        return;
+      }
+      const complete = assembler.receive(record);
+      if (complete !== undefined) {
+        const body =
+          decodeRoutedFrame(complete.payload, true, FRAME_SLOTS).body;
+        expect(complete.header.route).toEqual(routerRoute(body));
+        responses.shift()?.(body);
+      }
+    });
     data.send(JSON.stringify({
       type: "router.hello",
       version: 1,
@@ -5662,7 +5651,7 @@ Deno.test("private TLS listener accepts bounded binary links and rejects HTTP, O
       routerTicket: routedHex(ticket),
       routerBinding: routedBase64(binding),
     }));
-    expect(JSON.parse(await ready)).toMatchObject({
+    expect(JSON.parse(await ready.promise)).toMatchObject({
       type: "router.ready",
       version: 1,
       memoryFlags: { routedAuthV1: true },
@@ -5670,29 +5659,9 @@ Deno.test("private TLS listener accepts bounded binary links and rejects HTTP, O
       routerRequestAdmission: true,
       negotiatedMemoryFlags: f.encodingFlags,
     });
-    const assembler = new RouterAssembler();
-    const admission = Promise.withResolvers<
-      ReturnType<typeof decodeRouterAdmission>
-    >();
-    const opened = new Promise<Record<string, unknown>>((resolve) => {
-      data.on("message", (bytes, binary) => {
-        expect(binary).toBe(true);
-        const record = new Uint8Array(bytes as ArrayBuffer);
-        if (isRouterAdmission(record)) {
-          admission.resolve(decodeRouterAdmission(record));
-          return;
-        }
-        const complete = assembler.receive(
-          new Uint8Array(bytes as ArrayBuffer),
-        );
-        if (complete !== undefined) {
-          const body =
-            decodeRoutedFrame(complete.payload, true, FRAME_SLOTS).body;
-          expect(complete.header.route).toEqual(routerRoute(body));
-          resolve(body);
-        }
-      });
-    });
+    const opened = new Promise<Record<string, unknown>>((resolve) =>
+      responses.push(resolve)
+    );
     const open = {
       type: "session.open",
       requestId: "tls-open",
@@ -5705,12 +5674,12 @@ Deno.test("private TLS listener accepts bounded binary links and rejects HTTP, O
       `fvj1:${JSON.stringify(open)}`,
       1,
     );
+    // The toolshed grants its whole window once ready; the request goes
+    // header and body together within it.
+    await granted.promise;
+    expect(credits).toEqual([ROUTER_REQUEST_WINDOW]);
     const header = records.next().value!;
     data.send(header);
-    expect(await admission.promise).toEqual({
-      bytes: decodeRouterHeader(header).bytes,
-      requestOrdinal: 1,
-    });
     for (const record of records) {
       data.send(record);
     }
@@ -5854,6 +5823,7 @@ Deno.test("quota totals return to zero across socket replacement and context clo
     );
   const flagObject = {
     ...f.server.memoryProtocolFlags(),
+    routedCompressionV1: true,
     modernCellRep: true,
     connectionAuth: true,
     routedAuthV1: true,

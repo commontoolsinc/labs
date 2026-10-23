@@ -699,12 +699,19 @@ describe("WebSocketTransport failure signaling", () => {
     transport: WebSocketTransport,
     socket: () => DrivableWebSocket,
     window = 262_144,
+    compressedBodies = false,
   ): Promise<DrivableWebSocket> => {
     const hello = transport.send('fvj1:{"type":"hello"}');
     const active = socket();
     active.openConnection();
     await hello;
-    transport.setRoutedMessagesEnabled(true, 1, window);
+    transport.setRoutedMessagesEnabled(
+      true,
+      1,
+      window,
+      undefined,
+      compressedBodies,
+    );
     await active.whenSent(2);
     expect(active.sent[1]).toBe(
       'fvj1:{"type":"router.transport","version":1,"uploadCredits":true}',
@@ -1289,7 +1296,12 @@ describe("WebSocketTransport failure signaling", () => {
         const received = Promise.withResolvers<string>();
         transport.setReceiver(received.resolve);
         try {
-          const active = await selectCredits(transport, socket);
+          const active = await selectCredits(
+            transport,
+            socket,
+            262_144,
+            true,
+          );
           transport.setMessageCompressionEnabled(true);
           const payload = `fvj1:${
             JSON.stringify({
@@ -1341,12 +1353,37 @@ describe("WebSocketTransport failure signaling", () => {
       });
     });
 
-    it("refuses a compressed body on a connection that did not negotiate compression", async () => {
+    it("sends text and refuses a compressed body without routedCompressionV1, compression or not", async () => {
       const space = (await Identity.fromPassphrase("uncompressed-refusal"))
         .did();
       await withTransport(async (transport, socket) => {
         try {
+          // Message compression negotiated, end-to-end compression not: an
+          // SDK and a router of the same build against an older toolshed.
           const active = await selectCredits(transport, socket);
+          transport.setMessageCompressionEnabled(true);
+          const upload = `fvj1:${
+            JSON.stringify({
+              type: "transact",
+              requestId: "plain",
+              space,
+              sessionId: "s",
+              value: Array.from({ length: 2000 }, (_, i) => `entry ${i}`)
+                .join(" "),
+            })
+          }`;
+          const sent = transport.send(upload);
+          const receiver = new RouterAssembler();
+          let result;
+          for (let at = 2; result === undefined; at++) {
+            await active.whenSent(at + 1);
+            const record = requireRecord(active.sent[at]);
+            grantCredit(active, record.length);
+            result = receiver.receive(record);
+          }
+          await sent;
+          expect(result.header.binary).toBe(false);
+          expect(result.payload).toBe(upload);
           const closed = Promise.withResolvers<Error | undefined>();
           transport.setCloseReceiver(closed.resolve);
           const push = `fvj1:${

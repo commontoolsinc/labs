@@ -8,7 +8,6 @@ import { isPlainObject } from "@commonfabric/utils/types";
 
 import {
   parseRoutedJson,
-  ROUTED_QUEUE_LIMIT,
   ROUTED_RAW_LIMIT,
   routedIdentifier,
   routedObject,
@@ -41,6 +40,15 @@ export const ROUTER_SEND_WINDOW_BYTES = 256 * 1024;
  * bytes. The router offers it in `hello.ok.routerUploadWindow`.
  */
 export const ROUTER_UPLOAD_WINDOW = 262_144;
+
+/**
+ * Request credit a toolshed grants on one private data socket, in declared
+ * body bytes: its whole input budget (`ROUTED_QUEUE_LIMIT`). The toolshed
+ * grants the window once the socket is ready and returns each request's bytes
+ * when that request's turn ends; the router sends a request header only within
+ * the credit it holds, and its body right behind it.
+ */
+export const ROUTER_REQUEST_WINDOW = 4 * 1024 * 1024;
 
 /**
  * Largest private request ordinal. Ordinals start at 1 on each data socket
@@ -175,49 +183,40 @@ export function routerHeader(value: unknown): RouterHeader {
   };
 }
 
-/** Identifies private admission controls independently of response records. */
-export function isRouterAdmission(bytes: Uint8Array): boolean {
+/** Identifies private request credit independently of response records. */
+export function isRouterRequestCredit(bytes: Uint8Array): boolean {
   return bytes.length >= 4 && bytes[0] === 0x6d && bytes[1] === 0x72 &&
-    bytes[2] === 0x69 && bytes[3] === 1;
+    bytes[2] === 0x69 && bytes[3] === 2;
 }
 
-/** Encodes a reservation for one bounded, ordinal-bound private request. */
-export function encodeRouterAdmission(
+/**
+ * Encodes request credit: eight bytes, `mri\x02` and an unsigned big-endian
+ * count of declared body bytes, positive and within
+ * {@link ROUTER_REQUEST_WINDOW}. Credit is additive.
+ */
+export function encodeRouterRequestCredit(
   bytes: number,
-  requestOrdinal: number,
 ): Uint8Array<ArrayBuffer> {
   requireRouted(
-    Number.isSafeInteger(bytes) && bytes > 0 && bytes <= ROUTED_QUEUE_LIMIT,
+    Number.isSafeInteger(bytes) && bytes > 0 &&
+      bytes <= ROUTER_REQUEST_WINDOW,
   );
-  requireRouted(Number.isSafeInteger(requestOrdinal) && requestOrdinal > 0);
-  const record = new Uint8Array(16);
-  record.set([0x6d, 0x72, 0x69, 1]);
-  const view = new DataView(record.buffer);
-  view.setUint32(4, bytes);
-  view.setBigUint64(8, BigInt(requestOrdinal));
+  const record = new Uint8Array(8);
+  record.set([0x6d, 0x72, 0x69, 2]);
+  new DataView(record.buffer).setUint32(4, bytes);
   return record;
 }
 
-/** Decodes an exact private admission control without interpreting payloads. */
-export function decodeRouterAdmission(record: Uint8Array): {
-  /** Reserved body bytes. */
-  bytes: number;
-  /** Socket-local request identity. */
-  requestOrdinal: number;
-} {
-  requireRouted(record.length === 16 && isRouterAdmission(record));
-  const view = new DataView(
+/** Decodes an exact request credit record without interpreting payloads. */
+export function decodeRouterRequestCredit(record: Uint8Array): number {
+  requireRouted(record.length === 8 && isRouterRequestCredit(record));
+  const bytes = new DataView(
     record.buffer,
     record.byteOffset,
     record.byteLength,
-  );
-  const bytes = view.getUint32(4);
-  const ordinal = view.getBigUint64(8);
-  requireRouted(
-    bytes > 0 && bytes <= ROUTED_QUEUE_LIMIT && ordinal > 0n &&
-      ordinal <= BigInt(ROUTER_MAX_REQUEST_ORDINAL),
-  );
-  return { bytes, requestOrdinal: Number(ordinal) };
+  ).getUint32(4);
+  requireRouted(bytes > 0 && bytes <= ROUTER_REQUEST_WINDOW);
+  return bytes;
 }
 
 /** Encodes a start record without copying or parsing the application body. */
@@ -399,8 +398,8 @@ export interface RouterSenderSnapshot {
   readonly pendingRecordBytes: number;
 
   /**
-   * Routing kind of the oldest record awaiting a callback, or null for an
-   * admission control and when no write is pending.
+   * Routing kind of the oldest record awaiting a callback, or null for a
+   * request credit record and when no write is pending.
    */
   readonly pendingRecordKind: number | null;
 
@@ -439,7 +438,7 @@ interface PendingRecord {
   /** Record length including its routing overhead. */
   bytes: number;
 
-  /** Routing kind, or null for an admission control. */
+  /** Routing kind, or null for a request credit record. */
   kind: number | null;
 
   /** Monotonic time the record was passed to the socket. */
@@ -476,14 +475,8 @@ export class RouterSender {
   #callbackErrors = 0;
   #lastCallbackAt: number | undefined;
   #drained: PromiseWithResolvers<boolean> | undefined;
-  #admission: {
-    /** Single fixed-size control, retained through its write callback. */
-    record: Uint8Array;
-    /** Enables input only after a successful write. */
-    written: () => void;
-    /** Whether the record has been passed to the socket. */
-    dispatched: boolean;
-  } | undefined;
+  /** Request credit to return, coalesced into the next record boundary. */
+  #credit = 0;
 
   /**
    * Constructs an instance with a socket-completion callback and the bound on
@@ -528,18 +521,17 @@ export class RouterSender {
     return this.#drained.promise;
   }
 
-  /** Inserts one admission control at the next response-record boundary. */
-  sendAdmission(
-    bytes: number,
-    requestOrdinal: number,
-    written: () => void,
-  ): void {
-    requireRouted(!this.#closed && this.#admission === undefined);
-    this.#admission = {
-      record: encodeRouterAdmission(bytes, requestOrdinal),
-      written,
-      dispatched: false,
-    };
+  /**
+   * Returns request credit at the next response-record boundary, ahead of
+   * further body records. Credit returned before an earlier return is written
+   * joins it in one record.
+   */
+  sendCredit(bytes: number): void {
+    requireRouted(
+      !this.#closed && Number.isSafeInteger(bytes) && bytes > 0 &&
+        this.#credit + bytes <= ROUTER_REQUEST_WINDOW,
+    );
+    this.#credit += bytes;
     this.#pump();
   }
 
@@ -618,7 +610,7 @@ export class RouterSender {
     this.#closed = true;
     this.#queue = [];
     this.#dispatchedBodies = 0;
-    this.#admission = undefined;
+    this.#credit = 0;
     this.#bytes = 0;
     this.#pending = [];
     this.#pendingBytes = 0;
@@ -642,8 +634,8 @@ export class RouterSender {
 
   /**
    * Passes records to the socket, in order, while the bytes awaiting callbacks
-   * are below the send window. A waiting admission control goes out before
-   * the next body record. Re-entry from a synchronous callback returns to the
+   * are below the send window. Request credit waiting to be returned goes out
+   * before the next body record. Re-entry from a synchronous callback returns to the
    * running loop, which sees the released bytes on its next iteration.
    */
   #pump(): void {
@@ -653,13 +645,10 @@ export class RouterSender {
       while (
         !this.#closed && this.#pendingBytes < ROUTER_SEND_WINDOW_BYTES
       ) {
-        const admission = this.#admission;
-        if (admission !== undefined && !admission.dispatched) {
-          admission.dispatched = true;
-          this.#write(admission.record, null, undefined, () => {
-            this.#admission = undefined;
-            admission.written();
-          });
+        if (this.#credit > 0) {
+          const record = encodeRouterRequestCredit(this.#credit);
+          this.#credit = 0;
+          this.#write(record, null);
           continue;
         }
         const next = this.#queue[this.#dispatchedBodies];
@@ -700,7 +689,6 @@ export class RouterSender {
     record: Uint8Array,
     recordKind: number | null,
     body?: QueuedBody,
-    written?: () => void,
   ): void {
     const pending: PendingRecord = {
       bytes: record.length,
@@ -733,7 +721,6 @@ export class RouterSender {
           if (recordKind === 1) body!.writtenBytes += pending.bytes - 5;
           this.#observe?.("callback");
           if (recordKind === 2) this.#completeBody(body!);
-          written?.();
           this.#pump();
         }
       });

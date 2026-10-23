@@ -1361,6 +1361,15 @@ export type MemoryProtocolFlags = {
 
   /** The peer supports router-scoped binary connection authentication. */
   routedAuthV1?: boolean;
+
+  /**
+   * The peer sends and expands routed message bodies in the `mcmp` version 2
+   * envelope end to end, through a router that forwards them opaquely. Needs
+   * `messageCompressionV1` too. A routed client without it receives text
+   * bodies, so an SDK that predates it never sees a binary body it would take
+   * for router credit.
+   */
+  routedCompressionV1?: boolean;
 };
 
 /**
@@ -1403,6 +1412,7 @@ export type WireMemoryProtocolFlags = {
   elidedVerdicts?: boolean;
   sessionReportV1?: boolean;
   routedAuthV1?: boolean;
+  routedCompressionV1?: boolean;
 };
 
 export type HelloMessage = {
@@ -2660,6 +2670,7 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // reports about its session.
   sessionReportV1: true,
   routedAuthV1: false,
+  routedCompressionV1: false,
   syncSchemaTableV2: getSyncSchemaTableConfig(),
   syncLabelTableV1: true,
   commitLabelTableV1: true,
@@ -2691,6 +2702,12 @@ export const parseMemoryProtocolFlags = (
   }
   if (
     value.routedAuthV1 !== undefined && typeof value.routedAuthV1 !== "boolean"
+  ) {
+    return null;
+  }
+  if (
+    value.routedCompressionV1 !== undefined &&
+    typeof value.routedCompressionV1 !== "boolean"
   ) {
     return null;
   }
@@ -2957,6 +2974,7 @@ export const parseMemoryProtocolFlags = (
     // whole watch set to remove a watch.
     watchRemoveV1: watchRemoveV1 === true,
     routedAuthV1: value.routedAuthV1 === true,
+    routedCompressionV1: value.routedCompressionV1 === true,
   };
 };
 
@@ -2999,6 +3017,7 @@ export const wireMemoryProtocolFlags = (
   elidedVerdicts: flags.elidedVerdicts,
   sessionReportV1: flags.sessionReportV1,
   routedAuthV1: flags.routedAuthV1,
+  routedCompressionV1: flags.routedCompressionV1,
   syncCrossingsV1: flags.syncCrossingsV1,
   watchRemoveV1: flags.watchRemoveV1,
 });

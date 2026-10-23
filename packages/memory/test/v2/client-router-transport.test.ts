@@ -7,7 +7,11 @@ import { getMemoryProtocolFlags } from "../../v2.ts";
 import { connect, type Transport } from "../../v2/client.ts";
 
 /** Constructs a streaming-capable peer whose hello advertises one transport. */
-async function peer(routerTransport: unknown, routerUploadWindow = 262_144) {
+async function peer(
+  routerTransport: unknown,
+  routerUploadWindow = 262_144,
+  { compression = false, offered = false } = {},
+) {
   const identity = await Identity.fromRaw(new Uint8Array(32).fill(152));
   const selections: Parameters<
     NonNullable<Transport["setRoutedMessagesEnabled"]>
@@ -15,6 +19,7 @@ async function peer(routerTransport: unknown, routerUploadWindow = 262_144) {
   let receiver = (_: string) => {};
   const transport: Transport = {
     supportsRouterStreaming: true,
+    supportsMessageCompression: compression,
     setReceiver: (callback) => receiver = callback,
     setRoutedMessagesEnabled: (...args) => selections.push(args),
     reset: () => {},
@@ -28,6 +33,7 @@ async function peer(routerTransport: unknown, routerUploadWindow = 262_144) {
             ...getMemoryProtocolFlags(),
             routedAuthV1: true,
             connectionAuth: true,
+            routedCompressionV1: offered,
           },
           sessionOpen: {
             audience: identity.did(),
@@ -52,11 +58,37 @@ describe("client-router-transport", () => {
     const p = await peer(1);
     const client = await connect({ transport: p.transport });
     try {
-      expect(p.selections).toEqual([[false], [true, 1, 262_144, undefined]]);
+      expect(p.selections).toEqual([
+        [false],
+        [true, 1, 262_144, undefined, false],
+      ]);
     } finally {
       await client.close();
     }
   });
+
+  // End-to-end compression needs this client's compression and the router's
+  // offer of `routedCompressionV1`; either alone selects text bodies.
+  for (
+    const [compression, offered, expected] of [
+      [true, true, true],
+      [true, false, false],
+      [false, true, false],
+    ] as const
+  ) {
+    it(`selects compressed bodies \`${expected}\` for compression \`${compression}\` and an offer \`${offered}\``, async () => {
+      const p = await peer(1, 262_144, { compression, offered });
+      const client = await connect({ transport: p.transport });
+      try {
+        expect(p.selections).toEqual([
+          [false],
+          [true, 1, 262_144, undefined, expected],
+        ]);
+      } finally {
+        await client.close();
+      }
+    });
+  }
 
   // A router may offer a version this build predates. That is no streaming
   // for this client, not a failed handshake: routed framing stays legacy.
@@ -72,7 +104,7 @@ describe("client-router-transport", () => {
           expect(client.isConnected()).toBe(true);
           expect(p.selections).toEqual([
             [false],
-            [true, undefined, 262_144, undefined],
+            [true, undefined, 262_144, undefined, false],
           ]);
         } finally {
           await client.close();

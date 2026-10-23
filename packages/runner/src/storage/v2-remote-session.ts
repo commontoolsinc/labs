@@ -335,6 +335,8 @@ export class WebSocketTransport implements MemoryClient.Transport {
   #routedMessages = false;
   #routedFrameSlots: number | null = ROUTED_FRAME_SLOTS;
   #routerStreaming = false;
+  /** Streamed bodies use the routed compression envelope, both ways. */
+  #routedCompression = false;
   #uploadCredits: RouterUploadCredits | undefined;
   #sending: Promise<void> = Promise.resolve();
   #receiving: Promise<void> = Promise.resolve();
@@ -405,6 +407,8 @@ export class WebSocketTransport implements MemoryClient.Transport {
    * Selects routed framing after a pinned hello. A supported upload window
    * enables peer credit for every logical message after the text selection.
    * `frameSlots` defaults to `ROUTED_FRAME_SLOTS`; `null` disables slot counting.
+   * `compressedBodies` selects end-to-end body compression, negotiated as
+   * `routedCompressionV1`, on a streamed selection.
    * Throws if a supplied bound is not a positive safe integer or `null`.
    */
   setRoutedMessagesEnabled(
@@ -412,6 +416,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
     transportVersion?: number,
     uploadWindow?: number,
     frameSlots?: number | null,
+    compressedBodies?: boolean,
   ): void {
     if (
       frameSlots !== undefined && frameSlots !== null &&
@@ -425,6 +430,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
       ? frameSlots
       : ROUTED_FRAME_SLOTS;
     this.#routerStreaming = false;
+    this.#routedCompression = false;
     if (enabled && transportVersion === 1) {
       if (
         typeof uploadWindow === "number" &&
@@ -454,6 +460,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
       // must not report a second loss against its replacement.
       this.#sending = send.catch(() => {});
       this.#routerStreaming = true;
+      this.#routedCompression = compressedBodies === true;
     }
   }
 
@@ -488,6 +495,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
     const routed = this.#routedMessages;
     const frameSlots = this.#routedFrameSlots;
     const streaming = this.#routerStreaming;
+    const routedCompression = this.#routedCompression;
     const credits = this.#uploadCredits;
     this.#messagesSent++;
     const send = this.#sending.then(async () => {
@@ -498,10 +506,11 @@ export class WebSocketTransport implements MemoryClient.Transport {
       const control = decoded !== undefined &&
         isRouterControl(decoded.body.type);
       // A streamed message travels as the routed compression envelope when
-      // compression is on: the router reads only the controls it answers or
-      // counts, and the toolshed expands the rest.
+      // compression is on and `routedCompressionV1` was negotiated: the router
+      // reads only the controls it answers or counts, and the toolshed expands
+      // the rest.
       const frame = decoded !== undefined
-        ? compressionEnabled
+        ? compressionEnabled && routedCompression
           ? compressRoutedPayload(
             payload,
             new TextEncoder().encode(payload),
@@ -582,6 +591,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
     this.#routedMessages = false;
     this.#routedFrameSlots = ROUTED_FRAME_SLOTS;
     this.#routerStreaming = false;
+    this.#routedCompression = false;
     this.#clearUploadCredits(error);
     this.#rejectCompressionRequests(error);
     return socket;
@@ -607,6 +617,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
       this.#routedMessages = false;
       this.#routedFrameSlots = ROUTED_FRAME_SLOTS;
       this.#routerStreaming = false;
+      this.#routedCompression = false;
       let opened = false;
       socket.addEventListener("open", () => {
         opened = true;
@@ -646,9 +657,14 @@ export class WebSocketTransport implements MemoryClient.Transport {
                 this.#acceptUploadCredit(routedFrame);
                 return;
               }
+              // A streamed connection takes compressed bodies only once
+              // `routedCompressionV1` was negotiated; a legacy one, from its
+              // own negotiated compression.
               const decoded = await decodeRoutedFrameAsync(
                 routedFrame,
-                this.#receiveCompressionEnabled,
+                this.#routerStreaming
+                  ? this.#routedCompression
+                  : this.#receiveCompressionEnabled,
                 this.#routedFrameSlots,
               );
               if (this.#socket !== socket) return;
