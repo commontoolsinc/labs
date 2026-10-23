@@ -12,6 +12,7 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import {
   assertLocalReadAvailable,
+  endLocalReadValidationStretch,
   localReadFailure,
   localReadsReady,
   LocalReadUnavailable,
@@ -20,6 +21,7 @@ import {
   restrictToLocalReads,
   usesLocalReads,
   validateLocalReadBasis,
+  validateLocalReadBasisForCommit,
 } from "../src/storage/local-read-policy.ts";
 
 const signer = await Identity.fromPassphrase("local read policy");
@@ -73,6 +75,55 @@ describe("local-read-policy", () => {
       allowed = true;
       expect(localReadsReady(tx)).toBe(true);
       expect(checked.slice(-2)).toEqual([4, 4]);
+    } finally {
+      tx.abort();
+    }
+  });
+
+  it("makes no checker for a validation after a passing pre-commit one until a read, a condition, a commit or a microtask ends their stretch", async () => {
+    const tx = runtime.edit();
+    let checkers = 0;
+    restrictToLocalReads(tx.tx, () => {
+      checkers++;
+      return () => true;
+    });
+    const read = (id: "of:first" | "of:second") =>
+      assertLocalReadAvailable(tx.tx, {
+        space,
+        id,
+        type: "application/json",
+        path: ["value"],
+      }, () => true);
+    try {
+      read("of:first");
+      expect(validateLocalReadBasis(tx)).toBeUndefined();
+      expect(validateLocalReadBasis(tx)).toBeUndefined();
+      expect(checkers).toBe(3);
+      expect(validateLocalReadBasisForCommit(tx)).toBeUndefined();
+      expect(validateLocalReadBasis(tx)).toBeUndefined();
+      expect(checkers).toBe(4);
+      read("of:second");
+      expect(validateLocalReadBasis(tx)).toBeUndefined();
+      expect(checkers).toBe(5);
+      expect(validateLocalReadBasisForCommit(tx)).toBeUndefined();
+      requireLocalReadCondition(
+        tx.tx,
+        toMemorySpaceAddress(
+          runtime.getCell(space, "condition", undefined)
+            .getAsNormalizedFullLink(),
+        ),
+        () => true,
+      );
+      expect(validateLocalReadBasis(tx)).toBeUndefined();
+      expect(checkers).toBe(7);
+      expect(validateLocalReadBasisForCommit(tx)).toBeUndefined();
+      endLocalReadValidationStretch();
+      expect(validateLocalReadBasis(tx)).toBeUndefined();
+      expect(checkers).toBe(9);
+      expect(validateLocalReadBasisForCommit(tx)).toBeUndefined();
+      await Promise.resolve();
+      expect(validateLocalReadBasis(tx)).toBeUndefined();
+      expect(checkers).toBe(11);
     } finally {
       tx.abort();
     }
