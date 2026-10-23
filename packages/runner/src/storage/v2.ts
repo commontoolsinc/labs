@@ -7393,7 +7393,12 @@ export class SpaceReplica
         error,
       ]);
       if (isPermanentAuthorizationFailure(error)) this.#dropReleased(remove);
-      else this.#owedWatches.set(key, remove);
+      // A retraction pushed meanwhile has settled the document: it stays
+      // unwatched for its holder, and the pass that finds it held by
+      // nothing drops it.
+      else if (!this.#retractedHeld.has(key)) {
+        this.#owedWatches.set(key, remove);
+      }
     });
   }
 
@@ -8212,12 +8217,12 @@ export class SpaceReplica
         );
         // Recorded before the frame applies, so a frame that fails to
         // apply leaves no held document kept without the pass that drops
-        // it.
+        // it. The retraction supersedes a re-watch a release still owes
+        // the document.
         for (const remove of held) {
-          this.#retractedHeld.set(
-            this.#docKeyOf(removedAddress(remove)),
-            remove,
-          );
+          const key = this.#docKeyOf(removedAddress(remove));
+          this.#owedWatches.delete(key);
+          this.#retractedHeld.set(key, remove);
         }
         this.#applySessionSync(sync, "integrate");
         if (sync.removes.length > 0) this.#forgetRemoved(sync.removes);

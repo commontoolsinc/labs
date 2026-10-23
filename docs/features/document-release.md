@@ -4,10 +4,12 @@ A runtime holds a stored document because its memory session watches it. A
 watch names a root document and a selector (a path and a schema); the server
 keeps the session up to date with the root and with every document the schema
 reaches from it through links. The union of a session's watches is what the
-runtime's replica of the space holds. This document describes how the runtime
-removes the watches nothing needs any more, and drops the documents they kept
-loaded, so that a long-lived runtime that opens and closes many pieces does not
-hold every document it ever loaded.
+runtime's replica of the space holds, apart from a document the server retracted
+while something here still read it, which the replica keeps for that reader
+until the next release pass. This document describes how the runtime removes
+the watches nothing needs any more, and drops the documents they kept loaded, so
+that a long-lived runtime that opens and closes many pieces does not hold every
+document it ever loaded.
 
 The implementation is `SpaceReplica.releaseUnread()` in
 `packages/runner/src/storage/v2.ts`, driven by
@@ -59,9 +61,11 @@ also call `Runtime.releaseUnreadDocuments()` itself. The pass waits until the
 scheduler is idle. Passes run one after another, never two at once.
 
 A pass that has watches to remove first gives each document the replica keeps,
-as above, a watch of its own where it has none, with a selector that follows no
-links: a document that something reads only through a link from another
-document is otherwise watched only as part of that document's watch. It then
+as above, and the session still delivers, a watch of its own where it has none,
+with a selector that follows no links: a document that something reads only
+through a link from another document is otherwise watched only as part of that
+document's watch. A kept document the server retracted gets none, as below. It
+then
 removes the watches rooted at each document the replica does not keep and that
 was neither loaded nor read since the previous pass began, so no removal can
 take a kept document from the session. The server answers with `removes` naming
