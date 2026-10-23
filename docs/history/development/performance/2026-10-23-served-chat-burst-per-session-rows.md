@@ -245,15 +245,19 @@ member's join without writing it is not established.
 
 ## What remains
 
-- **Every session's view on one thread.** Each member is a web client with
-  its view mounted, so under the flag the serving worker runs every
-  session's instance of every row, where with the loop off each member's
-  runtime runs its own. None of the removals above changes that ratio. Two
-  directions were not tried: computing once per message the part of a row
-  that no session's state reaches, and settling the data a session watches
-  ahead of its view's rows within a wave.
-- **The lost first join.** The stalled probe's room never received its
-  creator's first message, which the store would need for any member's wait
-  to end. Whether the room's serving runtime consumed that event without a
-  handler, or the creator space's run of the room did, is the next question;
-  the run that stalls is one in about a dozen rooms.
+- **A lost message, the branch's blocking fault.** A served event was
+  consumed and its consequence never written: the stalled probe's room never
+  received its creator's first message, which every member's wait needed.
+  One room in about a dozen stalls this way. Whether the room's serving
+  runtime consumed that event without a handler, or the creator space's run
+  of the room did, is the next question
+  ([lost-join record](2026-10-23-served-chat-lost-first-join.md)).
+- **Every session's view on one thread, a decision for the owner.** Each
+  member is a web client with its view mounted, so under the flag the
+  serving worker runs every session's instance of every row, where with the
+  loop off each member's runtime runs its own, four runtimes on four
+  threads. None of the removals above changes that ratio, so the chat goal
+  may not be reachable by removing cost. Two directions change the ratio
+  instead, and choosing between them is the owner's: computing once per
+  message the part of a row that no session's state reaches, and settling
+  the data a session watches ahead of its view's rows within a wave.
