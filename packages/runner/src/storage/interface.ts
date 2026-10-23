@@ -64,6 +64,10 @@ import type { Immutable } from "@commonfabric/utils/types";
 import type { Cancel } from "../cancel.ts";
 import { Cell } from "../cell.ts";
 import type {
+  CfcConfidentialityRelease,
+  CfcConfidentialityReleaseInput,
+} from "../cfc/confidentiality-release-plan.ts";
+import type {
   CfcAddress,
   CfcContentAddressedLabels,
   CfcDeclaredMonotonicityMode,
@@ -2751,6 +2755,24 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * fails closed at prepare (S18 class).
    */
   writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string };
+
+  /**
+   * The trusted writer path for an owner's release of the confidentiality
+   * stored at one path of a document (`cfc/confidentiality-release-plan.ts`).
+   * Requires the transaction's current implementation identity to be the
+   * `cfc-confidentiality-release` builtin, its acting principal to be
+   * authenticated, and the document to sit in that principal's own space.
+   * Removes every stored clause at the path that `input.keep` does not name,
+   * from every component of the label there and from the stored schema, and
+   * writes the envelope inside the privileged system-write scope. Writes
+   * nothing when there is nothing to remove.
+   *
+   * @throws On any of the requirements above, on an unreadable envelope, and
+   *   on everything `planConfidentialityRelease()` refuses.
+   */
+  releaseCfcConfidentiality(
+    input: CfcConfidentialityReleaseInput,
+  ): CfcConfidentialityRelease;
 
   /**
    * Surfaces a post-commit sink-request release rejection (the effect is fail-

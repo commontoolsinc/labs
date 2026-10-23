@@ -1372,7 +1372,8 @@ export interface IStreamable<T> {
   ): void;
 }
 
-// Lightweight HKT, so we can pass cell types to IKeyable<>.
+// Lightweight higher-kinded type (HKT), so we can pass cell types to
+// IKeyable<>.
 export interface HKT {
   _A: unknown;
   type: unknown;
@@ -1816,8 +1817,9 @@ export interface ICreatable<C extends AnyBrandedCell<any>> {
    * Set a cause for this cell. Used to create a link when the cell doesn't have
    * one yet.
    *
-   * Record causes may not use the top-level key `$generated` — it is
-   * reserved for system-generated causes and setting one throws.
+   * Record causes may not use the top-level key `$generated` or `$instance` —
+   * they are reserved for the causes the pattern builder mints, and setting
+   * one throws.
    * @param cause - The cause to associate with this cell
    * @returns This cell for method chaining
    */
@@ -4979,6 +4981,47 @@ export type SpaceAccessOfFunction = (
 ) => SpaceAccessLevel | undefined;
 
 export declare const spaceAccessOf: SpaceAccessOfFunction;
+
+/**
+ * The principals a space's access list names, each with its level, as
+ * `spaceMembers()` returns them.
+ */
+export interface SpaceMemberList {
+  /** Each principal the list names, with the level its entry grants. */
+  readonly principals: Readonly<Record<DID, SpaceGrantLevel>>;
+
+  /**
+   * The level the list's `"*"` entry grants anyone it does not name, absent
+   * when the list has no such entry. It names no one, so it adds no member.
+   */
+  readonly anyone?: SpaceGrantLevel;
+}
+
+/**
+ * Returns the principals the access list of the space `target`'s value lives
+ * in names, each with its level, so a pattern can list a space's members. The
+ * list's `"*"` entry is not a member, and is reported apart, as `anyone`. A
+ * service DID the deployment grants `OWNER` everywhere holds it without an
+ * entry, and is not listed.
+ *
+ * Only a principal the list grants access gets it: the current principal,
+ * found as `spaceAccess()` finds it, through its own entry or the `"*"`
+ * entry. Anyone else gets `undefined`, as does a call for which
+ * `spaceAccess()` would return `undefined`. It is never an empty list, so a
+ * reader can tell "not known yet" from "nobody". The list tells a member only
+ * what a member can already read, since any member can read the whole access
+ * list.
+ *
+ * As with `spaceAccess()`, a reactive computation calling it gets a value of
+ * its viewer's own, which updates when the access list changes. It can be
+ * called where `spaceAccess()` can, and throws where that does. The result
+ * carries no label.
+ */
+export type SpaceMembersFunction = (
+  target: AnyCell<unknown> | undefined,
+) => SpaceMemberList | undefined;
+
+export declare const spaceMembers: SpaceMembersFunction;
 
 /**
  * Returns the DID of the space `target`'s value lives in, after following any

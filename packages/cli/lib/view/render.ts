@@ -418,10 +418,13 @@ export interface DialogState {
   readonly body: readonly string[];
   readonly buttons: readonly DialogButton[];
 
-  /** Whether the body is program output, which starts at the left margin of a
-   * box as wide as the screen, rather than centered text in a box that fits
-   * it. */
+  /** Whether the body is program output, which starts at the left margin
+   * rather than being centered. */
   readonly output?: boolean;
+
+  /** The width the box gives the body, in columns, when that is fixed rather
+   * than fitted to the body's lines. */
+  readonly width?: number;
 
   /** Index of the focused button — the one Space and Enter activate, drawn
    * highlighted. When absent, the default button (if any) is highlighted. */
@@ -1471,13 +1474,17 @@ export interface DialogBox {
 }
 
 /** Geometry of the centered dialog box, sized to its content (title, body and
- * button row), or as wide as the screen for program output, and clamped to
- * leave two cells for the drop shadow. */
-export function dialogBox(view: ViewState, dialog: DialogState): DialogBox {
+ * button row) or to the body's fixed width, and clamped to leave two cells for
+ * the drop shadow. */
+export function dialogBox(
+  view: Pick<ViewState, "width" | "height">,
+  dialog: DialogState,
+): DialogBox {
   const titleW = cpLen(dialog.title) + 4; // the padding spaces and some fill
-  const bodyW = dialog.body.reduce((m, l) => Math.max(m, cpLen(l)), 0);
+  const bodyW = dialog.width ??
+    dialog.body.reduce((m, l) => Math.max(m, cpLen(l)), 0);
   const btnW = buttonsWidth(dialog.buttons);
-  const contentW = dialog.output ? view.width : Math.max(titleW, bodyW, btnW);
+  const contentW = Math.max(titleW, bodyW, btnW);
   // The margin columns each side, then the two borders.
   // Inner rows: a blank under the title, the body, a blank, the buttons, and the
   // buttons' shadow.
@@ -1524,6 +1531,37 @@ function layoutButtons(
   return out;
 }
 
+/**
+ * Returns the inner row of a dialog box of `innerH` rows that the buttons are
+ * drawn on, or -1 when the box is too short to show them below the body.
+ */
+function buttonRowOf(dialog: DialogState, innerH: number): number {
+  const row = innerH - 2; // the buttons' shadow takes the last row
+  return row > dialog.body.length ? row : -1;
+}
+
+/**
+ * Returns the index of the button drawn at the zero-based screen cell `x`, `y`,
+ * at rest or pushed one column right, or -1 when no button is drawn there.
+ */
+export function dialogButtonAt(
+  view: Pick<ViewState, "width" | "height">,
+  dialog: DialogState,
+  x: number,
+  y: number,
+): number {
+  const box = dialogBox(view, dialog);
+  const buttonRow = buttonRowOf(dialog, box.innerH);
+  const col = x - box.x - 1;
+  if (
+    box.boxW < 2 || buttonRow < 0 || y !== box.y + 1 + buttonRow ||
+    col >= box.innerW
+  ) return -1;
+  return layoutButtons(dialog.buttons, box.innerW).findIndex((
+    { start, faceW },
+  ) => col >= start && col <= start + faceW);
+}
+
 /** The face index of the highlighted shortcut letter, or -1 if the hotkey does
  * not appear in the label. Offset by one for the leading pad space. */
 function hotkeyFaceIndex(b: DialogButton): number {
@@ -1556,8 +1594,7 @@ function applyDialog(
   );
 
   const layout = layoutButtons(dialog.buttons, innerW);
-  const buttonRow = innerH - 2;
-  const shadowRow = innerH - 1;
+  const buttonRow = buttonRowOf(dialog, innerH);
   // The focused button is drawn highlighted; without an explicit focus, the
   // default button is. A pushed button is drawn mid-press.
   const focusIdx = dialog.focus ??
@@ -1571,7 +1608,7 @@ function applyDialog(
       placeText(cells, dialog.body[bodyIdx], textStyle, dialog.output);
     } else if (i === buttonRow) {
       placeButtonFaces(cells, layout, view.color, panelBg, focusIdx, pushedIdx);
-    } else if (i === shadowRow && view.color) {
+    } else if (buttonRow >= 0 && i === buttonRow + 1 && view.color) {
       placeButtonShadows(cells, layout, panelBg, pushedIdx);
     }
     const rowText = paintIf("║", border, view.color) +
@@ -1582,8 +1619,8 @@ function applyDialog(
   if (view.color) castShadow(rows, view, x, y, boxW, boxH);
 }
 
-/** Write `text` centered (or at the left) in `cells`, one blank margin column
- * inside each edge. */
+/** Write `text` in `cells`, centered or starting after the dialog's margin,
+ * and clipped to leave one blank column inside each edge. */
 function placeText(
   cells: Cell[],
   text: string,
@@ -1592,10 +1629,9 @@ function placeText(
 ): void {
   const innerW = cells.length;
   const chars = [...showControls(text)];
-  const start = 1 +
-    (leftAligned
-      ? 0
-      : Math.max(0, Math.floor((innerW - 2 - chars.length) / 2)));
+  const start = leftAligned
+    ? DIALOG_HMARGIN
+    : 1 + Math.max(0, Math.floor((innerW - 2 - chars.length) / 2));
   for (let j = 0; j < chars.length; j++) {
     const col = start + j;
     if (col >= 1 && col <= innerW - 2) cells[col] = { ch: chars[j], style };

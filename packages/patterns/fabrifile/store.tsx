@@ -477,4 +477,39 @@ const FileStore = pattern<FileStoreInput, FileStoreOutput>(
   },
 );
 
+//
+// A root's store
+//
+
+/**
+ * Where a space's root keeps its store: a link to a store piece in the root's
+ * own space, in `store`, absent until the store is first needed. It holds a
+ * record rather than the link itself because a handler's cell for a field
+ * holding a link writes through the link, so replacing the link there would
+ * write into the store it names.
+ */
+export interface FileStoreRecord {
+  /** The store; absent while the root names none. */
+  store?: Cell<FileStoreOutput>;
+}
+
+/** The cell a root keeps its store in; a root naming none holds `{}`. */
+export type FileStoreRecordCell = Writable<
+  FileStoreRecord | Default<Record<PropertyKey, never>>
+>;
+
+/**
+ * Names a new store as the root's, unless the root names one already, in which
+ * case it changes nothing, as it does bound to no record at all. The store is
+ * a piece in the root's own space, as a pattern a handler calls is. Whatever
+ * may write the root may call this; the space's access list decides.
+ */
+export const ensureFileStore = handler<
+  void,
+  { fileStore?: FileStoreRecordCell }
+>((_, { fileStore }) => {
+  if (fileStore === undefined || fileStore.get().store !== undefined) return;
+  fileStore.set({ store: FileStore({}) });
+});
+
 export default FileStore;

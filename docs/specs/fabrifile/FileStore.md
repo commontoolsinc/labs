@@ -14,6 +14,14 @@ the store the first time something needs it, from a handler of its own, such as
 `ensureFileStore`. A root that declares no `fileStore` offers none, and a
 pattern or client that needs one there has nowhere to put files.
 
+`store.tsx` gives a root both halves. `FileStoreRecord` is where the root keeps
+the link: a record holding it in `store`, absent until the store is created,
+rather than the link itself, because a handler's cell for a field holding a
+link writes through the link. `ensureFileStore`, bound to that record, creates
+the store as a piece in the root's space and names it there, and changes
+nothing when the record names one already, which is what keeps a root from
+replacing its store.
+
 The link is set once, when the store is created, and never changes. Two stores
 in one space would be two sets of files with no rule for which a file belongs
 in, so a root MUST NOT replace its store, and nothing else in the space creates

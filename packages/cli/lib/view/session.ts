@@ -14,7 +14,7 @@ import type {
   TokenClass,
   ViewMode,
 } from "./model.ts";
-import type { Key } from "./keys.ts";
+import type { Key, MouseButton } from "./keys.ts";
 import { cpLen } from "./ansi.ts";
 import {
   blameKey,
@@ -25,6 +25,7 @@ import {
 import {
   blameColumnWidth,
   type DialogButton,
+  dialogButtonAt,
   type DialogState,
   DIFF_MARGIN_WIDTH,
   type DiffAnnotation,
@@ -138,6 +139,12 @@ interface BlameEntry {
   lines: readonly BlameLine[] | null;
 }
 
+/** A prompt button the mouse went down on, by its prompt and shortcut letter. */
+interface HeldButton {
+  readonly mode: Mode;
+  readonly hotkey: string;
+}
+
 type Mode =
   | "normal"
   | "search"
@@ -179,6 +186,14 @@ interface PeekOverlay {
 
 const HORIZONTAL_STEP = 8;
 const MOUSE_WHEEL_STEP = 3;
+
+/** The size of the push dialog's body, before it is shrunk to fit the screen:
+ * the 13 lines that pushing a new branch to GitHub typically prints, then a
+ * blank line and a summary whose pull request address wraps onto a row of its
+ * own, in columns as wide as the widest that GitHub's line offering a pull
+ * request needs. */
+const PUSH_ROWS = 16;
+const PUSH_COLUMNS = 80;
 
 /** Whether two search matches occupy the same displayed range. */
 function sameDisplayedMatch(a: Match, b: Match): boolean {
@@ -446,6 +461,14 @@ export class Session {
    * button row. Space and Enter activate it; it is reset to the default button
    * each time a prompt opens. */
   #dialogFocus = 0;
+
+  /**
+   * The button the mouse went down on and has not yet come up from, drawn pushed
+   * until it does; null when none is held. A button its prompt no longer shows
+   * is no longer held, as when Close replaces Abort once a push ends, or an
+   * interrupt opens the save prompt.
+   */
+  #held: HeldButton | null = null;
 
   /** What the active save prompt does on confirm. */
   #savePromptThen: "quit" | null = null;
@@ -1214,7 +1237,7 @@ export class Session {
     const focus = this.#dialogFocus < 0
       ? -1
       : clamp(this.#dialogFocus, 0, Math.max(0, dialog.buttons.length - 1));
-    return { ...dialog, focus };
+    return { ...dialog, focus, pushed: this.#indexOfHeld(dialog, this.#held) };
   }
 
   /** Rest the current prompt's Tab focus on its default button, called as each
@@ -1233,9 +1256,9 @@ export class Session {
   }
 
   /** The push dialog: as much of the end of git's output as fits, then how the
-   * push ended, at the size of the screen so that it holds still as the output
-   * grows. Abort stops the push; once it ends, Close takes the dialog down and
-   * Quit closes the viewer. */
+   * push ended, at a fixed size so that it holds still as the output grows.
+   * Abort stops the push; once it ends, Close takes the dialog down and Quit
+   * closes the viewer. */
   #pushDialog(): DialogState {
     const lines = this.#pushLines.at(-1) === ""
       ? this.#pushLines.slice(0, -1)
@@ -1243,25 +1266,31 @@ export class Session {
     const output = this.#pushSummary === ""
       ? lines
       : [...lines, "", this.#pushSummary];
-    // A line wider than the box wraps, so that an address at its end stays
-    // whole.
-    const columns = Math.max(1, this.width - 6);
+    // A line wider than the box wraps after its last space that fits, so that
+    // an address no wider than the box stays on one row, and a word wider than
+    // the box is broken. Git pads the lines a server sends with spaces when its
+    // output is not a terminal, and those would wrap onto rows of their own.
+    const columns = Math.max(1, Math.min(PUSH_COLUMNS, this.width - 8));
     const wrapped = output.flatMap((line) => {
-      const chars = [...line];
-      if (chars.length <= columns) return [line];
+      let chars = [...line.trimEnd()];
       const rowsOfLine: string[] = [];
-      for (let at = 0; at < chars.length; at += columns) {
-        rowsOfLine.push(chars.slice(at, at + columns).join(""));
+      while (chars.length > columns) {
+        const space = chars.lastIndexOf(" ", columns);
+        const words = chars.slice(0, space + 1).join("").trimEnd();
+        rowsOfLine.push(words || chars.slice(0, columns).join(""));
+        chars = chars.slice(words ? space + 1 : columns);
       }
+      rowsOfLine.push(chars.join(""));
       return rowsOfLine;
     });
-    const rows = Math.max(1, this.height - 7);
+    const rows = Math.max(1, Math.min(PUSH_ROWS, this.height - 7));
     const body = wrapped.slice(-rows);
     while (body.length < rows) body.push("");
     return {
       title: "Push",
       body,
       output: true,
+      width: columns,
       buttons: this.#abortPush
         ? [{ label: "Abort", hotkey: "a", kind: "cancel" }]
         : [
@@ -1359,6 +1388,14 @@ export class Session {
     this.pendingReveal = null;
     this.pendingPush = null;
     this.expireMessage();
+    // Every key but the release itself lets go of a held button.
+    const held = this.#held;
+    this.#held = null;
+    if (key.mouse) {
+      this.#chord = null;
+      this.#handleClick(key.mouse, held, beforeButtonAction);
+      return;
+    }
     if (key.name === "wheel-up" || key.name === "wheel-down") {
       this.#chord = null;
       this.#handleWheel(key.name === "wheel-up" ? -1 : 1);
@@ -4068,6 +4105,37 @@ export class Session {
     }
     if (index < 0 || index >= n) return; // an unbound key leaves the prompt up
     this.#activateButton(dialog, index, beforeButtonAction);
+  }
+
+  /**
+   * Focuses a prompt's button and holds it pushed when the mouse goes down on
+   * it, and activates it when the mouse comes up on the button it went down on.
+   * The mouse going down or coming up anywhere else does nothing.
+   */
+  #handleClick(
+    mouse: MouseButton,
+    held: HeldButton | null,
+    beforeButtonAction?: () => void,
+  ): void {
+    const dialog = this.#promptDialog();
+    if (!dialog) return;
+    const index = dialogButtonAt(this, dialog, mouse.x, mouse.y);
+    if (index < 0) return;
+    if (mouse.down) {
+      this.#dialogFocus = index;
+      this.#held = { mode: this.#mode, hotkey: dialog.buttons[index].hotkey };
+    } else if (index === this.#indexOfHeld(dialog, held)) {
+      this.#activateButton(dialog, index, beforeButtonAction);
+    }
+  }
+
+  /**
+   * Returns the index of `held` among the buttons of `dialog`, the prompt now
+   * up, or -1 when that prompt does not show it.
+   */
+  #indexOfHeld(dialog: DialogState, held: HeldButton | null): number {
+    if (held?.mode !== this.#mode) return -1;
+    return dialog.buttons.findIndex((b) => b.hotkey === held.hotkey);
   }
 
   /** Capture a prompt button's pushed frame, let the driver paint it, then run
