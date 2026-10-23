@@ -259,24 +259,23 @@ export const FabriChatMessageRow = pattern<
   // every message's place at once, from its messages alone, so whichever
   // runtime runs the room computes them for every viewer. The row reads its
   // own, and runs again only when that one changes.
-  const thread = computed(() => {
+  const thread = computed((): { label: string; display: ChatDisplay } => {
     const key = viewKeyOf(message);
     const replies =
       (key === undefined ? undefined : places.key(key).get())?.replies ?? 0;
     return {
       label: replies === 1 ? "1 reply" : `${replies} replies`,
-      display:
-        (!inThread && replies > 0 ? "inline-flex" : "none") as ChatDisplay,
+      display: !inThread && replies > 0 ? "inline-flex" : "none",
     };
   });
   // What differs by viewer or by session is shown or hidden through a prop,
   // never by building a different tree: a branch chosen per viewer is stored
   // once for everyone, and runtimes that chose differently overwrite each
   // other without end. Each element shown or hidden this way also carries a
-  // static `hidden`, which keeps it out of view until its display computed has
-  // a value and is outranked by that value once it has one, so an element
-  // whose computed has yet to run stays hidden. A computed that reads the
-  // viewer's or the session's state has a value only once a runtime acting
+  // static `hidden`, which keeps it out of view until the computed holding its
+  // display has a value and is outranked by that value once it has one, so an
+  // element whose computed has yet to run stays hidden. A computed that reads
+  // the viewer's or the session's state has a value only once a runtime acting
   // for that viewer runs the room, which one that only renders it does not,
   // so which rows the main conversation holds, which every viewer is shown,
   // is decided from the room's messages alone, by the room.
@@ -289,7 +288,13 @@ export const FabriChatMessageRow = pattern<
   // What the viewer may do follows the rule the room's handlers admit an act
   // by, and none of it while they can't write in the room. The rule reads the
   // message's author and body, and is handed those two alone.
-  const viewer = computed(() => {
+  const viewer = computed((): {
+    tallies: ReactionTally[];
+    canEdit: boolean;
+    editDisplay: ChatDisplay;
+    deleteDisplay: ChatDisplay;
+    obliterateDisplay: ChatDisplay;
+  } => {
     const key = entityKeyOf(message.resolveAsCell()) ?? "unsaved";
     const record = message.get();
     const rights = cannotWrite || myProfile?.get() === undefined
@@ -310,22 +315,25 @@ export const FabriChatMessageRow = pattern<
         `fabrichat-reactors-${key}`,
       ),
       canEdit: rights.canEdit,
-      editDisplay: (rights.canEdit ? "inline-flex" : "none") as ChatDisplay,
-      deleteDisplay: (rights.canDelete ? "inline-flex" : "none") as ChatDisplay,
-      obliterateDisplay:
-        (rights.canObliterate ? "inline-flex" : "none") as ChatDisplay,
+      editDisplay: rights.canEdit ? "inline-flex" : "none",
+      deleteDisplay: rights.canDelete ? "inline-flex" : "none",
+      obliterateDisplay: rights.canObliterate ? "inline-flex" : "none",
     };
   });
-  // An open editor closes once the message no longer takes an edit from the
-  // viewer, as when an OWNER deletes it.
-  const session = computed(() => {
+  // What the session has open on the message: its editor, which closes once
+  // the message no longer takes an edit from the viewer, as when an OWNER
+  // deletes it, and its reaction picker.
+  const session = computed((): {
+    editorDisplay: ChatDisplay;
+    pickerDisplay: ChatDisplay;
+    pickerLabel: string;
+  } => {
     const editing = composer.get()?.editing;
     const isEditing = editing !== undefined && equals(editing, message);
     const pickerShown = pickerOpen.get() === true;
     return {
-      editorDisplay:
-        (isEditing && viewer.canEdit ? "block" : "none") as ChatDisplay,
-      pickerDisplay: (pickerShown ? "flex" : "none") as ChatDisplay,
+      editorDisplay: isEditing && viewer.canEdit ? "block" : "none",
+      pickerDisplay: pickerShown ? "flex" : "none",
       pickerLabel: pickerShown ? "✕" : "☺+",
     };
   });
