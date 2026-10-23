@@ -298,10 +298,12 @@ export class ViewReplicationClient {
     const state = this.#spaces.get(space);
     if (state === undefined || !this.active(space)) return () => false;
     const producers = state.producers;
-    // A proof is synchronous. Its memo belongs to this pass so a later read
-    // or commit rechecks both replica values and local producer state.
+    // The memo lasts as long as the checker. A transaction's reads share one,
+    // and each validation pass makes its own, so a commit rechecks both
+    // replica values and local producer state.
     const checked = new Map<string, boolean>();
     const visiting = new Set<string>();
+    const writersOf = new Map<ViewValueBasis, Set<string>>();
     const matches = (basis: ViewValueBasis) => this.#matches(state, basis);
     const current = (producerId: string): boolean => {
       const known = checked.get(producerId);
@@ -333,13 +335,17 @@ export class ViewReplicationClient {
           !producer.basis.reads.every(matches)
         ) return false;
         for (const read of producer.basis.reads) {
-          const address = {
-            ...read,
-            id: read.id as IMemorySpaceAddress["id"],
-            space,
-            type: "application/json" as const,
-          };
-          for (const ancestor of this.producers(address)) {
+          let writers = writersOf.get(read);
+          if (writers === undefined) {
+            writers = this.producers({
+              ...read,
+              id: read.id as IMemorySpaceAddress["id"],
+              space,
+              type: "application/json",
+            });
+            writersOf.set(read, writers);
+          }
+          for (const ancestor of writers) {
             if (ancestor !== producerId && !current(ancestor)) return false;
           }
         }

@@ -233,9 +233,10 @@ local overlay; the output must match too. Basis dependencies wake parked
 consumers when a side input changes, even if its producer cannot run locally.
 The client indexes admitted inputs and producer write surfaces by document and
 scope for each accepted plan. A synchronous currency proof checks each reached
-producer once and records its basis as wake dependencies. Proof results are
-discarded at the end of that validation pass, so a later read or commit
-validates current replica and local scheduler state again. Fingerprints may be
+producer once and records its basis as wake dependencies. The reads of one
+transaction share a proof, and each validation pass makes its own, so a commit
+validates current replica and local scheduler state again and fails a read an
+earlier proof let through before that state changed. Fingerprints may be
 reused for an unchanged primitive or a value proven deeply frozen. Every check
 still observes the current value and path reachability. Mutable values are
 rehashed.

@@ -333,6 +333,13 @@ export class Scheduler {
   readonly #pending = new Set<Action>();
   #dependencies = new WeakMap<Action, ReactivityLog>();
   #viewConsumers = new Map<MemorySpace, Set<string>>();
+  /** Active view nodes by node id in each space, as of a registry membership. */
+  #viewNodeIndex:
+    | {
+      membership: number;
+      bySpace: Map<MemorySpace, Map<string, SchedulerNode>>;
+    }
+    | undefined;
   #viewOutcomes = new WeakMap<
     Action,
     Map<string, {
@@ -2112,13 +2119,7 @@ export class Scheduler {
     ) return;
     const views = this.runtime.viewReplication;
     const generation = views.version(piece.space);
-    const producers = new Map([...this.#nodes.nodes()].flatMap((node) => {
-      const annotated = node.action as Partial<TelemetryAnnotations>;
-      return annotated.viewPiece?.space === piece.space &&
-          annotated.viewNodeId !== undefined
-        ? [[annotated.viewNodeId, node] as const]
-        : [];
-    }));
+    const producers = this.#viewNodes(piece.space);
     if (!usesLocalReads(tx)) {
       restrictToLocalReads(tx.tx, () => {
         const producerCurrent = views.createProducerCheck(
@@ -2166,6 +2167,28 @@ export class Scheduler {
         views.version(piece.space) === generation &&
         views.eligible(piece.space, id) && views.pieceCurrent(piece),
     );
+  }
+
+  /**
+   * The space's active view nodes by node id, indexed again only after a node
+   * joins or leaves the active set.
+   */
+  #viewNodes(space: MemorySpace): ReadonlyMap<string, SchedulerNode> {
+    if (this.#viewNodeIndex?.membership !== this.#nodes.membership) {
+      const bySpace = new Map<MemorySpace, Map<string, SchedulerNode>>();
+      for (const node of this.#nodes.nodes()) {
+        const annotated = node.action as Partial<TelemetryAnnotations>;
+        const nodeSpace = annotated.viewPiece?.space;
+        if (nodeSpace === undefined || annotated.viewNodeId === undefined) {
+          continue;
+        }
+        let nodes = bySpace.get(nodeSpace);
+        if (nodes === undefined) bySpace.set(nodeSpace, nodes = new Map());
+        nodes.set(annotated.viewNodeId, node);
+      }
+      this.#viewNodeIndex = { membership: this.#nodes.membership, bySpace };
+    }
+    return this.#viewNodeIndex.bySpace.get(space) ?? new Map();
   }
 
   /** A local producer is current only after a successful completed attempt. */
