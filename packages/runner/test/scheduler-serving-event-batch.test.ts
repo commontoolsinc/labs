@@ -210,25 +210,6 @@ describe("scheduler serving event batch", () => {
     };
   }
 
-  it("settles a write from elsewhere while the settle a pass deferred waits on its parked head", async () => {
-    // The deferral holds back the derivations the pass's own events dirtied,
-    // to run once behind the parked head; a write that did not come from
-    // those events is settled in the next pass, with them, while the park
-    // still holds.
-    const env = await parkingRuntime();
-    env.runtime.scheduler.queueEvent(env.writing, { value: 1 });
-    env.runtime.scheduler.queueEvent(env.parking, {});
-    await env.pass();
-    expect(env.derived).toEqual([0]);
-
-    env.latch();
-    const write = env.runtime.edit();
-    env.slot.withTx(write).set(2);
-    await write.commit().settled;
-    await env.pass();
-    expect(env.derived).toEqual([0, 2]);
-  });
-
   it("keeps the settle a pass deferred waiting through a pass that only queued another event behind the parked head", async () => {
     // An event queued behind the parked head dirties nothing, so the pass it
     // asks for leaves the deferred settle to the park's end, which settles

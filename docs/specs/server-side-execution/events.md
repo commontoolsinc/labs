@@ -223,50 +223,50 @@ handler fires
   question of whether the existing across-stream order binds across
   pieces.
 - **Batching is at the COMMIT level only (D-v2-2, ruled 2026-08-02)**:
-  the wave commits once, at scheduler idle, with `consequenceOf`
-  listing every event processed. Handler-visible semantics are
-  UNCHANGED from today's client: handlers run eagerly, but only after
-  preflight makes any dirty state inputs current (D-v2-2) — the
-  scheduler recomputes a dirty computed input on demand before the
-  handler that reads it runs (`isInvalidNode` in
-  `event-preflight-dependencies.ts` — preflight recomputes an input
-  that is invalid OR has never run, so the lazy-computed case is
-  literally in the code; CT-1795's staleness park is an extra gate on
-  top) — the common case being not rapid-fire but a lazy computed
-  nothing has pulled yet, which the handler must and does see fresh.
-  Handlers never read last-wave state: events drain as part of regular
-  execution — the loop is simply not idle until all events are
-  processed — and the preflight ahead of each dispatch makes the inputs
-  a handler reads current. Within that rule the serving scheduler's
-  pass takes every ready event behind the head as well, each through
-  its own preflight, and settles the derivations once behind all of
-  them (`facade.ts`, `#processExecuteEventPhases`): the demanded
+  the wave commits once, at scheduler idle, with `consequenceOf` listing
+  every event processed. Handler-visible semantics are UNCHANGED from
+  today's client: handlers run eagerly, but only after preflight makes
+  any dirty state inputs current (D-v2-2) — the scheduler recomputes a
+  dirty computed input on demand before the handler that reads it runs
+  (`isInvalidNode` in `event-preflight-dependencies.ts` — preflight
+  recomputes an input that is invalid OR has never run, so the
+  lazy-computed case is literally in the code; CT-1795's staleness park
+  is an extra gate on top) — the common case being not rapid-fire but a
+  lazy computed nothing has pulled yet, which the handler must and does
+  see fresh. Handlers never read last-wave state: events drain as part
+  of regular execution — the loop is simply not idle until all events
+  are processed — and the preflight ahead of each dispatch makes the
+  inputs a handler reads current. Within that rule the serving
+  scheduler's pass takes every ready event behind the head as well, each
+  through its own preflight, and settles the derivations once behind all
+  of them (`facade.ts`, `#processExecuteEventPhases`): the demanded
   derivations several events invalidate run once per pass rather than
   once per event. A head the preflight parks on its loads, behind events
   the pass already ran, ends the pass without its settle: the pass that
   the park's end queues dispatches it and settles behind it, and the
-  continuation queues no pass for the work that waits. The park ends when
+  continuation queues no pass for the work that waits. A pass something
+  else asks for while the park holds defers the same way, so a write
+  from elsewhere waits for the park's end as well. The park ends when
   its loads settle, when one fails, or when a drop takes the parked head
   off the queue first, as the flush deadline's purge of an in-process
-  leftover does, and each of the three queues that pass. A head that parks
-  before the pass ran any handler leaves the settle to run as before.
-  The scheduler is not idle while a head is parked, so a serving cycle
-  whose flush deadline comes before the park ends commits the handlers'
-  writes, consequence marks included, a wave ahead of the derivations over
-  them. That is the deadline's trade (serving-loop.md §3: a consequence is
-  visible while the wave behind it keeps deriving), taken whenever a
-  park outlasts the deadline; W does not cover those inputs until the
-  derivations land. A client that runs the piece derives over the
-  consequence itself; a web client under view-scoped replication, which
-  runs none of it, shows the consequence a wave before the derived view.
-  That window is accepted for the batching it buys: settling at every
-  park instead would run the derivations once per parked event rather
-  than once over the events of a pass. An
-  event whose preflight finds an invalid input ends the run, so the
-  settle recomputes that input before the event dispatches. Undemanded
-  intermediates are skipped by pull-based
-  laziness as before; the wave's single derived commit carries every
-  event the pass took.
+  leftover does, and each of the three queues that pass. A head that
+  parks before the pass ran any handler leaves the settle to run as
+  before. The scheduler is not idle while a head is parked, so a serving
+  cycle whose flush deadline comes before the park ends commits the
+  handlers' writes, consequence marks included, a wave ahead of the
+  derivations over them. That is the deadline's trade (serving-loop.md
+  §3: a consequence is visible while the wave behind it keeps deriving),
+  taken whenever a park outlasts the deadline; W does not cover those
+  inputs until the derivations land. A client that runs the piece
+  derives over the consequence itself; a web client under view-scoped
+  replication, which runs none of it, shows the consequence a wave
+  before the derived view. That window is accepted for the batching it
+  buys: settling at every park instead would run the derivations once
+  per parked event rather than once over the events of a pass. An event
+  whose preflight finds an invalid input ends the run, so the settle
+  recomputes that input before the event dispatches. Undemanded
+  intermediates are skipped by pull-based laziness as before; the wave's
+  single derived commit carries every event the pass took.
 - Server enqueue goes through the scheduler facade (`facade.queueEvent`
   — the wake-shaping entry point), never raw `queueSchedulerEvent`, so
   server-enqueued events get the same shaping as client ones.

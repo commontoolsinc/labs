@@ -592,17 +592,6 @@ export class Scheduler {
   #settleDeferredForLoadPark = false;
 
   /**
-   * Whether an action was invalidated outside a pass's event phases while a
-   * settle was deferred to a load park: work the deferring pass's events did
-   * not dirty, which the next pass settles rather than leave it waiting on
-   * the park.
-   */
-  #invalidatedWhileDeferred = false;
-
-  /** Whether a pass is running its event phases. */
-  #runningEventPhases = false;
-
-  /**
    * How many event handlers the event phases have started. A phase that
    * moves past its head without starting one dropped or deferred it.
    */
@@ -2818,16 +2807,9 @@ export class Scheduler {
     if (this.runningPromise) await this.runningPromise;
 
     this.#beginExecuteCycle();
-    const invalidatedWhileDeferred = this.#invalidatedWhileDeferred;
-    this.#invalidatedWhileDeferred = false;
-    const deferredBefore = this.#settleDeferredForLoadPark &&
-      !invalidatedWhileDeferred;
-    this.#runningEventPhases = true;
+    const deferredBefore = this.#settleDeferredForLoadPark;
     const { eventBlockingDeps, dispatched } = await this
-      .#processExecuteEventPhases()
-      .finally(() => {
-        this.#runningEventPhases = false;
-      });
+      .#processExecuteEventPhases();
     // Under the serving posture a head the preflight parked on its loads,
     // behind events this pass dispatched, ends the pass without its settle:
     // the pass the park's end queues dispatches it and settles behind it,
@@ -2838,12 +2820,14 @@ export class Scheduler {
     // ahead of the derivations over them (events.md §2). A head that parks
     // again before this pass dispatched anything keeps a settle the previous
     // pass deferred waiting with it; one that parks with no batch ahead of it
-    // lets the settle run. So does a pass that finds work invalidated since a
-    // pass deferred, which those events did not dirty: a write from elsewhere
-    // waits on no park.
+    // lets the settle run. Every pass while the park holds defers, whatever
+    // asked for it, so a write from elsewhere waits for the park's end too,
+    // which a park reaches when its loads settle or fail: what invalidates
+    // between passes is mostly the park's own loads and the batch's commits,
+    // whose derivations the deferral exists to run once.
     this.#settleDeferredForLoadPark = this.runtime.servingPosture === true &&
-      !invalidatedWhileDeferred && (dispatched > 0 || deferredBefore) &&
-      eventBlockingDeps.size === 0 && this.#hasLoadParkedHeadEvent();
+      (dispatched > 0 || deferredBefore) && eventBlockingDeps.size === 0 &&
+      this.#hasLoadParkedHeadEvent();
     if (this.#settleDeferredForLoadPark) {
       this.#recordExecuteEndTelemetry();
       this.#applyExecuteContinuation();
@@ -3544,6 +3528,8 @@ export class Scheduler {
         return getEventPreflightTelemetryEnabled();
       },
       setRunningPromise: (promise) => {
+        // An event handler's run hands its promise here once, as it starts,
+        // so counting the hand-offs counts the handlers the phases ran.
         this.#eventHandlerRuns++;
         this.runningPromise = promise;
       },
@@ -3859,9 +3845,6 @@ export class Scheduler {
   ): void {
     const record = this.#nodes.get(action);
     if (!record) return;
-    if (this.#settleDeferredForLoadPark && !this.#runningEventPhases) {
-      this.#invalidatedWhileDeferred = true;
-    }
     markInvalidRecord(this.#nodes, action, cause, options);
     // A scheduler-owed retry (`options.retry`: a refused run re-queued after
     // its catch-up, or an empty rejection without an accepted result or live
@@ -4015,8 +3998,11 @@ export class Scheduler {
    * Ends the head event's load park, however it ends, and queues the pass
    * that runs what waited on it: the events behind the head, and a settle a
    * pass deferred to the park (`#settleDeferredForLoadPark`), for which no
-   * other pass is queued. A release, a failed load and a drop each end the
-   * park through here, so none of them can leave that settle unrun.
+   * other pass is queued. A release, a failed load and a drop through
+   * `#dropEvent()` each end the park through here. A drop the event phases
+   * make on their own leaves the park naming an event no longer at the head:
+   * no pass defers to it, its release finds it and ends it here, and the next
+   * head's park replaces it first.
    */
   #endHeadEventLoadPark(): void {
     this.#headEventLoadPark = null;
