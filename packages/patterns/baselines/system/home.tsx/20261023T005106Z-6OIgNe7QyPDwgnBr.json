@@ -2589,7 +2589,7 @@
                 "writeAuthorizedBy": {
                   "__ctWriterIdentityOf": {
                     "file": "/packages/patterns/system/shared-space-catalog.ts",
-                    "moduleIdentity": "UnmySU3DUdJRL9klxe4z77xdLTV9WWsv_JQ1Axn44zs",
+                    "moduleIdentity": "ByxVO10b6-aj7WVl6vl6-3mllYd_ymiamWaWNUoNfew",
                     "path": [
                       "registerSharedSpace"
                     ]
@@ -2600,7 +2600,7 @@
                 "writeAuthorizedBy": {
                   "__ctWriterIdentityOf": {
                     "file": "/packages/patterns/system/shared-space-catalog.ts",
-                    "moduleIdentity": "UnmySU3DUdJRL9klxe4z77xdLTV9WWsv_JQ1Axn44zs",
+                    "moduleIdentity": "ByxVO10b6-aj7WVl6vl6-3mllYd_ymiamWaWNUoNfew",
                     "path": [
                       "removeSharedSpace"
                     ]
@@ -2616,7 +2616,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/shared-space-catalog.ts",
-                  "moduleIdentity": "UnmySU3DUdJRL9klxe4z77xdLTV9WWsv_JQ1Axn44zs",
+                  "moduleIdentity": "ByxVO10b6-aj7WVl6vl6-3mllYd_ymiamWaWNUoNfew",
                   "path": [
                     "registerSharedSpace"
                   ]
@@ -2627,7 +2627,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/shared-space-catalog.ts",
-                  "moduleIdentity": "UnmySU3DUdJRL9klxe4z77xdLTV9WWsv_JQ1Axn44zs",
+                  "moduleIdentity": "ByxVO10b6-aj7WVl6vl6-3mllYd_ymiamWaWNUoNfew",
                   "path": [
                     "removeSharedSpace"
                   ]
