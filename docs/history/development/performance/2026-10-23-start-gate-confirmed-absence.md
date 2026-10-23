@@ -45,8 +45,10 @@ With the store read-through on, the replica had already asked the store for
 each such document and been told it holds nothing there. A name-sync could
 only ask the same question and get the same answer, while its pre-sync walk
 cost the start CPU: in an earlier profile of the serving worker over one
-burst, the pre-syncs took 2.1 s of 14.9 s busy, 14%, and 1.47 s of that was
-`#syncCrossSpaceReads` reading every node plan's inputs under its schema.
+burst, the pre-syncs took 2.15 s of its 14.0 s busy, 15%, and 1.46 s of that
+was `#syncCrossSpaceReads` reading every node plan's inputs under its schema.
+(Busy time here is the profile's sampled time less its idle samples, and a
+sample counts once if any pre-sync function is on its stack, as below.)
 
 ## The change
 
@@ -102,8 +104,7 @@ sample counts as a pre-sync once if any of the start path's sync functions is
 on its stack: `#syncCrossSpaceReads`, `#syncResumeInstanceNodes`,
 `#syncCellsForRunningPattern` and its inner half, `presyncInputs`,
 `#syncFamilyCell`, `#prepareCellsForRunningPattern` or `#nameFamilyBeforeRun`.
-The same count over the earlier profile of one burst reads 2.15 s of 14.0 s
-busy, 15%.
+That is the count the earlier profile's 15% comes from.
 
 Profiles of round 1's burst alone did not settle it. How much of the rows'
 start work fell inside the burst's window varied from run to run: without the

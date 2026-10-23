@@ -7727,6 +7727,11 @@ export class Runner {
       }
       return true;
     };
+    // The argument document holds the run even when the store reported it
+    // absent. Setup writes it in the transaction that writes the result
+    // linking to it, so with that result here such a report predates the
+    // write, and the name-sync reads the argument fresh where the run would
+    // read it missing and have its commit refused.
     if (!present(argumentLink)) return hold("the argument document");
     const presyncNamed =
       this.#presyncNamedInstances.get(familyKey) === entryKey;
