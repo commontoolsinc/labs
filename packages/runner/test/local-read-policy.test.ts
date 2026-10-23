@@ -8,7 +8,10 @@ import type { Server } from "@commonfabric/memory/v2/server";
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { Action, EventHandler } from "../src/scheduler/types.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import type {
+  IExtendedStorageTransaction,
+  URI,
+} from "../src/storage/interface.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import {
   assertLocalReadAvailable,
@@ -124,6 +127,49 @@ describe("local-read-policy", () => {
       await Promise.resolve();
       expect(validateLocalReadBasis(tx)).toBeUndefined();
       expect(checkers).toBe(11);
+    } finally {
+      tx.abort();
+    }
+  });
+
+  it("checks a transaction again when a frame lands between its pre-commit validation and the next", () => {
+    // What a frame brings can differ from what the passing validation's
+    // checker saw, so a replica's application of one ends the stretch the
+    // commit's own validations would otherwise stand on.
+    const store = new Map<string, { seq: number; value: string }>();
+    storage.installStoreReadThrough(space, ({ id, scopeKey }) => {
+      const entry = store.get(id);
+      return {
+        branch: "",
+        id,
+        scope: "space",
+        scopeKey,
+        ...(entry === undefined
+          ? { seq: 0, deleted: true as const }
+          : { seq: entry.seq, doc: { value: entry.value } }),
+      };
+    });
+    const replica = storage.open(space).replica;
+    const id = "of:frame-basis" as URI;
+    store.set(id, { seq: 1, value: "before" });
+    expect(replica.getDocument(id)?.value).toBe("before");
+    const tx = runtime.edit();
+    restrictToLocalReads(tx.tx, () => {
+      const seen = replica.getDocument(id)?.value;
+      return () => seen === "before";
+    });
+    try {
+      assertLocalReadAvailable(tx.tx, {
+        space,
+        id,
+        type: "application/json",
+        path: ["value"],
+      }, () => true);
+      expect(validateLocalReadBasisForCommit(tx)).toBeUndefined();
+      store.set(id, { seq: 2, value: "after" });
+      expect(storage.integrateStoreWrites(space, [{ id, scopeKey: "space" }]))
+        .toBe(1);
+      expect(validateLocalReadBasis(tx)).toBeInstanceOf(LocalReadUnavailable);
     } finally {
       tx.abort();
     }

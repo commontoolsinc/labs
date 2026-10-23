@@ -240,8 +240,9 @@ earlier proof let through before that state changed. The scheduler validates
 a run's transaction once just before committing it, and the validations the
 commit makes itself stand on that pass while the transaction reads and
 requires nothing new. Nothing they check can change between them: they share
-one synchronous stretch, which ends at the next microtask checkpoint and when
-the transaction hands its writes to the replica. Fingerprints may be
+one synchronous stretch, which ends at the next microtask checkpoint, when the
+transaction hands its writes to the replica, and when the replica applies a
+frame. Fingerprints may be
 reused for an unchanged primitive or a value proven deeply frozen. A check
 observes the current value and path reachability, except in the deep-frozen
 document version its basis value was last observed in, which can observe
