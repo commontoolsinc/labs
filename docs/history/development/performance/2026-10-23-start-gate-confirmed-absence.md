@@ -128,3 +128,9 @@ links in what it holds through a read transaction of its own, since the
 probe's transaction checked the argument out absent and reads it that way.
 This was not measured: a start meets it only in the feed's lag, which none of
 the runs above was timed in.
+
+The re-read applies a frame from inside the gate, and a frame's storage
+notification reaches its subscribers before the re-read returns. The
+scheduler's subscriber marks the readers of what changed and queues a pass, so
+no action runs between the gate's probes; `engine-read-through.test.ts` holds
+both halves.
