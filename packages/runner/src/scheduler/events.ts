@@ -906,6 +906,21 @@ function chainOnCommit(
   return chained;
 }
 
+/**
+ * Starts the piece an event's stream belongs to, starting first the pieces
+ * its inputs come from (`EnsurePieceOptions.startInputSources`). A stream a
+ * nested pattern defines belongs to the nested instance, whose handler reads
+ * what the instance enclosing it derives.
+ */
+function startEventPiece(
+  runtime: Runtime,
+  eventLink: NormalizedFullLink,
+): Promise<EnsurePieceVerdict> {
+  return ensurePieceRunningVerdict(runtime, eventLink, {
+    startInputSources: true,
+  });
+}
+
 export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   readonly eventLink: NormalizedFullLink;
   readonly event: unknown;
@@ -1086,11 +1101,10 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
         while (true) {
           const rechecking = wait !== undefined;
           if (!rechecking) attempts++;
-          const verdict = await (state.loadPieceForEvent ??
-            ensurePieceRunningVerdict)(
-              state.runtime,
-              args.eventLink,
-            );
+          const verdict = await (state.loadPieceForEvent ?? startEventPiece)(
+            state.runtime,
+            args.eventLink,
+          );
           // The origin may have failed while the piece was loading.
           if (
             queuedEvent.finalOutcomeNotified ||
