@@ -979,6 +979,20 @@ export interface IStorageProvider {
    */
   presentCount?(absences: readonly UnexaminedAbsence[]): number;
 
+  /**
+   * Whether the store read-through, asked for the instance `address` names
+   * under `identity`, reported holding nothing there, with no write to it
+   * reported since. Such an absence stays unexamined for commit to
+   * reconcile ({@link unexaminedAbsences}), but asking the store for the
+   * document again returns the same answer until the feed reports a write.
+   * Optional: a provider with no read-through may leave it out, which a
+   * caller reads as no such report.
+   */
+  storeReportedAbsent?(
+    address: { id: URI; scope?: CellScope },
+    identity?: ScopeKeyIdentity,
+  ): boolean;
+
   /** INBOUND settlement only (server-execution v2 stage F): outstanding
    * watch refreshes/pulls, EXCLUDING commit settlement AND update
    * processing — the serving loop's wave-settle barrier. Both exclusions
