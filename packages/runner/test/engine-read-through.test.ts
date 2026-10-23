@@ -685,6 +685,71 @@ describe("engine-read-through", () => {
     }
   });
 
+  it("refuses a commit that read an absence the store has since filled, and commits one that reads the document again once the feed reports the write", async () => {
+    // The window the feed's lag leaves: the store holds the document while
+    // this replica still reports it absent, so a run that was not held for
+    // it reads it as missing. The read goes out as a claim that no such
+    // document exists, and the server refuses it. The serving loop runs a
+    // refused run again; here the test makes the attempt twice, either side
+    // of the feed's report.
+    const engine = await server.engineForSpace(space);
+    const manager = SharedServerStorageManager.connectTo(server, {
+      as: serviceSigner,
+    });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: manager,
+    });
+    try {
+      manager.installStoreReadThrough(space, engineReadThrough(engine));
+      const provider = manager.open(space);
+      const id = "of:filled-late" as URI;
+      expect(provider.replica.getDocument(id)).toBeUndefined();
+      expect(provider.storeReportedAbsent?.({ id })).toBe(true);
+      const creating = clientRuntime.edit();
+      clientRuntime.getCellFromLink<{ made: boolean }>({ id, space, path: [] })
+        .withTx(creating).set({ made: true });
+      expect((await creating.commit().settled).error).toBeUndefined();
+      expect(provider.storeReportedAbsent?.({ id })).toBe(true);
+
+      // Each attempt writes a document of its own, so the second is not a
+      // dependent of the first's refused layer, which a rejection repair
+      // drops only once the frame it waits for arrives.
+      const attempt = async (name: string) => {
+        const verdict = runtime.getCell<string>(space, name, {
+          type: "string",
+        });
+        const tx = runtime.edit();
+        const value = runtime.getCellFromLink<unknown>({ id, space, path: [] })
+          .withTx(tx).get();
+        verdict.withTx(tx).set(value === undefined ? "absent" : "present");
+        return { value, verdict, result: await tx.commit().verdict };
+      };
+      const refused = await attempt("filled-late verdict 1");
+      expect(refused.value).toBeUndefined();
+      expect(refused.result.error?.name).toBe("ConflictError");
+      expect(
+        (refused.result.error as { conflict?: { of?: string } }).conflict?.of,
+      ).toBe(id);
+
+      expect(
+        manager.integrateStoreWrites(space, [{ id, scopeKey: "space" }]),
+      ).toBe(1);
+      expect(provider.storeReportedAbsent?.({ id })).toBe(false);
+      const repeated = await attempt("filled-late verdict 2");
+      expect(repeated.value).toEqual({ made: true });
+      expect(repeated.result.error).toBeUndefined();
+      expect(
+        provider.replica.getDocument(
+          repeated.verdict.getAsNormalizedFullLink().id,
+        )?.value,
+      ).toBe("present");
+    } finally {
+      await runtime.dispose();
+      await manager.close();
+    }
+  });
+
   it("integrates a feed refresh at the seq a local commit already confirmed, since the store's document may carry what the commit merged", async () => {
     // A commit of this replica's own write promotes its record to the
     // commit's seq with the value it materialized locally; the store's
