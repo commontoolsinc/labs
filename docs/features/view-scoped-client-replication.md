@@ -148,9 +148,12 @@ execution demand. Ordinary watch additions extend the demand graph and deliver
 differences against the session's current delivery state. A selection that
 adds delivery roots to a view and takes none away extends the view's support
 graph by the added roots within the next incremental refresh, over the demand
-graph that refresh keeps current. A full view replacement or recovery rebuilds
-the graphs, as does a selection that drops a delivered root, since only a full
-evaluation diffs the departed document out. A selection that changes only what
+graph that refresh keeps current. A selection that drops a delivered root
+rebuilds the view's support graphs from the current selections over the demand
+graphs, which the same pass first refreshes by its dirty documents, and diffs
+the session's delivery against the result, so the departed documents are
+removed without the demand being walked again. A full view replacement or
+recovery rebuilds every graph. A selection that changes only what
 the view may run or adopt leaves the graphs standing: its plans ride the
 session's next frame, a frame of plans alone when nothing dirtied it. A frame carries the plans when they are owed, by
 such a selection or by a rebuilt graph; an incremental frame that owes none

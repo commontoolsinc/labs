@@ -878,7 +878,7 @@ describe("view interests", () => {
     expect(ids).toEqual(["of:ordinary"]);
   });
 
-  it("re-evaluates the watch set for a plan that drops a delivered root", async () => {
+  it("rebuilds only the support graphs for a plan that drops a delivered root", async () => {
     await set([], [view()]);
     const [{ handle }] = server.viewInterestsForSpace(space);
     await server.setViewSelection(space, handle, {
@@ -893,9 +893,16 @@ describe("view interests", () => {
         generation: 2,
         delivery: [query("of:support")],
       });
+      expect(evaluations.calls).toHaveLength(1);
       await server.flushSessions();
-      // The validation of the new delivery and the pass's full evaluation.
-      expect(evaluations.calls.length).toBeGreaterThan(1);
+      // The pass evaluates the support watches, and the view's demand not
+      // at all.
+      const passWatches = evaluations.calls.slice(1).flatMap((call) =>
+        call.args[1].map((watch) => watch.id)
+      );
+      expect(passWatches.length).toBeGreaterThan(0);
+      expect(passWatches.every((id) => id.startsWith("view-support:")))
+        .toBe(true);
     } finally {
       evaluations.restore();
     }
@@ -907,7 +914,31 @@ describe("view interests", () => {
     expect(removed).toEqual(["of:ordinary"]);
   });
 
-  it("re-evaluates the watch set for a plan that keeps a root under another selector", async () => {
+  it("delivers a demand change in the pass that rebuilds the support graphs", async () => {
+    await set([watch("of:ordinary")], [view()]);
+    const [{ handle }] = server.viewInterestsForSpace(space);
+    await server.setViewSelection(space, handle, {
+      generation: 1,
+      delivery: [query("of:support"), query("of:extra")],
+    });
+    await server.flushSessions();
+    messages.length = 0;
+    await server.writeDocument(space, "of:ordinary", { label: "updated" });
+    await server.setViewSelection(space, handle, {
+      generation: 2,
+      delivery: [query("of:support")],
+    });
+    await server.flushSessions();
+    const effects = messages.flatMap((message) =>
+      message.type === "session/effect" ? [message.effect] : []
+    );
+    expect(effects.flatMap((effect) => effect.upserts.map((entry) => entry.id)))
+      .toContain("of:ordinary");
+    expect(effects.flatMap((effect) => effect.removes.map((entry) => entry.id)))
+      .toEqual(["of:extra"]);
+  });
+
+  it("rebuilds only the support graphs for a plan that keeps a root under another selector", async () => {
     await set([], [view()]);
     const [{ handle }] = server.viewInterestsForSpace(space);
     await server.setViewSelection(space, handle, {
@@ -918,8 +949,8 @@ describe("view interests", () => {
     const evaluations = spy(server, "evaluateWatchSet");
     try {
       // The root's id stays and its selector changes, beside an added root:
-      // the documents the old selector reached are diffed out only by a full
-      // evaluation, so this is not a delivery that only grew.
+      // what the old selector reached leaves only with a fresh support
+      // graph, so this is not a delivery that only grew.
       await server.setViewSelection(space, handle, {
         generation: 2,
         delivery: [{
@@ -931,7 +962,12 @@ describe("view interests", () => {
       });
       expect(evaluations.calls).toHaveLength(1);
       await server.flushSessions();
-      expect(evaluations.calls.length).toBeGreaterThan(1);
+      const passWatches = evaluations.calls.slice(1).flatMap((call) =>
+        call.args[1].map((watch) => watch.id)
+      );
+      expect(passWatches.length).toBeGreaterThan(0);
+      expect(passWatches.every((id) => id.startsWith("view-support:")))
+        .toBe(true);
     } finally {
       evaluations.restore();
     }

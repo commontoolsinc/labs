@@ -111,16 +111,24 @@ export type SessionState = {
    * or adopt without changing what they are delivered: the next frame
    * carries the new plans, over the incremental refresh, and a session
    * nothing dirtied gets a frame of plans alone. Cleared as that frame is
-   * built. A changed delivery takes `forceFullResync` instead. */
+   * built. A changed delivery takes `viewSupportGrown` or
+   * `viewSupportReplaced` as well. */
   viewPlansPending: boolean;
 
   /** Set when a planner selection added delivery roots to a view and took
    * none away: the next pass extends the view's support graph by the added
    * roots, inside the incremental refresh, instead of re-evaluating the
    * whole watch set. Cleared as that pass commits. A selection that removes
-   * a root takes `forceFullResync`, since only a full evaluation diffs a
-   * departed document out. */
+   * a root takes `viewSupportReplaced`. */
   viewSupportGrown: boolean;
+
+  /** Set when a planner selection took a delivery root away from a view of
+   * the same revision: the next pass refreshes the demand graphs by its
+   * dirty batch, rebuilds the support graphs from the current selections
+   * over them, and diffs the session's delivery against the result, as a
+   * full evaluation does, so the departed documents are removed without
+   * the demand being walked again. Cleared as that pass begins. */
+  viewSupportReplaced: boolean;
 
   /** Set once this session was admitted an explicit `entity_scope_key`
    * read (protocol.md §2's read row — lease holders only), and STICKY
@@ -387,6 +395,7 @@ export class SessionRegistry {
       forceFullResync: existing?.forceFullResync ?? false,
       viewPlansPending: existing?.viewPlansPending ?? false,
       viewSupportGrown: existing?.viewSupportGrown ?? false,
+      viewSupportReplaced: existing?.viewSupportReplaced ?? false,
       ...(existing?.leaseHolderReads === true
         ? { leaseHolderReads: true }
         : {}),
@@ -526,6 +535,7 @@ export class SessionRegistry {
     session.forceFullResync = true;
     session.viewPlansPending = false;
     session.viewSupportGrown = false;
+    session.viewSupportReplaced = false;
   }
 
   detach(space: string, sessionId: string, ownerConnectionId: string): void {

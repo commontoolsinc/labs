@@ -6618,18 +6618,24 @@ export class Server {
         revision: handle.revision,
       });
       // A delivery that only grew extends the view's support graph on the
-      // next pass; one that dropped a root rebuilds the graphs, since only a
-      // full evaluation diffs the departed document out.
+      // next pass; one that dropped a root rebuilds the support graphs over
+      // the demand graphs the session holds, and diffs the departed
+      // documents out. A view's first selection evaluates everything.
       if (sameDelivery(previous)) {
         session!.viewPlansPending = true;
       } else if (
-        previous !== undefined && previous.revision === handle.revision &&
-        isSubset(
-          deliveryRootKeys(previous.delivery),
-          deliveryRootKeys(selection.delivery),
-        )
+        previous !== undefined && previous.revision === handle.revision
       ) {
-        session!.viewSupportGrown = true;
+        if (
+          isSubset(
+            deliveryRootKeys(previous.delivery),
+            deliveryRootKeys(selection.delivery),
+          )
+        ) {
+          session!.viewSupportGrown = true;
+        } else {
+          session!.viewSupportReplaced = true;
+        }
         session!.viewPlansPending = true;
       } else {
         session!.forceFullResync = true;
@@ -6705,6 +6711,52 @@ export class Server {
       entities: this.#entriesFromGraphs(graphs.values(), identity),
       demandGraphs: demand.graphs,
       demandEntities: demand.entities,
+    };
+  }
+
+  /**
+   * Rebuilds a view session's support graphs from the planner's current
+   * selections over the demand graphs the session holds, after refreshing
+   * those by `dirtyIds`, the batch the pass would otherwise have refreshed
+   * incrementally: the full evaluation's result for a session whose
+   * delivery dropped a root, without walking its demand again.
+   */
+  async #reevaluateViewSupport(
+    session: SessionState,
+    dirtyIds: ReadonlySet<string> | undefined,
+  ) {
+    this.#assertRoutedAuthority(session);
+    const engine = await this.#openEngine(session.space);
+    this.#assertRoutedAuthority(session);
+    const identity = { principal: session.principal, sessionId: session.id };
+    if (dirtyIds !== undefined && dirtyIds.size > 0) {
+      for (const graph of session.viewDemandGraphs.values()) {
+        refreshTrackedGraph(session.space, engine, graph, dirtyIds);
+      }
+    }
+    const demandGraphs = session.viewDemandGraphs;
+    const selected = this.#viewSupportWatches(session, session.views);
+    const delivery = selected.length === 0
+      ? undefined
+      : await this.evaluateWatchSet(
+        session.space,
+        selected,
+        engine,
+        identity,
+      );
+    const graphs = new Map([...demandGraphs].map(([branch, graph]) => [
+      `view-demand:${branch}`,
+      graph,
+    ]));
+    for (const [branch, graph] of delivery?.graphs ?? []) {
+      graphs.set(`view-support:${branch}`, graph);
+    }
+    return {
+      serverSeq: delivery?.serverSeq ?? Engine.serverSeq(engine),
+      graphs,
+      entities: this.#entriesFromGraphs(graphs.values(), identity),
+      demandGraphs,
+      demandEntities: this.#entriesFromGraphs(demandGraphs.values(), identity),
     };
   }
 
@@ -8433,6 +8485,19 @@ export class Server {
     // below); restored on a throw so the re-arm's full evaluation is
     // not lost with the failed pass.
     let rearmedLeaseHolder = false;
+    const preCallViewSupportReplaced = session.viewSupportReplaced;
+    // A dropped delivery root rebuilds the support graphs over the demand
+    // graphs, which first take this pass's dirty batch; a full evaluation
+    // rebuilds both, so it owes no separate rebuild.
+    let supportReplaced: { dirtyIds?: ReadonlySet<string> } | undefined;
+    if (session.viewSupportReplaced) {
+      session.viewSupportReplaced = false;
+      if (!session.forceFullResync && session.views.length > 0) {
+        supportReplaced = { dirtyIds };
+        dirtyIds = undefined;
+        dirtyOrigins = undefined;
+      }
+    }
     if (session.forceFullResync) {
       // Rollback re-inserted tombstones for a lost frame's removes; only a
       // full evaluation re-diffs them out. Self-clearing (restored by the
@@ -8931,11 +8996,16 @@ export class Server {
           }
 
           const { serverSeq, graphs, entities, demandGraphs, demandEntities } =
-            await this.#evaluateViewWatchSet(
-              session,
-              session.watches,
-              session.views,
-            );
+            supportReplaced === undefined
+              ? await this.#evaluateViewWatchSet(
+                session,
+                session.watches,
+                session.views,
+              )
+              : await this.#reevaluateViewSupport(
+                session,
+                supportReplaced.dirtyIds,
+              );
           // protocol.md §3's applicable-set filter on the FULL
           // evaluation path: explicit foreign instances enter `entities`
           // only through admitted lease-holder reads, and the exemption
@@ -9050,8 +9120,11 @@ export class Server {
             // The full evaluation built the whole support graph, so a growth
             // an earlier selection owed is already in it.
             session.viewSupportGrown = false;
-            // The full evaluation walked every watch.
-            session.coveredWatchIds = new Set();
+            // The full evaluation walked every watch; a support rebuild
+            // kept the demand graphs, and with them the watches they cover.
+            if (supportReplaced === undefined) {
+              session.coveredWatchIds = new Set();
+            }
             session.entities = entities;
             this.#markCrossingsDelivered(session, newCrossings.keys);
             session.trackedIds = evaluatedTrackedIds;
@@ -9096,6 +9169,8 @@ export class Server {
             preCallForceFullResync;
           session.viewPlansPending = session.viewPlansPending ||
             preCallViewPlansPending;
+          session.viewSupportReplaced = session.viewSupportReplaced ||
+            preCallViewSupportReplaced;
           // A re-arm consumed by a throwing pass re-stages: the next
           // pass runs the full evaluation the lapse still owes.
           if (rearmedLeaseHolder) session.leaseHolderReadsLapsed = true;
@@ -10237,6 +10312,10 @@ export class Server {
 
       for (const space of spaces) {
         await this.#withSpacePublicationLock(space, async () => {
+          // A space a caller names that nothing dirtied has no batch to send:
+          // every write and every owed frame marks its space dirty, and an
+          // absent batch would otherwise read as one that dirtied everything.
+          if (!this.#dirtySpaces.has(space)) return;
           // Removed at its own processing turn (CT-1927): pre-deleting the
           // whole selection meant a failure mid-batch stranded every
           // not-yet-processed space — dirty maps intact but the space no
