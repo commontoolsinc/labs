@@ -2,7 +2,6 @@
 
 import type { JSONSchema } from "@commonfabric/api";
 import type { ScopeKeyIdentity, ViewInterest } from "@commonfabric/memory/v2";
-import { PathKeyMap } from "@commonfabric/utils/path-key-map";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import { type Cell, deepTraverse, isCell } from "./cell.ts";
@@ -41,7 +40,21 @@ type WalkedCell = ViewRenderReads & {
   children: NormalizedFullLink[];
   /** The reader the memo's index knows this cell's reads by. */
   reader: Action;
+  /** Each read's key, in `reads` order, as `addressKey` writes it. */
+  readKeys: string[];
+  /** Each shallow read's key, in `shallowReads` order. */
+  shallowReadKeys: string[];
+  /** Each child's key, in `children` order, as `linkKey` writes it. */
+  childKeys: string[];
 };
+
+/** Names one read address: its space, scope, document, and path. */
+const addressKey = (read: IMemorySpaceAddress): string =>
+  JSON.stringify([read.space, read.scope ?? "space", read.id, ...read.path]);
+
+/** Names one visible cell: the memo's key for it, and the walk's. */
+const linkKey = (link: NormalizedFullLink): string =>
+  JSON.stringify([link.space, link.scope, link.id, ...link.path]);
 
 /**
  * Keeps what a walk found at each visible cell, under one viewing identity,
@@ -147,51 +160,55 @@ export function collectViewRenderReads(
   const shallowReads: IMemorySpaceAddress[] = [];
   const bindings: IMemorySpaceAddress[] = [];
   const streams: NormalizedFullLink[] = [];
-  const visited = new PathKeyMap<boolean>();
   // A document two cells read is reported once, as one transaction's log
   // reports it; the consumers sort and compact what they need themselves.
-  const seenReads = new PathKeyMap<boolean>();
-  const seenShallowReads = new PathKeyMap<boolean>();
-  const addRead = (
+  const seenReads = new Set<string>();
+  const seenShallowReads = new Set<string>();
+  const addReads = (
     into: IMemorySpaceAddress[],
-    seen: PathKeyMap<boolean>,
-    read: IMemorySpaceAddress,
+    seen: Set<string>,
+    cellReads: readonly IMemorySpaceAddress[],
+    keys: readonly string[],
   ) => {
-    const key = [read.space, read.scope ?? "space", read.id, ...read.path];
-    if (seen.has(key)) return;
-    seen.set(key, true);
-    into.push(read);
+    for (let index = 0; index < cellReads.length; index++) {
+      if (seen.has(keys[index])) continue;
+      seen.add(keys[index]);
+      into.push(cellReads[index]);
+    }
   };
 
   const reached = new Set<string>();
 
-  function visitCell(link: NormalizedFullLink): void {
-    const key = [link.space, link.scope, link.id, ...link.path];
-    if (visited.has(key)) return;
-    visited.set(key, true);
-    const memoKey = JSON.stringify(key);
-    reached.add(memoKey);
-    let cell = memo?.get(memoKey);
+  function visitCell(link: NormalizedFullLink, key: string): void {
+    if (reached.has(key)) return;
+    reached.add(key);
+    let cell = memo?.get(key);
     if (cell === undefined) {
       cell = walkCell(runtime, link, identity);
-      memo?.set(memoKey, cell);
+      memo?.set(key, cell);
     }
-    for (const read of cell.reads) addRead(reads, seenReads, read);
-    for (const read of cell.shallowReads) {
-      addRead(shallowReads, seenShallowReads, read);
-    }
+    addReads(reads, seenReads, cell.reads, cell.readKeys);
+    addReads(
+      shallowReads,
+      seenShallowReads,
+      cell.shallowReads,
+      cell.shallowReadKeys,
+    );
     for (const binding of cell.bindings) bindings.push(binding);
     for (const stream of cell.streams) streams.push(stream);
-    for (const child of cell.children) visitCell(child);
+    for (let index = 0; index < cell.children.length; index++) {
+      visitCell(cell.children[index], cell.childKeys[index]);
+    }
   }
 
   for (const root of view.query.roots) {
-    visitCell({
+    const link: NormalizedFullLink = {
       space,
       id: root.id as NormalizedFullLink["id"],
       scope: root.scope ?? "space",
       path: root.selector.path,
-    });
+    };
+    visitCell(link, linkKey(link));
   }
   memo?.retainOnly(reached);
   return { reads, shallowReads, bindings, streams };
@@ -293,6 +310,9 @@ function walkCell(
       streams,
       children,
       reader: () => {},
+      readKeys: log.reads.map(addressKey),
+      shallowReadKeys: log.shallowReads.map(addressKey),
+      childKeys: children.map(linkKey),
     };
   } finally {
     tx.clearReadOnly?.();

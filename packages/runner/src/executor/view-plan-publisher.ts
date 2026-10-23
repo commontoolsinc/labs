@@ -26,7 +26,7 @@ import type {
   IStorageNotification,
   TransactionReactivityLog,
 } from "../storage/interface.ts";
-import { viewInputBasis, viewInputFingerprint } from "../view-input-basis.ts";
+import { viewInputBasisOf, viewInputFingerprint } from "../view-input-basis.ts";
 import {
   collectViewRenderReads,
   type ViewRenderReads,
@@ -38,7 +38,7 @@ import {
   type ViewExecutionNode,
 } from "../view-replication.ts";
 import type { HostMemoryServer } from "./host-memory-server.ts";
-import { ViewReadCache } from "./view-read-cache.ts";
+import { ViewReadCache, type ViewReadPart } from "./view-read-cache.ts";
 import { hasInlineCellScheme } from "../immutable-cell.ts";
 
 const logger = getLogger("view-replication");
@@ -79,6 +79,14 @@ export class ViewPlanPublisher {
    * document unchanged since the last plan, or shared by several viewing
    * sessions, is hashed once at each path. A version is a new object. */
   #fingerprints = new WeakMap<EntityDocument, Map<string, string>>();
+  /** Each producer's write surface and basis reads, sorted and compacted, by
+   * the observation they were taken from, so that a node that has not run
+   * again since the last plan sorts neither again. */
+  #surfaces = new WeakMap<TransactionReactivityLog, {
+    writes: readonly IMemorySpaceAddress[];
+    surface: IMemorySpaceAddress[];
+    reads: IMemorySpaceAddress[];
+  }>();
   #subscription: IStorageNotification = {
     next: (notification) => {
       for (const view of this.#views.values()) {
@@ -360,6 +368,24 @@ export class ViewPlanPublisher {
         const selectedProducers = candidates.filter((node) =>
           node.kind === "computation" && ancestorIds.has(node.id)
         );
+        const surfacesOf = (node: ViewExecutionNode) => {
+          let surfaces = this.#surfaces.get(node.log);
+          if (surfaces?.writes !== node.writes) {
+            surfaces = {
+              writes: node.writes,
+              surface: sortAndCompactPaths([
+                ...node.writes,
+                ...node.log.writes,
+              ]),
+              reads: sortAndCompactPaths([
+                ...node.log.reads,
+                ...node.log.shallowReads,
+              ]),
+            };
+            this.#surfaces.set(node.log, surfaces);
+          }
+          return surfaces;
+        };
         const selection: Selection = {
           delivery: [{ roots: [...roots.entries()].map(([, root]) => root) }],
           eligibleActions: view.mode === "speculate" ? selected.actions : [],
@@ -370,45 +396,50 @@ export class ViewPlanPublisher {
               : []
           ),
           inputs,
-          producers: selectedProducers.map((
-            node,
-          ) => ({
-            id: node.id,
-            writes: sortAndCompactPaths([...node.writes, ...node.log.writes])
-              .map(addressOf),
-            ...(node.current === true
-              ? {
-                basis: {
-                  reads: viewInputBasis(
-                    [...node.log.reads, ...node.log.shallowReads],
-                    documentAt,
-                    fingerprintOf,
-                  ),
-                  outputs: viewInputBasis(
-                    [...node.writes, ...node.log.writes],
-                    documentAt,
-                    fingerprintOf,
-                  ),
-                },
-              }
-              : {}),
-          })),
+          producers: selectedProducers.map((node) => {
+            const { surface, reads } = surfacesOf(node);
+            return {
+              id: node.id,
+              writes: surface.map(addressOf),
+              ...(node.current === true
+                ? {
+                  basis: {
+                    reads: viewInputBasisOf(reads, documentAt, fingerprintOf),
+                    outputs: viewInputBasisOf(
+                      surface,
+                      documentAt,
+                      fingerprintOf,
+                    ),
+                  },
+                }
+                : {}),
+            };
+          }),
         };
         // Fingerprints consume whole values even for shallow execution reads.
         // Install dependencies before publication awaits, so concurrent changes
         // invalidate this result rather than being forgotten when it returns.
-        cache.selection.set(true, {
-          reads: [
-            ...metadataReads.reads,
-            ...selectedProducers.flatMap((node) => [
-              ...node.log.reads,
-              ...node.log.shallowReads,
-              ...node.writes,
-              ...node.log.writes,
-            ]),
-          ],
-          shallowReads: metadataReads.shallowReads,
-        });
+        // Each producer is a part of its own, so a plan indexes again only the
+        // producers that ran since the last one.
+        const parts = new Map<string, ViewReadPart>([[
+          "",
+          {
+            reads: [metadataReads.reads],
+            shallowReads: [metadataReads.shallowReads],
+          },
+        ]]);
+        for (const node of selectedProducers) {
+          parts.set(node.id, {
+            reads: [
+              node.log.reads,
+              node.log.shallowReads,
+              node.writes,
+              node.log.writes,
+            ],
+            shallowReads: [],
+          });
+        }
+        cache.selection.setParts(true, parts);
         cache.execution = observed.map((node) => ({ ...node }));
         if (valueEqualByWalk(this.#published.get(key), selection)) continue;
         if (

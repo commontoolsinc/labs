@@ -50,7 +50,26 @@ export function viewInputBasis(
     path: readonly string[],
   ) => string = viewInputFingerprint,
 ): ViewValueBasis[] {
-  return sortAndCompactPaths(addresses).map((address) => ({
+  return viewInputBasisOf(
+    sortAndCompactPaths(addresses),
+    documentAt,
+    fingerprintOf,
+  );
+}
+
+/**
+ * The basis of addresses already sorted and compacted, as `viewInputBasis`
+ * sorts and compacts them, for a caller that keeps them so across bases.
+ */
+export function viewInputBasisOf(
+  addresses: readonly IMemorySpaceAddress[],
+  documentAt: (address: IMemorySpaceAddress) => EntityDocument | undefined,
+  fingerprintOf: (
+    document: EntityDocument | undefined,
+    path: readonly string[],
+  ) => string = viewInputFingerprint,
+): ViewValueBasis[] {
+  return addresses.map((address) => ({
     id: address.id,
     scope: address.scope ?? "space",
     path: [...address.path],
