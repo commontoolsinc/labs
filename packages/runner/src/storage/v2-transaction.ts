@@ -11,7 +11,6 @@ import {
   valueEqualByWalk,
 } from "@commonfabric/data-model";
 import {
-  type ApplyOpOperation,
   applyTextChanges,
   canResolveScopeKey,
   CODEMIRROR_CHANGESET_CODEC,
@@ -72,6 +71,7 @@ import type {
   NativeCommitOptions,
   NativeStorageCommit,
   NativeStorageCommitOperation,
+  NativeTextEdit,
   ReadError,
   Result,
   StorageTransactionFailed,
@@ -1883,8 +1883,8 @@ export class V2StorageTransaction implements IStorageTransaction {
    * applies at the version the field holds only while the field still holds
    * that value, so the server has nothing to merge it over.
    */
-  #textChangeOperations(space: MemorySpace): ApplyOpOperation[] {
-    const operations: ApplyOpOperation[] = [];
+  #textChangeOperations(space: MemorySpace): NativeTextEdit[] {
+    const operations: NativeTextEdit[] = [];
     for (const docKey of this.#textChanges.get(space)?.keys() ?? []) {
       const { id, scope } = this.#parseDocKey(docKey);
       const doc = this.#branches.get(space)?.docs.get(docKey);

@@ -3921,9 +3921,28 @@ export interface NativeStorageCommit {
    * carry are left out of the patch in `operations`, whose `value` still holds
    * them, so the local view shows the edited text while the store integrates
    * it.
+   *
+   * The replica shows that text ahead of the verdict, which is sound only for
+   * what the list holds: edits this transaction generated, one per field, each
+   * with no base and a hash of the value the transaction read, combining every
+   * change the transaction made to the field, and producing exactly the text
+   * its ordinary write left there. An accepted edit then yields that text and
+   * nothing else. A cursor-based edit, which the store rebases, a blind one, or
+   * a second operation on the same field would make the result unpredictable,
+   * and none of them belongs here; {@link NativeTextEdit} keeps out the first
+   * two.
    */
-  applyOps?: readonly ApplyOpOperation[];
+  applyOps?: readonly NativeTextEdit[];
 }
+
+/**
+ * An `apply-op` as a transaction's native commit carries it in
+ * {@link NativeStorageCommit.applyOps}: no base, and a hash of the value the
+ * transaction read.
+ */
+export type NativeTextEdit =
+  & Omit<ApplyOpOperation, "base" | "baselineHash">
+  & { base?: never; baselineHash: string };
 
 export type Activity = Variant<{
   read: IReadActivity;

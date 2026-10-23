@@ -177,6 +177,7 @@ import {
   IStorageTransactionInconsistent,
   NativeCommitOptions,
   NativeStorageCommit,
+  NativeTextEdit,
   PullError,
   PushError,
   ReplicaLoadFailureError,
@@ -558,7 +559,7 @@ const documentOperationsOf = (
 const storeOperationsOf = (
   operations: readonly NativeCommitOperation[],
   sqliteOps: readonly SqliteOperation[],
-  applyOps: readonly ApplyOpOperation[] = [],
+  applyOps: readonly NativeTextEdit[] = [],
 ): ClientCommit["operations"] => [
   ...operations.map((operation) => {
     switch (operation.op) {
@@ -589,11 +590,14 @@ const storeOperationsOf = (
  * `applyOps` edits is replaced by the text `operation.value` holds there. The
  * wire patch leaves that field to the edit, and the edit lands only on the
  * value its transaction read, so the store's result is that text, and the
- * layer replays to it.
+ * layer replays to it. That holds only for the edits
+ * {@link NativeStorageCommit.applyOps} admits, one per field and generated
+ * with the write that `value` records; a rebased or blind edit, or a second
+ * one on the field, has no result to show ahead of the verdict.
  */
 const withTextEditsShown = (
   operation: NativeCommitOperation,
-  applyOps: readonly ApplyOpOperation[],
+  applyOps: readonly NativeTextEdit[],
 ): NativeCommitOperation => {
   if (operation.op !== "patch" || applyOps.length === 0) return operation;
   const scope = normalizeCellScope(operation.scope);
@@ -7565,7 +7569,7 @@ export class SpaceReplica
       readonly identity?: ScopeKeyIdentity;
       readonly reads?: ClientCommit["reads"];
     },
-    applyOps: readonly ApplyOpOperation[] = [],
+    applyOps: readonly NativeTextEdit[] = [],
   ): SealedNativeCommit {
     // The tx→replica identity seam (server-execution v2 stage A, OW17): a
     // served per-instance run seals under ITS identity — its ops apply to
@@ -8264,7 +8268,7 @@ export class SpaceReplica
     preconditions: readonly CommitPrecondition[] = [],
     sqliteOps: readonly SqliteOperation[] = [],
     commitOptions?: NativeCommitOptions,
-    applyOps: readonly ApplyOpOperation[] = [],
+    applyOps: readonly NativeTextEdit[] = [],
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const activePreconditions = activeCommitPreconditions(preconditions);
     for (const pin of activePreconditions) {
