@@ -5579,9 +5579,9 @@ export class SpaceReplica
    * Re-reads every listed instance this replica holds a record for
    * through the installed store read-through and integrates the results
    * as one inbound frame (see IStorageManager.integrateStoreWrites).
-   * Returns how many were refreshed. An instance the replica has never
-   * read is left alone: nothing depends on it, and its first read serves
-   * it from the store anyway.
+   * Returns how many the read-through answered for, a read finding nothing
+   * included. An instance the replica has never read is left alone: nothing
+   * depends on it, and its first read serves it from the store anyway.
    */
   integrateStoreWrites(
     writes: readonly { id: string; scopeKey: ScopeKey }[],
@@ -9507,7 +9507,8 @@ export class SpaceReplica
    * write does, and returns whether the store holds the document now. An
    * instance with no such report is not asked, nor is one while a frame is
    * being applied, as a read-through on a miss is not; either returns
-   * `undefined`.
+   * `undefined`, as does a read the store gives no answer to, which leaves
+   * the report standing.
    */
   readStoreAbsenceAgain(
     address: { id: URI; scope?: CellScope },
@@ -9518,7 +9519,10 @@ export class SpaceReplica
     if (!isScopeKey(instance)) return undefined;
     const key = docKey(address.id, instance);
     if (!this.#storeAbsences.has(key)) return undefined;
-    this.integrateStoreWrites([{ id: address.id, scopeKey: instance }]);
+    const answered = this.integrateStoreWrites([
+      { id: address.id, scopeKey: instance },
+    ]);
+    if (answered === 0) return undefined;
     return !this.#storeAbsences.has(key);
   }
 

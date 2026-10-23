@@ -337,8 +337,9 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * Re-read every listed document instance that SPACE's replica holds
    * through its installed read-through and integrate the result as an
    * inbound frame, so a store commit the replica has no watch for still
-   * reaches its subscribers. Returns how many documents were refreshed;
-   * zero when no read-through is installed or the replica holds none of
+   * reaches its subscribers. Returns how many documents were refreshed, a
+   * read finding nothing included; zero when no read-through is installed,
+   * the replica holds none of them, or the read-through gives no answer for
    * them.
    */
   integrateStoreWrites?(
@@ -1015,9 +1016,9 @@ export interface IStorageProvider {
    * Asks the store read-through again for an instance it reported holding
    * nothing at (`storeReportedAbsent()`), as the feed's report of a write
    * would, and integrates what it holds now. Returns whether the store holds
-   * the document now, or `undefined` when it was not asked: no such report
-   * stands, or a frame is being applied. Optional, as `storeReportedAbsent()`
-   * is.
+   * the document now, or `undefined` when it was not asked, because no such
+   * report stands or a frame is being applied, or gave no answer. Optional,
+   * as `storeReportedAbsent()` is.
    */
   readStoreAbsenceAgain?(
     address: { id: URI; scope?: CellScope },

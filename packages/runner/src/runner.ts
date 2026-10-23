@@ -7699,8 +7699,7 @@ export class Runner {
     // whole family per piece for nothing. The probes stop at a budget
     // (`NAMING_PROBE_BUDGET`), and a budget spent reads absent: a hold costs
     // one name-sync, a wrong local verdict costs a conflicting commit.
-    const readTx = this.#familyReadTx(identity);
-    const cell = resultCell.withTx(readTx);
+    let readTx = this.#familyReadTx(identity);
     let probes = this.#namingProbeBudget;
     let budgetSpent = false;
     const present = (link: NormalizedFullLink, record = false): boolean => {
@@ -7736,13 +7735,16 @@ export class Runner {
     // name-sync asks the replica, which answers that report. Whatever the
     // store answers, the run reads what it holds now; an argument the store
     // still holds nothing at is one no name-sync could deliver. An argument
-    // the store was not asked for holds the run.
-    if (
-      !present(argumentLink) &&
-      this.#readStoreAbsenceAgain(argumentLink, identity) === undefined
-    ) {
-      return hold("the argument document");
+    // the store was not asked for, or gave no answer for, holds the run.
+    if (!present(argumentLink)) {
+      const heldNow = this.#readStoreAbsenceAgain(argumentLink, identity);
+      if (heldNow === undefined) return hold("the argument document");
+      // A transaction reads a document as it first checked it out, and the
+      // probe checked the argument out absent, so the walks below read the
+      // argument the store answered through a fresh one.
+      if (heldNow) readTx = this.#familyReadTx(identity);
     }
+    const cell = resultCell.withTx(readTx);
     const presyncNamed =
       this.#presyncNamedInstances.get(familyKey) === entryKey;
     if (!presyncNamed) {
@@ -7826,7 +7828,8 @@ export class Runner {
    * Asks the store read-through again for the document `link` names, in the
    * instance `identity` resolves it to, when it reported holding nothing
    * there (`IStorageProvider.readStoreAbsenceAgain`). Returns whether the
-   * store holds it now, or `undefined` when the store was not asked.
+   * store holds it now, or `undefined` when the store was not asked or gave
+   * no answer.
    */
   #readStoreAbsenceAgain(
     link: NormalizedFullLink,

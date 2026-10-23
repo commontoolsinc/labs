@@ -691,12 +691,14 @@ describe("engine-read-through", () => {
       { seq: number; doc: { value: FabricValue } }
     >();
     let reads = 0;
+    let answering = true;
     const manager = SharedServerStorageManager.connectTo(server, {
       as: serviceSigner,
     });
     try {
       manager.installStoreReadThrough(space, ({ id, scopeKey }) => {
         reads += 1;
+        if (!answering) return undefined;
         const entry = store.get(id);
         return {
           branch: "",
@@ -720,8 +722,16 @@ describe("engine-read-through", () => {
       expect(reads).toBe(2);
       expect(provider.storeReportedAbsent?.({ id })).toBe(true);
       store.set(id, { seq: 1, doc: { value: { made: true } } });
-      expect(provider.readStoreAbsenceAgain?.({ id })).toBe(true);
+      // A read the store gives no answer to, as one with its lease
+      // unconfirmed gives none, says nothing of what it holds, and the report
+      // stands.
+      answering = false;
+      expect(provider.readStoreAbsenceAgain?.({ id })).toBeUndefined();
       expect(reads).toBe(3);
+      expect(provider.storeReportedAbsent?.({ id })).toBe(true);
+      answering = true;
+      expect(provider.readStoreAbsenceAgain?.({ id })).toBe(true);
+      expect(reads).toBe(4);
       expect(provider.storeReportedAbsent?.({ id })).toBe(false);
       expect(provider.replica.getDocument(id)?.value).toEqual({ made: true });
     } finally {
