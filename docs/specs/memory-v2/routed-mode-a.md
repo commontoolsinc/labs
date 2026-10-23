@@ -541,8 +541,10 @@ connections accept it only from a service DID. Principal leases are admitted
 into the existing Server connection authority; each session and protected engine
 turn rechecks its bound connection, lease, ownership and ACL. Checks after
 asynchronous waits retain the originating session object, so resumed sessions
-cannot authorize an old queued write. Data frames are serialized through the
-protected Memory turn, retaining their queue budget until it ends.
+cannot authorize an old queued write. Data frames are checked and reserved in
+socket order and handed to the connection without waiting for the turn before
+them to end, as the WebSocket hosts do (04-protocol.md section 4.13.4); each
+frame retains its queue budget until its own protected Memory turn ends.
 
 The durable ledger records only what must outlive a restart: link epochs and
 router-key revocations. It exclusively locks a separate inode, fsyncs each

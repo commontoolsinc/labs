@@ -2033,9 +2033,15 @@ export class RoutedMemoryHost {
       pendingBytes += bytes;
       assemblingBytes = bytes;
     });
-    // Dispatch is serialized through `chain`; only this request can synchronously
-    // emit its response. Unsolicited pushes carry their own routing fields.
-    let dispatchRoute: Record<string, unknown> | undefined;
+    // Dispatch starts in socket order through `chain`, which checks and
+    // reserves each request before handing its body to the Memory connection.
+    // The connection orders turns per space itself (04-protocol.md section
+    // 4.11.2), so the hand-off does not wait for a turn to end. The routes of
+    // the requests whose turns are open attribute their responses; unsolicited
+    // pushes carry their own routing fields.
+    const dispatchRoutes = new Map<string, Record<string, unknown>>();
+    // The turns handed to the connection and not yet ended, for `settled`.
+    const openTurns = new Set<Promise<void>>();
     let enqueueSource: OutputSource | undefined;
     const outgoing = new RouterSender(
       (record, done) => socket.send(record, done),
@@ -2138,7 +2144,11 @@ export class RoutedMemoryHost {
         return outputPaused;
       },
       get settled() {
-        return chain;
+        // Every dispatch started and every open turn ended.
+        return chain.then(() => Promise.all(openTurns)).then(
+          () => undefined,
+          () => undefined,
+        );
       },
     });
 
@@ -2177,7 +2187,12 @@ export class RoutedMemoryHost {
         return;
       }
       const route = routerRoute(message);
-      const source = outputSource(route, dispatchRoute);
+      const source = outputSource(
+        route,
+        typeof route.requestId === "string"
+          ? dispatchRoutes.get(route.requestId)
+          : undefined,
+      );
       if (message.type === "response") {
         pending.delete(message.requestId);
         const mutation = mutations?.get(message.requestId);
@@ -2362,6 +2377,15 @@ export class RoutedMemoryHost {
       // The request this frame carries, once its identifier is checked, so a
       // refusal at a capacity limit can answer it.
       let refusedRequest: string | undefined;
+      // Whether the body reached the connection: its turn then owns the
+      // frame's reservation and releases it when the turn ends.
+      let handedOver = false;
+      const release = (): void => {
+        if (refusedRequest !== undefined) dispatchRoutes.delete(refusedRequest);
+        pendingBytes -= frameBytes;
+        admitHeader();
+        updateReadFlow();
+      };
       chain = chain.then(async () => {
         if (failed) return;
         // Only the active chain entry waits. Queued frames retain their input
@@ -2579,7 +2603,7 @@ export class RoutedMemoryHost {
           requireRouted(false);
         }
         pending.add(body.requestId);
-        dispatchRoute = routerRoute(body);
+        dispatchRoutes.set(body.requestId, routerRoute(body));
         refusedRequest = body.requestId;
         if (body.type === "session.open") {
           requireRouted(typeof body.principal === "string");
@@ -2743,12 +2767,25 @@ export class RoutedMemoryHost {
           const key = `${parsed.space} ${body.sessionId}`;
           closes.set(body.requestId, key);
         }
-        try {
-          await backend.receive(parsed.payload);
-        } catch (error) {
-          rememberClose("backend-failure");
-          throw error;
-        }
+        // Hand the body over without waiting for its turn to end. The frames
+        // that queue in the connection are what lets the server's subscription
+        // refresh wait for a quiet moment and evaluate one pass for many
+        // commits (04-protocol.md section 4.13.4); a hand-off that waited kept
+        // that queue empty, so every commit ran its own refresh pass and the
+        // socket carried one request at a time. The reservation, the route and
+        // the next header's admission wait for the turn.
+        handedOver = true;
+        const turn: Promise<void> = backend.receive(parsed.payload).catch(
+          () => {
+            if (failed) return;
+            rememberClose("backend-failure");
+            fail("data-protocol");
+          },
+        ).finally(() => {
+          openTurns.delete(turn);
+          release();
+        });
+        openTurns.add(turn);
       }).catch(async (error) => {
         if (failed) return;
         if (!(error instanceof RoutedRequestRefusal)) {
@@ -2783,10 +2820,7 @@ export class RoutedMemoryHost {
           fail("socket-send-failure");
         }
       }).finally(() => {
-        dispatchRoute = undefined;
-        pendingBytes -= frameBytes;
-        admitHeader();
-        updateReadFlow();
+        if (!handedOver) release();
       });
     });
   }

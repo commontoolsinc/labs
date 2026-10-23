@@ -3823,6 +3823,57 @@ describe("routed output high and low marks", () => {
     }
   });
 
+  it("hands a request to the connection while the one before it is still in its turn, and releases each budget when its own turn ends", async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const second = Promise.withResolvers<void>();
+    const f = await routedRequestFixture(
+      "flow-handoff",
+      async (requestId, send) => {
+        if (requestId === "first") {
+          entered.resolve();
+          await release.promise;
+        }
+        send({ type: "response", requestId, ok: requestId });
+        if (requestId === "second") second.resolve();
+      },
+    );
+    try {
+      const state = f.host.accessForTestingOnly.dataSocket(
+        f.socket as unknown as WebSocket,
+      )!;
+      f.socket.receive(f.request("first"));
+      await entered.promise;
+      const firstBytes = state.pendingBytes;
+      expect(firstBytes).toBeGreaterThan(0);
+      f.socket.receive(f.request("second"));
+      // The connection receives the second request while the first turn is
+      // still open; the connection, not the host, orders turns per space.
+      await second.promise;
+      expect(f.handled).toEqual(["first", "second"]);
+      expect(
+        decodeRoutedFrame(await f.socket.take(), true, FRAME_SLOTS).body
+          .requestId,
+      ).toBe("second");
+      // The second turn ended with its response; the first request's
+      // reservation stays until its own turn ends.
+      while (state.pendingBytes !== firstBytes) {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+      release.resolve();
+      expect(
+        decodeRoutedFrame(await f.socket.take(), true, FRAME_SLOTS).body
+          .requestId,
+      ).toBe("first");
+      await state.settled;
+      expect(state.pendingBytes).toBe(0);
+      expect(f.socket.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      release.resolve();
+      await f.close();
+    }
+  });
+
   it("pauses reads and dispatch at the high mark, not below it, and resumes both below the low mark", async () => {
     const f = await routedRequestFixture(
       "flow-watermarks",
