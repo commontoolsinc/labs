@@ -192,6 +192,7 @@ import {
   Unit,
   type ViewInterestLease,
 } from "./interface.ts";
+import { endLocalReadValidationStretch } from "./local-read-policy.ts";
 import {
   getBlindStructuralTarget,
   isDurableReadTx,
@@ -9932,6 +9933,9 @@ export class SpaceReplica
     } finally {
       this.#frameApplyDepth -= 1;
       this.#frameTouchedKeys = undefined;
+      // What the frame brought can change what a commit's validations
+      // before it proved, so none after it stands on them.
+      endLocalReadValidationStretch();
     }
     if (pushed) {
       this.#completeThroughSeq = Math.max(this.#completeThroughSeq, sync.toSeq);

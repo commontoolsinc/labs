@@ -53,7 +53,7 @@ const policies = new WeakMap<object, LocalReadPolicy>();
 /**
  * The synchronous stretch a commit's validations share. It ends at the next
  * microtask checkpoint, or sooner when a transaction applies its writes to a
- * replica.
+ * replica or a replica applies a frame.
  */
 let validationStretch: object | undefined;
 
@@ -72,8 +72,8 @@ function currentValidationStretch(): object {
 /**
  * Ends the open validation stretch, so that every validation after it checks
  * replica and local scheduler state again. A transaction calls this as it
- * applies its writes to a replica, since those writes can change what the
- * validations before them proved.
+ * applies its writes to a replica, and a replica once it has applied a
+ * frame, since either can change what the validations before them proved.
  */
 export function endLocalReadValidationStretch(): void {
   validationStretch = undefined;
