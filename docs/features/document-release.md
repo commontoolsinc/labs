@@ -81,9 +81,12 @@ not load it again, so dropping it would leave the action with no value and no
 later changes. If the space refuses the watch outright, the document is removed
 and dropped like the others, so that its readers meet the refusal.
 
-A removal the server sends for any other reason, such as the retraction of an
-instance whose lease has lapsed, empties the document in the same way, whatever
-holds it.
+A removal the server pushes for any other reason, the retraction of a document
+a write's re-walk no longer reaches or of an instance whose lease has lapsed,
+is handled the same way: a document the replica holds keeps its value and is
+watched again on its own, and any other is emptied and dropped. The watch of
+its own is what the server refuses for a lapsed lease, which empties the
+document after all, so its readers meet the refusal.
 
 The server attributes each document it tracks to what reached it: a watch's
 root to the watch, a document reached through a link to the document holding
@@ -101,7 +104,10 @@ root on its own, so the documents it names stay delivered.
 
 A write that edits a link away retracts in the same way: the refresh that
 re-walks the changed document releases what the walk no longer reaches, and the
-pushed frame names it in `removes`. So a document stays loaded in a runtime
+pushed frame names it in `removes`. A document the server retires and reaches
+again in one pass, as a schema document is when the document that kept it goes
+and one that still names it is delivered after, is delivered, not retracted.
+So a document stays loaded in a runtime
 only while something reaches it, not until the next full evaluation.
 
 A server that does not advertise `watchRemoveV1` could only be asked to remove

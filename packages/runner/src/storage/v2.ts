@@ -7266,30 +7266,10 @@ export class SpaceReplica
       // A document something began to hold while the removal was on its way
       // keeps its value and is watched again on its own; the answer to that
       // watch brings it up to date.
-      const heldSince = new Set(
-        sync.removes.filter((remove) => this.#holds(removedAddress(remove))),
-      );
-      for (const remove of heldSince) {
-        const key = this.#docKeyOf(removedAddress(remove));
-        // The session no longer keeps it current, so nothing may count it
-        // as delivered until the answer to its own watch arrives.
-        this.#delivered.delete(key);
-        this.#watchedIds.delete(key);
-        if ((this.#docs.get(key)?.pending.length ?? 0) === 0) continue;
-        // The session reports nothing about the document until it is
-        // watched again, so a foreign change in between is hidden: the
-        // sentinel 1 holds W until the shadow clears.
-        let seqs = this.#shadowedForeignSeqs.get(key);
-        if (seqs === undefined) {
-          seqs = new Set();
-          this.#shadowedForeignSeqs.set(key, seqs);
-        }
-        seqs.add(1);
-      }
-      const removes = sync.removes.filter((remove) => !heldSince.has(remove));
-      this.#integrateWatchMutation(view, precedingSyncs, { ...sync, removes });
-      this.#forgetRemoved(removes);
-      for (const remove of heldSince) this.#watchAgain(remove);
+      const { sync: applied, held } = this.#keepHeld(sync);
+      this.#integrateWatchMutation(view, precedingSyncs, applied);
+      this.#forgetRemoved(applied.removes);
+      for (const remove of held) this.#watchAgain(remove);
     } catch (error) {
       if (!this.#closed) {
         logger.warn("release-watches-failed", () => [
@@ -7327,6 +7307,47 @@ export class SpaceReplica
       dropped.push(address);
     }
     if (dropped.length > 0) this.#onDocumentsDropped?.(dropped);
+  }
+
+  /**
+   * Splits a frame's removals into the ones to apply and the ones of
+   * documents the replica holds (`#holds()`), which keep their value and are
+   * watched again on their own (`#watchAgain()`), whether the frame answers
+   * a removal of this replica's or the server pushed it because a re-walk
+   * stopped reaching the document. A held document loses its delivery
+   * record and its watched mark here: the session no longer keeps it
+   * current, so nothing may count it as delivered until the answer to its
+   * own watch arrives. One with a local write pending is shadowed until
+   * then, since the session reports nothing about it in between: the
+   * sentinel 1 holds W until the shadow clears.
+   */
+  #keepHeld(
+    sync: SessionSync,
+  ): { sync: SessionSync; held: SessionSync["removes"][number][] } {
+    const held = sync.removes.filter((remove) =>
+      this.#holds(removedAddress(remove))
+    );
+    if (held.length === 0) return { sync, held };
+    for (const remove of held) {
+      const key = this.#docKeyOf(removedAddress(remove));
+      this.#delivered.delete(key);
+      this.#watchedIds.delete(key);
+      if ((this.#docs.get(key)?.pending.length ?? 0) === 0) continue;
+      let seqs = this.#shadowedForeignSeqs.get(key);
+      if (seqs === undefined) {
+        seqs = new Set();
+        this.#shadowedForeignSeqs.set(key, seqs);
+      }
+      seqs.add(1);
+    }
+    const kept = new Set(held);
+    return {
+      sync: {
+        ...sync,
+        removes: sync.removes.filter((remove) => !kept.has(remove)),
+      },
+      held,
+    };
   }
 
   /**
@@ -8162,7 +8183,14 @@ export class SpaceReplica
       }
       const applyStart = performance.now();
       try {
-        this.#applySessionSync(next.value, "integrate");
+        // A pushed frame retracts what a re-walk stopped reaching. One of
+        // those documents the replica holds is kept and watched again on
+        // its own, as a removal answer's is; the rest are emptied and
+        // dropped, so a later read loads them again.
+        const { sync, held } = this.#keepHeld(next.value);
+        this.#applySessionSync(sync, "integrate");
+        if (sync.removes.length > 0) this.#forgetRemoved(sync.removes);
+        for (const remove of held) this.#watchAgain(remove);
       } catch (error) {
         // The background consumer must never die wholesale on one bad
         // frame (OW61: a validation throw here was an unhandled rejection
