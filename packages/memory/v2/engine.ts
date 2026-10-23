@@ -4777,25 +4777,33 @@ const validateApplyOperation = (operation: BasedApplyOpOperation): void => {
 /**
  * Whether `commit` stands as the base of its `apply-op` at `opIndex`, which
  * names none: it carries a recursive read, confirmed or pending, of the field
- * or of a path above it, and no operation ahead of this one writes the field.
- * Reads are validated before any operation applies, so the field then holds
- * exactly what that read saw.
+ * or of a path above it on the commit's own branch, and no operation ahead of
+ * this one writes the field. Reads are validated before any operation applies,
+ * so the field then holds exactly what that read saw. A shallow read sees only
+ * the shape at its path, and a read of another branch says nothing about this
+ * one, so neither counts.
  */
 const commitReadIsFieldBase = (
   commit: ClientCommit,
+  branch: BranchName,
   opIndex: number,
   operation: ApplyOpOperation,
 ): boolean => {
   const fieldPath = ["value", ...operation.path];
   const scope = normalizeScope(operation.scope);
   const covers = (
-    read: { id: string; scope?: CellScope; path: readonly string[] },
+    read: {
+      id: string;
+      scope?: CellScope;
+      path: readonly string[];
+      nonRecursive?: boolean;
+    },
   ) =>
     read.id === operation.id && normalizeScope(read.scope) === scope &&
-    isPrefixPath(read.path, fieldPath);
+    read.nonRecursive !== true && isPrefixPath(read.path, fieldPath);
   const read =
     commit.reads.confirmed.some((read) =>
-      read.nonRecursive !== true && covers(read)
+      (read.branch ?? branch) === branch && covers(read)
     ) || commit.reads.pending.some(covers);
   if (!read) return false;
   return commit.operations.slice(0, opIndex).every((earlier) => {
@@ -4845,7 +4853,7 @@ const withStatedBase = (
     return { ...operation, base: operation.base };
   }
   validateOperationPath(operation.path);
-  if (!commitReadIsFieldBase(commit, opIndex, operation)) {
+  if (!commitReadIsFieldBase(commit, branch, opIndex, operation)) {
     throw new OpCursorMismatchError(
       "an apply-op without a base needs the commit's recursive read of the " +
         "field, and no earlier operation in the commit writing it",

@@ -1965,6 +1965,110 @@ describe("v2-operation-engine", () => {
       }
     });
 
+    it("applies beside a recursive pending read of the field", async () => {
+      const { engine, path } = await openTestEngine();
+      try {
+        const seededSeq = seed(engine);
+        applyCommit(engine, {
+          sessionId: "session:agent",
+          commit: {
+            localSeq: 1,
+            reads: readAt(seededSeq),
+            operations: [unbased("agent:1", "abcd", "!")],
+          },
+        });
+        applyCommit(engine, {
+          sessionId: "session:agent",
+          commit: {
+            localSeq: 2,
+            reads: {
+              confirmed: [],
+              pending: [{
+                id: "of:collaborative",
+                path: toDocumentPath(["value", "body"]),
+                localSeq: 1,
+              }],
+            },
+            operations: [unbased("agent:2", "abcd!", "?")],
+          },
+        });
+
+        expect(read(engine, { id: "of:collaborative" })).toEqual({
+          value: { body: "abcd!?" },
+        });
+      } finally {
+        close(engine);
+        await Deno.remove(path);
+      }
+    });
+
+    it("throws `OpCursorMismatchError` when the only read of the field is a shallow pending read", async () => {
+      const { engine, path } = await openTestEngine();
+      try {
+        const seededSeq = seed(engine);
+        applyCommit(engine, {
+          sessionId: "session:agent",
+          commit: {
+            localSeq: 1,
+            reads: readAt(seededSeq),
+            operations: [unbased("agent:1", "abcd", "!")],
+          },
+        });
+
+        expect(() =>
+          applyCommit(engine, {
+            sessionId: "session:agent",
+            commit: {
+              localSeq: 2,
+              reads: {
+                confirmed: [],
+                pending: [{
+                  id: "of:collaborative",
+                  path: toDocumentPath(["value"]),
+                  localSeq: 1,
+                  nonRecursive: true,
+                }],
+              },
+              operations: [unbased("agent:2", "abcd!", "?")],
+            },
+          })
+        ).toThrow(OpCursorMismatchError);
+      } finally {
+        close(engine);
+        await Deno.remove(path);
+      }
+    });
+
+    it("throws `OpCursorMismatchError` when the only read of the field is of another branch", async () => {
+      const { engine, path } = await openTestEngine();
+      try {
+        const seededSeq = seed(engine);
+        createBranch(engine, "feature");
+
+        expect(() =>
+          applyCommit(engine, {
+            sessionId: "session:agent",
+            commit: {
+              localSeq: 1,
+              reads: {
+                confirmed: [{
+                  id: "of:collaborative",
+                  branch: "feature",
+                  path: toDocumentPath(["value", "body"]),
+                  seq: seededSeq,
+                }],
+                pending: [],
+              },
+              operations: [unbased("agent:1", "abcd", "!")],
+            },
+          })
+        ).toThrow(OpCursorMismatchError);
+      } finally {
+        close(engine);
+        await Deno.remove(path);
+      }
+    });
+
     it("applies after an earlier write to another field of the document", async () => {
       const { engine, path } = await openTestEngine();
       try {

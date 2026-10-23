@@ -1588,10 +1588,16 @@ export class V2StorageTransaction implements IStorageTransaction {
           "the transaction already wrote the field another way",
       );
     }
-    const next = applyTextChanges(current, changes);
+    // The payload is encoded at commit, so the changes are copied now: a
+    // caller changing its list afterward must not change what the commit
+    // sends from the value this call returned.
+    const recorded: readonly TextChange[] = changes.map((
+      { from, to, insert },
+    ) => ({ from, to: to ?? from, insert: insert ?? "" }));
+    const next = applyTextChanges(current, recorded);
     if (next === current) return next;
     if (intent !== undefined) {
-      intent.batches.push(changes);
+      intent.batches.push(recorded);
       intent.expected = next;
       return next;
     }
@@ -1608,7 +1614,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     byPath.set(pathKey, {
       path: address.path,
       baseline: current,
-      batches: [changes],
+      batches: [recorded],
       expected: next,
       submissionId: crypto.randomUUID(),
     });

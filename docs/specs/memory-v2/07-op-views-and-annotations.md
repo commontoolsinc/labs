@@ -285,7 +285,8 @@ conflict semantics.
 
 An `apply-op` with no base takes the commit's read of the field as what it was
 written against. The commit must carry a recursive read, confirmed or pending,
-of the field or of a path above it, and no operation ahead of the `apply-op` in
+of the field or of a path above it on the commit's branch, and no operation
+ahead of the `apply-op` in
 the commit may write the field; otherwise the engine rejects it with
 `OpCursorMismatchError`. Reads are validated before operations apply, so where
 the field moved since the read, the read refuses the whole commit as an

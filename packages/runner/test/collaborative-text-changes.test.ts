@@ -230,6 +230,23 @@ describe("collaborative-text-changes", () => {
     expect(await readDurable(server)).toEqual({ title: "Notes", body: "Abcd" });
   });
 
+  it("commits the changes as they stood when recorded, however the caller's list changes later", async () => {
+    const note = await seed();
+    await openAsEditor(note);
+
+    const tx = rt.edit();
+    const body = note.withTx(tx).key("body");
+    const changes = [{ from: 3, insert: "d" }];
+    body.applyChanges(changes);
+    changes[0].insert = "WRONG";
+    const committed = await tx.commit({ holdSyncedUntilCovered: false })
+      .verdict;
+    expect(committed.error).toBeUndefined();
+    await rt.storageManager.synced();
+
+    expect(await readDurable(server)).toEqual({ title: "Notes", body: "abcd" });
+  });
+
   it("activates an inactive field from the value the transaction read", async () => {
     const note = await seed();
 
