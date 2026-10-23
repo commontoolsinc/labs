@@ -49,6 +49,7 @@ import {
 } from "./shared-space-catalog.ts";
 import {
   type CreateProfileEvent,
+  profileLinkSpace,
   type ProfileRetirementEvent,
   restoreProfile,
   retireProfile,
@@ -59,7 +60,6 @@ import {
   type TrustedProfileMru,
   type TrustedRetiredProfileList,
 } from "./profile-create.tsx";
-import { profileLinkSpace } from "./profile-links.ts";
 import ProfilePicker from "./profile-picker.tsx";
 import { refusalReasonText } from "./private-inbox-refusal-text.ts";
 import type { BackwardsCompatibleProfile } from "./profile-home.tsx";

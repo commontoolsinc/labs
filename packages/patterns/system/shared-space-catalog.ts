@@ -17,7 +17,6 @@ import {
   type WriteAuthorizedBy,
   type WritePolicyAnyOf,
 } from "commonfabric";
-import { profileLinks, profileLinkSpace } from "./profile-links.ts";
 
 /** Collection membership, independent of access to the space. */
 export type SharedSpaceMembership = "saved" | "archived";
@@ -155,7 +154,7 @@ export interface SharedSpaceCatalogState {
  */
 export interface SharedSpaceRegistrationState extends SharedSpaceCatalogState {
   sharedSpaceProfiles?: Writable<SharedSpaceProfileStorage>;
-  profiles?: Cell<unknown>;
+  profiles?: Cell<Cell<unknown>[]>;
 }
 
 /**
@@ -169,12 +168,13 @@ export interface SharedSpaceRemovalState extends SharedSpaceCatalogState {
 
 /**
  * Where a registration naming a profile records it: Home's records of the
- * profile acting in each space, and the spaces of the profiles Home lists,
- * among which the named profile must be.
+ * profile acting in each space, and what returns the spaces of the profiles
+ * Home lists, among which the named profile must be. A registration naming
+ * no profile reads neither.
  */
 export interface SharedSpaceProfileRecorder {
   records: Writable<SharedSpaceProfileStorage>;
-  listed: readonly (string | undefined)[];
+  listed: () => readonly (string | undefined)[];
 }
 
 /** Returns the offer identity shared by all collection consumers. */
@@ -433,7 +433,7 @@ export function registerSharedSpaceIn(
   ) return { status: "conflict", reason: "offer" };
   let recordProfile: (() => void) | undefined;
   if (profile !== undefined && recorder !== undefined) {
-    if (!recorder.listed.includes(profile)) {
+    if (!recorder.listed().includes(profile)) {
       return { status: "conflict", reason: "unknown-profile" };
     }
     const held = readSharedSpaceProfiles(recorder.records)[space];
@@ -470,6 +470,26 @@ export function registerSharedSpaceIn(
   return { status: current ? "existing" : "registered", space };
 }
 
+/**
+ * The spaces of the profiles Home's `profiles` list links, each read off the
+ * link without loading the profile, as `profile-create.tsx` reads them, or
+ * `undefined` for an element that is no link. The pattern-facing `Cell` has
+ * no typed space accessor, so each link is read through `any`.
+ */
+function listedProfileSpaces(
+  profiles: Cell<Cell<unknown>[]>,
+): (string | undefined)[] {
+  const links = profiles.get();
+  return (Array.isArray(links) ? links : []).map((link) => {
+    try {
+      // deno-lint-ignore no-explicit-any
+      return (link as any)?.getAsNormalizedFullLink?.()?.space;
+    } catch {
+      return undefined;
+    }
+  });
+}
+
 // Retain every event field for validation, including linked payloads whose
 // stored schema would otherwise omit a malformed optional field.
 const eventSchema = toSchema<Record<string, any>>();
@@ -495,7 +515,7 @@ export const registerSharedSpace = handler<
         ? undefined
         : {
           records: sharedSpaceProfiles,
-          listed: profileLinks(profiles).map(profileLinkSpace),
+          listed: () => listedProfileSpaces(profiles),
         },
     ),
 );

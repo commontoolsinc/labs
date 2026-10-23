@@ -14,6 +14,8 @@ import ProfileCreate, {
   type DefaultProfileSlot,
   defaultProfileSpace,
   liveProfileSpaces,
+  profileLinks,
+  profileLinkSpace,
   restoreProfile,
   retireProfile,
   setDefaultProfile,
@@ -26,7 +28,6 @@ import type {
   BackwardsCompatibleProfile,
   ProfileInbox,
 } from "./profile-home.tsx";
-import { profileLinks, profileLinkSpace } from "./profile-links.ts";
 
 // The profile picker rendered as the `[UI]` of a #profile wish when the user
 // has 2+ profiles and no valid default. It renders each profile natively

@@ -2418,7 +2418,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-create.tsx",
-                  "moduleIdentity": "aMTdvpLPyz9yqwAHeK8J18X4cr0Ls75a-qE1nOHUWw8",
+                  "moduleIdentity": "z-8t3FsRQ4FksWC5mp7-Zb3RQ2tTtm8Yknb34Eh--24",
                   "path": [
                     "setDefaultProfile"
                   ]
@@ -2446,7 +2446,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-create.tsx",
-              "moduleIdentity": "aMTdvpLPyz9yqwAHeK8J18X4cr0Ls75a-qE1nOHUWw8",
+              "moduleIdentity": "z-8t3FsRQ4FksWC5mp7-Zb3RQ2tTtm8Yknb34Eh--24",
               "path": [
                 "submitProfileCreation"
               ]
@@ -2462,7 +2462,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-create.tsx",
-              "moduleIdentity": "aMTdvpLPyz9yqwAHeK8J18X4cr0Ls75a-qE1nOHUWw8",
+              "moduleIdentity": "z-8t3FsRQ4FksWC5mp7-Zb3RQ2tTtm8Yknb34Eh--24",
               "path": [
                 "submitProfileCreation"
               ]
@@ -2482,7 +2482,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-create.tsx",
-              "moduleIdentity": "aMTdvpLPyz9yqwAHeK8J18X4cr0Ls75a-qE1nOHUWw8",
+              "moduleIdentity": "z-8t3FsRQ4FksWC5mp7-Zb3RQ2tTtm8Yknb34Eh--24",
               "path": [
                 "setMruProfile"
               ]
@@ -2506,7 +2506,7 @@
             "writeAuthorizedBy": {
               "__ctWriterIdentityOf": {
                 "file": "/packages/patterns/system/profile-create.tsx",
-                "moduleIdentity": "aMTdvpLPyz9yqwAHeK8J18X4cr0Ls75a-qE1nOHUWw8",
+                "moduleIdentity": "z-8t3FsRQ4FksWC5mp7-Zb3RQ2tTtm8Yknb34Eh--24",
                 "path": [
                   "setMruProfile"
                 ]
@@ -2526,7 +2526,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-create.tsx",
-                  "moduleIdentity": "aMTdvpLPyz9yqwAHeK8J18X4cr0Ls75a-qE1nOHUWw8",
+                  "moduleIdentity": "z-8t3FsRQ4FksWC5mp7-Zb3RQ2tTtm8Yknb34Eh--24",
                   "path": [
                     "retireProfile"
                   ]
@@ -2537,7 +2537,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-create.tsx",
-                  "moduleIdentity": "aMTdvpLPyz9yqwAHeK8J18X4cr0Ls75a-qE1nOHUWw8",
+                  "moduleIdentity": "z-8t3FsRQ4FksWC5mp7-Zb3RQ2tTtm8Yknb34Eh--24",
                   "path": [
                     "restoreProfile"
                   ]
@@ -2557,7 +2557,7 @@
                 "writeAuthorizedBy": {
                   "__ctWriterIdentityOf": {
                     "file": "/packages/patterns/system/profile-create.tsx",
-                    "moduleIdentity": "aMTdvpLPyz9yqwAHeK8J18X4cr0Ls75a-qE1nOHUWw8",
+                    "moduleIdentity": "z-8t3FsRQ4FksWC5mp7-Zb3RQ2tTtm8Yknb34Eh--24",
                     "path": [
                       "retireProfile"
                     ]
@@ -2568,7 +2568,7 @@
                 "writeAuthorizedBy": {
                   "__ctWriterIdentityOf": {
                     "file": "/packages/patterns/system/profile-create.tsx",
-                    "moduleIdentity": "aMTdvpLPyz9yqwAHeK8J18X4cr0Ls75a-qE1nOHUWw8",
+                    "moduleIdentity": "z-8t3FsRQ4FksWC5mp7-Zb3RQ2tTtm8Yknb34Eh--24",
                     "path": [
                       "restoreProfile"
                     ]
@@ -2589,7 +2589,7 @@
                 "writeAuthorizedBy": {
                   "__ctWriterIdentityOf": {
                     "file": "/packages/patterns/system/shared-space-catalog.ts",
-                    "moduleIdentity": "ByxVO10b6-aj7WVl6vl6-3mllYd_ymiamWaWNUoNfew",
+                    "moduleIdentity": "LTtIAVijjwG-Y8mJ2gOYLntA5tSUofrq1YrC-zQyHAQ",
                     "path": [
                       "registerSharedSpace"
                     ]
@@ -2600,7 +2600,7 @@
                 "writeAuthorizedBy": {
                   "__ctWriterIdentityOf": {
                     "file": "/packages/patterns/system/shared-space-catalog.ts",
-                    "moduleIdentity": "ByxVO10b6-aj7WVl6vl6-3mllYd_ymiamWaWNUoNfew",
+                    "moduleIdentity": "LTtIAVijjwG-Y8mJ2gOYLntA5tSUofrq1YrC-zQyHAQ",
                     "path": [
                       "removeSharedSpace"
                     ]
@@ -2616,7 +2616,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/shared-space-catalog.ts",
-                  "moduleIdentity": "ByxVO10b6-aj7WVl6vl6-3mllYd_ymiamWaWNUoNfew",
+                  "moduleIdentity": "LTtIAVijjwG-Y8mJ2gOYLntA5tSUofrq1YrC-zQyHAQ",
                   "path": [
                     "registerSharedSpace"
                   ]
@@ -2627,7 +2627,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/shared-space-catalog.ts",
-                  "moduleIdentity": "ByxVO10b6-aj7WVl6vl6-3mllYd_ymiamWaWNUoNfew",
+                  "moduleIdentity": "LTtIAVijjwG-Y8mJ2gOYLntA5tSUofrq1YrC-zQyHAQ",
                   "path": [
                     "removeSharedSpace"
                   ]

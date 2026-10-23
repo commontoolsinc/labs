@@ -71,7 +71,7 @@ const registerAndRecord = handler<
       registerSharedSpaceIn(
         catalog,
         event,
-        withoutRecords ? undefined : { records, listed: LISTED },
+        withoutRecords ? undefined : { records, listed: () => LISTED },
       ),
     );
   } catch (error) {
