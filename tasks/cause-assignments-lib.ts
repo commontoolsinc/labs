@@ -19,6 +19,9 @@
  * disturb.
  */
 
+import { encodeHex } from "@std/encoding/hex";
+import { sha256 } from "@commonfabric/content-hash";
+import { type FabricValue, hashStringOf } from "@commonfabric/data-model";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 /** One numbered cell of a pattern level. */
@@ -145,17 +148,9 @@ function nestedPatterns(
   for (const child of Object.values(value)) nestedPatterns(child, out, seen);
 }
 
-/** A key for a partial cause that does not depend on its key order. */
+/** A key for a partial cause, the same for two equal causes. */
 function causeKey(cause: unknown): string {
-  return JSON.stringify(
-    cause,
-    (_key, value) =>
-      isObjectNotArray(value)
-        ? Object.fromEntries(
-          Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0),
-        )
-        : value,
-  );
+  return hashStringOf(cause as FabricValue);
 }
 
 /**
@@ -302,17 +297,10 @@ export function movedCells(
  * A digest of `assignment`'s levels, which names one build of one pattern in
  * the gate's report and in an accepted move.
  */
-export async function assignmentDigest(
-  assignment: PatternAssignment,
-): Promise<string> {
-  const bytes = new Uint8Array(
-    await crypto.subtle.digest(
-      "SHA-256",
-      new TextEncoder().encode(JSON.stringify(assignment.levels)),
-    ),
-  );
-  return Array.from(
-    bytes.slice(0, 8),
-    (byte) => byte.toString(16).padStart(2, "0"),
-  ).join("");
+export function assignmentDigest(assignment: PatternAssignment): string {
+  // The levels are this module's own plain records, which JSON represents
+  // whole.
+  return encodeHex(
+    sha256(new TextEncoder().encode(JSON.stringify(assignment.levels))),
+  ).slice(0, 16);
 }

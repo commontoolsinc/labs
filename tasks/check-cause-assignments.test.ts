@@ -38,8 +38,8 @@ const RENUMBERED = build("room.tsx", "s", [CHILD]);
 
 describe("check-cause-assignments", () => {
   describe("compareDumps()", () => {
-    it("returns a failure for a pattern whose child moves under the same source", async () => {
-      const comparison = await compareDumps(
+    it("returns a failure for a pattern whose child moves under the same source", () => {
+      const comparison = compareDumps(
         dump(NUMBERED),
         dump(RENUMBERED),
         [],
@@ -56,8 +56,8 @@ describe("check-cause-assignments", () => {
       ).toEqual([{ pattern: "room.tsx", moved: [[1, 0, true]] }]);
     });
 
-    it("returns no failure for a pattern numbered alike on both sides", async () => {
-      const comparison = await compareDumps(
+    it("returns no failure for a pattern numbered alike on both sides", () => {
+      const comparison = compareDumps(
         dump(NUMBERED),
         dump(build("room.tsx", "s", [LIFT, CHILD])),
         [],
@@ -71,8 +71,8 @@ describe("check-cause-assignments", () => {
       });
     });
 
-    it("returns no comparison of a pattern whose source differs between the two sides", async () => {
-      const comparison = await compareDumps(
+    it("returns no comparison of a pattern whose source differs between the two sides", () => {
+      const comparison = compareDumps(
         dump(NUMBERED),
         dump(build("room.tsx", "edited", [CHILD])),
         [],
@@ -82,15 +82,15 @@ describe("check-cause-assignments", () => {
       expect(comparison.failing).toEqual([]);
     });
 
-    it("returns as forgiven a move an accepted entry names by both builds' digests", async () => {
+    it("returns as forgiven a move an accepted entry names by both builds' digests", () => {
       const entry: AcceptedMove = {
         pattern: "room.tsx",
-        base: await assignmentDigest(NUMBERED),
-        head: await assignmentDigest(RENUMBERED),
+        base: assignmentDigest(NUMBERED),
+        head: assignmentDigest(RENUMBERED),
         reason: "test",
       };
 
-      const comparison = await compareDumps(
+      const comparison = compareDumps(
         dump(NUMBERED),
         dump(RENUMBERED),
         [entry],
@@ -101,15 +101,15 @@ describe("check-cause-assignments", () => {
       expect(comparison.unused).toEqual([]);
     });
 
-    it("returns as a failure a move an accepted entry names by another build, and the entry as unused", async () => {
+    it("returns as a failure a move an accepted entry names by another build, and the entry as unused", () => {
       const entry: AcceptedMove = {
         pattern: "room.tsx",
-        base: await assignmentDigest(NUMBERED),
-        head: await assignmentDigest(build("room.tsx", "s", [CHILD, LIFT])),
+        base: assignmentDigest(NUMBERED),
+        head: assignmentDigest(build("room.tsx", "s", [CHILD, LIFT])),
         reason: "test",
       };
 
-      const comparison = await compareDumps(
+      const comparison = compareDumps(
         dump(NUMBERED),
         dump(RENUMBERED),
         [entry],
@@ -123,8 +123,8 @@ describe("check-cause-assignments", () => {
   });
 
   describe("describeFailures()", () => {
-    it("returns each moved cell with its two numbers, whether it holds state, and both builds' digests", async () => {
-      const comparison = await compareDumps(
+    it("returns each moved cell with its two numbers, whether it holds state, and both builds' digests", () => {
+      const comparison = compareDumps(
         dump(NUMBERED),
         dump(RENUMBERED),
         [],
@@ -132,9 +132,11 @@ describe("check-cause-assignments", () => {
       const text = describeFailures(comparison);
 
       expect(text).toContain(
-        `room.tsx (base build ${await assignmentDigest(
-          NUMBERED,
-        )}, this build ${await assignmentDigest(RENUMBERED)}):`,
+        `room.tsx (base build ${
+          assignmentDigest(
+            NUMBERED,
+          )
+        }, this build ${assignmentDigest(RENUMBERED)}):`,
       );
       expect(text).toContain(`  1 -> 0, holds state: ${CHILD} (entry pattern)`);
     });

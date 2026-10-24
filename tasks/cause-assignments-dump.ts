@@ -17,6 +17,9 @@
  * pattern is left out; one that fails to compile is written as an error.
  */
 
+import { encodeHex } from "@std/encoding/hex";
+import { sha256 } from "@commonfabric/content-hash";
+import { utf8Compare } from "@commonfabric/utils/utf8";
 import { patternKey } from "./pattern-files.ts";
 import {
   assignmentLevels,
@@ -31,18 +34,14 @@ export interface DumpOutput {
 }
 
 /** A digest of the files `files` names, in an order of its own. */
-async function sourceDigest(
+function sourceDigest(
   files: readonly { name: string; contents: string }[],
-): Promise<string> {
+): string {
   const text = [...files]
-    .sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
+    .sort((a, b) => utf8Compare(a.name, b.name))
     .map((file) => `${file.name}\0${file.contents}`)
     .join("\0");
-  const bytes = new Uint8Array(
-    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)),
-  );
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  return encodeHex(sha256(new TextEncoder().encode(text)));
 }
 
 /**
@@ -111,7 +110,7 @@ export async function buildAssignment(
     (artifact) => runtime.patternManager.getArtifactEntryRef(artifact),
   );
   if (levels.length === 0) return undefined;
-  return { pattern, source: await sourceDigest(program.files), levels };
+  return { pattern, source: sourceDigest(program.files), levels };
 }
 
 function parseArgs(args: readonly string[]): {

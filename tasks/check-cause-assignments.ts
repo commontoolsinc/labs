@@ -84,11 +84,11 @@ export interface Comparison {
  * Compares the build of each pattern `head` holds with the build of it in
  * `base`, where the two were built from the same source files.
  */
-export async function compareDumps(
+export function compareDumps(
   base: DumpOutput,
   head: DumpOutput,
   accepted: readonly AcceptedMove[],
-): Promise<Comparison> {
+): Comparison {
   const before = new Map(
     base.assignments.map((assignment) => [assignment.pattern, assignment]),
   );
@@ -105,10 +105,8 @@ export async function compareDumps(
     comparison.compared++;
     const moved = movedCells(prior, after);
     if (moved.length === 0) continue;
-    const [baseDigest, headDigest] = await Promise.all([
-      assignmentDigest(prior),
-      assignmentDigest(after),
-    ]);
+    const baseDigest = assignmentDigest(prior);
+    const headDigest = assignmentDigest(after);
     const entry = accepted.find((candidate) =>
       candidate.pattern === after.pattern && candidate.base === baseDigest &&
       candidate.head === headDigest
@@ -278,7 +276,7 @@ async function main() {
       dumpTree(baseTree, inBase, shards, scratch, "base"),
       dumpTree(head, files, shards, scratch, "head"),
     ]);
-    const comparison = await compareDumps(baseDump, headDump, ACCEPTED_MOVES);
+    const comparison = compareDumps(baseDump, headDump, ACCEPTED_MOVES);
     console.log(
       `check-cause-assignments: compared ${comparison.compared} patterns ` +
         `built from the same source by ${mergeBase.slice(0, 10)} and this ` +

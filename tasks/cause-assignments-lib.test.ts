@@ -233,13 +233,13 @@ describe("cause-assignments-lib", () => {
   });
 
   describe("assignmentDigest()", () => {
-    it("returns one digest for two alike builds, and another for a build that numbers a cell differently", async () => {
+    it("returns one digest for two alike builds, and another for a build that numbers a cell differently", () => {
       const digest = (parts: readonly Part[]) =>
         assignmentDigest(assignment(parts));
-      const alike = await digest([{ lift: true }, { child: CHILD }]);
+      const alike = digest([{ lift: true }, { child: CHILD }]);
 
-      expect(await digest([{ lift: true }, { child: CHILD }])).toBe(alike);
-      expect(await digest([{ child: CHILD }, { lift: true }])).not.toBe(alike);
+      expect(digest([{ lift: true }, { child: CHILD }])).toBe(alike);
+      expect(digest([{ child: CHILD }, { lift: true }])).not.toBe(alike);
     });
   });
 });
