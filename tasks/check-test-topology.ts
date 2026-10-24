@@ -46,7 +46,9 @@
  *
  * Each path is a file of records or a directory holding them, walked for
  * every `.ndjson` under it, so a run's downloaded record artifacts are
- * named as the one directory they arrive in. A directory a job gathered
+ * named as the one directory they arrive in. Of a job that was re-run,
+ * only the latest attempt's artifact is read, because the run as it
+ * stands is what that attempt recorded. A directory a job gathered
  * carries the commit its records are from in the facts beside them, and
  * a path holding no records fails rather than being read as a part of
  * the run that had none.
@@ -57,6 +59,7 @@ import {
   type AliasResolver,
   loadAliasResolver,
   parseReportGroups,
+  shippedArtifact,
   type TestIdentity,
   testIdentityKey,
 } from "@commonfabric/test-support/records";
@@ -584,6 +587,29 @@ async function recordFiles(at: string): Promise<RecordFile[]> {
   return found.sort((left, right) => left.path.localeCompare(right.path));
 }
 
+/**
+ * The record files of `files`, less every one in an artifact that a later
+ * attempt at the same job superseded. A job that is re-run ships its
+ * artifact under the new attempt, beside the one the attempt before it
+ * shipped, and the run as it stands is each job's latest attempt.
+ */
+function latestAttempts(files: readonly RecordFile[]): RecordFile[] {
+  const latest = new Map<string, number>();
+  for (const { from } of files) {
+    const shipped = shippedArtifact(from);
+    if (shipped === undefined) continue;
+    latest.set(
+      shipped.artifact,
+      Math.max(latest.get(shipped.artifact) ?? 0, shipped.attempt),
+    );
+  }
+  return files.filter(({ from }) => {
+    const shipped = shippedArtifact(from);
+    return shipped === undefined ||
+      shipped.attempt === latest.get(shipped.artifact);
+  });
+}
+
 /** The commit a gathered artifact's own facts name, where it holds them. */
 async function gatheredCommit(dir: string): Promise<string | undefined> {
   let facts: unknown;
@@ -615,7 +641,7 @@ export async function readRecords(
   for (const at of paths) {
     for (const file of await recordFiles(at)) files.push(file);
   }
-  for (const file of files) {
+  for (const file of latestAttempts(files)) {
     const text = await Deno.readTextFile(file.path);
     for (const group of parseReportGroups(text)) {
       // An alias applies only to records from days before the rename, so
