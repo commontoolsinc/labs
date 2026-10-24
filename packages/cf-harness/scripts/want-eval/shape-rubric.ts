@@ -405,12 +405,14 @@ export interface JudgedPair {
 
 /**
  * Which shape a pair went to: the winner its readings agree on, `split` when
- * they disagree, and undefined when no reading came back.
+ * they disagree, and undefined when either reading failed. A pair is read in
+ * both orders so the judge's lean toward one position cancels out; one order
+ * alone could be that lean, so it is not a win.
  */
 export const winnerOf = (
   pair: JudgedPair,
 ): "first" | "second" | "tie" | "split" | undefined => {
-  if (pair.verdicts.length === 0) return undefined;
+  if (pair.errors.length > 0 || pair.verdicts.length === 0) return undefined;
   const [one, ...rest] = pair.verdicts.map((verdict) => verdict.winner);
   return rest.every((winner) => winner === one) ? one : "split";
 };

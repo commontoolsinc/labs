@@ -16,7 +16,8 @@
  *   deno run -A packages/cf-harness/scripts/want-eval/shape-judge.ts \
  *     --results <shape-eval results.json>[,<more.json>] --out <directory> \
  *     [--label judged] [--first default] [--second deep] [--only <case id>] \
- *     [--harness-home ~/.cf-harness] [--owner local]
+ *     [--harness-home ~/.cf-harness] [--owner local] \
+ *     [--runs-root <the runner's agent-runs/local, as given to shape-eval>]
  */
 
 import { parseArgs } from "@std/cli/parse-args";
@@ -28,7 +29,7 @@ import {
 } from "../../src/cli-flags.ts";
 import type { HarnessToolCall } from "../../src/contracts/transcript.ts";
 import { codexEvalToolModel } from "../task-classification-eval.ts";
-import { rootRunOf, transcriptsOf } from "./runs.ts";
+import { defaultRunsRoot, rootRunOf, transcriptsOf } from "./runs.ts";
 import {
   type JudgedPair,
   materialOf,
@@ -51,6 +52,7 @@ const FLAGS = [
   "only",
   "harness-home",
   "owner",
+  "runs-root",
 ];
 const undeclared: string[] = [];
 const args = parseArgs(Deno.args, {
@@ -61,6 +63,7 @@ const args = parseArgs(Deno.args, {
     second: "deep",
     "harness-home": join(Deno.env.get("HOME") ?? ".", ".cf-harness"),
     owner: "local",
+    "runs-root": defaultRunsRoot(),
   },
   unknown: recordUndeclaredFlags(undeclared),
 });
@@ -76,6 +79,9 @@ interface ShapeRun {
   variant: string;
   job: string;
   state: string;
+
+  /** False for a run whose record the eval could not read; older files omit it. */
+  measured?: boolean;
   totalTokens: number;
   answer: string;
 }
@@ -90,7 +96,7 @@ for (const path of args.results.split(",")) {
   const read: ShapeRun[] = JSON.parse(await Deno.readTextFile(path));
   for (const run of read) {
     if (
-      run.state === "completed" &&
+      run.state === "completed" && run.measured !== false &&
       (args.only === undefined || run.case === args.only)
     ) runs.push(run);
   }
@@ -119,7 +125,10 @@ const judged: JudgedPair[] = await Promise.all(pairs.map(async (pair) => {
   const ask = asks.get(pair.case);
   if (ask === undefined) throw new Error(`no case ${pair.case} in the cases`);
   const material = async (run: ShapeRun) =>
-    materialOf(run.answer, await transcriptsOf(await rootRunOf(run.job)));
+    materialOf(
+      run.answer,
+      await transcriptsOf(await rootRunOf(run.job, args["runs-root"])),
+    );
   const [first, second] = await Promise.all([
     material(pair.first),
     material(pair.second),

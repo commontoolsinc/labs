@@ -17,6 +17,7 @@ import {
   unblind,
   VERDICT_TOOL,
   verdictOf,
+  winnerOf,
 } from "../scripts/want-eval/shape-rubric.ts";
 
 /** Every criterion at `score`, as a judge would write it. */
@@ -399,6 +400,25 @@ describe("shape-rubric", () => {
           "deep",
         )[0].better,
       ).toBe("even");
+    });
+
+    it("counts a pair read in only one order as failed, not as a win", () => {
+      const runs = [
+        { case: "a", variant: "default", totalTokens: 1 },
+        { case: "a", variant: "deep", totalTokens: 2 },
+      ];
+      const halfRead: JudgedPair = {
+        ...pair("second", 3, 5),
+        verdicts: [reading("second", 3, 5, true)],
+        errors: ["expected one submit_verdict call, got 0"],
+      };
+
+      expect(winnerOf(halfRead)).toBeUndefined();
+      expect(winnerOf(pair("second", 3, 5))).toBe("second");
+      expect(
+        summarise(runs, [halfRead, pair("first", 4, 3)], "default", "deep")[0]
+          .wins,
+      ).toEqual({ first: 1, second: 0, tie: 0, split: 0, failed: 1 });
     });
 
     it("leaves scores out, rather than zero, when no pair was read", () => {

@@ -99,6 +99,9 @@ interface ShapeResult {
   job: string;
   state: string;
   errorCode?: string;
+
+  /** False for a row standing in for a run whose record could not be read. */
+  measured: boolean;
   seconds: number;
   tags: string[];
   domains: string[];
@@ -200,6 +203,7 @@ const measure = async (
     ...(typeof snapshot.errorCode === "string"
       ? { errorCode: snapshot.errorCode }
       : {}),
+    measured: true,
     seconds,
     tags: state.taskClassification?.tags ?? [],
     domains: state.taskClassification?.domains ?? [],
@@ -243,6 +247,7 @@ const unmeasured = async (
       ...(typeof snapshot.errorCode === "string" ? [snapshot.errorCode] : []),
       `unmeasured: ${error instanceof Error ? error.message : String(error)}`,
     ].join("; "),
+    measured: false,
     seconds,
     tags: [],
     domains: [],
@@ -349,15 +354,22 @@ const table = [
   "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
   ...runs.map(row),
   "",
-  "| case | shape | runs | median tokens | min–max |",
-  "| --- | --- | --- | --- | --- |",
+  "| case | shape | runs | measured | median tokens | min–max |",
+  "| --- | --- | --- | --- | --- | --- |",
   ...cases.flatMap((evalCase) =>
     variants.map((variant) => {
-      const tokens = runs.filter((result) =>
+      // An unmeasured row's zero tokens are a missing record, not a cheap run.
+      const ofShape = runs.filter((result) =>
         result.case === evalCase.id && result.variant === variant
-      ).map((result) => result.totalTokens);
+      );
+      const tokens = ofShape.filter((result) => result.measured).map((
+        result,
+      ) => result.totalTokens);
+      if (tokens.length === 0) {
+        return `| ${evalCase.id} | ${variant} | ${ofShape.length} | 0 | – | – |`;
+      }
       const { min, max } = spread(tokens);
-      return `| ${evalCase.id} | ${variant} | ${tokens.length} | ${
+      return `| ${evalCase.id} | ${variant} | ${ofShape.length} | ${tokens.length} | ${
         median(tokens)
       } | ${min}–${max} |`;
     })
