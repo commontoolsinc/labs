@@ -91,6 +91,13 @@ let writeClock = 0;
 export const $onCellUpdate = Symbol("$onCellUpdate");
 
 /**
+ * Tells a handle the worker delivered an update of its cell that the
+ * connection dropped: a value of `undefined`, which the handle cannot tell
+ * from a document not yet loaded, so it keeps the value it holds.
+ */
+export const $onCellUpdateDropped = Symbol("$onCellUpdateDropped");
+
+/**
  * Delivers to a handle a subscription update the worker refused, which
  * carries the refusal and nothing of the cell.
  */
@@ -1592,6 +1599,15 @@ export class CellHandle<T = unknown> {
       ...(this.#ref.overwrite !== undefined &&
         { overwrite: this.#ref.overwrite }),
     });
+  }
+
+  /**
+   * Handles an update of the cell the connection dropped. The handle keeps
+   * the value and label it holds, but the worker has read the cell since, so
+   * the label is no longer the one the worker read with the cell's value.
+   */
+  [$onCellUpdateDropped](): void {
+    this.#cfcLabelCurrent = false;
   }
 
   /**
