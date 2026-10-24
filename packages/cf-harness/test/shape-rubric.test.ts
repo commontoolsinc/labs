@@ -205,6 +205,10 @@ describe("shape-rubric", () => {
       toolCallId: id,
       content,
     });
+    const written = JSON.stringify({
+      status: "executed",
+      outcome: { ok: true, bodyBytes: 2 },
+    });
 
     it("takes page.write as pages and every other call as a read with its result, across subagents", () => {
       const root = [
@@ -215,7 +219,7 @@ describe("shape-rubric", () => {
           command: "page.write",
           args: { path: "Research/A.md", content: "# A page" },
         }),
-        result("2", "ok"),
+        result("2", written),
         call("3", "run_command", { command: "loom.compose", args: {} }),
         result("3", "composed"),
         call("4", "submit_result", { result: {} }),
@@ -239,6 +243,44 @@ describe("shape-rubric", () => {
       expect(material.reads[2]).toContain("dentist");
       expect(material.reads[2]).toContain("two rows");
       expect(material.reads.join("\n")).not.toContain("submit_result");
+    });
+
+    it("shows a page.write that failed or got no answer as a call with its result, not a page", () => {
+      const write = (id: string, path: string) =>
+        call(id, "run_command", {
+          command: "page.write",
+          args: { path, content: `# ${path}` },
+        });
+      const material = materialOf("tile", [[
+        write("1", "Refused.md"),
+        result(
+          "1",
+          JSON.stringify({
+            status: "executed",
+            outcome: { ok: false, code: "version_conflict", bodyBytes: 9 },
+          }),
+        ),
+        write("2", "Lost.md"),
+        result(
+          "2",
+          JSON.stringify({
+            status: "failed_to_deliver",
+            code: "unavailable",
+            landed: "unknown",
+          }),
+        ),
+        write("3", "Unanswered.md"),
+        write("4", "Written.md"),
+        result("4", written),
+      ]]);
+
+      expect(material.pages).toEqual([
+        { path: "Written.md", content: "# Written.md" },
+      ]);
+      expect(material.reads).toHaveLength(3);
+      expect(material.reads[0]).toContain("version_conflict");
+      expect(material.reads[1]).toContain("failed_to_deliver");
+      expect(material.reads[2]).toContain("(no result)");
     });
 
     it("counts a host-supplied result with no call, such as opening research, as a read", () => {
@@ -273,6 +315,7 @@ describe("shape-rubric", () => {
           command: "page.write",
           args: { path: "P.md", content: long },
         }),
+        result("p", written),
         ...reads,
       ]]);
 

@@ -303,6 +303,23 @@ const callSummary = (name: string, args: unknown): string => {
 };
 
 /**
+ * Whether a command call's result says it ran and succeeded: the command
+ * layer's `executed` status with an `ok` outcome. A refusal, a failure to
+ * deliver, or no result at all is not a success.
+ */
+const wrote = (result: string | undefined): boolean => {
+  if (result === undefined) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result);
+  } catch {
+    return false;
+  }
+  return fieldOf(parsed, "status") === "executed" &&
+    fieldOf(fieldOf(parsed, "outcome"), "ok") === true;
+};
+
+/**
  * What the transcripts of one run (its root and any subagents) left for the
  * person: each `page.write` as a page, and every other tool call as a read,
  * with an excerpt of what came back. A tool result the host supplied without
@@ -363,9 +380,13 @@ export const materialOf = (
         const args = argumentsOf(call);
         const inner = fieldOf(args, "args");
         const content = fieldOf(inner, "content");
+        const id = fieldOf(call, "id");
+        const result = typeof id === "string" ? results.get(id) : undefined;
+        // A write that failed, or whose answer never came, wrote nothing: it
+        // is shown as a call with its result, so the judge sees the failure.
         if (
           fieldOf(args, "command") === "page.write" &&
-          typeof content === "string"
+          typeof content === "string" && wrote(result)
         ) {
           const path = fieldOf(inner, "path");
           pages.push({
@@ -374,11 +395,7 @@ export const materialOf = (
           });
           continue;
         }
-        const id = fieldOf(call, "id");
-        read(
-          callSummary(name, args),
-          typeof id === "string" ? results.get(id) : undefined,
-        );
+        read(callSummary(name, args), result);
       }
     }
   }
