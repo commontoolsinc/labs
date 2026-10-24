@@ -167,7 +167,7 @@ class MockRuntimeClient {
   /** When set, every `getPiece` rejects rather than answering. */
   failEveryGetPiece = false;
 
-  /** When set, the next `getPiece` answers as this settles, and no sooner. */
+  /** When set, the next `getPiece` returns this, which the test settles. */
   nextGetPiece: Promise<{ id: () => string }> | undefined = undefined;
 
   getPiece(

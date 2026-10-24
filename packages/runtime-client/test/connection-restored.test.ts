@@ -27,7 +27,7 @@ import {
 import { RuntimeClient } from "@/runtime-client.ts";
 import { buildProcessor } from "./backends/build-processor.ts";
 
-/** A transport that answers every request with nothing, on the next turn. */
+/** A transport that replies to every request with nothing, on the next turn. */
 class TestTransport extends EventEmitter<RuntimeTransportEvents>
   implements RuntimeTransport {
   send(message: IPCClientMessage | IPCClientNotification): void {
