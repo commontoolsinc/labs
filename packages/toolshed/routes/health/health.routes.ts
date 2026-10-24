@@ -129,8 +129,10 @@ export const stats = createRoute({
           ),
         }).optional(),
         // The serving loop's counters (server-execution v2,
-        // serving-loop.md §7) — present only while the loop runs in this
-        // process (the ON arm), on this thread or in its worker.
+        // serving-loop.md §7) — present only in a process that runs the
+        // loop (the ON arm), on this thread or in its worker. Between a
+        // worker that failed and its replacement they are the failed
+        // worker's last counters, and no worker is serving.
         servingLoop: z.any().optional(),
       }),
       "Logger counts and timing statistics",
