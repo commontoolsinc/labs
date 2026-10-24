@@ -111,12 +111,16 @@ type MirroredSession = {
  * The server's sessions, kept current by its lifecycle events, answering
  * the questions the loop asks without waiting. A detached session counts as
  * live until the expiry the server gave it, as it does in the server's own
- * registry.
+ * registry. `expired` hears of each session that lapses without an event,
+ * and `emptied` of each space whose last session leaves.
  */
 class SessionMirror {
   readonly #spaces = new Map<string, Map<string, MirroredSession>>();
 
-  constructor(readonly expired: (space: string, sessionId: string) => void) {}
+  constructor(
+    readonly expired: (space: string, sessionId: string) => void,
+    readonly emptied: (space: string) => void,
+  ) {}
 
   /** Applies one of the server's session lifecycle events to the mirror. */
   apply(event: SessionLifecycleEvent): void {
@@ -141,7 +145,10 @@ class SessionMirror {
       }
       case "removed":
         sessions.delete(event.sessionId);
-        if (sessions.size === 0) this.#spaces.delete(event.space);
+        if (sessions.size === 0) {
+          this.#spaces.delete(event.space);
+          this.emptied(event.space);
+        }
         return;
     }
   }
@@ -157,7 +164,10 @@ class SessionMirror {
         this.expired(space, sessionId);
       }
     }
-    if (sessions.size === 0) this.#spaces.delete(space);
+    if (sessions.size === 0) {
+      this.#spaces.delete(space);
+      this.emptied(space);
+    }
     return sessions;
   }
 }
@@ -521,10 +531,13 @@ export class ServingPlane {
   readonly #endpoint: ServingPlaneEndpoint;
   readonly #demandShares = new DemandShareCache();
   readonly #viewInterests = new ViewInterestCache();
-  readonly #sessions = new SessionMirror((space, sessionId) => {
-    this.#demandShares.forget(space, sessionId);
-    this.#viewInterests.noteChanged(space);
-  });
+  readonly #sessions = new SessionMirror(
+    (space, sessionId) => {
+      this.#demandShares.forget(space, sessionId);
+      this.#viewInterests.noteChanged(space);
+    },
+    (space) => this.#viewInterests.forget(space),
+  );
   readonly #engines = new Map<string, Promise<Engine.Engine>>();
   readonly #transports = new Map<
     number,
@@ -587,6 +600,11 @@ export class ServingPlane {
   /** The loopback plane, for the serving runtime factory. */
   get loopback(): LoopbackPlane {
     return this.#loopback;
+  }
+
+  /** DIAGNOSTIC (tests): how many spaces' view interests the plane holds. */
+  get heldViewInterestSpaces(): number {
+    return this.#viewInterests.size;
   }
 
   /** The host's observer of the server, as the host installed it. */

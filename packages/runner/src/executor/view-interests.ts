@@ -18,12 +18,30 @@ export class ViewInterestCache {
   readonly #interests = new Map<string, SessionViewInterest[]>();
   /** The spaces whose held list may no longer be the server's. */
   readonly #stale = new Set<string>();
-  /** How many reads of each space's list have started. */
-  readonly #reads = new Map<string, number>();
+  /** The number of the read of each space's list that started last. */
+  readonly #latestRead = new Map<string, number>();
+  /** How many reads of any space's list have started. */
+  #reads = 0;
+
+  /** How many spaces' lists it holds. */
+  get size(): number {
+    return this.#interests.size;
+  }
 
   /** Notes that `space`'s interests may have changed. */
   noteChanged(space: string): void {
     this.#stale.add(space);
+  }
+
+  /**
+   * Forgets `space`'s list, once the space has no session left to hold one,
+   * so a plane that outlives its spaces does not keep every list it read. A
+   * read of it in flight then holds nothing when it settles.
+   */
+  forget(space: string): void {
+    this.#interests.delete(space);
+    this.#stale.delete(space);
+    this.#latestRead.delete(space);
   }
 
   /**
@@ -66,15 +84,15 @@ export class ViewInterestCache {
       // from. Of two reads in flight at once, the list the later one
       // started is the one held, whichever settles last.
       this.#stale.delete(space);
-      const started = (this.#reads.get(space) ?? 0) + 1;
-      this.#reads.set(space, started);
+      const started = ++this.#reads;
+      this.#latestRead.set(space, started);
       try {
         interests = await read();
       } catch (error) {
         this.#stale.add(space);
         throw error;
       }
-      if (this.#reads.get(space) === started) {
+      if (this.#latestRead.get(space) === started) {
         this.#interests.set(space, interests);
       }
     }

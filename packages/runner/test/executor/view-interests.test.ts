@@ -153,6 +153,51 @@ describe("view-interests", () => {
     expect(r.state.reads).toBe(0);
   });
 
+  it("holds no list for a space once it is forgotten, and reads it again", async () => {
+    const cache = new ViewInterestCache();
+    const r = reader(() => [interest("a", undefined)]);
+    await cache.interestsFor(space, undefined, r.read);
+    expect(cache.size).toBe(1);
+
+    cache.forget(space);
+
+    expect(cache.size).toBe(0);
+    expect(await cache.interestsFor(space, undefined, r.read)).toHaveLength(1);
+    expect(r.state.reads).toBe(2);
+  });
+
+  it("holds nothing from a read in flight when its space is forgotten", async () => {
+    const cache = new ViewInterestCache();
+    const pending = Promise.withResolvers<SessionViewInterest[]>();
+    const reading = cache.interestsFor(space, undefined, () => pending.promise);
+
+    cache.forget(space);
+    pending.resolve([interest("a", undefined)]);
+    expect(await reading).toHaveLength(1);
+
+    expect(cache.size).toBe(0);
+  });
+
+  it("holds the list of a read that starts after its space is forgotten, over one in flight before", async () => {
+    const cache = new ViewInterestCache();
+    const older = Promise.withResolvers<SessionViewInterest[]>();
+    const first = cache.interestsFor(space, undefined, () => older.promise);
+    cache.forget(space);
+    await cache.interestsFor(
+      space,
+      undefined,
+      () =>
+        Promise.resolve([interest("a", undefined), interest("b", undefined)]),
+    );
+
+    older.resolve([interest("a", undefined)]);
+    await first;
+
+    const r = reader(() => []);
+    expect(await cache.interestsFor(space, undefined, r.read)).toHaveLength(2);
+    expect(r.state.reads).toBe(0);
+  });
+
   it("ignores a selection for a handle the held list does not carry", async () => {
     const cache = new ViewInterestCache();
     const r = reader(() => [interest("a", undefined)]);
