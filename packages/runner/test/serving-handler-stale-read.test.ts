@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
+import type { PatchOp } from "@commonfabric/memory/v2";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
@@ -31,6 +32,12 @@ const space = signer.did() as MemorySpace;
 
 const counterSchema = {
   type: "number",
+  // deno-lint-ignore no-explicit-any
+} as any;
+
+const recordSchema = {
+  type: "object",
+  properties: { a: { type: "number" }, c: { type: "number" } },
   // deno-lint-ignore no-explicit-any
 } as any;
 
@@ -56,8 +63,30 @@ const commitUnseen = (
     },
   }).seq;
 
-/** The counter's value as `engine` holds it. */
-const stored = (engine: Engine.Engine, cell: Cell<number>): unknown =>
+/**
+ * Commits `patches` to `cell`'s document straight to `engine` from another
+ * session, so no replica hears of it, and returns the commit's seq.
+ */
+const patchUnseen = (
+  engine: Engine.Engine,
+  cell: Cell<unknown>,
+  patches: PatchOp[],
+): number =>
+  Engine.applyCommit(engine, {
+    sessionId: "session:peer",
+    commit: {
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "patch",
+        id: cell.getAsNormalizedFullLink().id,
+        patches,
+      }],
+    },
+  }).seq;
+
+/** The cell's document as `engine` holds it. */
+const stored = (engine: Engine.Engine, cell: Cell<unknown>): unknown =>
   Engine.read(engine, { id: cell.getAsNormalizedFullLink().id });
 
 describe("serving-handler-stale-read", () => {
@@ -145,16 +174,140 @@ describe("serving-handler-stale-read", () => {
       await waves.storageManager.synced();
       waves.serve();
 
-      commitUnseen(engine, counter, 5);
+      const peerSeq = commitUnseen(engine, counter, 5);
       const tx = runtime.edit();
-      stampWaveRunContext(tx, { actionId: "increment", kind: "event-handler" });
+      stampWaveRunContext(tx, {
+        actionId: "increment",
+        kind: "event-handler",
+        eventId: "increment-1",
+      });
       const handled = counter.withTx(tx);
       expect(handled.get(), "the replica has not seen the peer").toBe(0);
       handled.set(handled.get() + 1);
       await tx.commit().settled;
-      await waves.commitWave();
+      const outcome = await waves.commitWave();
 
       expect(stored(engine, counter)).toEqual({ value: 5 });
+      expect(outcome.requeuedEventIds).toEqual(["increment-1"]);
+      expect(outcome.staleReadRequeues).toBe(1);
+      expect(outcome.requeueCatchUp).toMatchObject([{
+        eventId: "increment-1",
+        docs: [{ id: counter.getAsNormalizedFullLink().id, seq: peerSeq }],
+      }]);
+    });
+
+    it("requeues a handler whose stale read was of a doc other than the one it wrote", async () => {
+      const { runtime, engine } = waves;
+      const counter = runtime.getCell<number>(space, "counter", counterSchema);
+      const mirror = runtime.getCell<number>(space, "mirror", counterSchema);
+      const seed = runtime.edit();
+      counter.withTx(seed).set(0);
+      mirror.withTx(seed).set(0);
+      expect((await seed.commit().settled).error).toBeUndefined();
+      await waves.storageManager.synced();
+      waves.serve();
+
+      const peerSeq = commitUnseen(engine, counter, 5);
+      const tx = runtime.edit();
+      stampWaveRunContext(tx, {
+        actionId: "mirror",
+        kind: "event-handler",
+        eventId: "mirror-1",
+      });
+      mirror.withTx(tx).set(counter.withTx(tx).get() + 1);
+      await tx.commit().settled;
+      const outcome = await waves.commitWave();
+
+      expect(stored(engine, mirror)).toEqual({ value: 0 });
+      expect(outcome.requeuedEventIds).toEqual(["mirror-1"]);
+      expect(outcome.requeueCatchUp).toMatchObject([{
+        eventId: "mirror-1",
+        docs: [{ id: counter.getAsNormalizedFullLink().id, seq: peerSeq }],
+      }]);
+    });
+
+    it("requeues the later entries of a requeued event's stream with it, and no other stream's", async () => {
+      const { runtime, engine } = waves;
+      const counter = runtime.getCell<number>(space, "counter", counterSchema);
+      const first = runtime.getCell<number>(space, "first", counterSchema);
+      const second = runtime.getCell<number>(space, "second", counterSchema);
+      const seed = runtime.edit();
+      counter.withTx(seed).set(0);
+      first.withTx(seed).set(0);
+      second.withTx(seed).set(0);
+      expect((await seed.commit().settled).error).toBeUndefined();
+      await waves.storageManager.synced();
+      waves.serve();
+
+      commitUnseen(engine, counter, 5);
+      const stream = "of:stream-events:ordered";
+      const head = runtime.edit();
+      stampWaveRunContext(head, {
+        actionId: "head",
+        kind: "event-handler",
+        eventId: "e1",
+        streamEntry: { sidecarId: stream, index: 0, seq: 1 },
+      });
+      const handled = counter.withTx(head);
+      handled.set(handled.get() + 1);
+      await head.commit().settled;
+      const later = runtime.edit();
+      stampWaveRunContext(later, {
+        actionId: "later",
+        kind: "event-handler",
+        eventId: "e2",
+        streamEntry: { sidecarId: stream, index: 1, seq: 2 },
+      });
+      first.withTx(later).set(1);
+      await later.commit().settled;
+      const elsewhere = runtime.edit();
+      stampWaveRunContext(elsewhere, {
+        actionId: "elsewhere",
+        kind: "event-handler",
+        eventId: "e3",
+        streamEntry: { sidecarId: "of:stream-events:other", index: 0, seq: 3 },
+      });
+      second.withTx(elsewhere).set(1);
+      await elsewhere.commit().settled;
+      const outcome = await waves.commitWave();
+
+      expect(outcome.requeuedEventIds).toEqual(["e1", "e2"]);
+      expect(outcome.staleReadRequeues).toBe(2);
+      expect(stored(engine, first)).toEqual({ value: 0 });
+      expect(stored(engine, second)).toEqual({ value: 1 });
+    });
+
+    it("rebases a handler whose reads are current over a concurrent patch to another field", async () => {
+      const { runtime, engine } = waves;
+      const record = runtime.getCell<{ a: number; c: number }>(
+        space,
+        "record",
+        recordSchema,
+      );
+      const seed = runtime.edit();
+      record.withTx(seed).set({ a: 0, c: 0 });
+      expect((await seed.commit().settled).error).toBeUndefined();
+      await waves.storageManager.synced();
+      waves.serve();
+
+      waves.openWave();
+      patchUnseen(engine, record, [{
+        op: "replace",
+        path: "/value/c",
+        value: 7,
+      }]);
+      const tx = runtime.edit();
+      stampWaveRunContext(tx, {
+        actionId: "set-a",
+        kind: "event-handler",
+        eventId: "set-a-1",
+      });
+      record.withTx(tx).key("a").set(1);
+      await tx.commit().settled;
+      const outcome = await waves.commitWave();
+
+      expect(outcome.requeuedEventIds).toEqual([]);
+      expect(stored(engine, record)).toEqual({ value: { a: 1, c: 7 } });
     });
   });
 });

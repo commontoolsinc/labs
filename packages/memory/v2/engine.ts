@@ -4232,6 +4232,60 @@ LIMIT 1
     }) !== undefined;
 
 /**
+ * Returns the `seq` of the newest write after `afterSeq` that a read at `path`
+ * of this document instance conflicts with, or `null` when none does: the
+ * check a wave commit holds a served handler's recorded reads to
+ * (serving-loop.md §3d). A write other than a `patch` conflicts whatever the
+ * read's path, as it does for a client commit's reads; a `patch` conflicts
+ * when `patchOverlapsRead()`, or `patchOverlapsNonRecursiveRead()` for a
+ * shallow read, matches one of its patches that `commutes` does not except.
+ * A write by `holder`'s own derived commits is no conflict, under the
+ * exemption `hasIntrusionSince()` states and in the same NULL-safe shape, so
+ * an absent `holder` exempts nothing.
+ */
+export const findStaleReadSeq = (
+  engine: Engine,
+  options: {
+    branch?: BranchName;
+    id: EntityId;
+    scopeKey: string;
+    afterSeq: number;
+    path: readonly string[];
+    nonRecursive?: boolean;
+    holder?: string;
+
+    /** A patch the read is held not to conflict with. */
+    commutes?: (patch: PatchOp) => boolean;
+  },
+): number | null => {
+  const rows = engine.database.prepare(`
+SELECT r.seq, r.op, r.data
+FROM revision r JOIN "commit" c ON c.seq = r.commit_seq
+WHERE r.branch = :branch AND r.id = :id AND r.scope_key = :scope_key
+  AND r.seq > :after_seq
+  AND NOT (:holder IS NOT NULL AND c.class = 'derived' AND c.holder IS :holder)
+ORDER BY r.seq DESC, r.op_index DESC
+`).all({
+      branch: options.branch ?? DEFAULT_BRANCH,
+      id: options.id,
+      scope_key: options.scopeKey,
+      after_seq: options.afterSeq,
+      holder: options.holder ?? null,
+    }) as Array<{ seq: number; op: string; data: string | null }>;
+  for (const row of rows) {
+    if (row.op !== "patch") return row.seq;
+    const patches = decodeStoredPatchList(row.data).filter((patch) =>
+      options.commutes?.(patch) !== true
+    );
+    const overlaps = options.nonRecursive === true
+      ? patchOverlapsNonRecursiveRead(patches, options.path)
+      : patchOverlapsRead(patches, options.path);
+    if (overlaps) return row.seq;
+  }
+  return null;
+};
+
+/**
  * One admitted commit as the serving loop's subscription sees it
  * (serving-loop.md §1 plane (d), §3): class + holder for the self-echo
  * skip, and the written doc INSTANCES for dirtiness marking. Assembled

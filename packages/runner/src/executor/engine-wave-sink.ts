@@ -49,6 +49,7 @@ import {
   applyCommit,
   applyWaveCommit,
   DerivedAclDocumentWriteError,
+  findStaleReadSeq,
   hasIntrusionSince,
   readState,
   RowLabelCommitError,
@@ -60,7 +61,7 @@ import {
   WavePreconditionError,
 } from "@commonfabric/memory/v2/engine";
 import type { CellScope } from "@commonfabric/api";
-import type { Operation } from "@commonfabric/memory/v2";
+import type { Operation, PatchOp } from "@commonfabric/memory/v2";
 import type {
   ServedAclChange,
   ServedAclChangeVerdict,
@@ -69,6 +70,7 @@ import type { MemorySpace, Result } from "../storage/interface.ts";
 import type {
   WaveCommitRejection,
   WaveCommitSink,
+  WaveReadQuery,
   WaveSpaceCommit,
 } from "./wave.ts";
 
@@ -259,6 +261,32 @@ export class EngineWaveCommitSink implements WaveCommitSink {
       sinceSeq,
       ...(holder === undefined ? {} : { holder }),
     }));
+  }
+
+  /** @inheritDoc */
+  staleReads(
+    space: MemorySpace,
+    reads: ReadonlyArray<WaveReadQuery>,
+    holder: string | undefined,
+    commutes: (read: WaveReadQuery, patch: PatchOp) => boolean,
+  ): Promise<ReadonlyArray<{ read: WaveReadQuery; seq: number }>> {
+    const engine = this.#engineFor(space);
+    const stale: Array<{ read: WaveReadQuery; seq: number }> = [];
+    for (const read of reads) {
+      const seq = findStaleReadSeq(engine, {
+        id: read.id,
+        scopeKey: read.scopeKey,
+        afterSeq: read.seq,
+        path: read.path,
+        ...(read.nonRecursive === undefined
+          ? {}
+          : { nonRecursive: read.nonRecursive }),
+        ...(holder === undefined ? {} : { holder }),
+        commutes: (patch) => commutes(read, patch),
+      });
+      if (seq !== null) stale.push({ read, seq });
+    }
+    return Promise.resolve(stale);
   }
 
   /** @inheritDoc */
