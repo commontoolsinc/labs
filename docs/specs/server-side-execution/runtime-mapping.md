@@ -267,7 +267,9 @@ For a stream a nested pattern defines, that structure is the enclosing
 piece's graph: the stream belongs to the nested instance, whose inputs
 the enclosing instance derives, so the auto-start starts the pieces
 those inputs come from first and leaves the nested instance to run as
-their child (`EnsurePieceOptions.startInputSources`).
+their child (`EnsurePieceOptions.startInputSources`). An argument whose
+links cannot be read fails the start rather than running the handler
+over what those pieces derived last.
 The derivation path needs no analog: a commit dirtying docs read by
 unmaterialized nodes leaves them dirty-unmaterialized until a
 value-granular client pull (a subscription) demands them and their

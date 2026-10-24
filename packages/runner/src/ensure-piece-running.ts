@@ -7,6 +7,7 @@ import {
   type NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
+import { addressKey } from "./link-types.ts";
 import { asPatternIdentityRef } from "./meta-seam.ts";
 import type { Runtime } from "./runtime.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
@@ -70,16 +71,18 @@ async function followResultCellChain(
 
 /**
  * Starts the pieces that derive what the piece at `owner` takes as input: the
- * owning roots of the documents its stored argument links to at its top
- * level, in `owner`'s space, other than `owner` and the roots in `visited`,
- * that are not already running. A nested pattern's instance links its inputs
- * into the instance enclosing it, so for one of those this starts the
- * enclosing instance, whose graph sets the nested one up as its child; a link
- * to the enclosing instance's own argument starts it too, for that reason,
- * though the input it names is current without it. Each source's own sources
- * start first, so an instance nested more than one level deep starts from
- * the outermost. An argument whose links cannot be read leaves `owner` to
- * start on its own, as a source that cannot start does.
+ * owning roots of the documents its stored argument links to, at any depth,
+ * in `owner`'s space, other than `owner` and the roots in `visited`, that are
+ * not already running. A nested pattern's instance links its inputs into the
+ * instance enclosing it, so for one of those this starts the enclosing
+ * instance, whose graph sets the nested one up as its child; a link to the
+ * enclosing instance's own argument starts it too, for that reason, though
+ * the input it names is current without it. Each source's own sources start
+ * first, so an instance nested more than one level deep starts from the
+ * outermost. A source that cannot start leaves `owner` to start on its own,
+ * but an argument whose links cannot be read fails `owner`'s start, as a
+ * chain of its own that cannot be read does: a handler started without its
+ * sources reads what they derived last.
  */
 async function startInputSources(
   runtime: Runtime,
@@ -87,20 +90,11 @@ async function startInputSources(
   signal: AbortSignal | undefined,
   visited: Set<string>,
 ): Promise<void> {
-  let sources: NormalizedFullLink[];
-  try {
-    sources = await inputSourcesOf(runtime, owner, signal);
-  } catch (error) {
-    signal?.throwIfAborted();
-    logger.debug("ensure-piece", () => [
-      `Could not read the input sources of ${owner.id}`,
-      error,
-    ]);
-    return;
-  }
+  const sources = await inputSourcesOf(runtime, owner, signal);
   for (const source of sources) {
-    if (visited.has(source.id)) continue;
-    visited.add(source.id);
+    const key = rootKey(source);
+    if (visited.has(key)) continue;
+    visited.add(key);
     if (runtime.runner.isRunning(runtime.getCellFromLink(source))) continue;
     // A source that cannot start leaves `owner` to start on its own.
     await ensureVerdict(
@@ -115,9 +109,10 @@ async function startInputSources(
 
 /**
  * The owning roots, other than `owner`, of the documents in `owner`'s space
- * that `owner`'s stored argument links to at its top level. Each argument and
+ * that `owner`'s stored argument links to, at any depth. Each argument and
  * derived document a setup writes carries a `result` backlink to the piece it
- * belongs to, which `followResultCellChain()` follows.
+ * belongs to, which `followResultCellChain()` follows, once for each document
+ * however many links name it.
  */
 async function inputSourcesOf(
   runtime: Runtime,
@@ -135,15 +130,14 @@ async function inputSourcesOf(
     const argument = runtime.getCellFromLink(argumentLink, undefined, tx);
     await argument.sync();
     signal?.throwIfAborted();
-    const value = argument.getRaw();
-    if (!isKeyableObjectOrArray(value)) return [];
+    const ownerKey = rootKey(owner);
+    const followed = new Set([ownerKey, rootKey(argumentLink)]);
     const sources = new Map<string, NormalizedFullLink>();
-    for (const field of Object.values(value)) {
-      const link = parseLink(field, argument);
-      if (
-        link === undefined || link.space !== owner.space ||
-        link.id === owner.id || link.id === argumentLink.id
-      ) continue;
+    for (const link of linksIn(argument.getRaw(), argument)) {
+      if (link.space !== owner.space) continue;
+      const document = rootKey(link);
+      if (followed.has(document)) continue;
+      followed.add(document);
       const root = await followResultCellChain(
         runtime,
         runtime.getCellFromLink({ ...link, path: [] }, undefined, tx),
@@ -155,15 +149,34 @@ async function inputSourcesOf(
       signal?.throwIfAborted();
       if (root === undefined) continue;
       const source = root.getAsNormalizedFullLink();
-      if (source.id !== owner.id) {
-        sources.set(source.id, { ...source, path: [] });
-      }
+      const key = rootKey(source);
+      if (key !== ownerKey) sources.set(key, { ...source, path: [] });
     }
     return [...sources.values()];
   } finally {
     runtime.prepareTxForCommit(tx);
     await tx.commit().settled;
   }
+}
+
+/**
+ * Every link `value` holds, at any depth. A link is taken whole rather than
+ * walked into, since what it names is another document.
+ */
+function linksIn(value: unknown, base: Cell<any>): NormalizedFullLink[] {
+  const link = parseLink(value, base);
+  if (link !== undefined) return [link];
+  if (!isKeyableObjectOrArray(value)) return [];
+  return Object.values(value).flatMap((member) => linksIn(member, base));
+}
+
+/**
+ * The key a document is known by while starting input sources: its space,
+ * id and scope, since a `result` backlink can cross into the same id in
+ * another scope, which is another document.
+ */
+function rootKey(address: OwningRootAddress): string {
+  return addressKey({ ...address, path: [] });
 }
 
 /**
@@ -280,8 +293,8 @@ export function ensurePieceRunningVerdict(
 /**
  * {@link ensurePieceRunningVerdict} for a piece reached while starting input
  * sources: `visited` holds the owning roots already asked about on the way,
- * which `startInputSources()` skips, so pieces linked to each other's outputs
- * end the walk rather than loop.
+ * by `rootKey()`, which `startInputSources()` skips, so pieces linked to each
+ * other's outputs end the walk rather than loop.
  */
 async function ensureVerdict(
   runtime: Runtime,
@@ -387,7 +400,7 @@ async function ensureVerdict(
         options?.startInputSources === true &&
         !runtime.runner.isRunning(resultCell)
       ) {
-        visited.add(rootId);
+        visited.add(rootKey(root));
         await startInputSources(runtime, root, signal, visited);
         signal?.throwIfAborted();
         // A source whose graph sets this piece up as its child has started
