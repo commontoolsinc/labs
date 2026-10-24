@@ -281,11 +281,11 @@ describe("fabrichat-join", () => {
     // the profile the adder's manager lists for them, which points at their
     // Home's private inbox, and the room's page, reading the manager's verdict
     // from the adder's home, says so. A served handler can't read the
-    // manager's per-session `people`, so under server execution it finds no
+    // manager's per-user `people`, so under server execution it finds no
     // profile for them, and queues a notice instead.
     // TODO(danfuzz): Expect `offered` under server execution too, and the
     // room in the person's chats below, once a served handler can read a
-    // per-session instance of its user's.
+    // per-user instance of its user's.
     await fillCfInput(adder, "#fabrichat-add-member-address", addedAddress);
     await clickTrustedAction(adder, ADD_MEMBER_ACTION);
     await waitForSettledText(
