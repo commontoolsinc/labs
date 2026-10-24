@@ -1467,11 +1467,11 @@ export class SpeculationOverlayDestination
     ]);
   }
 
-  /** Whether a live entry is a client cascade DESCENDANT of `ancestor`:
-   * its own `parentEventId` is the ancestor, or the thread recorded at
-   * seal leads there through intermediate cascade ids (a child that
-   * wrote nothing has no entry to hang the walk on — the thread does
-   * not need one). */
+  /** Whether a live entry, or a child the thread names, is a client
+   * cascade DESCENDANT of `ancestor`: its own `parentEventId` is the
+   * ancestor, or the thread leads there through intermediate cascade ids
+   * (a child that wrote nothing has no entry to hang the walk on — the
+   * thread does not need one). */
   #cascadeReaches(
     entry: Pick<OverlayEntry, "parentEventId">,
     ancestor: string,
