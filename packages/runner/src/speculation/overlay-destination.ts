@@ -305,15 +305,18 @@ export class SpeculationOverlayDestination
   static readonly #MAX_TERMINAL_INTENTS = 4096;
 
   /** The client cascade THREAD (stage C W2.1): cascade child eventId →
-   * its emitter's eventId, recorded at the seal of every event-handler
+   * its emitter's eventId, recorded when the scheduler queues the child
+   * (`threadCascadeChild`) and again at the seal of every event-handler
    * echo that carries a `parentEventId` — with or without writes, so a
    * "router" child that only forwards (no entry of its own) still links
    * its grandchildren to the root intent. Process-local, bounded and
    * insertion-ordered like `#terminalIntents` (oldest pruned); never
    * persisted, never sent, never a dependency on history: it is read
-   * only at `retireIntent` to walk a live entry's ancestry to the intent
-   * whose terminal consequence just arrived. A link is needed only for
-   * the round trip between a cascade's seal and its root's consequence. */
+   * at a retirement to walk a live entry's ancestry to the intent whose
+   * terminal consequence just arrived, and to find the descendants still
+   * queued behind an event that was never fired. A link is needed only
+   * for the round trip between a cascade's queueing and its root's
+   * consequence. */
   readonly #cascadeParents = new Map<string, string>();
 
   /** Walk cap for the ancestry walk — ids are fresh per attempt, so no
@@ -1469,7 +1472,10 @@ export class SpeculationOverlayDestination
    * seal leads there through intermediate cascade ids (a child that
    * wrote nothing has no entry to hang the walk on — the thread does
    * not need one). */
-  #cascadeReaches(entry: OverlayEntry, ancestor: string): boolean {
+  #cascadeReaches(
+    entry: Pick<OverlayEntry, "parentEventId">,
+    ancestor: string,
+  ): boolean {
     let id = entry.parentEventId;
     let hops = 0;
     while (id !== undefined) {
@@ -1731,14 +1737,37 @@ export class SpeculationOverlayDestination
    * was never tracked, so nothing is settled or signaled, and the event's
    * own id does not join the jobless set: an attempt run again under the
    * same id fires the event after all, and that attempt's echo stands.
+   *
+   * A cascade child the echo's run queued can still be waiting to run, and
+   * its echo would seal after this retirement with nothing left to retire
+   * it. Every descendant the thread reaches joins the jobless set instead,
+   * so such an echo is dropped at its seal. A child's id is minted for the
+   * attempt that queued it, so an attempt run again under the event's id
+   * queues children the set does not name.
    */
   retireUnfiredEcho(space: MemorySpace, eventId: string): void {
+    for (const [child, parent] of [...this.#cascadeParents]) {
+      if (this.#cascadeReaches({ parentEventId: parent }, eventId)) {
+        this.#noteJoblessIntent(child);
+      }
+    }
     this.#retireEchoes(space, eventId, {
       own: "event echo retired: the transaction that sent the event did " +
         "not commit, so the event was never fired",
       cascade: "cascade echo retired: the transaction that sent its " +
         "ancestor event did not commit, so that event was never fired",
     });
+  }
+
+  /**
+   * Thread a client cascade child to the event whose run queued it, as the
+   * child's seal does later. The thread has to reach the child while it
+   * waits in the queue: the transaction that sent the root event can fail
+   * before the child runs, and {@link retireUnfiredEcho} then finds the
+   * child by it.
+   */
+  threadCascadeChild(eventId: string, parentEventId: string): void {
+    this.#noteCascadeParent(eventId, parentEventId);
   }
 
   /**

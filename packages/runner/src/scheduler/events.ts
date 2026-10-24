@@ -938,6 +938,15 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   // ingress caller's opaque idempotency key is bound to its stream earlier,
   // at the send surface (cell.ts), via scopeCallerEventId.
   const id = args.eventId ?? mintEventId(args.eventLink, args.originTx);
+  // A flag-ON client's cascade child is threaded to its emitter before it
+  // waits in the queue, so an emitter whose event is never fired takes the
+  // child's echo with it however late the child runs.
+  if (args.parentEventId !== undefined) {
+    state.runtime.speculationOverlay?.threadCascadeChild(
+      id,
+      args.parentEventId,
+    );
+  }
   const handler = state.eventHandlers.get(args.eventLink);
 
   if (handler) {
