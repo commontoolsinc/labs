@@ -712,8 +712,10 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       // settled value. A handle cannot tell these apart, so the update is
       // dropped and the handle holds what it held: one that has read
       // nothing stays unread until a read answers it. The label it holds
-      // is no longer the worker's read of the cell, so a subscriber, or a
-      // handle seeded from this one, asks the worker for it.
+      // is no longer the worker's read of the cell, so it is marked not
+      // current. No attached subscriber is told; a subscriber added to the
+      // handle later, or a handle seeded from it, is handed the label as
+      // not current, and an authorship observation then asks the worker.
       for (const instance of subscribed ?? []) {
         instance[$onCellUpdateDropped]();
       }
