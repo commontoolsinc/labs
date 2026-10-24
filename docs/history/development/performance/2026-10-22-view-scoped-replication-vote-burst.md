@@ -48,10 +48,12 @@ probe's second round, on the same four-core container as the census.
 | Serving scheduler runs | 888 | 789 |
 | Client scheduler runs, each of five clients | 315 | 552–564 |
 
-The selection does what it is for: the memory server's incremental walks
-evaluate 45 roots instead of 10,206, since the sessions' graphs are now the
-rendered roots and the documents the planner selected rather than everything
-the clients had subscribed to. What replaces them is the planner.
+The selection does what it is for: the root evaluations the memory server's
+incremental walks count fall from 10,206 to 45, since the sessions' graphs are
+now the rendered roots and the documents the planner selected rather than
+everything the clients had subscribed to. The count leaves out the full
+evaluations of a session's watch set, which the second finding below accounts
+for. What replaces the walks' work is the planner.
 
 **A plan per view per wave, each walking the UI again.** The publisher
 considers every attached view after every cycle: 16 publishes by 5 views here,

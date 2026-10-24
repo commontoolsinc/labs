@@ -216,7 +216,9 @@ Exit: a plan's inputs document is hashed over its links, not its schemas.
       record is
       [`../history/development/performance/2026-10-16-fabrichat-room-cold-load-phases.md`](../history/development/performance/2026-10-16-fabrichat-room-cold-load-phases.md).
 - [x] An absence the store read-through confirmed holds no start, named
-      family or not. The replica remembers each instance the store held
+      family or not, among the documents the gate's probes reach before
+      their budget is spent; one past the budget holds the start, as the
+      item above says. The replica remembers each instance the store held
       nothing at until the feed reports a write to it
       (`IStorageProvider.storeReportedAbsent`), and a name-sync asks the
       replica, which answers with that report until then; the replica still

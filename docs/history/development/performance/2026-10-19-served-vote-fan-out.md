@@ -146,9 +146,11 @@ despite retaining the previous manager's document cache in the graph state.
 
 OFF had 3,071 affected updates, 2,706 at unchanged versions, and 4,365
 unchanged reads among 4,730. Conflict catch-up deliberately dirties rejected
-operations and their confirmed/pending read sets. This explains why OFF
-rewalks many unchanged roots. Dropping their delivery solely because the
-server version is unchanged would lose the client's conflict repair.
+operations and their confirmed/pending read sets, so OFF's incremental
+refreshes walk those roots again at unchanged versions and read their
+supporting documents again with them; none of these counts is a first
+evaluation. Dropping their delivery solely because the server version is
+unchanged would lose the client's conflict repair.
 
 The compressed captures contained 151 admitted OFF commits with 104 writes,
 and 45 worker commits with 497 writes. Dirty sets also include conflict

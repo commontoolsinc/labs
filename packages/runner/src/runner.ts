@@ -7667,8 +7667,11 @@ export class Runner {
    * cell, which no store holds before the session writes it, the replica
    * counts as examined without asking. A document the store read-through
    * reported holding nothing at (`IStorageProvider.storeReportedAbsent`)
-   * holds no run either, named family or not: a name-sync asks the replica,
-   * which answers with that report until the feed reports a write. The
+   * holds no run either, named family or not, while the probes have budget
+   * left: a name-sync asks the replica, which answers with that report until
+   * the feed reports a write. Once the budget is spent, a document the probes
+   * have not reached holds the run whatever the store reported, as every
+   * document past the budget does. The
    * argument document is the one asked of the store again, since the result
    * here shows the report predates its write. A cell owed a default
    * (`ownedCellOwesSeed`) that the store reported holding nothing at is not

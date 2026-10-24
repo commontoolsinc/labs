@@ -143,11 +143,14 @@ From `packages/patterns`, one arm at a time, the box otherwise idle:
 CF_LUNCH_POLL_VOTERS=5 CF_LUNCH_POLL_OPTIONS=5 \
 EXPERIMENTAL_SERVER_EXECUTION=true SERVER_EXECUTION_WORKER=true \
 SERVER_EXECUTION_STORE_READ_THROUGH=true SERVER_EXECUTION_OVERLAP_COMMIT=false \
+EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION=true \
 deno bench -A --no-check integration/lunch-poll-vote-burst.bench.ts
 ```
 
 `EXPERIMENTAL_SERVER_EXECUTION=false` is the loop-off arm;
 `SERVER_EXECUTION_WORKER=false` the main-thread arm;
+`EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION=false` the arm without view-scoped
+replication, whose default is off;
 `SERVER_EXECUTION_FLUSH_DEADLINE_MS` the cadence. The bench prints, once, before
 its timed iterations, a
 `one burst cost N rejected commit(s) and M rolled-back write(s)` line from the

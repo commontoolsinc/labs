@@ -66,8 +66,9 @@ dropped and added. At 296 votes the view's delivery holds about 3,269 roots,
 and every vote swaps two of them: the space-scoped document the previous vote
 added gives way to a new one, and one user-scoped document gives way to
 another, the two alternating from vote to vote. A selection that drops a
-root rebuilds the session's support graphs from every root it holds, so each
-vote pays a support evaluation over all 3,269.
+root has the next pass refresh the session's demand graphs by its dirty
+batch, as any pass does, and then rebuild its support graphs from every root
+the selection holds, so each vote pays a support evaluation over all 3,269.
 
 ## The browser is the vote's critical path
 

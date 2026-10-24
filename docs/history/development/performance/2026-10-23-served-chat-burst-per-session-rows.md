@@ -46,8 +46,10 @@ The caller came from the SES-tamed error's `getStackString`, since
 The room renders its messages through `facts.main.map(...)`, one
 `FabriChatMessageRow` per message. The room's UI is per session, so every
 viewing session has its own instance of every row, and the serving worker
-starts each one. With three sessions viewing the room, a burst's 8 new
-messages make 24 starts.
+starts each one. In the probe's logs each new row started three times, once
+in each of three of the four members' sessions, so a burst's 8 new messages
+made 24 starts. The fourth member's session, whose view is mounted like the
+others', started none of them; this round did not follow that up.
 
 Every start came through the same path: the list map's `reconcile`, then
 `run`, `#runAfterNamedFamilyLands`, `#nameFamilyBeforeRun` and

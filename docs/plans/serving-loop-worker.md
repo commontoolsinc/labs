@@ -210,12 +210,15 @@ closes the port, and the worker's host closes as it does today.
 
 ## What does not change
 
-The loop, the demand pass, the outbox, the lease, the sink, and the protocol
-are untouched, and the wave takes the one addition above. What changes is who
-holds the engine object the loop reads, which thread the sink runs on, and how
-the host reaches the server. The
-in-process arrangement stays available: it is what every existing test runs,
-and the flag below selects between the two.
+What the loop computes does not change: the demand pass, the outbox, the
+lease, the sink and the protocol keep their meaning. The wave and the cycle
+take the two additions above, the rebase of a write over the loop's own
+landed commit and, under its flag, the overlapped commit, and the demand pass
+awaits its rows, which a worker reads across the port. What changes otherwise
+is who holds the engine object the loop reads, which thread the sink runs
+on, and how the host reaches the server. The in-process arrangement stays
+available: it is what every existing test runs, and the flag below selects
+between the two.
 
 ## Stages
 
@@ -264,7 +267,8 @@ and the flag below selects between the two.
 5. [x] **Measure.** The vote probe and the Topics seed under the worker against
    the in-process loop on the same box: client watch-add latency, the
    per-vote and per-topic client cost, and the serving loop's own wave
-   timings, which should not move.
+   timings, whose settle the worker leaves where it was and whose cycle
+   gains the port round trips of its commit.
    [The 2026-10-11 record](../history/development/performance/2026-10-11-serving-loop-in-a-worker.md)
    holds the numbers, and the wave basis race the measurement exposed, which
    the ordering section above now covers.
