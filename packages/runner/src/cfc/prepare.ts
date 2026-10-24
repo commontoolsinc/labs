@@ -8442,25 +8442,50 @@ const isRuntimeMintedIntegrityAtom = (atom: unknown): boolean =>
   (typeof atom === "string" && SYSTEM_STRING_ATOMS.has(atom));
 
 /**
- * Drops runtime-minted evidence atoms from a persisted label's integrity unless
- * the write was authored by a trusted builtin (the sanitizer, compile cache,
- * and link/provenance minting all run as builtins). Verified pattern code and
- * unattributed writes may not mint evidence (audit S4).
+ * Drops runtime-minted evidence atoms from an author-influenceable label's
+ * integrity unless the write was authored by a trusted builtin (the
+ * sanitizer, compile cache, and link/provenance minting all run as builtins).
+ * Verified pattern code and unattributed writes may not mint evidence (audit
+ * S4).
  */
 const gateRuntimeMintedIntegrity = (
   label: IFCLabel,
   authoringIdentity: ImplementationIdentity | undefined,
+): IFCLabel =>
+  withIntegrityFiltered(
+    label,
+    authoringIdentity?.kind === "builtin"
+      ? () => true
+      : (atom) => !isRuntimeMintedIntegrityAtom(atom),
+  );
+
+/**
+ * {@link gateRuntimeMintedIntegrity} for a label a schema declares or stamps,
+ * which drops `TransformedBy` whatever the author as well: the flow stage
+ * mints that atom for one attempt, from the identity that ran and the
+ * witnesses it consumed, and a schema declaration names no attempt (CFC
+ * §15.4). A label read from what a document stores, or carried by a view
+ * built from it, keeps the flow stage's stamps and passes the other gate.
+ */
+const gateSchemaIntegrity = (
+  label: IFCLabel,
+  authoringIdentity: ImplementationIdentity | undefined,
+): IFCLabel =>
+  gateRuntimeMintedIntegrity(
+    withIntegrityFiltered(label, (atom) => !isTransformedByAtom(atom)),
+    authoringIdentity,
+  );
+
+/** `label` with the integrity atoms `keep` rejects left out. */
+const withIntegrityFiltered = (
+  label: IFCLabel,
+  keep: (atom: unknown) => boolean,
 ): IFCLabel => {
-  if (authoringIdentity?.kind === "builtin") {
-    return label;
-  }
   const integrity = label.integrity;
   if (integrity === undefined || integrity.length === 0) {
     return label;
   }
-  const filtered = integrity.filter((atom) =>
-    !isRuntimeMintedIntegrityAtom(atom)
-  );
+  const filtered = integrity.filter(keep);
   if (filtered.length === integrity.length) {
     return label;
   }
@@ -9285,7 +9310,7 @@ const linkSlotLabel = (
     }
     linkSchemaLabel = { ...linkSchemaLabel, confidentiality: [...boundSchema] };
   }
-  const gatedIntegrity = gateRuntimeMintedIntegrity(
+  const gatedIntegrity = gateSchemaIntegrity(
     { integrity: linkSchemaLabel.integrity },
     authoringIdentity,
   ).integrity;
@@ -11436,7 +11461,7 @@ const verifyWriteFloor = function* (
           continue;
         }
         const derived = yield* ctx.linkLabels.evidence(input);
-        const declared = gateRuntimeMintedIntegrity(
+        const declared = gateSchemaIntegrity(
           { integrity: entry.label.integrity },
           ctx.identityForPath(linkPath),
         ).integrity ?? [];
@@ -11529,7 +11554,7 @@ const verifyWriteFloor = function* (
     );
     const ownStamps = valueStampsOf(tx, entry.schema, mint);
     const base = mergeLabelValues(
-      gateRuntimeMintedIntegrity(declared, ctx.identityForPath(entry.path))
+      gateSchemaIntegrity(declared, ctx.identityForPath(entry.path))
         .integrity,
       stampsHere.filter((stamp) => stamp.lands)
         .flatMap((stamp) => stamp.integrity),
@@ -11546,7 +11571,7 @@ const verifyWriteFloor = function* (
     // persisted stamp, as the minted list of a roster covers the references
     // its roles hold.
     const declaredBase =
-      gateRuntimeMintedIntegrity(declared, ctx.identityForPath(entry.path))
+      gateSchemaIntegrity(declared, ctx.identityForPath(entry.path))
         .integrity ?? [];
     // One contribution per link written at/under the floor path (each linked
     // value must individually carry the floor), plus one `value` contribution
@@ -12198,7 +12223,7 @@ export function* prepareBoundaryCommitSteps(
     if (stampingSchema !== undefined) {
       for (const entry of cfcSchemaEntries(stampingSchema)) {
         const path = canonicalizeLogicalPath(entry.path);
-        const integrity = gateRuntimeMintedIntegrity(
+        const integrity = gateSchemaIntegrity(
           {
             integrity: [
               ...valueStampsOf(
@@ -12475,7 +12500,7 @@ export function* prepareBoundaryCommitSteps(
             remintedDeclaredPaths.set(pathKey(entry.path), entry.path);
           }
           const mint = labelMintOptionsAt(tx, target, entry.path);
-          const derived = gateRuntimeMintedIntegrity(
+          const derived = gateSchemaIntegrity(
             derivePersistedLabel(
               tx,
               entry.schema,
