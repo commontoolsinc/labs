@@ -1049,13 +1049,13 @@ export class MultiRuntimeHarness {
    * in a LATER wave, outside the wait; cascades ride the ordinary barrier
    * rounds, so a test asserting on cascade results still needs enough rounds
    * (or `settleUntil()`, or `waitFor()` against a toolshed). The wait has no
-   * budget, since a budget that ran out on a slow but healthy drain would hand
-   * the caller's next read a mid-drain head. It runs under the shared
-   * stuck-condition net instead, so a consequence that never arrives fails the
-   * call with an error naming the session, rather than hanging the run. The
-   * barrier then pulls each replica to a head ≥ every first-order consequence
-   * commit. The wait returns at once where there is no overlay and so no
-   * outstanding intent, as on an OFF-posture toolshed.
+   * budget, so a drain that is slow but healthy still completes before the
+   * caller's next read. It runs under the shared stuck-condition net, so a
+   * consequence that never arrives fails the call with an error naming the
+   * session, rather than hanging the run. The barrier then pulls each replica
+   * to a head ≥ every first-order consequence commit. The wait returns at once
+   * where there is no overlay and so no outstanding intent, as on an
+   * OFF-posture toolshed.
    */
   async settle(rounds = 2): Promise<void> {
     for (let i = 0; i < rounds; i++) {
