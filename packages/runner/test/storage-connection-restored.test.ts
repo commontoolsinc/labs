@@ -116,8 +116,9 @@ describe("storage-connection-restored", () => {
     });
 
     /**
-     * A factory onto the server, every socket it has opened, and a wait for
-     * the factory's `count`-th report of a restored connection, which also
+     * A factory onto the server, every socket it has opened, a session opener
+     * whose connection the test's cleanup closes, and a wait for the
+     * factory's `count`-th report of a restored connection, which also
      * returns every report it has made by then.
      */
     const factoryOver = (shared: boolean) => {
@@ -152,9 +153,14 @@ describe("storage-connection-restored", () => {
         );
         return reports;
       };
+      const open = async (space: MemorySpace): Promise<void> => {
+        const { client } = await factory.create(space);
+        cleanups.push(() => client.close());
+      };
       return {
         factory,
         sockets,
+        open,
         reported,
         get reports() {
           return reports;
@@ -169,7 +175,7 @@ describe("storage-connection-restored", () => {
 
       it(`reports a restored connection once its dropped socket comes back, over ${connection}`, async () => {
         const harness = factoryOver(shared);
-        await harness.factory.create(SPACES[0]);
+        await harness.open(SPACES[0]);
         const opened = harness.sockets.length;
 
         harness.sockets[opened - 1].close();
@@ -181,7 +187,7 @@ describe("storage-connection-restored", () => {
 
     it("reports each connection that comes back, over a connection per space", async () => {
       const harness = factoryOver(false);
-      await Promise.all(SPACES.map((space) => harness.factory.create(space)));
+      await Promise.all(SPACES.map((space) => harness.open(space)));
       expect(harness.sockets).toHaveLength(SPACES.length);
 
       for (const socket of [...harness.sockets]) socket.close();
@@ -192,7 +198,7 @@ describe("storage-connection-restored", () => {
     it("reports nothing for the connections it opens", async () => {
       const harness = factoryOver(false);
 
-      await Promise.all(SPACES.map((space) => harness.factory.create(space)));
+      await Promise.all(SPACES.map((space) => harness.open(space)));
 
       expect(harness.reports).toBe(0);
     });
