@@ -126,8 +126,8 @@ file-sharing example: bytes go to the blob store, cells hold descriptors),
 shapes are stored, while each viewer's pointer and a shape held mid-drag or
 mid-resize travel through a presence room and are stored nowhere),
 `iframe-verb-list/` (a list in a sandboxed iframe whose guest adds an item only
-by sending the pattern's `addItem` verb, which the generated frame takes as a
-stream), `lobby/`, `lunch-poll/`, `profile-group-chat/`, `project-list/`,
+by sending the pattern's `addItem` verb, which writes the pattern's own state),
+`lobby/`, `lunch-poll/`, `profile-group-chat/`, `project-list/`,
 [`recommend-a-book/`](recommend-a-book/README.md) (personal reading shelf and
 private visitor recommendations), `router/`, `scoped-group-chat/`,
 `scoped-user-directory/`, `scrabble/`, `shared-note/` (a shared Markdown
