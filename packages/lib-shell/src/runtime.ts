@@ -468,7 +468,8 @@ export class RuntimeInternals extends EventTarget {
    *
    * An entry carries whether the load was STARTED: a started piece answers a
    * caller that only reads it, while one loaded without starting does not
-   * answer a caller that needs it running.
+   * answer a caller that needs it running. A load that failed is an entry
+   * like any other, and answers with its failure until it is invalidated.
    */
   #patternCache: Map<
     DID,
@@ -614,6 +615,14 @@ export class RuntimeInternals extends EventTarget {
    * Cached per (space, scope, id) — a pattern's whole address. A cache entry
    * created with `start: false` is upgraded (re-fetched with start) when a
    * starting caller asks for the same pattern.
+   *
+   * A load that fails is cached too, and every later request for that
+   * address rejects with the same error without asking the worker again,
+   * until {@link RuntimeInternals.invalidatePattern} or
+   * {@link RuntimeInternals.refreshPattern} drops it. So a failing piece is
+   * fetched and started once however often it is asked for, which is what
+   * keeps a caller that asks on a schedule of its own from repeating the
+   * failure on that schedule.
    */
   getPattern(
     space: DID,
@@ -642,12 +651,7 @@ export class RuntimeInternals extends EventTarget {
       }
       return piece;
     })();
-    const entry: PatternCacheEntry = { promise, started: start };
-    byId.set(id, entry);
-    // Evict on rejection so the next request retries.
-    promise.catch(() => {
-      if (byId.get(id) === entry) this.#dropPattern(space, scope, id);
-    });
+    byId.set(id, { promise, started: start });
     return promise;
   }
 
@@ -669,7 +673,7 @@ export class RuntimeInternals extends EventTarget {
    * Drop one loaded piece, and any level of the cache it was the last thing
    * in. A nested map holds a level per address component, so a level left
    * empty is a space or a scope the runtime goes on holding for a piece it
-   * no longer has — and a run of failed lookups is a run of them.
+   * no longer has — and a run of invalidated lookups is a run of them.
    */
   #dropPattern(space: DID, scope: CellScope, id: string): void {
     const byScope = this.#patternCache.get(space);

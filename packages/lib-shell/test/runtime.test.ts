@@ -664,10 +664,10 @@ describe("RuntimeInternals", () => {
     }
   });
 
-  it("leaves no empty levels behind when a load fails", async () => {
+  it("leaves no empty levels behind when a failed load is invalidated", async () => {
     // A nested cache holds a level per address component, so evicting only
     // the piece leaves the scope and the space it sat in — and a run of
-    // failed lookups is a run of those, held for the runtime's lifetime.
+    // invalidated lookups is a run of those, held for the runtime's lifetime.
     const space = "did:key:z6Mk-lib-shell-cache-levels" as DID;
     const client = new MockRuntimeClient();
     client.failNextGetPiece = true;
@@ -675,7 +675,71 @@ describe("RuntimeInternals", () => {
 
     try {
       await expect(runtime.getPattern(space, "fid1:gone")).rejects.toThrow();
+      runtime.invalidatePattern(space, "fid1:gone");
       expect(runtime.accessForTestingOnly.patternCacheSize).toBe(0);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("rejects a failed load's later requests with its error, asking the worker once", async () => {
+    // Only the first load fails, so a second trip to the worker would
+    // succeed: a request that resolves here is one that asked again.
+    const space = "did:key:z6Mk-lib-shell-failed-load" as DID;
+    const client = new MockRuntimeClient();
+    client.failNextGetPiece = true;
+    const runtime = new RuntimeInternals(client as any);
+
+    try {
+      await expect(runtime.getPattern(space, "fid1:broken")).rejects.toThrow(
+        "the socket went away",
+      );
+      await expect(runtime.getPattern(space, "fid1:broken")).rejects.toThrow(
+        "the socket went away",
+      );
+      await expect(
+        runtime.getPattern(space, "fid1:broken", { start: false }),
+      ).rejects.toThrow("the socket went away");
+      expect(client.getPieceCalls).toEqual([
+        { pieceId: "fid1:broken", runIt: true, space, scope: "space" },
+      ]);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("loads a failed piece again once it is refreshed", async () => {
+    const space = "did:key:z6Mk-lib-shell-failed-refresh" as DID;
+    const client = new MockRuntimeClient();
+    client.failNextGetPiece = true;
+    const runtime = new RuntimeInternals(client as any);
+
+    try {
+      await expect(runtime.getPattern(space, "fid1:broken")).rejects.toThrow();
+
+      const piece = await runtime.refreshPattern(space, "fid1:broken");
+
+      expect(piece.id()).toBe("fid1:broken");
+      expect(client.getPieceCalls).toHaveLength(2);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("loads a failed piece again once it is invalidated", async () => {
+    const space = "did:key:z6Mk-lib-shell-failed-invalidate" as DID;
+    const client = new MockRuntimeClient();
+    client.failNextGetPiece = true;
+    const runtime = new RuntimeInternals(client as any);
+
+    try {
+      await expect(runtime.getPattern(space, "fid1:broken")).rejects.toThrow();
+
+      runtime.invalidatePattern(space, "fid1:broken");
+      const piece = await runtime.getPattern(space, "fid1:broken");
+
+      expect(piece.id()).toBe("fid1:broken");
+      expect(client.getPieceCalls).toHaveLength(2);
     } finally {
       await runtime.dispose();
     }
