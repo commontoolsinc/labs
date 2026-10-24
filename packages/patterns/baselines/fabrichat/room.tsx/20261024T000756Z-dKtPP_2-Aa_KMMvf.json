@@ -21,6 +21,52 @@
         ],
         "type": "object"
       },
+      "AddFileEvent": {
+        "properties": {
+          "blob": {
+            "$ref": "#/$defs/BlobRef",
+            "description": "The blob holding the bytes."
+          },
+          "mediaType": {
+            "description": "The media type the blob was stored with.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The new entry's name, the name its blob was stored under.",
+            "type": "string"
+          },
+          "onConflict": {
+            "$ref": "#/$defs/NameConflict",
+            "description": "What to do when `name` is taken; `refuse` when absent."
+          },
+          "requestId": {
+            "description": "Chosen by the sender; the event's own key when there is none.",
+            "type": "string"
+          },
+          "size": {
+            "description": "The size of the file, in bytes.",
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "BlobRef": {
+        "properties": {
+          "id": {
+            "description": "The blob's id: `fid1:` and the hash of its name, media type and bytes.",
+            "type": "string"
+          },
+          "space": {
+            "description": "The DID of the space whose blob store holds the bytes.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "space",
+          "id"
+        ],
+        "type": "object"
+      },
       "ChatDeletedBody": {
         "properties": {
           "deleted": {
@@ -80,8 +126,291 @@
           "group"
         ]
       },
+      "FileEntry": {
+        "properties": {
+          "addedAt": {
+            "description": "When the file was added.",
+            "type": "FabricEpochNsec"
+          },
+          "addedBy": {
+            "$ref": "#/$defs/FileProfile",
+            "asCell": [
+              "cell"
+            ],
+            "description": "The profile of whoever added it."
+          },
+          "blob": {
+            "$ref": "#/$defs/BlobRef",
+            "description": "The blob holding the bytes."
+          },
+          "mediaType": {
+            "description": "The media type of the bytes.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name the store finds this file by, and its blob's name.",
+            "type": "string"
+          },
+          "removedAt": {
+            "description": "When the file was removed from its store, if it has been.",
+            "type": "FabricEpochNsec"
+          },
+          "size": {
+            "description": "The size of the file, in bytes.",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "mediaType",
+          "blob",
+          "size",
+          "addedAt",
+          "addedBy"
+        ],
+        "type": "object"
+      },
+      "FileProfile": {
+        "properties": {
+          "avatar": {
+            "description": "A URL of their picture.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name the person goes by.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FileRefusalCode": {
+        "enum": [
+          "invalid-request",
+          "invalid-name",
+          "name-taken",
+          "other-space",
+          "no-blob",
+          "not-found",
+          "not-permitted"
+        ]
+      },
+      "FileRequestOutcome": {
+        "anyOf": [
+          {
+            "properties": {
+              "entry": {
+                "$ref": "#/$defs/FileEntry",
+                "asCell": [
+                  "cell"
+                ],
+                "description": "The entry the request added or changed."
+              },
+              "name": {
+                "description": "The name the request gave the entry.",
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "done"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "entry",
+              "name"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "code": {
+                "$ref": "#/$defs/FileRefusalCode",
+                "description": "Why, as a code a client can act on."
+              },
+              "reason": {
+                "description": "Why, as prose for a person.",
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "refused"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "reason",
+              "code"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "FileStoreFiles": {
+        "properties": {
+          "add": {
+            "$ref": "#/$defs/AddFileEvent",
+            "asCell": [
+              "stream"
+            ],
+            "description": "Adds a file, for a blob already in the store's space."
+          },
+          "byName": {
+            "additionalProperties": {
+              "$ref": "#/$defs/FileEntry",
+              "asCell": [
+                "cell"
+              ]
+            },
+            "description": "The same files, by name.",
+            "properties": {},
+            "type": "object"
+          },
+          "entries": {
+            "description": "Every file in the store, in the order they were added.",
+            "items": {
+              "$ref": "#/$defs/FileEntry",
+              "asCell": [
+                "cell"
+              ]
+            },
+            "type": "array"
+          },
+          "remove": {
+            "$ref": "#/$defs/RemoveFileEvent",
+            "asCell": [
+              "stream"
+            ],
+            "description": "Takes a file out of the store, and marks it removed."
+          },
+          "rename": {
+            "$ref": "#/$defs/RenameFileEvent",
+            "asCell": [
+              "stream"
+            ],
+            "description": "Changes a file's name, and its blob with it."
+          },
+          "requests": {
+            "additionalProperties": {
+              "$ref": "#/$defs/FileRequestOutcome"
+            },
+            "description": "The outcome of each request, by its `requestId`.",
+            "properties": {},
+            "type": "object"
+          }
+        },
+        "required": [
+          "entries",
+          "byName",
+          "requests",
+          "add",
+          "remove",
+          "rename"
+        ],
+        "type": "object"
+      },
+      "FileStoreOutput": {
+        "properties": {
+          "$VIEWS": {
+            "properties": {
+              "files": {
+                "$ref": "#/$defs/FileStoreFiles"
+              }
+            },
+            "required": [
+              "files"
+            ],
+            "type": "object"
+          },
+          "add": {
+            "$ref": "#/$defs/AddFileEvent",
+            "asCell": [
+              "stream"
+            ],
+            "description": "Adds a file, for a blob already in the store's space."
+          },
+          "byName": {
+            "additionalProperties": {
+              "$ref": "#/$defs/FileEntry",
+              "asCell": [
+                "cell"
+              ]
+            },
+            "description": "The same files, by name.",
+            "properties": {},
+            "type": "object"
+          },
+          "entries": {
+            "description": "Every file in the store, in the order they were added.",
+            "items": {
+              "$ref": "#/$defs/FileEntry",
+              "asCell": [
+                "cell"
+              ]
+            },
+            "type": "array"
+          },
+          "remove": {
+            "$ref": "#/$defs/RemoveFileEvent",
+            "asCell": [
+              "stream"
+            ],
+            "description": "Takes a file out of the store, and marks it removed."
+          },
+          "rename": {
+            "$ref": "#/$defs/RenameFileEvent",
+            "asCell": [
+              "stream"
+            ],
+            "description": "Changes a file's name, and its blob with it."
+          },
+          "requests": {
+            "additionalProperties": {
+              "$ref": "#/$defs/FileRequestOutcome"
+            },
+            "description": "The outcome of each request, by its `requestId`.",
+            "properties": {},
+            "type": "object"
+          }
+        },
+        "required": [
+          "$VIEWS",
+          "entries",
+          "byName",
+          "requests",
+          "add",
+          "remove",
+          "rename"
+        ],
+        "type": "object"
+      },
+      "FileStoreRecord": {
+        "properties": {
+          "store": {
+            "$ref": "#/$defs/FileStoreOutput",
+            "asCell": [
+              "cell"
+            ],
+            "description": "The store; absent while the root names none."
+          }
+        },
+        "type": "object"
+      },
       "MessageRecord": {
         "properties": {
+          "attachments": {
+            "description": "The files sent with the message, as entries of its space's file store;\nabsent for none, and once the message is deleted.",
+            "items": {
+              "$ref": "#/$defs/FileEntry",
+              "asCell": [
+                "cell"
+              ]
+            },
+            "type": "array"
+          },
           "authorProfile": {
             "$ref": "#/$defs/ChatProfile",
             "asCell": [
@@ -98,7 +427,7 @@
                 "$ref": "#/$defs/ChatDeletedBody"
               }
             ],
-            "description": "The current text, or the marker of a deleted message."
+            "description": "The current text, empty only where the message has attachments, or the\nmarker of a deleted message."
           },
           "editedAt": {
             "description": "The handler clock at the latest edit or deletion; absent until then.",
@@ -132,6 +461,12 @@
           "$ref": "#/$defs/SentMessage"
         },
         "type": "array"
+      },
+      "NameConflict": {
+        "enum": [
+          "refuse",
+          "rename"
+        ]
       },
       "ParticipantList": {
         "ifc": {
@@ -175,6 +510,46 @@
           "$ref": "#/$defs/SentReaction"
         },
         "type": "array"
+      },
+      "RemoveFileEvent": {
+        "properties": {
+          "entry": {
+            "$ref": "#/$defs/FileEntry",
+            "asCell": [
+              "cell"
+            ],
+            "description": "The entry to remove."
+          },
+          "requestId": {
+            "description": "Chosen by the sender; the event's own key when there is none.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RenameFileEvent": {
+        "properties": {
+          "entry": {
+            "$ref": "#/$defs/FileEntry",
+            "asCell": [
+              "cell"
+            ],
+            "description": "The entry to rename."
+          },
+          "name": {
+            "description": "The entry's new name.",
+            "type": "string"
+          },
+          "onConflict": {
+            "$ref": "#/$defs/NameConflict",
+            "description": "What to do when `name` is taken; `refuse` when absent."
+          },
+          "requestId": {
+            "description": "Chosen by the sender; the event's own key when there is none.",
+            "type": "string"
+          }
+        },
+        "type": "object"
       },
       "RepliedMessage": {
         "properties": {
@@ -243,7 +618,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "dU8rIcHGPufB5pFmP3xnshcnuttAUYk8OCCl0n31I14",
+                  "moduleIdentity": "7INxhz8IePuWSAgTPzunjZUTy8ceKVb9730GBi_ctoc",
                   "path": [
                     "commitSend"
                   ]
@@ -262,7 +637,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "dU8rIcHGPufB5pFmP3xnshcnuttAUYk8OCCl0n31I14",
+                  "moduleIdentity": "7INxhz8IePuWSAgTPzunjZUTy8ceKVb9730GBi_ctoc",
                   "path": [
                     "commitComposerSend"
                   ]
@@ -281,7 +656,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "dU8rIcHGPufB5pFmP3xnshcnuttAUYk8OCCl0n31I14",
+                  "moduleIdentity": "7INxhz8IePuWSAgTPzunjZUTy8ceKVb9730GBi_ctoc",
                   "path": [
                     "commitThreadSend"
                   ]
@@ -300,7 +675,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "dU8rIcHGPufB5pFmP3xnshcnuttAUYk8OCCl0n31I14",
+                  "moduleIdentity": "7INxhz8IePuWSAgTPzunjZUTy8ceKVb9730GBi_ctoc",
                   "path": [
                     "commitReply"
                   ]
@@ -319,7 +694,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "dU8rIcHGPufB5pFmP3xnshcnuttAUYk8OCCl0n31I14",
+                  "moduleIdentity": "7INxhz8IePuWSAgTPzunjZUTy8ceKVb9730GBi_ctoc",
                   "path": [
                     "commitEdit"
                   ]
@@ -338,7 +713,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "dU8rIcHGPufB5pFmP3xnshcnuttAUYk8OCCl0n31I14",
+                  "moduleIdentity": "7INxhz8IePuWSAgTPzunjZUTy8ceKVb9730GBi_ctoc",
                   "path": [
                     "commitDelete"
                   ]
@@ -357,7 +732,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "dU8rIcHGPufB5pFmP3xnshcnuttAUYk8OCCl0n31I14",
+                  "moduleIdentity": "7INxhz8IePuWSAgTPzunjZUTy8ceKVb9730GBi_ctoc",
                   "path": [
                     "commitObliterate"
                   ]
@@ -391,7 +766,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "dU8rIcHGPufB5pFmP3xnshcnuttAUYk8OCCl0n31I14",
+                  "moduleIdentity": "7INxhz8IePuWSAgTPzunjZUTy8ceKVb9730GBi_ctoc",
                   "path": [
                     "commitSendReaction"
                   ]
@@ -410,7 +785,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "dU8rIcHGPufB5pFmP3xnshcnuttAUYk8OCCl0n31I14",
+                  "moduleIdentity": "7INxhz8IePuWSAgTPzunjZUTy8ceKVb9730GBi_ctoc",
                   "path": [
                     "commitDeleteReaction"
                   ]
@@ -449,7 +824,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/fabrichat/manager.tsx",
-              "moduleIdentity": "baUJld6OWBMu4kkAPhIkvIoswZjp3zBYlxZCy7F4VvM",
+              "moduleIdentity": "WCrEFn2YW9jbL1suAXVPhEWiWnX1lGHJwyb4ChGhkd8",
               "path": [
                 "commitStart"
               ]
@@ -499,7 +874,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/fabrichat/room-records.tsx",
-              "moduleIdentity": "dU8rIcHGPufB5pFmP3xnshcnuttAUYk8OCCl0n31I14",
+              "moduleIdentity": "7INxhz8IePuWSAgTPzunjZUTy8ceKVb9730GBi_ctoc",
               "path": [
                 "commitSetTitle"
               ]
@@ -525,6 +900,14 @@
       "about": {
         "$ref": "#/$defs/StoredAbout",
         "description": "What the room says about itself, written once by the manager that creates\nit. A space's own chat has none, and reads as a group room with no title."
+      },
+      "fileStore": {
+        "$ref": "#/$defs/FileStoreRecord",
+        "asCell": [
+          "cell"
+        ],
+        "default": {},
+        "description": "Where a room that is its space's root keeps its space's file store; a\nroom naming none, and every other room, holds `{}`."
       },
       "messages": {
         "$ref": "#/$defs/MessagesValue",
@@ -576,6 +959,35 @@
         "required": [
           "kind"
         ],
+        "type": "object"
+      },
+      "AddFileEvent": {
+        "properties": {
+          "blob": {
+            "$ref": "#/$defs/BlobRef",
+            "description": "The blob holding the bytes."
+          },
+          "mediaType": {
+            "description": "The media type the blob was stored with.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The new entry's name, the name its blob was stored under.",
+            "type": "string"
+          },
+          "onConflict": {
+            "$ref": "#/$defs/NameConflict",
+            "description": "What to do when `name` is taken; `refuse` when absent."
+          },
+          "requestId": {
+            "description": "Chosen by the sender; the event's own key when there is none.",
+            "type": "string"
+          },
+          "size": {
+            "description": "The size of the file, in bytes.",
+            "type": "number"
+          }
+        },
         "type": "object"
       },
       "AddMemberDelivery": {
@@ -660,6 +1072,23 @@
             "type": "object"
           }
         ]
+      },
+      "BlobRef": {
+        "properties": {
+          "id": {
+            "description": "The blob's id: `fid1:` and the hash of its name, media type and bytes.",
+            "type": "string"
+          },
+          "space": {
+            "description": "The DID of the space whose blob store holds the bytes.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "space",
+          "id"
+        ],
+        "type": "object"
       },
       "ChatDeletedBody": {
         "properties": {
@@ -833,6 +1262,10 @@
             "description": "Stated for the policy's shape, and read by nothing: a message keeps no history.",
             "type": "boolean"
           },
+          "maxAttachments": {
+            "description": "The most attachments a message may have; absent for\n`DEFAULT_MAX_ATTACHMENTS`.",
+            "type": "number"
+          },
           "maxOpenWindows": {
             "description": "Stated for the policy's shape, and read by nothing: the room offers no windows.",
             "type": "number"
@@ -926,6 +1359,21 @@
               "stream"
             ],
             "description": "Records a new version of one of the sender's messages."
+          },
+          "ensureFileStore": {
+            "asCell": [
+              "stream",
+              "opaque"
+            ],
+            "description": "Names a new store as the space's, unless the space names one already. A\nroom that is its space's root keeps the store itself; any other asks its\nspace's root to, and does nothing in a space whose root keeps none."
+          },
+          "fileStore": {
+            "$ref": "#/$defs/FileStoreOutput",
+            "description": "The store of the files of the room's space: for a room that is its\nspace's root, the one it names itself; for any other, the one its space's\nroot names. Absent while that names none."
+          },
+          "fileStoreRecord": {
+            "$ref": "#/$defs/FileStoreRecord",
+            "description": "Where the room keeps its space's file store, for a room that is its\nspace's root, as a root offering its space's store does; absent for any\nother room, which keeps none."
           },
           "messageRights": {
             "description": "What this reader may do to each of the room's messages, oldest first.\nNothing at all while `canSend` doesn't hold.",
@@ -1030,7 +1478,8 @@
           "canAdd",
           "addRequests",
           "setTitle",
-          "titleRequests"
+          "titleRequests",
+          "ensureFileStore"
         ],
         "type": "object"
       },
@@ -1073,6 +1522,258 @@
         ],
         "type": "object"
       },
+      "FileEntry": {
+        "properties": {
+          "addedAt": {
+            "description": "When the file was added.",
+            "type": "FabricEpochNsec"
+          },
+          "addedBy": {
+            "$ref": "#/$defs/FileProfile",
+            "description": "The profile of whoever added it."
+          },
+          "blob": {
+            "$ref": "#/$defs/BlobRef",
+            "description": "The blob holding the bytes."
+          },
+          "mediaType": {
+            "description": "The media type of the bytes.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name the store finds this file by, and its blob's name.",
+            "type": "string"
+          },
+          "removedAt": {
+            "description": "When the file was removed from its store, if it has been.",
+            "type": "FabricEpochNsec"
+          },
+          "size": {
+            "description": "The size of the file, in bytes.",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "mediaType",
+          "blob",
+          "size",
+          "addedAt",
+          "addedBy"
+        ],
+        "type": "object"
+      },
+      "FileProfile": {
+        "properties": {
+          "avatar": {
+            "description": "A URL of their picture.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name the person goes by.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FileRefusalCode": {
+        "enum": [
+          "invalid-request",
+          "invalid-name",
+          "name-taken",
+          "other-space",
+          "no-blob",
+          "not-found",
+          "not-permitted"
+        ]
+      },
+      "FileRequestOutcome": {
+        "anyOf": [
+          {
+            "properties": {
+              "entry": {
+                "$ref": "#/$defs/FileEntry",
+                "description": "The entry the request added or changed."
+              },
+              "name": {
+                "description": "The name the request gave the entry.",
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "done"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "entry",
+              "name"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "code": {
+                "$ref": "#/$defs/FileRefusalCode",
+                "description": "Why, as a code a client can act on."
+              },
+              "reason": {
+                "description": "Why, as prose for a person.",
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "refused"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "reason",
+              "code"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "FileStoreFiles": {
+        "properties": {
+          "add": {
+            "$ref": "#/$defs/AddFileEvent",
+            "asCell": [
+              "stream"
+            ],
+            "description": "Adds a file, for a blob already in the store's space."
+          },
+          "byName": {
+            "additionalProperties": {
+              "$ref": "#/$defs/FileEntry"
+            },
+            "description": "The same files, by name.",
+            "properties": {},
+            "type": "object"
+          },
+          "entries": {
+            "description": "Every file in the store, in the order they were added.",
+            "items": {
+              "$ref": "#/$defs/FileEntry"
+            },
+            "type": "array"
+          },
+          "remove": {
+            "$ref": "#/$defs/RemoveFileEvent",
+            "asCell": [
+              "stream"
+            ],
+            "description": "Takes a file out of the store, and marks it removed."
+          },
+          "rename": {
+            "$ref": "#/$defs/RenameFileEvent",
+            "asCell": [
+              "stream"
+            ],
+            "description": "Changes a file's name, and its blob with it."
+          },
+          "requests": {
+            "additionalProperties": {
+              "$ref": "#/$defs/FileRequestOutcome"
+            },
+            "description": "The outcome of each request, by its `requestId`.",
+            "properties": {},
+            "type": "object"
+          }
+        },
+        "required": [
+          "entries",
+          "byName",
+          "requests",
+          "add",
+          "remove",
+          "rename"
+        ],
+        "type": "object"
+      },
+      "FileStoreOutput": {
+        "properties": {
+          "$VIEWS": {
+            "properties": {
+              "files": {
+                "$ref": "#/$defs/FileStoreFiles"
+              }
+            },
+            "required": [
+              "files"
+            ],
+            "type": "object"
+          },
+          "add": {
+            "$ref": "#/$defs/AddFileEvent",
+            "asCell": [
+              "stream"
+            ],
+            "description": "Adds a file, for a blob already in the store's space."
+          },
+          "byName": {
+            "additionalProperties": {
+              "$ref": "#/$defs/FileEntry"
+            },
+            "description": "The same files, by name.",
+            "properties": {},
+            "type": "object"
+          },
+          "entries": {
+            "description": "Every file in the store, in the order they were added.",
+            "items": {
+              "$ref": "#/$defs/FileEntry"
+            },
+            "type": "array"
+          },
+          "remove": {
+            "$ref": "#/$defs/RemoveFileEvent",
+            "asCell": [
+              "stream"
+            ],
+            "description": "Takes a file out of the store, and marks it removed."
+          },
+          "rename": {
+            "$ref": "#/$defs/RenameFileEvent",
+            "asCell": [
+              "stream"
+            ],
+            "description": "Changes a file's name, and its blob with it."
+          },
+          "requests": {
+            "additionalProperties": {
+              "$ref": "#/$defs/FileRequestOutcome"
+            },
+            "description": "The outcome of each request, by its `requestId`.",
+            "properties": {},
+            "type": "object"
+          }
+        },
+        "required": [
+          "$VIEWS",
+          "entries",
+          "byName",
+          "requests",
+          "add",
+          "remove",
+          "rename"
+        ],
+        "type": "object"
+      },
+      "FileStoreRecord": {
+        "properties": {
+          "store": {
+            "$ref": "#/$defs/FileStoreOutput",
+            "description": "The store; absent while the root names none."
+          }
+        },
+        "type": "object"
+      },
       "JoinRoomEvent": {
         "properties": {
           "profile": {
@@ -1087,6 +1788,13 @@
       },
       "MessageRecord": {
         "properties": {
+          "attachments": {
+            "description": "The files sent with the message, as entries of its space's file store;\nabsent for none, and once the message is deleted.",
+            "items": {
+              "$ref": "#/$defs/FileEntry"
+            },
+            "type": "array"
+          },
           "authorProfile": {
             "$ref": "#/$defs/ChatProfile",
             "description": "The profile the sender sent under; absent once obliterated."
@@ -1100,7 +1808,7 @@
                 "$ref": "#/$defs/ChatDeletedBody"
               }
             ],
-            "description": "The current text, or the marker of a deleted message."
+            "description": "The current text, empty only where the message has attachments, or the\nmarker of a deleted message."
           },
           "editedAt": {
             "description": "The handler clock at the latest edit or deletion; absent until then.",
@@ -1125,6 +1833,12 @@
         ],
         "type": "object"
       },
+      "NameConflict": {
+        "enum": [
+          "refuse",
+          "rename"
+        ]
+      },
       "ParticipantEntry": {
         "properties": {
           "principal": {
@@ -1147,6 +1861,40 @@
           "$ref": "#/$defs/SentReaction"
         },
         "type": "array"
+      },
+      "RemoveFileEvent": {
+        "properties": {
+          "entry": {
+            "$ref": "#/$defs/FileEntry",
+            "description": "The entry to remove."
+          },
+          "requestId": {
+            "description": "Chosen by the sender; the event's own key when there is none.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RenameFileEvent": {
+        "properties": {
+          "entry": {
+            "$ref": "#/$defs/FileEntry",
+            "description": "The entry to rename."
+          },
+          "name": {
+            "description": "The entry's new name.",
+            "type": "string"
+          },
+          "onConflict": {
+            "$ref": "#/$defs/NameConflict",
+            "description": "What to do when `name` is taken; `refuse` when absent."
+          },
+          "requestId": {
+            "description": "Chosen by the sender; the event's own key when there is none.",
+            "type": "string"
+          }
+        },
+        "type": "object"
       },
       "RepliedMessage": {
         "properties": {
@@ -1190,6 +1938,13 @@
       },
       "RoomStreamEvent": {
         "properties": {
+          "attachments": {
+            "description": "The files a sent message attaches, as entries of its space's store.",
+            "items": {
+              "$ref": "#/$defs/FileEntry"
+            },
+            "type": "array"
+          },
           "body": {
             "description": "The text to send, or to record as a message's new version.",
             "type": "string"
@@ -1246,7 +2001,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "dU8rIcHGPufB5pFmP3xnshcnuttAUYk8OCCl0n31I14",
+                  "moduleIdentity": "7INxhz8IePuWSAgTPzunjZUTy8ceKVb9730GBi_ctoc",
                   "path": [
                     "commitSendReaction"
                   ]
@@ -1265,7 +2020,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "dU8rIcHGPufB5pFmP3xnshcnuttAUYk8OCCl0n31I14",
+                  "moduleIdentity": "7INxhz8IePuWSAgTPzunjZUTy8ceKVb9730GBi_ctoc",
                   "path": [
                     "commitDeleteReaction"
                   ]
@@ -1458,6 +2213,21 @@
         ],
         "description": "Records a new version of one of the sender's messages."
       },
+      "ensureFileStore": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "description": "Names a new store as the space's, unless the space names one already. A\nroom that is its space's root keeps the store itself; any other asks its\nspace's root to, and does nothing in a space whose root keeps none."
+      },
+      "fileStore": {
+        "$ref": "#/$defs/FileStoreOutput",
+        "description": "The store of the files of the room's space: for a room that is its\nspace's root, the one it names itself; for any other, the one its space's\nroot names. Absent while that names none."
+      },
+      "fileStoreRecord": {
+        "$ref": "#/$defs/FileStoreRecord",
+        "description": "Where the room keeps its space's file store, for a room that is its\nspace's root, as a root offering its space's store does; absent for any\nother room, which keeps none."
+      },
       "messageRights": {
         "description": "What this reader may do to each of the room's messages, oldest first.\nNothing at all while `canSend` doesn't hold.",
         "items": {
@@ -1564,7 +2334,8 @@
       "canAdd",
       "addRequests",
       "setTitle",
-      "titleRequests"
+      "titleRequests",
+      "ensureFileStore"
     ],
     "type": "object"
   }

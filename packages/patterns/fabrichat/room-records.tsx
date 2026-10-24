@@ -41,6 +41,7 @@ import {
   Writable,
   type WritePolicyAnyOf,
 } from "commonfabric";
+import type { FileEntry } from "../fabrifile/schemas.tsx";
 import { profileKeyOf } from "../system/private-inbox.tsx";
 import { isSharedSpaceCatalog } from "../system/shared-space-catalog.ts";
 import {
@@ -74,6 +75,7 @@ import {
   type ChatRoomKind,
   type ChatRoomLink,
   type ChatRoomPolicy,
+  DEFAULT_MAX_ATTACHMENTS,
   durationNsec,
   epochNsecFromMsec,
   nsecOf,
@@ -92,13 +94,13 @@ const NSEC_PER_SEC = 1_000_000_000n;
 
 /**
  * The policy every room starts from, a group room's. `about.policy` states
- * it, and the handlers read `deletionIsObliteration` from it, so the two
- * cannot disagree; `maxWindowCount` bounds `messages.latest`. The other
- * settings are stated for the policy's shape, which a user's Home carries,
- * and read by nothing. A room's `ownersMayObliterate` is
- * `ownersMayObliterateIn()`'s.
+ * it, and the handlers read `deletionIsObliteration` and `maxAttachments`
+ * from it, so the two cannot disagree; `maxWindowCount` bounds
+ * `messages.latest`. The other settings are stated for the policy's shape,
+ * which a user's Home carries, and read by nothing. A room's
+ * `ownersMayObliterate` is `ownersMayObliterateIn()`'s.
  */
-export const FABRICHAT_POLICY: ChatRoomPolicy = {
+export const FABRICHAT_POLICY: Required<ChatRoomPolicy> = {
   ownersMayObliterate: true,
   keepsHistory: false,
   deletionIsObliteration: false,
@@ -107,6 +109,7 @@ export const FABRICHAT_POLICY: ChatRoomPolicy = {
   recentActivityWindowNsec: durationNsec(600n * NSEC_PER_SEC),
   maxWindowCount: 100,
   maxOpenWindows: 50,
+  maxAttachments: DEFAULT_MAX_ATTACHMENTS,
 };
 
 /**
@@ -205,8 +208,17 @@ export interface MessageRecord {
   /** The profile the sender sent under; absent once obliterated. */
   authorProfile?: ProfileCell;
 
-  /** The current text, or the marker of a deleted message. */
+  /**
+   * The current text, empty only where the message has attachments, or the
+   * marker of a deleted message.
+   */
   body: string | ChatDeletedBody;
+
+  /**
+   * The files sent with the message, as entries of its space's file store;
+   * absent for none, and once the message is deleted.
+   */
+  attachments?: Cell<FileEntry>[];
 
   /** The handler clock when the room recorded the message. */
   sentAt: FabricEpochNsec;
@@ -578,6 +590,9 @@ export interface RoomStreamEvent {
   /** What a sent message replies to. */
   replyTo?: StoredReply;
 
+  /** The files a sent message attaches, as entries of its space's store. */
+  attachments?: Cell<FileEntry>[];
+
   /** The message acted on. */
   message?: MessageCell;
 
@@ -818,6 +833,10 @@ const textOf = (event: RoomStreamEvent): string => {
   return typeof text === "string" ? text.trim() : "";
 };
 
+/** Whether `event` carries its text as a string, empty or not. */
+const hasTextIn = (event: RoomStreamEvent): boolean =>
+  typeof (event?.body ?? event?.target?.value) === "string";
+
 /**
  * The emoji an event sends: its own, the one its control is bound to, or the
  * text typed into a rendered control.
@@ -844,6 +863,43 @@ const NOT_IN_ROOM = "That message isn't in this chat.";
 
 /** Why an act on a deleted message, other than its obliteration, is refused. */
 const DELETED = "That message was deleted.";
+
+/**
+ * The files `links` names, as the attachments of a message sent into the
+ * room: each an entry of the space `room`, any of the room's records, lives
+ * in, whose bytes are in that space's blob store too, and not removed, and no
+ * more of them than the room's policy allows. Each entry is read alone, so a
+ * send reads no more of the store than the files it attaches.
+ *
+ * @throws If there are more than the policy allows, or one names no entry, an
+ *   entry outside the room's space, one whose blob is in another space, or a
+ *   removed one.
+ */
+const attachmentsIn = (
+  room: Cell<unknown>,
+  links: readonly (Cell<FileEntry> | undefined)[] | undefined,
+): Cell<FileEntry>[] => {
+  if (links === undefined) return [];
+  const max = FABRICHAT_POLICY.maxAttachments;
+  if (links.length > max) {
+    throw new Error(`A message can have at most ${max} attachments.`);
+  }
+  return links.map((link) => {
+    const entry = link?.resolveAsCell();
+    if (entry === undefined || !isInRoomOf(room, entry)) {
+      throw new Error("That file isn't in this chat's space.");
+    }
+    const value = entry.get();
+    if (value === undefined) throw new Error("That file can't be found.");
+    if (value.blob?.space !== spaceOf(room)) {
+      throw new Error("That file's bytes aren't in this chat's space.");
+    }
+    if (value.removedAt !== undefined) {
+      throw new Error("That file was removed.");
+    }
+    return entry;
+  });
+};
 
 /**
  * The message `link` names, as the target of an act: one of the room's
@@ -880,11 +936,11 @@ const obliterationRefusal = (
 
 /**
  * Leaves a tombstone of the message at `target`: its time and what it replies
- * to stay, its body becomes the deleted marker, its reactions go, and so does
- * its author unless `keepsAuthor`. The whole message is written, where an
- * edit writes its text alone, since only a write of the whole drops a key: a
- * key written `undefined` is present, and an author's link so written reads
- * as a handle to nothing rather than as no author.
+ * to stay, its body becomes the deleted marker, its attachments and reactions
+ * go, and so does its author unless `keepsAuthor`. The whole message is
+ * written, where an edit writes its text alone, since only a write of the
+ * whole drops a key: a key written `undefined` is present, and an author's
+ * link so written reads as a handle to nothing rather than as no author.
  */
 const leaveTombstone = (target: MessageCell, keepsAuthor: boolean): void => {
   const current = target.get();
@@ -900,9 +956,10 @@ const leaveTombstone = (target: MessageCell, keepsAuthor: boolean): void => {
 };
 
 /**
- * Pushes a send onto `messages`: the text `event` carries, from `myProfile`,
- * as a reply to `reply` where that names a message, shown `shownIn`, with a
- * reaction list of its own; then `joined` is told.
+ * Pushes a send onto `messages`: the text and the attachments `event`
+ * carries, from `myProfile`, as a reply to `reply` where that names a
+ * message, shown `shownIn`, with a reaction list of its own; then `joined` is
+ * told.
  *
  * Every handler here takes the event a rendered control of the room sends,
  * and the controls offer only acts the viewer may take, so a handler checks
@@ -913,8 +970,9 @@ const leaveTombstone = (target: MessageCell, keepsAuthor: boolean): void => {
  * handling is rejected with the reason. An act that would change nothing,
  * such as a reaction added twice, writes nothing and succeeds.
  *
- * @throws If the profile hasn't resolved, the send has no text, or `reply`
- *   names a message outside the room's space.
+ * @throws If the profile hasn't resolved, the send has neither text nor
+ *   attachments, its text isn't a string, `attachmentsIn()` refuses its
+ *   attachments, or `reply` names a message outside the room's space.
  */
 const sendInto = (
   event: RoomStreamEvent,
@@ -927,7 +985,11 @@ const sendInto = (
   const profile = resolvedProfile(myProfile);
   if (profile === undefined) throw new Error(NO_PROFILE);
   const body = textOf(event);
-  if (body === "") throw new Error("This send has no text in `body`.");
+  const attachments = attachmentsIn(messages, event?.attachments);
+  if (body === "" && attachments.length === 0) {
+    throw new Error("This send has no text in `body`, and no attachments.");
+  }
+  if (!hasTextIn(event)) throw new Error("This send's `body` isn't text.");
   const target = reply?.resolveAsCell();
   if (target !== undefined && !isInRoomOf(messages, target)) {
     throw new Error(NOT_IN_ROOM);
@@ -938,6 +1000,7 @@ const sendInto = (
   messages.push({
     authorProfile: profile,
     body,
+    ...(attachments.length === 0 ? {} : { attachments }),
     sentAt: now(),
     ...(target === undefined ? {} : { replyTo: { message: target, shownIn } }),
     reactions,
@@ -1001,7 +1064,8 @@ export const commitReply = handler<RoomStreamEvent, ReplyState>(
 
 /**
  * Records a new version of the sender's message, from `ChatEditSurface`: the
- * event's text, in place of the current one. An edit of the message the
+ * event's text, in place of the current one, empty only where the message has
+ * attachments, which an edit leaves as they are. An edit of the message the
  * session's composer is editing ends that edit.
  */
 export const commitEdit = handler<RoomStreamEvent, EditState>(
@@ -1015,7 +1079,12 @@ export const commitEdit = handler<RoomStreamEvent, EditState>(
       throw new Error("Only its author can edit a message.");
     }
     const body = textOf(event);
-    if (body === "") throw new Error("This edit has no text in `body`.");
+    if (
+      !hasTextIn(event) ||
+      (body === "" && (current.attachments?.length ?? 0) === 0)
+    ) {
+      throw new Error("This edit has no text in `body`.");
+    }
     target.key("body").set(body);
     target.key("editedAt").set(now());
     const editing = composer.get()?.editing;
