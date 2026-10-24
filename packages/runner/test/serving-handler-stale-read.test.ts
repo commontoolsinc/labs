@@ -20,7 +20,11 @@ import * as Engine from "@commonfabric/memory/v2/engine";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import type { Cell } from "../src/cell.ts";
-import { stampWaveRunContext } from "../src/executor/wave.ts";
+import type { EngineWaveCommitSink } from "../src/executor/engine-wave-sink.ts";
+import {
+  stampWaveRunContext,
+  type WaveCommitSink,
+} from "../src/executor/wave.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
@@ -88,6 +92,32 @@ const patchUnseen = (
 /** The cell's document as `engine` holds it. */
 const stored = (engine: Engine.Engine, cell: Cell<unknown>): unknown =>
   Engine.read(engine, { id: cell.getAsNormalizedFullLink().id });
+
+/**
+ * `inner`, with `race` run after its stale-read check has answered and
+ * before the wave commits: the window between the accumulator's own check
+ * and the sink's store transaction, which a commit admitted there has to be
+ * caught in.
+ */
+const racing = (
+  inner: EngineWaveCommitSink,
+  race: () => void,
+): WaveCommitSink => ({
+  currentHeads: (space, docs) => inner.currentHeads(space, docs),
+  concurrentWritePaths: (space, doc, sinceSeq) =>
+    inner.concurrentWritePaths(space, doc, sinceSeq),
+  intrusionSince: (space, doc, sinceSeq, holder) =>
+    inner.intrusionSince(space, doc, sinceSeq, holder),
+  sessionOverwritePathsSince: (space, doc, sinceSeq, session) =>
+    inner.sessionOverwritePathsSince(space, doc, sinceSeq, session),
+  staleReads: async (space, reads, holder) => {
+    const stale = await inner.staleReads(space, reads, holder);
+    race();
+    return stale;
+  },
+  commitWave: (batch) => inner.commitWave(batch),
+  commitSpaceAccessChange: (change) => inner.commitSpaceAccessChange(change),
+});
 
 describe("serving-handler-stale-read", () => {
   describe("with server execution off", () => {
@@ -222,6 +252,42 @@ describe("serving-handler-stale-read", () => {
       expect(outcome.requeuedEventIds).toEqual(["mirror-1"]);
       expect(outcome.requeueCatchUp).toMatchObject([{
         eventId: "mirror-1",
+        docs: [{ id: counter.getAsNormalizedFullLink().id, seq: peerSeq }],
+      }]);
+    });
+
+    it("requeues a handler whose read a commit staled between the wave's check and its commit", async () => {
+      const { runtime, engine } = waves;
+      const counter = runtime.getCell<number>(space, "counter", counterSchema);
+      const mirror = runtime.getCell<number>(space, "mirror", counterSchema);
+      const seed = runtime.edit();
+      counter.withTx(seed).set(0);
+      mirror.withTx(seed).set(0);
+      expect((await seed.commit().settled).error).toBeUndefined();
+      await waves.storageManager.synced();
+      waves.serve();
+
+      const tx = runtime.edit();
+      stampWaveRunContext(tx, {
+        actionId: "mirror",
+        kind: "event-handler",
+        eventId: "mirror-2",
+      });
+      mirror.withTx(tx).set(counter.withTx(tx).get() + 1);
+      await tx.commit().settled;
+      let peerSeq = 0;
+      const outcome = await waves.commitWave(
+        racing(waves.sink(), () => {
+          peerSeq = commitUnseen(engine, counter, 5);
+        }),
+      );
+
+      expect(peerSeq).not.toBe(0);
+      expect(stored(engine, mirror)).toEqual({ value: 0 });
+      expect(outcome.requeuedEventIds).toEqual(["mirror-2"]);
+      expect(outcome.staleReadRequeues).toBe(1);
+      expect(outcome.requeueCatchUp).toMatchObject([{
+        eventId: "mirror-2",
         docs: [{ id: counter.getAsNormalizedFullLink().id, seq: peerSeq }],
       }]);
     });
