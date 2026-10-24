@@ -522,6 +522,15 @@ describe("selectRuns", () => {
     expect(() => selectRuns(runs, { first: "default", second: "quick" }))
       .toThrow("--second quick");
   });
+
+  it("refuses shapes that never meet in one case, which would pair nothing", () => {
+    const apart = [
+      { case: "a", variant: "default", state: "completed" },
+      { case: "b", variant: "deep", state: "completed" },
+    ];
+    expect(() => selectRuns(apart, { first: "default", second: "deep" }))
+      .toThrow("no case has both --first default and --second deep");
+  });
 });
 
 describe("judgePair", () => {

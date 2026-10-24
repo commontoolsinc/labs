@@ -279,6 +279,16 @@ export const selectRuns = <
     (run) => run.variant === wanted.second,
     `--second ${wanted.second}`,
   );
+  const casesOf = (variant: string) =>
+    new Set(
+      kept.filter((run) => run.variant === variant).map((run) => run.case),
+    );
+  const seconds = casesOf(wanted.second);
+  if (![...casesOf(wanted.first)].some((name) => seconds.has(name))) {
+    throw new Error(
+      `no case has both --first ${wanted.first} and --second ${wanted.second}`,
+    );
+  }
   return kept;
 };
 
