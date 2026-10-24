@@ -1,8 +1,8 @@
 /**
  * What a finished local job's run record says it did, read from the runner's
  * run directories under `~/.cf-harness/agent-runs/local`: the root run, the
- * tools it and its subagents called, its report, and its run state. The want
- * eval and the shape eval both measure a job by these.
+ * tools it and its subagents called, its report, and its run state. The shape
+ * eval measures a job by these.
  */
 
 import { basename, join } from "@std/path";
