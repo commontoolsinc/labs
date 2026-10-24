@@ -224,6 +224,45 @@ describe("serving-worker-recovery", () => {
     expect(released).toHaveLength(1);
   });
 
+  it("settles a close while the worker has not reported serving", async () => {
+    using fakes = fakeWorkers();
+    const { workers } = fakes;
+    using _init = stub(
+      ServingPortBridge.prototype,
+      "init",
+      () => new Promise<never>(() => {}),
+    );
+    let hostCloses = 0;
+    using _close = stub(
+      ServingPortBridge.prototype,
+      "closeHost",
+      () => {
+        hostCloses += 1;
+        return Promise.resolve();
+      },
+    );
+    const released: string[] = [];
+    using _release = stub(
+      ServingPortBridge.prototype,
+      "releaseLeasesOf",
+      (holder: string) => {
+        released.push(holder);
+        return Promise.resolve();
+      },
+    );
+    const host = new ServingWorker({
+      server,
+      identity,
+      apiUrl: new URL(import.meta.url),
+    });
+
+    await host.close();
+
+    expect(workers[0].terminated).toBe(true);
+    expect(hostCloses).toBe(0);
+    expect(released).toHaveLength(1);
+  });
+
   it("cancels a pending replacement when closed", async () => {
     using fakes = fakeWorkers();
     const { workers } = fakes;

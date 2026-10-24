@@ -108,6 +108,9 @@ type WorkerGeneration = {
   /** Settles once the worker's host serves. */
   ready: Promise<void>;
 
+  /** Whether `ready` has settled with the worker's host serving. */
+  serving: boolean;
+
   /** The lifetime lock the worker's host holds, if it holds one. */
   lifetimeLock: string | undefined;
 };
@@ -178,9 +181,12 @@ export class ServingWorker {
 
   /**
    * Closes the worker's host, then the worker; settles once both are gone,
-   * and once a worker that failed before the call has been torn down. A host
-   * that does not close, the worker failing first among the reasons, leaves
-   * the lease rows its worker held to be released here.
+   * and once a worker that failed before the call has been torn down. A
+   * worker whose host has not yet reported serving is terminated without
+   * asking its host to close, since one that stalls in its startup never
+   * answers. A host that does not close, for that reason or because the
+   * worker fails first, leaves the lease rows its worker held to be released
+   * here.
    */
   async close(): Promise<void> {
     if (this.#closed) return;
@@ -196,9 +202,10 @@ export class ServingWorker {
     }
     let hostClosed = false;
     try {
-      await generation.ready;
-      await generation.bridge.closeHost();
-      hostClosed = true;
+      if (generation.serving) {
+        await generation.bridge.closeHost();
+        hostClosed = true;
+      }
     } catch (error) {
       logger.warn("worker-close-failed", () => [
         "closing the serving worker's host failed; terminating the worker",
@@ -259,6 +266,7 @@ export class ServingWorker {
       holder: executionLeaseHolder(identity.did(), processInstanceId),
       lifetimeLock: undefined,
       ready: Promise.resolve(),
+      serving: false,
     };
     const init: ServingWorkerInit = {
       serviceKeyPair: realmValueFromKeyPair(identity.keyPair),
@@ -270,6 +278,7 @@ export class ServingWorker {
     };
     generation.ready = bridge.init(init).then(({ lifetimeLock }) => {
       generation.lifetimeLock = lifetimeLock;
+      generation.serving = true;
     });
     generation.ready.catch((error) => {
       this.#onWorkerFailed(generation, String(error));
