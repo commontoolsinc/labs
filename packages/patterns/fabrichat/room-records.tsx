@@ -1175,15 +1175,13 @@ export const prepareAttach = handler<unknown, PrepareAttachState>(
   },
 );
 
-/** Returns a new request id, for one file a composer attaches. */
-const newAttachRequestId = (): string =>
-  `attach-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-
 /**
  * Adds each file `cf-file-input` reports it stored to the space's store,
  * under the name it had or a free one, and to the composer's attachments as
  * the request adding it. The store's outcome for each request says which
- * entry it added, or why it refused, and the composer's send reads that.
+ * entry it added, or why it refused, and the composer's send reads that. Each
+ * request is named by the event's key and the file's place in it, so every
+ * run of one event names the same requests, and the store adds each file once.
  *
  * @throws If the space has no store, or the files would make more
  *   attachments than the room's policy allows.
@@ -1202,8 +1200,9 @@ export const commitAttach = handler<UploadEvent, AttachState>(
     if (attaching.length + files.length > max) {
       throw new Error(`A message can have at most ${max} attachments.`);
     }
-    const added = files.map((file) => {
-      const requestId = newAttachRequestId();
+    const key = eventKey();
+    const added = files.map((file, index) => {
+      const requestId = `attach-${key}-${index}`;
       target.key("add").send({
         requestId,
         name: file.name,
