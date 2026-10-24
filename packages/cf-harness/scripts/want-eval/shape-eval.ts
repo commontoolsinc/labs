@@ -20,7 +20,7 @@
  *   deno run -A packages/cf-harness/scripts/want-eval/shape-eval.ts \
  *     --cases packages/cf-harness/scripts/want-eval/shape-cases.json \
  *     --instructions <path to the Weaver's WantSaidNow.swift> \
- *     --out <directory> [--label baseline] [--variants default,deep] \
+ *     --out <directory> [--label baseline] [--variants default,deep,quick] \
  *     [--only <case id>] [--repeat N] [--instance-dir <loom instance directory>] \
  *     [--runs-root <the runner's agent-runs/local>]
  *

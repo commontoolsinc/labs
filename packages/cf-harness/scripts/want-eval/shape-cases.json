@@ -3,6 +3,9 @@
     "default": {},
     "deep": {
       "depth": "deep"
+    },
+    "quick": {
+      "depth": "quick"
     }
   },
   "cases": [
