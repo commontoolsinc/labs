@@ -1083,6 +1083,7 @@ export class RuntimeProcessor {
    */
   #hostReadGate = new HostReadGate(undefined, {});
   #cancelSpaceAccessLoss?: Cancel;
+  #cancelConnectionRestored?: Cancel;
 
   /**
    * The retries of refused spaces in flight, which the render boundaries'
@@ -1120,6 +1121,12 @@ export class RuntimeProcessor {
       ?.subscribeSpaceAccessLoss?.((space) => {
         for (const client of clients()) {
           client.post({ type: NotificationType.SpaceAccessLost, space });
+        }
+      });
+    this.#cancelConnectionRestored = runtime.storageManager
+      ?.subscribeConnectionRestored?.(() => {
+        for (const client of clients()) {
+          client.post({ type: NotificationType.ConnectionRestored });
         }
       });
   }
@@ -1442,6 +1449,8 @@ export class RuntimeProcessor {
         this.#intentOutcomeCancel?.();
         this.#cancelSpaceAccessLoss?.();
         this.#cancelSpaceAccessLoss = undefined;
+        this.#cancelConnectionRestored?.();
+        this.#cancelConnectionRestored = undefined;
         this.#spaceAccessRetries.dispose();
         this.#intentOutcomeCancel = undefined;
         this.#profilePreloadCancel?.();
