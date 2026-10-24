@@ -1861,14 +1861,17 @@ export const FabriChatManagerCore = pattern<
     // refuses finds nothing there that the others find. That access is the
     // principal's, so each room is found, and everything read from it
     // derived, per user: a value stored once for every reader, which readers
-    // derive differently, is one their runtimes overwrite without end.
-    const found = savedRooms.map((entry) =>
+    // derive differently, is one their runtimes overwrite without end. Each
+    // per-user binding's name here is its value's cause, the identity of the
+    // document that stores it, so renaming one moves its data.
+    const foundForUser = savedRooms.map((entry) =>
       FoundRoom.asScope("user")({ space: entry.space, kind: entry.kind })
     );
     // Each saved room once it resolves and reads as a room, newest first. The
     // room's own records are read here, beside the entry they belong to, so
-    // they are read in the run that lists them.
-    const newestFirst = computed((): PerUser<ChatIndexEntry[]> => {
+    // they are read in the run that lists them. Its binding's name is its
+    // cause, as `foundForUser`'s is.
+    const roomsForUser = computed((): PerUser<ChatIndexEntry[]> => {
       const self = principalOf(myProfile, "represents-principal");
       const stored = direct.get() ?? {};
       const catalogValue = sharedSpaceCatalog.get();
@@ -1881,7 +1884,7 @@ export const FabriChatManagerCore = pattern<
       );
       const discovered = savedRooms.flatMap(
         (entry, index): ChatIndexEntry[] => {
-          const room = found[index]?.room;
+          const room = foundForUser[index]?.room;
           if (room === undefined) return [];
           const standalone = catalogEntries[spaceOf(room) ?? ""];
           if (
@@ -1927,14 +1930,15 @@ export const FabriChatManagerCore = pattern<
     });
     // The people the listed rooms' rosters hold, by the principal each
     // profile's own label attests, read beside the rooms that list them, and
-    // per user, as `newestFirst` is: a profile attests no one to a reader its
-    // space refuses. A profile attesting no principal, or a DID no
+    // per user, as `roomsForUser` is: a profile attests no one to a reader
+    // its space refuses. A profile attesting no principal, or a DID no
     // principal can have, names no one to offer a room to, and this user's
-    // own are left out.
-    const people = computed(
+    // own are left out. Its binding's name is its cause, as `foundForUser`'s
+    // is.
+    const peopleForUser = computed(
       (): PerUser<Record<string, ManagerProfileCell[]>> => {
         const self = principalOf(myProfile, "represents-principal");
-        return newestFirst.reduce<Record<string, ManagerProfileCell[]>>(
+        return roomsForUser.reduce<Record<string, ManagerProfileCell[]>>(
           (found, entry) =>
             (entry.room.key("roster").get() ?? []).reduce((known, profile) => {
               const principal = principalOf(profile, "represents-principal");
@@ -1963,10 +1967,11 @@ export const FabriChatManagerCore = pattern<
       draft,
       startRefusal,
     };
-    // Per user, as `newestFirst` is: a room's label is the title its room
-    // holds, which a direct room has only once a member sets one.
-    const shown = computed((): PerUser<ShownEntry[]> =>
-      newestFirst.map((entry) => ({
+    // Per user, as `roomsForUser` is: a room's label is the title its room
+    // holds, which a direct room has only once a member sets one. Its
+    // binding's name is its cause, as `foundForUser`'s is.
+    const shownForUser = computed((): PerUser<ShownEntry[]> =>
+      roomsForUser.map((entry) => ({
         room: entry.room,
         ...(entry.revision === undefined ? {} : { revision: entry.revision }),
         label: entry.room.key("about").get()?.title ??
@@ -1988,7 +1993,7 @@ export const FabriChatManagerCore = pattern<
     // as the draft is.
     const shownPeople = computed((): PerSession<ShownPerson[]> => {
       const picked = draft.get()?.picked ?? [];
-      return Object.values(people).flatMap((profiles): ShownPerson[] => {
+      return Object.values(peopleForUser).flatMap((profiles): ShownPerson[] => {
         const profile = profiles[0];
         if (profile === undefined) return [];
         return [{
@@ -2004,9 +2009,10 @@ export const FabriChatManagerCore = pattern<
     );
     // A notice whose room's roster lists a profile attesting its recipient
     // has nothing left to tell them: they are in the room. Per user, as
-    // `newestFirst` is: the roster is read under the reader's access, and a
-    // profile attests no one to a reader its space refuses.
-    const noticeList = computed((): PerUser<ChatManagerNotice[]> =>
+    // `roomsForUser` is: the roster is read under the reader's access, and a
+    // profile attests no one to a reader its space refuses. Its binding's
+    // name is its cause, as `foundForUser`'s is.
+    const noticesForUser = computed((): PerUser<ChatManagerNotice[]> =>
       ((outgoingNotices.get() ?? []) as ChatManagerNotice[]).filter((notice) =>
         !(notice.room.key("roster").get() ?? []).some((member) =>
           principalOf(member, "represents-principal") === notice.recipient
@@ -2030,20 +2036,24 @@ export const FabriChatManagerCore = pattern<
     const streams = {
       openDirect: commitStart({ act: "openDirect", ...records }),
       createGroup: commitStart({ act: "createGroup", ...records }),
-      offerRoom: commitManager({ act: "offerRoom", ...records, people }),
+      offerRoom: commitManager({
+        act: "offerRoom",
+        ...records,
+        people: peopleForUser,
+      }),
       accept: commitManager({ act: "accept", ...records }),
       joinRoom: commitManager({ act: "joinRoom", ...records }),
       forget: commitManager({ act: "forget", ...records }),
       delivered: commitManager({ act: "delivered", ...records }),
     };
     const view = {
-      rooms: newestFirst,
+      rooms: roomsForUser,
       sharedSpaceCatalog,
       roomMembership,
       direct,
       requests,
-      outgoingNotices: noticeList,
-      people,
+      outgoingNotices: noticesForUser,
+      people: peopleForUser,
       ...streams,
     };
 
@@ -2053,7 +2063,7 @@ export const FabriChatManagerCore = pattern<
         <cf-vstack gap="3" style={{ padding: "1rem" }}>
           <cf-heading level={3}>Chats</cf-heading>
           <cf-vstack id="fabrichat-rooms" gap="1">
-            {shown.map((entry) => (
+            {shownForUser.map((entry) => (
               <cf-hstack gap="2" align="center">
                 <cf-cell-link $cell={entry.room} label={entry.label} />
                 <cf-button
@@ -2150,7 +2160,7 @@ export const FabriChatManagerCore = pattern<
               </div>
             </cf-vstack>
           </div>
-          {noticeList.map((notice) => (
+          {noticesForUser.map((notice) => (
             <cf-hstack gap="2" align="center">
               <cf-text variant="caption">
                 {notice.recipient}{" "}
