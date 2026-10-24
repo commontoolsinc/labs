@@ -65,20 +65,23 @@ renamed, so every per-user value in an updated piece is stored per user.
 ## What an updated manager and room do
 
 Measured with `packages/patterns/integration/fabrichat-update-rehearsal.test.ts`
-and a probe derived from it. The deployed release was `main` at
-`ad88bbc9e3` (#9203). Each mode was measured with the manager's and the group
-room's views read before the update, as a client showing them would have, and
-without.
+and a probe derived from it, with `main` at `ad88bbc9e3` (#9203) as the
+deployed release. The probe reads every view after the update, idles, renders
+Home and the room, creates a group, and reads again. These figures are for a
+manager and room whose views no client read before the update:
 
-| | `main`'s code | per user, old names, not read | per user, new names, either mode |
+| | `main`'s code | per user, old names | per user, new names |
 | --- | --- | --- | --- |
 | `rooms` after the update | listed | `undefined` | listed |
 | `rooms` after a room is started | listed | `undefined` | listed |
 | room's participant views | listed | listed | listed |
-| `ReadOnlyAddressError` | 0 | 4 | 0 |
-| `schedule-error` | 0 | 11 | 0 |
-| blocked narrower link follows | 0 | 59 | 20 per rehearsal |
+| `ReadOnlyAddressError` | 0 | 5 | 0 |
+| `schedule-error` | 0 | 12 | 0 |
+| blocked narrower link follows (warning lines) | 0 | 92 | 20 |
 | scheduler runs while idle | flat | flat | flat |
+
+With the views read before the update, both the old and the new names list
+everything, with no error and the same 20 warning lines.
 
 The 20 blocked follows under the new names come once, while the update opens
 each piece, and not afterwards:
