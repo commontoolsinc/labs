@@ -3447,15 +3447,12 @@ export async function readTextProbe(
   return await readWithProbe(
     page,
     (probe, targetSelector: string) => {
-      // A control declines a click through its own `disabled` or
-      // `aria-disabled`, or through the button inside its shadow root.
-      const declines = (candidate: Element): boolean =>
-        candidate.hasAttribute("disabled") ||
-        candidate.getAttribute("aria-disabled") === "true";
       return {
         selector: targetSelector,
         matches: probe.collect(targetSelector).map((element) => {
           const rect = element.getBoundingClientRect();
+          // A control declines a click through its own `disabled` or
+          // `aria-disabled`, or through the button inside its shadow root.
           const inner = element.shadowRoot?.querySelector("[data-cf-button]") ??
             element;
           return {
@@ -3468,7 +3465,7 @@ export async function readTextProbe(
               left: rect.left,
             },
             visible: probe.isVisible(element),
-            disabled: declines(element) || declines(inner),
+            disabled: probe.isDisabled(element) || probe.isDisabled(inner),
           };
         }),
         bodyText: document.body === null
