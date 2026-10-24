@@ -367,7 +367,11 @@ const now = (): FabricEpochNsec => epochNsecFromMsec(Date.now());
  * values, and follows a link only where it hands one on.
  */
 export interface MessageEntry extends ViewItem {
-  /** A link to the stored message. */
+  /**
+   * The stored message's own cell: the document that holds it, never its slot
+   * in the room's messages, so two entries name one message exactly when
+   * their links are equal.
+   */
   cell: MessageCell;
 
   /** Whether the message is shown in the main conversation. */
@@ -433,8 +437,8 @@ export const messageEntries = (
   const entries = ((messages.get() ?? []) as MessageRecord[]).flatMap(
     (record, index): MessageEntry[] => {
       if (record?.sentAt === undefined) return [];
-      const cell = cellAt(messages, index);
-      const key = viewKeyOf(cell);
+      const cell = cellAt(messages, index).resolveAsCell();
+      const key = entityKeyOf(cell);
       if (key === undefined) return [];
       const target = record.replyTo?.message;
       const targetKey = target === undefined ? undefined : viewKeyOf(target);
