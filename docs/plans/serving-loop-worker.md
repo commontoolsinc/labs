@@ -106,8 +106,9 @@ last time and asks the server only for the sessions whose shares are stale or
 not yet cached. The view interests cross the same way (`ViewInterestCache`):
 read once per space and held until the server's `viewsChanged`, sent for a
 watch set that carried views, or its `sessionChanged`, which is what attaches,
-detaches or removes a viewing session, names the space; a selection the
-worker installs updates the held interest's generation itself.
+detaches or removes a viewing session, names the space, and dropped once the
+space has no session left; a selection the worker installs updates the held
+interest's generation itself.
 A publish over unchanged interests then asks the server nothing, where the
 request alone waited for the server's thread's turn, however empty the list.
 

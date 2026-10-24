@@ -178,6 +178,26 @@ describe("view-interests", () => {
     expect(cache.size).toBe(0);
   });
 
+  it("keeps nothing for a change noted in a space it has not read", () => {
+    const cache = new ViewInterestCache();
+
+    cache.noteChanged(space);
+
+    expect(cache.size).toBe(0);
+  });
+
+  it("keeps nothing for a space forgotten while a read of it fails", async () => {
+    const cache = new ViewInterestCache();
+    const pending = Promise.withResolvers<SessionViewInterest[]>();
+    const reading = cache.interestsFor(space, undefined, () => pending.promise);
+
+    cache.forget(space);
+    pending.reject(new Error("port closed"));
+    await expect(reading).rejects.toThrow("port closed");
+
+    expect(cache.size).toBe(0);
+  });
+
   it("holds the list of a read that starts after its space is forgotten, over one in flight before", async () => {
     const cache = new ViewInterestCache();
     const older = Promise.withResolvers<SessionViewInterest[]>();

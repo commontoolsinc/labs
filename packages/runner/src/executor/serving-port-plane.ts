@@ -12,7 +12,10 @@
 import type { CellScope } from "@commonfabric/api";
 import type { FabricValue } from "@commonfabric/data-model";
 import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
-import type { SessionReadCeiling } from "@commonfabric/memory/v2";
+import type {
+  SessionReadCeiling,
+  SessionViewInterest,
+} from "@commonfabric/memory/v2";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import {
@@ -502,14 +505,14 @@ class PlaneMemoryServer implements HostMemoryServer {
   }
 
   /** @inheritDoc */
-  viewInterestsForSpace(
+  async viewInterestsForSpace(
     space: string,
     options: { excludePrincipal?: string } = {},
-  ): ReturnType<HostMemoryServer["viewInterestsForSpace"]> {
+  ): Promise<SessionViewInterest[]> {
     this.#sessions.live(space);
     // The list crosses the port once, and again only after the server
     // reported a change that can move it (`ServingPlane`'s notices).
-    return this.#viewInterests.interestsFor(
+    const interests = await this.#viewInterests.interestsFor(
       space,
       options.excludePrincipal,
       () =>
@@ -518,6 +521,13 @@ class PlaneMemoryServer implements HostMemoryServer {
           excludePrincipal: undefined,
         }),
     );
+    // A space with no session left keeps no list. The mirror's report of
+    // its last session leaving drops the one held; a read that found the
+    // space so, or left it so, holds its answer no longer than this call.
+    if (this.#sessions.live(space).size === 0) {
+      this.#viewInterests.forget(space);
+    }
+    return interests;
   }
 }
 
@@ -602,7 +612,10 @@ export class ServingPlane {
     return this.#loopback;
   }
 
-  /** DIAGNOSTIC (tests): how many spaces' view interests the plane holds. */
+  /**
+   * DIAGNOSTIC (tests): how many spaces the plane keeps view interests, or a
+   * note of their change, for.
+   */
   get heldViewInterestSpaces(): number {
     return this.#viewInterests.size;
   }

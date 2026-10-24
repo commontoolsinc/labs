@@ -23,14 +23,22 @@ export class ViewInterestCache {
   /** How many reads of any space's list have started. */
   #reads = 0;
 
-  /** How many spaces' lists it holds. */
+  /** How many spaces it keeps anything for: a list, a read or a change. */
   get size(): number {
-    return this.#interests.size;
+    return new Set([
+      ...this.#interests.keys(),
+      ...this.#stale,
+      ...this.#latestRead.keys(),
+    ]).size;
   }
 
-  /** Notes that `space`'s interests may have changed. */
+  /**
+   * Notes that `space`'s interests may have changed. A space it has not read
+   * since it last forgot it has no list to doubt, and its next publish reads
+   * it anyway, so the note is kept only for a space it has read.
+   */
   noteChanged(space: string): void {
-    this.#stale.add(space);
+    if (this.#latestRead.has(space)) this.#stale.add(space);
   }
 
   /**
@@ -89,7 +97,7 @@ export class ViewInterestCache {
       try {
         interests = await read();
       } catch (error) {
-        this.#stale.add(space);
+        this.noteChanged(space);
         throw error;
       }
       if (this.#latestRead.get(space) === started) {

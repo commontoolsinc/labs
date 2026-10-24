@@ -120,4 +120,51 @@ describe("serving-plane-sessions", () => {
       channel.port2.close();
     }
   });
+
+  it("keeps no view interests for a space whose last session lapsed", async () => {
+    const channel = new MessageChannel();
+    const endpoint = servingPlaneEndpoint(channel.port1);
+    const plane = new ServingPlane(endpoint);
+    const bridge = new PortEndpoint<
+      BridgeRequests,
+      BridgeNotices,
+      PlaneRequests,
+      PlaneNotices
+    >(channel.port2, () => {});
+    let now = Date.now();
+    using _now = stub(Date, "now", () => now);
+    endpoint.onRequest("host.stats", emptyServingLoopStats);
+    bridge.onRequest("server.viewInterestsForSpace", () => []);
+    try {
+      bridge.notify("observer.sessionChanged", {
+        event: { kind: "opened", space, sessionId: "a" },
+      });
+      bridge.notify("observer.sessionChanged", {
+        event: {
+          kind: "detached",
+          space,
+          sessionId: "a",
+          expiresAt: now + 100,
+        },
+      });
+      await bridge.request("host.stats", null);
+      await plane.server.viewInterestsForSpace(space);
+      expect(plane.heldViewInterestSpaces).toBe(1);
+
+      now += 101;
+      expect(await plane.server.viewInterestsForSpace(space)).toEqual([]);
+      expect(plane.heldViewInterestSpaces).toBe(0);
+      bridge.notify("observer.sessionChanged", {
+        event: { kind: "removed", space, sessionId: "a" },
+      });
+      await bridge.request("host.stats", null);
+
+      expect(plane.heldViewInterestSpaces).toBe(0);
+    } finally {
+      await plane.close();
+      bridge.close();
+      channel.port1.close();
+      channel.port2.close();
+    }
+  });
 });
