@@ -1161,6 +1161,10 @@ export class CellHandle<T = unknown> {
     // The subscriber added here hears what the handle holds once, below.
     if (upgradeToCfcLabel) {
       // Tear down the label-less backend sub, then re-open it label-aware.
+      // Off the cell's subscription in between, the handle hears of no
+      // change, so the label it holds is current only once the worker
+      // delivers one again, as when its last subscriber leaves.
+      this.#cfcLabelCurrent = false;
       void this.#conn.unsubscribe(this).finally(() => {
         this.#conn.subscribe(this);
       });

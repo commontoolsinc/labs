@@ -371,6 +371,19 @@ describe("connection", () => {
         label: { integrity: [{ kind: "authored-by", subject: sender }] },
       }],
     });
+    /** The label of a profile `did:key:alice` owns, read through a link. */
+    const profileLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: {
+          integrity: [{
+            kind: "represents-principal",
+            subject: "did:key:alice",
+          }],
+        },
+      }],
+    };
     const runtimeOf = (connection: RuntimeConnection) =>
       ({ [$conn]: () => connection }) as unknown as RuntimeClient;
     const posted = (message: Record<string, FabricValue>) => {
@@ -566,6 +579,50 @@ describe("connection", () => {
       await connection.dispose();
     });
 
+    it("reports a message whose author the worker reported as undefined while its handle upgraded to labels as unknown, not from the author's former label", async () => {
+      // A handle upgrading a value-only subscription to a label-aware one
+      // leaves the cell's subscription until the worker answers the
+      // unsubscribe, so an update the worker sends in between reaches it in
+      // no form; the label it held from before is not the worker's read.
+      const transport = new FakeTransport([RequestType.CellUnsubscribe], {
+        [RequestType.CellGetCfcLabel]: { cfcLabel: undefined },
+        [RequestType.CellResolveAsCell]: { cell: ref },
+      });
+      const connection = await initializedConnection(transport);
+      const runtime = runtimeOf(connection);
+      const labeled = new CellHandle<string>(runtime, ref);
+      const valueOnly = new CellHandle<string>(runtime, ref);
+      const labeledListening = listen(labeled);
+      const valueOnlyCancel = valueOnly.subscribe(() => {}, {
+        onRefused: () => {},
+      });
+      transport.emit(
+        "message",
+        posted({ value: { name: "Alice" }, cfcLabel: profileLabel }),
+      );
+      labeledListening.cancel();
+      const upgraded = listen(valueOnly);
+      transport.emit("message", posted({ value: undefined }));
+
+      const states: string[] = [];
+      const cancel = observeAuthorship(
+        { getCfcLabel: () => Promise.resolve(label("did:key:alice")) },
+        valueOnly,
+        (observation) => states.push(observation.state),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(upgraded.heard[0]).toEqual({
+        cfcLabel: profileLabel,
+        current: false,
+      });
+      expect(states).toEqual(["unknown"]);
+      cancel();
+      upgraded.cancel();
+      valueOnlyCancel();
+      await connection.dispose();
+    });
+
     it("reports a message whose author the worker last reported as undefined as unknown on a handle seeded after, not from the author's former label", async () => {
       // An obliterated message keeps no `authorProfile`. A handle that
       // watched that field before still holds the profile and its
@@ -578,18 +635,6 @@ describe("connection", () => {
       });
       const connection = await initializedConnection(transport);
       const runtime = runtimeOf(connection);
-      const profileLabel = {
-        version: 1 as const,
-        entries: [{
-          path: [],
-          label: {
-            integrity: [{
-              kind: "represents-principal",
-              subject: "did:key:alice",
-            }],
-          },
-        }],
-      };
       const watching = listen(new CellHandle<string>(runtime, ref));
       transport.emit(
         "message",
