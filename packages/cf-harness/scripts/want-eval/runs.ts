@@ -8,15 +8,16 @@
 import { basename, join } from "@std/path";
 
 /**
- * Where a runner keeps its local jobs' runs: under `CF_HARNESS_HOME` when it
- * is set, as the harness keeps its home, else `~/.cf-harness`.
+ * The harness home, as the harness resolves it: `CF_HARNESS_HOME` when it is
+ * set, else `~/.cf-harness`.
  */
+export const defaultHarnessHome = (): string =>
+  Deno.env.get("CF_HARNESS_HOME") ??
+    join(Deno.env.get("HOME") ?? "", ".cf-harness");
+
+/** Where a runner keeps its local jobs' runs, under the harness home. */
 export const defaultRunsRoot = (): string =>
-  join(
-    Deno.env.get("CF_HARNESS_HOME") ??
-      join(Deno.env.get("HOME") ?? "", ".cf-harness"),
-    "agent-runs/local",
-  );
+  join(defaultHarnessHome(), "agent-runs/local");
 
 /**
  * The newest run directory of a job under `runsRoot`: the root run, not a
@@ -68,3 +69,18 @@ export const recordOf = async (
   file: "run-report.json" | "run-state.json",
 ): Promise<Record<string, unknown>> =>
   JSON.parse(await Deno.readTextFile(join(run, file)));
+
+/** The transcripts of a root run and each subagent it spawned, root first. */
+export const transcriptsOf = async (run: string): Promise<unknown[]> => {
+  const paths = [run];
+  for await (const entry of Deno.readDir(join(run, ".."))) {
+    if (entry.name.startsWith(`${basename(run)}.subagent.`)) {
+      paths.push(join(run, "..", entry.name));
+    }
+  }
+  return await Promise.all(
+    paths.map(async (path) =>
+      JSON.parse(await Deno.readTextFile(join(path, "transcript.json")))
+    ),
+  );
+};
