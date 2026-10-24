@@ -5212,6 +5212,9 @@ export class SpaceServer implements TransactionSealDestination {
       // client demand.
       { excludePrincipal: this.#options.serviceIdentity },
     );
+    // A park while the request was out cleared the registry this pass
+    // reconciles into and disposed the runtime whose writers it marks.
+    if (!this.#active || this.#runtime !== runtime) return;
     const changed = this.#demandMirror.update(demand);
     // WARM DEMAND KEYS (the explicit warm request's demand half — see
     // #warmDemandKeys): the staged instances enter the key set
