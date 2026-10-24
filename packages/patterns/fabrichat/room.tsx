@@ -42,6 +42,12 @@ import {
   wish,
   Writable,
 } from "commonfabric";
+import type { FileStoreOutput } from "../fabrifile/schemas.tsx";
+import {
+  ensureFileStore,
+  type FileStoreRecord,
+  type FileStoreRecordCell,
+} from "../fabrifile/store.tsx";
 import {
   addParticipant,
   type ParticipantRosterCell,
@@ -1071,6 +1077,27 @@ export interface ChatRoomView {
 
   /** The outcome of each of this reader's retitles, by its `requestId`. */
   titleRequests: Record<string, SetTitleOutcome>;
+
+  /**
+   * The store of the files of the room's space: for a room that is its
+   * space's root, the one it names itself; for any other, the one its space's
+   * root names. Absent while that names none.
+   */
+  fileStore?: Cell<FileStoreOutput>;
+
+  /**
+   * Names a new store as the space's, unless the space names one already. A
+   * room that is its space's root keeps the store itself; any other asks its
+   * space's root to, and does nothing in a space whose root keeps none.
+   */
+  ensureFileStore: Stream<void>;
+
+  /**
+   * Where the room keeps its space's file store, for a room that is its
+   * space's root, as a root offering its space's store does; absent for any
+   * other room, which keeps none.
+   */
+  fileStoreRecord?: Cell<FileStoreRecord>;
 }
 
 /** What a room offers everyone its space admits: `ChatRoomOutput`. */
@@ -1084,6 +1111,27 @@ export interface ChatRoomOutput extends ChatRoomView {
   /** The room's data face, as one group. */
   [VIEWS]: { room: ChatRoomView };
 }
+
+/**
+ * Names a new store as the room's space's: through `own`, for a room that is
+ * its space's root, and otherwise through `root`, which keeps it where the
+ * space's root does, when that root keeps a record of its store, as a
+ * container offering its space's store does. `rootKeeps` says whether it
+ * does: `root` is bound whether or not the root keeps a record, and reads as
+ * one either way.
+ */
+const ensureSpaceFileStore = handler<
+  void,
+  {
+    ownSpace: boolean;
+    rootKeeps: boolean;
+    own: Stream<void>;
+    root: Stream<void>;
+  }
+>((_, { ownSpace, rootKeeps, own, root }) => {
+  if (ownSpace) own.send();
+  else if (rootKeeps) root.send();
+});
 
 /** What a room stores, and who is looking at it. */
 export interface FabriChatRoomCoreInput {
@@ -1110,6 +1158,12 @@ export interface FabriChatRoomCoreInput {
 
   /** Those who joined the room; absent for a room nobody can join. */
   roster?: ParticipantRosterCell;
+
+  /**
+   * Where the room keeps its space's store, for a room that is its space's
+   * root; absent where it keeps none.
+   */
+  fileStore?: FileStoreRecordCell;
 
   /** The viewer's adds' outcomes; absent where they aren't remembered. */
   addRequests?: AddRequestsCell;
@@ -1166,6 +1220,7 @@ export const FabriChatRoomCore = pattern<
     messages,
     titles,
     roster,
+    fileStore,
     addRequests,
     startDirect,
     self,
@@ -1399,6 +1454,13 @@ export const FabriChatRoomCore = pattern<
     }),
     deleteReaction: commitDeleteReaction({ myProfile, room: messages }),
   };
+  // A room that is its space's root names its space's store itself; any other
+  // uses the one its space's root names.
+  const rootFileStore = container?.key("fileStoreRecord");
+  const rootKeepsFileStore = computed(() => rootFileStore?.get() !== undefined);
+  const spaceFileStore = computed((): Cell<FileStoreOutput> | undefined =>
+    ownSpace ? fileStore?.get().store : rootFileStore?.get()?.store
+  );
   const view = {
     about: aboutView,
     participants,
@@ -1416,6 +1478,14 @@ export const FabriChatRoomCore = pattern<
     addRequests: addMember.outcomes,
     setTitle,
     titleRequests,
+    fileStore: spaceFileStore,
+    ensureFileStore: ensureSpaceFileStore({
+      ownSpace,
+      rootKeeps: rootKeepsFileStore,
+      own: ensureFileStore({ fileStore }),
+      root: ensureFileStore({ fileStore: rootFileStore }),
+    }),
+    fileStoreRecord: ownSpace ? fileStore : undefined,
   };
   const closeThread = action(() => composer.key("thread").set(undefined));
   const cancelReply = action(() => composer.key("replyTo").set(undefined));
@@ -1616,6 +1686,12 @@ export interface FabriChatRoomInput {
    * one writer its write contract admits.
    */
   participants?: ParticipantRosterCell;
+
+  /**
+   * Where a room that is its space's root keeps its space's file store; a
+   * room naming none, and every other room, holds `{}`.
+   */
+  fileStore?: FileStoreRecordCell;
 }
 
 /**
@@ -1629,6 +1705,7 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
     messages,
     titles,
     participants,
+    fileStore,
     // The room itself, the link another member's manager lists it by.
     [SELF]: self,
   }) => {
@@ -1658,6 +1735,7 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
         messages,
         titles,
         roster: participants,
+        fileStore,
         addRequests,
         startDirect: managerWish.result?.openDirect,
         self,
@@ -1689,6 +1767,9 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
       addRequests: room.addRequests,
       setTitle: room.setTitle,
       titleRequests: room.titleRequests,
+      fileStore: room.fileStore,
+      ensureFileStore: room.ensureFileStore,
+      fileStoreRecord: room.fileStoreRecord,
       [UI]: (
         <cf-screen>
           {room[UI]}

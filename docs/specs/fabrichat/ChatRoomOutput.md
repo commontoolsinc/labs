@@ -241,6 +241,15 @@ space.
 - **`titleRequests`** holds the outcome of each of the reader's
   [`setTitle`](#settitlerequestid-string-title-string) requests, by its
   `requestId`. Like `addRequests`, it is the reader's alone.
+- **`fileStore`** links the store of the files of the room's space (see
+  [`FileStore`](../fabrifile/FileStore.md#where-it-lives)): for a room that is
+  its space's root, the store the room names itself, and for any other, the
+  one its space's root names. It is absent while that names none, and in a
+  space whose root keeps no store.
+- **`fileStoreRecord`**, for a room that is its space's root, is where it keeps
+  that store, offered as any root offering its space's store offers it (see
+  [`FileStore`](../fabrifile/FileStore.md#where-it-lives)). Any other room
+  keeps none, and offers none.
 - The lists here are projections. An implementation may keep each message's
   reactions as a list of their own, as long as what it offers satisfies these
   rules.
@@ -621,6 +630,23 @@ gesture of its own, records its outcome, and is in `[VIEWS]`.
   same whatever the `reason` says. A refusal changes nothing else. A retitle the
   stream doesn't admit, as one without the gesture, records nothing.
 
+### `ensureFileStore()`
+
+Creates the store of the room's space's files, unless the space names one
+already, which is how something that needs to put a file in the space, such as
+an attachment, makes sure there is somewhere to put it. Like `addParticipant`,
+it takes no `requestId`, since a repeat changes nothing, and it is in
+`[VIEWS]`.
+
+- **Admitted:** without a reviewed gesture, from anyone who can write in the
+  room's space; the space's access list decides.
+- **Effect:** for a room that is its space's root, creates a store as a piece
+  in the space and names it as the room's own. For any other room, it does the
+  same where its space's root keeps its store, when that root offers a record
+  of it (see [`FileStore`](../fabrifile/FileStore.md#where-it-lives)), and
+  does nothing in a space whose root offers none. Where the space names a store
+  already, it changes nothing, so the space keeps the one store it names.
+
 ## Renderings
 
 - **`[UI]`** is the room's own rendering, with its reviewed surfaces. An
@@ -628,7 +654,8 @@ gesture of its own, records its outcome, and is in `[VIEWS]`.
 - **`[VIEWS]`** holds a `room` group with the facts and streams above, for hosts
   that draw natively. It includes `messages`, `canSend`, `viewer`,
   `messageRights`, `addMember` with `canAdd` and
-  `addRequests`, and `setTitle` with `titleRequests`. A client uses it to show
+  `addRequests`, `setTitle` with `titleRequests`, and `ensureFileStore` with
+  `fileStore`. A client uses it to show
   a room outside any container. Inside a container, it reads the placement's
   `chat` group instead
   ([`FabriChatPlacement.md`](FabriChatPlacement.md#outputs)).
