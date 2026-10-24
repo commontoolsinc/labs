@@ -960,12 +960,18 @@ unaffected.
 
 #### Negotiated label-table encoding
 
-The measured savings that motivated the label tables (3,930,754 to 669,274
-bytes and 211,817 to 58,476 values on a rehearsal sync) were taken before labs
-#8767, #8788 and #8790 changed how link labels are carried, and have not been
-re-measured since. The tables change neither stored documents nor CFC
-decisions: they are a wire representation that every receiver expands before
-reading.
+The label tables were motivated by a rehearsal sync they reduced from 3,930,754
+to 669,274 bytes and from 211,817 to 58,476 values. Since labs #8767, #8788 and
+#8790 changed how link labels are carried, documents written carry few labels:
+measured again on 2026-10-23, the tables changed under 1% of the Memory messages
+in a Topics run and in a lunch-poll run, and saved at most 0.1% of those
+messages' gzipped bytes. Documents written by the labs builds of 2026-10-01 to
+10-15, before those changes, keep their labels until rewritten; in the heaviest
+such space on the rehearsal copy, the tables reduce syncs of its label-bearing
+documents from 17.6 MB to 3.8 MB, and the largest of those syncs from 190,663 to
+56,201 values, under the routed default of 150,000 values per frame. The tables
+change neither stored documents nor CFC decisions: they are a wire
+representation that every receiver expands before reading.
 
 When both peers advertise `syncLabelTableV1`, a `SessionSync` in
 `response.ok.sync` or `session/effect.effect` may carry dense `labelTable` and

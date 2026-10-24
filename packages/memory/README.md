@@ -132,10 +132,15 @@ without unbounded read-ahead. Malformed credit or out-of-order records close the
 connection, and cancellation releases each owned reservation exactly once.
 Request credit is independent of public `mrc\x01` credits.
 
-The measured savings behind the label tables (3,930,754 to 669,274 bytes and
-211,817 to 58,476 values on a rehearsal sync) were taken before labs #8767,
-#8788 and #8790 changed how link labels are carried, and have not been
-re-measured since. The tables change neither stored documents nor CFC decisions.
+The label tables save little on documents written since labs #8767, #8788 and
+#8790 changed how link labels are carried: measured on 2026-10-23, they changed
+under 1% of the Memory messages in a Topics run and in a lunch-poll run and
+saved at most 0.1% of those messages' gzipped bytes. Documents written by the
+builds of 2026-10-01 to 10-15 keep heavy labels until rewritten, and there the
+tables reduce a space's label-bearing syncs from 17.6 MB to 3.8 MB and keep the
+largest of them under the routed default of 150,000 values per frame (see the
+protocol spec's label-table section). The tables change neither stored documents
+nor CFC decisions.
 
 Peers supporting `syncLabelTableV1` negotiate lossless interning of CFC
 label-map metadata in sync responses and effects. A sync's `labelTable` stores
