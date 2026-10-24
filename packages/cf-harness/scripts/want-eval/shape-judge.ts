@@ -3,9 +3,11 @@
  * two shapes (`default` and `deep` unless told otherwise), and asks a cheap
  * model which run left the person better served, scoring both on the rubric
  * in `shape-rubric.ts`. The runs are shown in a random order under neutral
- * labels, without their shapes. Writes `<label>.json` (every verdict) and
- * `<label>.md` (a line per case: median tokens and their spread under each
- * shape, the pairwise record, the mean rubric scores) to `--out`.
+ * labels, without their shapes. The model gives its verdict as a call to the
+ * one tool it is offered, `submit_verdict`. Writes `<label>.json` (every
+ * verdict), `<label>.replies.json` (every reply the judge made, as it came
+ * back) and `<label>.md` (a line per case: median tokens and their spread
+ * under each shape, the pairwise record, the mean rubric scores) to `--out`.
  *
  * It reads the runs' own records, and the model call goes out on the owner's
  * Codex credential, so it is run by hand, and `--out` names a directory
@@ -24,17 +26,19 @@ import {
   recordUndeclaredFlags,
   refuseUndeclaredFlags,
 } from "../../src/cli-flags.ts";
-import { codexEvalModel } from "../task-classification-eval.ts";
+import type { HarnessToolCall } from "../../src/contracts/transcript.ts";
+import { codexEvalToolModel } from "../task-classification-eval.ts";
 import { rootRunOf, transcriptsOf } from "./runs.ts";
 import {
   type JudgedPair,
   materialOf,
   pairPrompt,
   pairRuns,
-  parseVerdict,
   summarise,
   summaryTable,
   unblind,
+  VERDICT_TOOL,
+  verdictOf,
   winnerOf,
 } from "./shape-rubric.ts";
 
@@ -91,7 +95,21 @@ for (const path of args.results.split(",")) {
     ) runs.push(run);
   }
 }
-const model = codexEvalModel(args["harness-home"], args.owner);
+const model = codexEvalToolModel(args["harness-home"], args.owner);
+await ensureDir(args.out);
+const repliesFile = join(args.out, `${args.label}.replies.json`);
+
+/** Every reply the judge made, as it came back. */
+const replies: {
+  case: string;
+  firstJob: string;
+  secondJob: string;
+  firstWasA: boolean;
+  content: string;
+  toolCalls: readonly HarnessToolCall[];
+}[] = [];
+const messageOf = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
 const pairs = pairRuns(runs, args.first, args.second);
 console.error(`judging ${pairs.length} pairs with ${model.name}`);
 
@@ -107,14 +125,27 @@ const judged: JudgedPair[] = await Promise.all(pairs.map(async (pair) => {
     material(pair.second),
   ]);
   const readings = await Promise.all([true, false].map(async (firstWasA) => {
+    let reply;
     try {
-      const verdict = parseVerdict(
-        await model.ask(
-          firstWasA
-            ? pairPrompt(ask, first, second)
-            : pairPrompt(ask, second, first),
-        ),
+      reply = await model.turn(
+        firstWasA
+          ? pairPrompt(ask, first, second)
+          : pairPrompt(ask, second, first),
+        [VERDICT_TOOL],
       );
+    } catch (error) {
+      return { error: messageOf(error) };
+    }
+    replies.push({
+      case: pair.case,
+      firstJob: pair.first.job,
+      secondJob: pair.second.job,
+      firstWasA,
+      content: reply.content,
+      toolCalls: reply.toolCalls ?? [],
+    });
+    try {
+      const verdict = verdictOf(reply);
       return {
         verdict: {
           ...unblind(verdict, firstWasA),
@@ -123,7 +154,7 @@ const judged: JudgedPair[] = await Promise.all(pairs.map(async (pair) => {
         },
       };
     } catch (error) {
-      return { error: error instanceof Error ? error.message : String(error) };
+      return { error: `${messageOf(error)} (reply saved in ${repliesFile})` };
     }
   }));
   const verdicts = readings.flatMap((one) =>
@@ -165,10 +196,10 @@ const table = [
     ...pair.errors.map((error) => `  - failed: ${error}`),
   ]),
 ].join("\n");
-await ensureDir(args.out);
 await Deno.writeTextFile(
   join(args.out, `${args.label}.json`),
   JSON.stringify(judged, null, 2),
 );
+await Deno.writeTextFile(repliesFile, JSON.stringify(replies, null, 2));
 await Deno.writeTextFile(join(args.out, `${args.label}.md`), table);
 console.log(table);

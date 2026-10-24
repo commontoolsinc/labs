@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type { HarnessAssistantTranscriptMessage } from "../src/contracts/transcript.ts";
 import {
   CRITERIA,
   type JudgedPair,
@@ -8,13 +9,14 @@ import {
   median,
   pairPrompt,
   pairRuns,
-  parseVerdict,
   RUBRIC,
   type Score,
   spread,
   summarise,
   summaryTable,
   unblind,
+  VERDICT_TOOL,
+  verdictOf,
 } from "../scripts/want-eval/shape-rubric.ts";
 
 /** Every criterion at `score`, as a judge would write it. */
@@ -23,15 +25,31 @@ const side = (score: number) =>
     CRITERIA.map((key) => [key, { score, reason: `${key} ${score}` }]),
   );
 
+/** A judge's reply: `args` as the arguments of one call to `tool`. */
+const called = (
+  args: unknown,
+  tool = "submit_verdict",
+): HarnessAssistantTranscriptMessage => ({
+  role: "assistant",
+  content: "",
+  toolCalls: [{
+    id: "call-1",
+    type: "function",
+    function: { name: tool, arguments: JSON.stringify(args) },
+  }],
+});
+
 const reply = (a: number, b: number, winner: string) =>
-  JSON.stringify({ A: side(a), B: side(b), winner, reason: "because" });
+  called({ A: side(a), B: side(b), winner, reason: "because" });
+
+/** The deleted parse: the reply's text from its first `{` to its last `}`. */
+const sliceParse = (text: string): unknown =>
+  JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
 
 describe("shape-rubric", () => {
-  describe("parseVerdict", () => {
-    it("reads a verdict wrapped in prose and a code fence", () => {
-      const verdict = parseVerdict(
-        "Here it is:\n```json\n" + reply(2, 4, "B") + "\n```\nDone.",
-      );
+  describe("verdictOf", () => {
+    it("reads the verdict from the submit_verdict call's arguments", () => {
+      const verdict = verdictOf(reply(2, 4, "B"));
 
       expect(verdict.winner).toBe("B");
       expect(verdict.A.substance).toEqual({ score: 2, reason: "substance 2" });
@@ -39,26 +57,65 @@ describe("shape-rubric", () => {
       expect(verdict.reason).toBe("because");
     });
 
-    it("refuses a reply with a criterion missing", () => {
+    it("reads a reason with quotes and braces exactly, where slicing the text broke", () => {
+      // What a live judge wrote: a reason quoting a run, quotes and braces
+      // and all. Typed into prose, they are not JSON; as tool arguments, the
+      // provider encodes them.
+      const reason =
+        'B says "nothing on {Tuesday}" but its read shows {"events": 2}} } {';
+      const verdict = verdictOf(
+        called({ A: side(3), B: side(2), winner: "A", reason }),
+      );
+      expect(verdict.reason).toBe(reason);
+
+      const typed = `Verdict: {"A": ${JSON.stringify(side(3))}, "B": ${
+        JSON.stringify(side(2))
+      }, "winner": "A", "reason": "${reason}"}`;
+      expect(() => sliceParse(typed)).toThrow(SyntaxError);
+    });
+
+    it("refuses a reply with no submit_verdict call, even one with a verdict in its text", () => {
+      const text = JSON.stringify({
+        A: side(3),
+        B: side(3),
+        winner: "tie",
+        reason: "",
+      });
+      expect(() => verdictOf({ role: "assistant", content: text })).toThrow(
+        "expected one submit_verdict call, got 0",
+      );
+      expect(() => verdictOf(called(JSON.parse(text), "other_tool"))).toThrow(
+        "got 0",
+      );
+    });
+
+    it("refuses arguments the tool's schema refuses", () => {
       const a = side(3);
       delete a.honest;
-
       expect(() =>
-        parseVerdict(
-          JSON.stringify({ A: a, B: side(3), winner: "tie", reason: "" }),
+        verdictOf(called({ A: a, B: side(3), winner: "tie", reason: "" }))
+      ).toThrow();
+      expect(() => verdictOf(reply(0, 3, "B"))).toThrow();
+      expect(() => verdictOf(reply(6, 3, "B"))).toThrow();
+      expect(() => verdictOf(reply(2.5, 3, "B"))).toThrow();
+      expect(() => verdictOf(reply(3, 3, "both"))).toThrow();
+      expect(() =>
+        verdictOf(
+          called({ A: side(3), B: side(3), winner: "tie", reason: "", x: 1 }),
         )
-      ).toThrow("run A honest");
+      ).toThrow();
+      expect(() => verdictOf(reply(3, 3, "tie"))).not.toThrow();
     });
 
-    it("refuses a score outside 1-5 or not whole", () => {
-      expect(() => parseVerdict(reply(0, 3, "B"))).toThrow("1-5");
-      expect(() => parseVerdict(reply(6, 3, "B"))).toThrow("1-5");
-      expect(() => parseVerdict(reply(2.5, 3, "B"))).toThrow("1-5");
-    });
-
-    it("refuses a winner that is not A, B or tie, and a reply with no JSON", () => {
-      expect(() => parseVerdict(reply(3, 3, "both"))).toThrow("winner");
-      expect(() => parseVerdict("I prefer B.")).toThrow("no JSON");
+    it("offers the verdict tool by the name the prompt asks for", () => {
+      expect(VERDICT_TOOL.toolId).toBe("submit_verdict");
+      expect(
+        pairPrompt("ask", { answer: "", pages: [], reads: [] }, {
+          answer: "",
+          pages: [],
+          reads: [],
+        }),
+      ).toContain("calling submit_verdict");
     });
   });
 
@@ -117,7 +174,7 @@ describe("shape-rubric", () => {
 
   describe("unblind", () => {
     it("reads A and B back to the shapes they were shown for", () => {
-      const verdict = parseVerdict(reply(2, 5, "B"));
+      const verdict = verdictOf(reply(2, 5, "B"));
 
       const shownFirst = unblind(verdict, true);
       expect(shownFirst.winner).toBe("second");
@@ -127,7 +184,7 @@ describe("shape-rubric", () => {
       expect(shownSecond.winner).toBe("first");
       expect(shownSecond.first.answers.score).toBe(5);
 
-      expect(unblind(parseVerdict(reply(3, 3, "tie")), false).winner).toBe(
+      expect(unblind(verdictOf(reply(3, 3, "tie")), false).winner).toBe(
         "tie",
       );
     });

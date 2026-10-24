@@ -1,10 +1,15 @@
 /**
  * What the shape judge decides without a model or a run record: the rubric
- * and the prompt that carries it, how a reply is read back into scores, how
- * runs of one case are paired across two shapes, and the median and spread a
+ * and the prompt that carries it, the tool the verdict comes back through and
+ * how its call is read back into scores, how runs of one case are paired across two shapes, and the median and spread a
  * case×shape's tokens are reported by. `shape-judge.ts` gathers the runs and
  * asks the model.
  */
+
+import type { JSONSchema } from "@commonfabric/api";
+import type { HarnessModelToolDescriptor } from "../../src/contracts/tool-descriptor.ts";
+import type { HarnessAssistantTranscriptMessage } from "../../src/contracts/transcript.ts";
+import { validateStructuredResultValue } from "../../src/structured-result.ts";
 
 /**
  * The rubric, one line each, in the order the judge scores them. Length is
@@ -102,13 +107,48 @@ export const pairPrompt = (
     "Then say which run the person is better served by, or tie if neither is clearly better. " +
     "Longer is not better in itself, and the order the runs are shown in means nothing.",
     "",
-    "Reply with JSON only, in this shape:",
-    `{"A": {${
-      CRITERIA.map((key) => `"${key}": {"score": 1-5, "reason": "..."}`).join(
-        ", ",
-      )
-    }}, "B": {...same keys...}, "winner": "A" | "B" | "tie", "reason": "one line"}`,
+    `Give your verdict by calling ${VERDICT_TOOL.toolId}, once.`,
   ].join("\n");
+
+/** One run's scores, as the verdict tool declares them. */
+const scoresSchema = (label: string): JSONSchema => ({
+  type: "object",
+  description: `Run ${label}'s score on each criterion.`,
+  required: [...CRITERIA],
+  additionalProperties: false,
+  properties: Object.fromEntries(CRITERIA.map((key) => [key, {
+    type: "object",
+    required: ["score", "reason"],
+    additionalProperties: false,
+    properties: {
+      score: { type: "integer", minimum: 1, maximum: 5 },
+      reason: { type: "string", description: "One line." },
+    },
+  }])),
+});
+
+/**
+ * The one tool the judge is offered, and the only way it gives a verdict: its
+ * arguments are the verdict, so a reason that quotes the runs reaches us as
+ * the provider encoded it rather than as JSON the model typed into prose.
+ */
+export const VERDICT_TOOL: HarnessModelToolDescriptor = {
+  toolId: "submit_verdict",
+  title: "Submit verdict",
+  description: "Submit both runs' scores on every criterion and the winner.",
+  effectClass: "read",
+  inputSchema: {
+    type: "object",
+    required: ["A", "B", "winner", "reason"],
+    additionalProperties: false,
+    properties: {
+      A: scoresSchema("A"),
+      B: scoresSchema("B"),
+      winner: { type: "string", enum: ["A", "B", "tie"] },
+      reason: { type: "string", description: "One line." },
+    },
+  },
+};
 
 /** The field `name` of `value`, or undefined when it has none. */
 const fieldOf = (value: unknown, name: string): unknown =>
@@ -141,18 +181,27 @@ const scoresOf = (value: unknown, label: string): Record<Criterion, Score> => {
 };
 
 /**
- * The verdict in a judge's reply. The reply may wrap its JSON in prose or a
- * code fence; a reply missing a criterion, scoring outside 1–5, or naming no
- * winner is refused rather than read as a partial verdict.
+ * The verdict in a judge's reply: the arguments of its one `submit_verdict`
+ * call, checked against the tool's schema. A reply with no such call, more
+ * than one, or arguments the schema refuses is refused rather than read as a
+ * partial verdict.
  */
-export const parseVerdict = (reply: string): PairVerdict => {
-  const start = reply.indexOf("{");
-  const end = reply.lastIndexOf("}");
-  if (start < 0 || end < start) throw new Error("no JSON in the reply");
-  const parsed: unknown = JSON.parse(reply.slice(start, end + 1));
-  if (typeof parsed !== "object" || parsed === null) {
-    throw new Error("the reply is not an object");
+export const verdictOf = (
+  reply: HarnessAssistantTranscriptMessage,
+): PairVerdict => {
+  const calls = (reply.toolCalls ?? []).filter((call) =>
+    call.function.name === VERDICT_TOOL.toolId
+  );
+  if (calls.length !== 1) {
+    throw new Error(
+      `expected one ${VERDICT_TOOL.toolId} call, got ${calls.length}`,
+    );
   }
+  const parsed: unknown = JSON.parse(calls[0].function.arguments);
+  validateStructuredResultValue({
+    schema: VERDICT_TOOL.inputSchema,
+    value: parsed,
+  });
   const winner = fieldOf(parsed, "winner");
   if (winner !== "A" && winner !== "B" && winner !== "tie") {
     throw new Error(`winner must be A, B or tie, not ${String(winner)}`);
