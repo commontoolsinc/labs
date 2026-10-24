@@ -233,27 +233,17 @@ export type PageCondition<
 ) => boolean | R | Promise<boolean | R>;
 
 /**
- * Installed in the page by {@link waitForCondition}. Re-evaluates `predicate`
- * whenever the UI could have changed — a shared pulse hub observes the document
- * and every shadow root (subtree, character data, and attributes), including
- * shadow roots created after the wait began, so the predicate runs the instant
- * the DOM reflects new state instead of on a fixed timer. When the predicate
- * holds, it calls the CDP binding `bindingName`, which wakes the awaiting test
- * process. An async predicate that awaits a runtime signal (such as
- * `rt.idle()`) resolves the moment that signal fires, with no DOM change
- * required.
+ * Builds the {@link ProbeApi} that a {@link waitForCondition} predicate and a
+ * {@link readWithProbe} reader are handed, so a read and a wait judge the page
+ * by the same rules.
  *
- * Self-contained: it is serialized and run in the page, so it closes over none
- * of the module scope. `predicateSource` is the predicate's source text,
- * reconstructed here because a function cannot cross the evaluate boundary as a
- * callable value.
+ * Self-contained: its source is serialized and run in the page, so it closes
+ * over none of the module scope.
  */
-function installWaiter(
-  bindingName: string,
-  predicateSource: string,
-  predicateArgs: unknown[],
-  events: string[],
-): void {
+function createProbe(): ProbeApi {
+  // The return type makes a method added to `ProbeApi` one this has to
+  // implement. The annotation is erased before the source is serialized, so it
+  // adds no runtime reference to module scope.
   const isRendered = (element: Element): boolean => {
     const style = globalThis.getComputedStyle(element);
     if (style.display === "none" || style.visibility === "hidden") return false;
@@ -265,11 +255,7 @@ function installWaiter(
     element.hasAttribute("disabled") ||
     element.getAttribute("aria-disabled") === "true";
 
-  // Typed as the ProbeApi the predicates are handed, so a method added to that
-  // interface has to be implemented here too. The annotation is erased before
-  // this function is serialized into the page, so it adds no runtime reference
-  // to module scope.
-  const probe: ProbeApi = {
+  return {
     collect(selector) {
       const out: Element[] = [];
       const walk = (root: Document | ShadowRoot) => {
@@ -354,6 +340,33 @@ function installWaiter(
       element.setAttribute(attribute, [...tokens].join(" "));
     },
   };
+}
+
+/**
+ * Installed in the page by {@link waitForCondition}. Re-evaluates `predicate`
+ * whenever the UI could have changed — a shared pulse hub observes the document
+ * and every shadow root (subtree, character data, and attributes), including
+ * shadow roots created after the wait began, so the predicate runs the instant
+ * the DOM reflects new state instead of on a fixed timer. When the predicate
+ * holds, it calls the CDP binding `bindingName`, which wakes the awaiting test
+ * process. An async predicate that awaits a runtime signal (such as
+ * `rt.idle()`) resolves the moment that signal fires, with no DOM change
+ * required.
+ *
+ * Self-contained: it is serialized and run in the page, so it closes over none
+ * of the module scope. `probeSource` is {@link createProbe}'s source text and
+ * `predicateSource` the predicate's, each reconstructed here because a function
+ * cannot cross the evaluate boundary as a callable value.
+ */
+function installWaiter(
+  bindingName: string,
+  probeSource: string,
+  predicateSource: string,
+  predicateArgs: unknown[],
+  events: string[],
+): void {
+  const probe =
+    (new Function("return (" + probeSource + ")")() as () => ProbeApi)();
 
   const predicate = new Function("return (" + predicateSource + ")")() as (
     probe: ProbeApi,
@@ -722,6 +735,7 @@ export const waitForCondition = async <
     await page.evaluate(installWaiter, {
       args: [
         bindingName,
+        createProbe.toString(),
         predicate.toString(),
         (args ?? []) as unknown[],
         events,
@@ -771,3 +785,42 @@ export const waitForCondition = async <
     }, { args: [bindingName] }).catch(() => {});
   }
 };
+
+/**
+ * Evaluates `reader` in the page once, handed the {@link ProbeApi} a
+ * {@link waitForCondition} predicate is, and returns its answer: for reading
+ * the page as a wait reads it, where nothing is being waited for. `reader` is
+ * serialized into the page, so it closes over none of the module scope.
+ *
+ * @throws If the page cannot be evaluated, or `reader` throws.
+ */
+export const readWithProbe = async <
+  A extends readonly unknown[],
+  R extends PageConditionValue,
+>(
+  page: Page,
+  reader: (probe: ProbeApi, ...args: A) => R | Promise<R>,
+  { args }: { args?: A } = {},
+): Promise<R> =>
+  await page.evaluate(
+    async (
+      probeSource: string,
+      readerSource: string,
+      readerArgs: unknown[],
+    ) => {
+      const probe =
+        (new Function("return (" + probeSource + ")")() as () => ProbeApi)();
+      const read = new Function("return (" + readerSource + ")")() as (
+        probe: ProbeApi,
+        ...args: unknown[]
+      ) => unknown;
+      return await read(probe, ...readerArgs);
+    },
+    {
+      args: [
+        createProbe.toString(),
+        reader.toString(),
+        (args ?? []) as unknown[],
+      ],
+    },
+  ) as R;
