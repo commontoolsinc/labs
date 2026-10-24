@@ -970,21 +970,34 @@ export class XAppView extends BaseView {
 
   /**
    * Handler for the runtime's `connectionrestored`, which runs again each
-   * load whose failure the view is showing. The runtime has dropped every
-   * failed load by then, so the run reaches the worker, and a failure the
-   * lost connection caused can heal. A load the view is not showing as
-   * failed is left alone, so a restored connection reloads nothing on
+   * load whose failure the view is showing, and each load still in flight
+   * that goes on to fail. The runtime has dropped every failed load by then,
+   * and keeps none that was in flight, so the run reaches the worker, and a
+   * failure the lost connection caused can heal. A load the view shows as
+   * loaded is left alone, so a restored connection reloads nothing on
    * screen, and one that fails again stays failed until the next restored
    * connection.
    */
   #onConnectionRestored = (): void => {
-    if (this._selectedPattern.status === TaskStatus.ERROR) {
-      this._selectedPattern.run();
-    }
-    if (this._spaceRootPattern.status === TaskStatus.ERROR) {
-      this._spaceRootPattern.run();
-    }
+    this.#runAgainIfFailed(this._selectedPattern);
+    this.#runAgainIfFailed(this._spaceRootPattern);
   };
+
+  /**
+   * Helper for `#onConnectionRestored()`, which runs `task` again if it has
+   * failed, or once it fails if it is running. A run asked for in between,
+   * whichever way it ends, is the one this waits on, and a task already
+   * running again by then is left to it.
+   */
+  #runAgainIfFailed(task: Task<readonly unknown[], unknown>): void {
+    if (task.status === TaskStatus.ERROR) {
+      task.run();
+    } else if (task.status === TaskStatus.PENDING) {
+      task.taskComplete.catch(() => {
+        if (task.status === TaskStatus.ERROR) task.run();
+      });
+    }
+  }
 
   /**
    * Listens for `connectionrestored` on `rt` and on no other runtime, so a

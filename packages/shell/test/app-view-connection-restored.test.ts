@@ -14,21 +14,30 @@ const PAGE_HREF = "http://localhost:8000/connection-restored";
 const SPACE = "did:key:z6Mk-shell-app-view-connection-restored" as DID;
 
 /**
- * A runtime whose loads fail while `failing` is set, which records each piece
- * load and each root load it is asked for, and on which a test dispatches
+ * A runtime whose loads fail while `failing` is set, whose next piece load
+ * settles as `held` does when that is set, which records each piece load and
+ * each root load it is asked for, and on which a test dispatches
  * `connectionrestored` as the real one does once a connection comes back.
  */
 function stubRuntime() {
   const target = new EventTarget();
   const pieceLoads: unknown[][] = [];
   let rootLoads = 0;
-  const state = { failing: true };
+  const state: {
+    failing: boolean;
+    held?: PromiseWithResolvers<{ id: () => string }>;
+  } = { failing: true };
   const rt = {
     signal: new AbortController().signal,
     addEventListener: target.addEventListener.bind(target),
     removeEventListener: target.removeEventListener.bind(target),
     getPattern: (...args: unknown[]) => {
       pieceLoads.push(args);
+      const held = state.held;
+      if (held) {
+        state.held = undefined;
+        return held.promise;
+      }
       return state.failing
         ? Promise.reject(new Error("the socket went away"))
         : Promise.resolve({ id: () => "fid1:piece" });
@@ -115,6 +124,31 @@ describe("XAppView on a restored connection", () => {
       expect(view._spaceRootPattern.status).toBe(TaskStatus.COMPLETE);
       expect(view._spaceRootPattern.value?.id()).toBe("root");
       expect(runtime.rootLoads).toBe(2);
+    } finally {
+      errors.restore();
+      restore();
+    }
+  });
+
+  it("runs a selection whose load was in flight when the connection was restored again, once that load fails", async () => {
+    const restore = installBrowserGlobals(PAGE_HREF);
+    const errors = stub(console, "error", () => {});
+    try {
+      const runtime = stubRuntime();
+      runtime.state.failing = false;
+      const held = Promise.withResolvers<{ id: () => string }>();
+      runtime.state.held = held;
+      const view = await appViewOver(runtime, { pieceId: "fid1:piece" });
+      view._selectedPattern.run();
+      expect(view._selectedPattern.status).toBe(TaskStatus.PENDING);
+
+      runtime.restore();
+      held.reject(new Error("the socket went away"));
+      await view._selectedPattern.taskComplete.catch(() => {});
+      await view._selectedPattern.taskComplete;
+
+      expect(view._selectedPattern.status).toBe(TaskStatus.COMPLETE);
+      expect(view._selectedPattern.value?.id()).toBe("fid1:piece");
     } finally {
       errors.restore();
       restore();

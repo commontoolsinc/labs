@@ -167,6 +167,9 @@ class MockRuntimeClient {
   /** When set, every `getPiece` rejects rather than answering. */
   failEveryGetPiece = false;
 
+  /** When set, the next `getPiece` answers as this settles, and no sooner. */
+  nextGetPiece: Promise<{ id: () => string }> | undefined = undefined;
+
   getPiece(
     pieceId: string,
     space: DID,
@@ -174,6 +177,11 @@ class MockRuntimeClient {
     scope?: string,
   ): Promise<{ id: () => string }> {
     this.getPieceCalls.push({ pieceId, runIt, space, scope });
+    const next = this.nextGetPiece;
+    if (next) {
+      this.nextGetPiece = undefined;
+      return next;
+    }
     if (this.failEveryGetPiece) {
       return Promise.reject(new Error("the piece will never load"));
     }
@@ -841,6 +849,30 @@ describe("RuntimeInternals", () => {
 
         expect(await runtime.getPattern(space, "fid1:fine")).toBe(loaded);
         expect(client.getPieceCalls).toHaveLength(1);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("loads a piece whose load was in flight when the connection was restored again, once that load fails", async () => {
+      // The load fails after the restoration, as one the lost connection
+      // broke can, once the requests it went on to make were answered.
+      const space = "did:key:z6Mk-lib-shell-restored-in-flight" as DID;
+      const client = new MockRuntimeClient();
+      const held = Promise.withResolvers<{ id: () => string }>();
+      client.nextGetPiece = held.promise;
+      const runtime = new RuntimeInternals(client as any);
+
+      try {
+        const first = runtime.getPattern(space, "fid1:in-flight");
+        client.emit("connectionrestored");
+        held.reject(new Error("the socket went away"));
+        await expect(first).rejects.toThrow("the socket went away");
+
+        const piece = await runtime.getPattern(space, "fid1:in-flight");
+
+        expect(piece.id()).toBe("fid1:in-flight");
+        expect(client.getPieceCalls).toHaveLength(2);
       } finally {
         await runtime.dispose();
       }

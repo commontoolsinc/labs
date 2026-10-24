@@ -402,6 +402,14 @@ interface PatternCacheEntry {
    * chance of success than the load that already failed.
    */
   failed: boolean;
+
+  /**
+   * How many connections the runtime had seen restored when the load began.
+   * A load that fails after another one was restored was in flight across
+   * that restoration, so its failure may be the lost connection's, and is
+   * not kept.
+   */
+  readonly restoredAtStart: number;
 }
 
 /** Where a slug reference lands, as a page address can carry it. */
@@ -487,6 +495,10 @@ export class RuntimeInternals extends EventTarget {
     DID,
     Map<CellScope, Map<string, PatternCacheEntry>>
   > = new Map();
+
+  /** How many of its connections the runtime has reported restored. */
+  #connectionsRestored = 0;
+
   // TODO(runtime-worker-refactor)
   #telemetryMarkers: RuntimeTelemetryMarkerResult[] = [];
 
@@ -646,7 +658,8 @@ export class RuntimeInternals extends EventTarget {
    * An error crosses from the worker as its message, with a code for only a
    * few kinds, so nothing here tells a dropped connection from a piece that
    * will never load; one that will never load fails once more per restored
-   * connection.
+   * connection. A load still in flight when a connection is restored is not
+   * kept if it then fails, since the lost connection may be what failed it.
    */
   getPattern(
     space: DID,
@@ -675,10 +688,19 @@ export class RuntimeInternals extends EventTarget {
       }
       return piece;
     })();
-    const entry: PatternCacheEntry = { promise, started: start, failed: false };
+    const entry: PatternCacheEntry = {
+      promise,
+      started: start,
+      failed: false,
+      restoredAtStart: this.#connectionsRestored,
+    };
     byId.set(id, entry);
     promise.catch(() => {
-      entry.failed = true;
+      if (entry.restoredAtStart === this.#connectionsRestored) {
+        entry.failed = true;
+      } else if (byId.get(id) === entry) {
+        this.#dropPattern(space, scope, id);
+      }
     });
     return promise;
   }
@@ -948,6 +970,7 @@ export class RuntimeInternals extends EventTarget {
    * showing a failed load can ask for it again and reach the worker.
    */
   #onConnectionRestored = () => {
+    this.#connectionsRestored++;
     for (const [space, byScope] of [...this.#patternCache]) {
       for (const [scope, byId] of [...byScope]) {
         for (const [id, entry] of [...byId]) {
