@@ -480,7 +480,8 @@ export class RuntimeInternals extends EventTarget {
    * An entry carries whether the load was STARTED: a started piece answers a
    * caller that only reads it, while one loaded without starting does not
    * answer a caller that needs it running. A load that failed is an entry
-   * like any other, and answers with its failure until it is invalidated.
+   * like any other, and answers with its failure until it is invalidated or
+   * a connection to a memory server is restored.
    */
   #patternCache: Map<
     DID,
@@ -506,6 +507,7 @@ export class RuntimeInternals extends EventTarget {
     this.#client.on("navigaterequest", this.#onNavigateRequest);
     this.#client.on("error", this.#onError);
     this.#client.on("telemetry", this.#onTelemetry);
+    this.#client.on("connectionrestored", this.#onConnectionRestored);
   }
 
   /**
@@ -631,10 +633,20 @@ export class RuntimeInternals extends EventTarget {
    * address rejects with the same error without asking the worker again,
    * whether or not it asks to start the piece, until
    * {@link RuntimeInternals.invalidatePattern} or
-   * {@link RuntimeInternals.refreshPattern} drops it. So a failing piece is
-   * fetched once however often it is asked for, which is what keeps a caller
-   * that asks on a schedule of its own from repeating the failure on that
-   * schedule.
+   * {@link RuntimeInternals.refreshPattern} drops it, or until a connection
+   * of the runtime's to a memory server comes back after it was lost, which
+   * drops every failed load at once and then dispatches `connectionrestored`
+   * for a caller showing one to ask again on. So a failing piece is fetched
+   * once per restored connection however often it is asked for, which keeps
+   * a caller that asks on a schedule of its own from repeating the failure
+   * on that schedule, and gives a failure the lost connection caused a
+   * request that can succeed.
+   *
+   * Every failure is dropped on a restored connection, whatever caused it.
+   * An error crosses from the worker as its message, with a code for only a
+   * few kinds, so nothing here tells a dropped connection from a piece that
+   * will never load; one that will never load fails once more per restored
+   * connection.
    */
   getPattern(
     space: DID,
@@ -928,6 +940,22 @@ export class RuntimeInternals extends EventTarget {
       return;
     }
     console.error("[RuntimeClient Error]", event);
+  };
+
+  /**
+   * Drops every failed load, since one the lost connection caused can
+   * succeed now, and then tells this runtime's listeners, so that a view
+   * showing a failed load can ask for it again and reach the worker.
+   */
+  #onConnectionRestored = () => {
+    for (const [space, byScope] of [...this.#patternCache]) {
+      for (const [scope, byId] of [...byScope]) {
+        for (const [id, entry] of [...byId]) {
+          if (entry.failed) this.#dropPattern(space, scope, id);
+        }
+      }
+    }
+    this.dispatchEvent(new Event("connectionrestored"));
   };
 
   #onTelemetry = (marker: RuntimeTelemetryMarkerResult) => {

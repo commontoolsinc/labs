@@ -47,6 +47,7 @@ type MockRuntimeClientEvents = {
   navigaterequest: [{ cell: { id(): string; space(): DID } }];
   error: [unknown];
   telemetry: [unknown];
+  connectionrestored: [];
 };
 
 class MockRuntimeClient {
@@ -163,6 +164,9 @@ class MockRuntimeClient {
   /** When set, the next `getPiece` rejects rather than answering. */
   failNextGetPiece = false;
 
+  /** When set, every `getPiece` rejects rather than answering. */
+  failEveryGetPiece = false;
+
   getPiece(
     pieceId: string,
     space: DID,
@@ -170,6 +174,9 @@ class MockRuntimeClient {
     scope?: string,
   ): Promise<{ id: () => string }> {
     this.getPieceCalls.push({ pieceId, runIt, space, scope });
+    if (this.failEveryGetPiece) {
+      return Promise.reject(new Error("the piece will never load"));
+    }
     if (this.failNextGetPiece) {
       this.failNextGetPiece = false;
       return Promise.reject(new Error("the socket went away"));
@@ -766,6 +773,105 @@ describe("RuntimeInternals", () => {
     } finally {
       await runtime.dispose();
     }
+  });
+
+  describe("on a restored connection", () => {
+    it("loads a piece whose load failed again, and succeeds", async () => {
+      // Only the first load fails, as one the lost connection cut short
+      // does, so the load after the restored connection resolves.
+      const space = "did:key:z6Mk-lib-shell-restored-heal" as DID;
+      const client = new MockRuntimeClient();
+      client.failNextGetPiece = true;
+      const runtime = new RuntimeInternals(client as any);
+
+      try {
+        await expect(runtime.getPattern(space, "fid1:cut-off")).rejects
+          .toThrow("the socket went away");
+        await expect(runtime.getPattern(space, "fid1:cut-off")).rejects
+          .toThrow("the socket went away");
+        expect(client.getPieceCalls).toHaveLength(1);
+
+        client.emit("connectionrestored");
+        const piece = await runtime.getPattern(space, "fid1:cut-off");
+
+        expect(piece.id()).toBe("fid1:cut-off");
+        expect(client.getPieceCalls).toHaveLength(2);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("asks the worker for a piece that keeps failing once per restored connection", async () => {
+      const space = "did:key:z6Mk-lib-shell-restored-permanent" as DID;
+      const client = new MockRuntimeClient();
+      client.failEveryGetPiece = true;
+      const runtime = new RuntimeInternals(client as any);
+      const askThrice = async () => {
+        for (let ask = 0; ask < 3; ask++) {
+          await expect(runtime.getPattern(space, "fid1:broken")).rejects
+            .toThrow("the piece will never load");
+        }
+      };
+
+      try {
+        await askThrice();
+        expect(client.getPieceCalls).toHaveLength(1);
+
+        client.emit("connectionrestored");
+        await askThrice();
+        expect(client.getPieceCalls).toHaveLength(2);
+
+        client.emit("connectionrestored");
+        await askThrice();
+        expect(client.getPieceCalls).toHaveLength(3);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("asks the worker nothing for a piece that loaded", async () => {
+      const space = "did:key:z6Mk-lib-shell-restored-loaded" as DID;
+      const client = new MockRuntimeClient();
+      const runtime = new RuntimeInternals(client as any);
+
+      try {
+        const loaded = await runtime.getPattern(space, "fid1:fine");
+
+        client.emit("connectionrestored");
+
+        expect(await runtime.getPattern(space, "fid1:fine")).toBe(loaded);
+        expect(client.getPieceCalls).toHaveLength(1);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("lets a `connectionrestored` listener asking again reach the worker", async () => {
+      // A listener asks again from inside the event, as a view showing the
+      // failure does, so it reaches the worker only if the failure was
+      // dropped before the event went out.
+      const space = "did:key:z6Mk-lib-shell-restored-event" as DID;
+      const client = new MockRuntimeClient();
+      client.failNextGetPiece = true;
+      const runtime = new RuntimeInternals(client as any);
+      const asked: Promise<{ id(): string }>[] = [];
+      runtime.addEventListener("connectionrestored", () => {
+        asked.push(runtime.getPattern(space, "fid1:cut-off"));
+      });
+
+      try {
+        await expect(runtime.getPattern(space, "fid1:cut-off")).rejects
+          .toThrow("the socket went away");
+
+        client.emit("connectionrestored");
+
+        expect(asked).toHaveLength(1);
+        expect((await asked[0]).id()).toBe("fid1:cut-off");
+        expect(client.getPieceCalls).toHaveLength(2);
+      } finally {
+        await runtime.dispose();
+      }
+    });
   });
 
   it("guards removePiece after dispose", async () => {

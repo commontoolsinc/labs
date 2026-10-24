@@ -215,3 +215,18 @@ flight. The shell calls it when the person navigates into a space
 `spaceaccesslost` named, and when the page regains focus or becomes visible.
 [`docs/features/space-access.md`](../../docs/features/space-access.md) says how
 the answer is kept current.
+
+## Restored connections
+
+The `connectionrestored` event reports that one of the worker's connections to a
+memory server came back after it was lost: the reconnect has finished its
+handshake and restored the sessions the connection carries. It carries nothing,
+and it is sent once per restored connection, so a worker holding a connection
+per space sends it once for each one that comes back. The first connection to a
+server is not a restored one, and neither is a reconnect attempt that fails.
+
+A load that failed while the connection was down can succeed once this is sent,
+and nothing else says when to ask again, so it is the event for a host to retry
+on. `RuntimeInternals` in `@commonfabric/lib-shell` drops every load it
+remembers as failed and then dispatches an event of the same name, and the shell
+runs again each load whose failure a view is showing.

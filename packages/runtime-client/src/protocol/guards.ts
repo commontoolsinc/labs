@@ -15,6 +15,7 @@ import {
   CellUpdateNotification,
   ClientNotificationType,
   ClientTransportNotificationType,
+  ConnectionRestoredNotification,
   ConsoleNotification,
   ErrorNotification,
   EventIntentOutcomeNotification,
@@ -159,6 +160,7 @@ export function isIPCRemoteNotification(
     isPresenceUpdateNotification(value) ||
     isEventNeedsAttentionNotification(value) ||
     isSpaceAccessLostNotification(value) ||
+    isConnectionRestoredNotification(value) ||
     isEventIntentOutcomeNotification(value);
 }
 
@@ -272,6 +274,14 @@ export function isSpaceAccessLostNotification(
 ): value is SpaceAccessLostNotification {
   return isObjectNotArray(value) &&
     value.type === NotificationType.SpaceAccessLost && isDID(value.space);
+}
+
+/** Recognizes a notification that a memory connection was restored. */
+export function isConnectionRestoredNotification(
+  value: unknown,
+): value is ConnectionRestoredNotification {
+  return isObjectNotArray(value) &&
+    value.type === NotificationType.ConnectionRestored;
 }
 
 /**

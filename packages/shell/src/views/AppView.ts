@@ -408,6 +408,13 @@ export class XAppView extends BaseView {
     | undefined = undefined;
 
   /**
+   * The runtime this view is listening to for `connectionrestored`: the
+   * view's runtime, from the update that brought it until the view leaves the
+   * document.
+   */
+  #restoredListenerRt: RuntimeInternals | undefined = undefined;
+
+  /**
    * The revision the slug watch bumps to make the selection run again, which
    * a test reads to tell a reload from a resolution that changed nothing.
    */
@@ -961,6 +968,38 @@ export class XAppView extends BaseView {
     this.pieceTitle = titleOf(event.detail) ?? "";
   };
 
+  /**
+   * Handler for the runtime's `connectionrestored`, which runs again each
+   * load whose failure the view is showing. The runtime has dropped every
+   * failed load by then, so the run reaches the worker, and a failure the
+   * lost connection caused can heal. A load the view is not showing as
+   * failed is left alone, so a restored connection reloads nothing on
+   * screen, and one that fails again stays failed until the next restored
+   * connection.
+   */
+  #onConnectionRestored = (): void => {
+    if (this._selectedPattern.status === TaskStatus.ERROR) {
+      this._selectedPattern.run();
+    }
+    if (this._spaceRootPattern.status === TaskStatus.ERROR) {
+      this._spaceRootPattern.run();
+    }
+  };
+
+  /**
+   * Listens for `connectionrestored` on `rt` and on no other runtime, so a
+   * replaced runtime's restored connections run nothing here.
+   */
+  #listenForRestoredConnections(rt: RuntimeInternals | undefined): void {
+    if (rt === this.#restoredListenerRt) return;
+    this.#restoredListenerRt?.removeEventListener(
+      "connectionrestored",
+      this.#onConnectionRestored,
+    );
+    this.#restoredListenerRt = rt;
+    rt?.addEventListener("connectionrestored", this.#onConnectionRestored);
+  }
+
   #replacePieceUrlWithSlug(view: typeof this.app.view, slug: string) {
     try {
       validateSlug(slug);
@@ -986,9 +1025,15 @@ export class XAppView extends BaseView {
     replaceNavigation(view);
   }
 
+  override connectedCallback() {
+    super.connectedCallback();
+    this.#listenForRestoredConnections(this.rt);
+  }
+
   override disconnectedCallback() {
     super.disconnectedCallback();
     this.#stopSlugWatch();
+    this.#listenForRestoredConnections(undefined);
   }
 
   override updated(changedProperties: Map<string, unknown>) {
@@ -1014,6 +1059,10 @@ export class XAppView extends BaseView {
     // Update debugger controller with runtime
     if (changedProperties.has("rt") && this.rt) {
       this.#debuggerController.setRuntime(this.rt);
+    }
+
+    if (changedProperties.has("rt")) {
+      this.#listenForRestoredConnections(this.rt);
     }
 
     // Update debugger visibility from app state
