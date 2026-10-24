@@ -275,10 +275,10 @@ describe("instance-naming-modes", () => {
       const parent = runtime.getCell(space, PARENT);
       await parent.sync();
       const raw = parent.getMetaRaw("instanceChildren") as
-        | Record<string, { id: string }>
+        | { name: string; child: { id: string } }[]
         | undefined;
       return raw === undefined ? undefined : Object.fromEntries(
-        Object.entries(raw).map(([name, link]) => [name, link.id]),
+        raw.map(({ name, child }) => [name, child.id]),
       );
     };
 

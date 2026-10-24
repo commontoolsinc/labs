@@ -1089,33 +1089,6 @@ export function firstResolvedOutputRedirect(
   return undefined;
 }
 
-/** The child links a parent's `instanceChildren` meta holds, by name. */
-function readInstanceChildren(
-  parent: Cell<any>,
-): Record<string, NormalizedFullLink> {
-  const raw = convertibleJsFromFabricValue(
-    parent.getMetaRaw("instanceChildren", { meta: ignoreReadForScheduling }),
-  );
-  // Prototype-free, so an instance named for an inherited member, such as
-  // `toString`, finds nothing it was not given.
-  const children: Record<string, NormalizedFullLink> = Object.create(null);
-  if (!isObjectNotArray(raw)) return children;
-  for (const [name, entry] of Object.entries(raw)) {
-    if (
-      isObjectNotArray(entry) && typeof entry.space === "string" &&
-      typeof entry.id === "string"
-    ) {
-      children[name] = {
-        space: entry.space as MemorySpace,
-        id: entry.id as URI,
-        path: [],
-        scope: isCellScope(entry.scope) ? entry.scope : "space",
-      };
-    }
-  }
-  return children;
-}
-
 /**
  * A named instance that carries no child over: its name and, where it was
  * matched by position, its positional cause and the child left at it.
@@ -1126,13 +1099,6 @@ type UncarriedInstance = {
   // The child at `legacyPartialCause`, and whether another instance keeps it.
   atSpot?: { id: string; kept: boolean };
 };
-
-/** What `instanceChildren` records for the child at `link`. */
-function instanceChildRecord(
-  link: NormalizedFullLink,
-): Record<string, string> {
-  return { space: link.space, id: link.id, scope: link.scope };
-}
 
 /**
  * The named instances of `pattern` that `parent` has not yet run under their
@@ -1147,7 +1113,7 @@ function pendingInstances(
   | {
     pending: DerivedInternalCellDescriptor[];
     manifest: InternalCellDescriptor[];
-    recordedChildren: Record<string, NormalizedFullLink>;
+    recordedChildren: Map<string, NormalizedFullLink>;
   }
   | undefined {
   const instances = (pattern.derivedInternalCells ?? []).filter((descriptor) =>
@@ -1160,7 +1126,7 @@ function pendingInstances(
   const recordedNames = recordedInstanceNames(manifest);
   const pending = instances.filter((descriptor) => {
     const name = instanceNameOfPartialCause(descriptor.partialCause);
-    return name !== undefined && recordedChildren[name] === undefined &&
+    return name !== undefined && !recordedChildren.has(name) &&
       !recordedNames.has(name);
   });
   return pending.length === 0
@@ -1208,6 +1174,60 @@ function isPositionalPartialCause(partialCause: unknown): boolean {
   return isObjectNotArray(partialCause) &&
     typeof partialCause.$generated === "number" &&
     Object.keys(partialCause).length === 1;
+}
+
+/**
+ * The children a parent's `instanceChildren` meta records, by instance name:
+ * for each, the child that named instance runs in place of the one at its own
+ * spot. The meta is a list of `{ name, child }` entries rather than a record
+ * keyed by name, since an instance may take any name a `const` can, among
+ * them names a stored record may not use as a key, such as `constructor` and
+ * `__proto__`. An entry that is malformed, or that repeats a name an earlier
+ * entry gave, is skipped.
+ */
+function readInstanceChildren(
+  parent: Cell<any>,
+): Map<string, NormalizedFullLink> {
+  const raw = convertibleJsFromFabricValue(
+    parent.getMetaRaw("instanceChildren", { meta: ignoreReadForScheduling }),
+  );
+  const children = new Map<string, NormalizedFullLink>();
+  if (!Array.isArray(raw)) return children;
+  for (const entry of raw) {
+    if (!isObjectNotArray(entry) || typeof entry.name !== "string") continue;
+    const child = entry.child;
+    if (
+      children.has(entry.name) || !isObjectNotArray(child) ||
+      typeof child.space !== "string" || typeof child.id !== "string"
+    ) {
+      continue;
+    }
+    children.set(entry.name, {
+      space: child.space as MemorySpace,
+      id: child.id as URI,
+      path: [],
+      scope: isCellScope(child.scope) ? child.scope : "space",
+    });
+  }
+  return children;
+}
+
+/**
+ * Records `children` as the parent's `instanceChildren` meta, in the shape
+ * `readInstanceChildren()` reads back: one `{ name, child }` entry per name.
+ */
+function writeInstanceChildren(
+  parent: Cell<any>,
+  children: ReadonlyMap<string, NormalizedFullLink>,
+): void {
+  parent.setMetaRaw(
+    "instanceChildren",
+    [...children].map(([name, link]) => ({
+      name,
+      child: { space: link.space, id: link.id, scope: link.scope },
+    })),
+    rawMetaWriteAuthorization,
+  );
 }
 
 /**
@@ -14641,8 +14661,9 @@ export class Runner {
     if (outputRedirect === undefined) {
       return { ...io, childResultCell: undefined, sendToBindings: true };
     }
-    // A named instance whose child was carried over from a positional spot
-    // runs that child, wherever its own spot would mint one.
+    // A named instance the parent's `instanceChildren` records a child for,
+    // or whose child a start's pre-sync carried over, runs that child,
+    // wherever its own spot would mint one.
     const carriedOver = instanceName === undefined
       ? undefined
       : this.#carriedOverInstanceChild(tx, resultCell, instanceName);
@@ -14713,7 +14734,7 @@ export class Runner {
     instanceName: string,
   ): NormalizedFullLink | undefined {
     const parent = tx === undefined ? resultCell : resultCell.withTx(tx);
-    return readInstanceChildren(parent)[instanceName] ??
+    return readInstanceChildren(parent).get(instanceName) ??
       this.#preparedCarryOvers.get(this.#getDocKey(resultCell))?.get(
         instanceName,
       );
@@ -14788,17 +14809,9 @@ export class Runner {
     }
     if (carried.size === 0) return;
     const parent = resultCell.withTx(tx);
-    const children: Record<string, Record<string, string>> = {};
-    for (const [name, link] of Object.entries(readInstanceChildren(parent))) {
-      children[name] = instanceChildRecord(link);
-    }
-    for (const [name, link] of carried) {
-      children[name] = instanceChildRecord(link);
-    }
-    parent.setMetaRaw(
-      "instanceChildren",
-      children,
-      rawMetaWriteAuthorization,
+    writeInstanceChildren(
+      parent,
+      new Map([...readInstanceChildren(parent), ...carried]),
     );
   }
 
@@ -14839,7 +14852,7 @@ export class Runner {
     const { pending, manifest, recordedChildren } = found;
 
     const claimed = new Set<string>(
-      Object.values(recordedChildren).map(documentKey),
+      [...recordedChildren.values()].map(documentKey),
     );
     const previous = this.#previouslySetUpPattern(parent, pattern);
     const nodes = subPatternNodes(pattern);
@@ -15301,7 +15314,7 @@ export class Runner {
    * the parent `resultCell` keeps elsewhere (`#refuseDisplacedChild()`), for
    * each such node whose child this parent owns: not a child that is its
    * space's root, nor one managed in a space of its own. A named instance's
-   * child is the one it carried over, where the parent's `instanceChildren`
+   * child is the one the parent's `instanceChildren` records for it, where it
    * records one.
    *
    * Only a parent its updater has pointed at `pattern` is judged: its stored
@@ -15333,23 +15346,26 @@ export class Runner {
     const manifest = storedManifestOf(parent);
     const recorded = recordedPositionalSpots(manifest);
     const recordedInstances = recordedInstanceNames(manifest);
-    const carried = readInstanceChildren(parent);
+    const recordedChildren = readInstanceChildren(parent);
     for (const { module, partialCause } of subPatternNodes(pattern)) {
-      // Only a spot the stored manifest records can hold a child already, and
-      // only a positional or named one can hold another's: a spot a result
-      // key, a node input or `.for()` names does not shift with its siblings,
-      // and no instance stamps the child there.
+      // Only a spot the stored manifest records, or a child the parent's
+      // `instanceChildren` records for a named instance, can hold a child
+      // already, and only a positional or named one can hold another's: a
+      // spot a result key, a node input or `.for()` names does not shift with
+      // its siblings, and no instance stamps the child there.
       const instanceName = instanceNameOfPartialCause(partialCause);
       const judged = isPositionalPartialCause(partialCause)
         ? recorded.has(positionalNumber(partialCause))
-        : instanceName !== undefined && recordedInstances.has(instanceName);
+        : instanceName !== undefined &&
+          (recordedInstances.has(instanceName) ||
+            recordedChildren.has(instanceName));
       if (!judged) continue;
       // A space's root sits where its space's genesis reserved it, whatever
       // the node's cause, so no shift between this parent's spots moves it.
       if (module.targetSpaceRoot) continue;
       const link = instanceName === undefined
         ? undefined
-        : carried[instanceName];
+        : recordedChildren.get(instanceName);
       const child = link !== undefined
         ? this.#runtime.getCellFromLink(link, undefined, tx)
         : this.#childAtPartialCause(tx, resultCell, module, partialCause);
@@ -15370,16 +15386,17 @@ export class Runner {
    * Throws rather than let the child of `childPattern`, at the positional or
    * named spot `partialCause` names, set up over `storedChild` when that cell
    * holds a different child the parent `resultCell` keeps elsewhere: a child
-   * stamped with another instance's name, a child another named instance
-   * carried over, or, where `partialCause` is positional, a sign that the
-   * parent's positional children have moved spots, which is `storedChild`
-   * running another pattern identity while either a child of
-   * `childPattern`'s identity runs at another positional spot, or another
-   * positional spot of `pattern` sets up the identity `storedChild` runs. A
-   * child is looked for only at the positional spots in `recorded`, the ones
-   * the parent's stored manifest records, and no spot whose node sets up a
-   * space's root is counted. A child whose identity differs with no such sign
-   * is the same child under a newer version of its own source.
+   * stamped with another instance's name, a child the parent's
+   * `instanceChildren` records for another named instance, or, where
+   * `partialCause` is positional, a sign that the parent's positional children
+   * have moved spots, which is `storedChild` running another pattern identity
+   * while either a child of `childPattern`'s identity runs at another
+   * positional spot, or another positional spot of `pattern` sets up the
+   * identity `storedChild` runs. A child is looked for only at the positional
+   * spots in `recorded`, the ones the parent's stored manifest records, and no
+   * spot whose node sets up a space's root is counted. A child whose identity
+   * differs with no such sign is the same child under a newer version of its
+   * own source.
    */
   #refuseDisplacedChild(
     tx: IExtendedStorageTransaction,
@@ -15411,10 +15428,10 @@ export class Runner {
     const over = stored !== undefined
       ? `the child of ${describe(stored)}`
       : "a child with no stored pattern identity";
-    // The stamp and the parent's record of carried children alone decide
-    // these refusals, so they hold for a child whose pattern identity was
-    // never stored, and whatever the two identities; the identities only name
-    // the two sides in the message.
+    // The stamp and the parent's `instanceChildren` record alone decide these
+    // refusals, so they hold for a child whose pattern identity was never
+    // stored, and whatever the two identities; the identities only name the
+    // two sides in the message.
     const stamped = getInstanceNameStamp(storedChild);
     if (stamped !== undefined && stamped !== instanceName) {
       throw new Error(
@@ -15423,11 +15440,7 @@ export class Runner {
       );
     }
     const storedKey = documentKey(storedChild.getAsNormalizedFullLink());
-    for (
-      const [name, link] of Object.entries(
-        readInstanceChildren(resultCell.withTx(tx)),
-      )
-    ) {
+    for (const [name, link] of readInstanceChildren(resultCell.withTx(tx))) {
       if (name === instanceName || documentKey(link) !== storedKey) continue;
       throw new Error(
         `refusing to set up ${settingUp} for ${holder} over ${over} that ` +

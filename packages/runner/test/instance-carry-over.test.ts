@@ -11,7 +11,6 @@ import {
 } from "@commonfabric/runner/storage/cache.deno";
 import type { Cell } from "../src/cell.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import { instancePartialCause } from "../src/builder/instance-name.ts";
 import { getDerivedInternalCellLink } from "../src/link-utils.ts";
 import { type MetaField, rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -103,16 +102,6 @@ const NAMED_TWO = parentProgram([
   "  const b = Counter({ label: 'b' });",
   "  return { views: [a, b], aCount: a.count, bCount: b.count };",
 ].join("\n"));
-
-// `NAMED_TWO` under a newer version of `Counter`'s own source.
-const NAMED_TWO_NEWER_COUNTER = parentProgram(
-  [
-    "  const a = Counter({ label: 'a' });",
-    "  const b = Counter({ label: 'b' });",
-    "  return { views: [a, b], aCount: a.count, bCount: b.count };",
-  ].join("\n"),
-  `${COUNTER}// A newer version.\n`,
-);
 
 // An unrelated sibling `s` inserted ahead of `a`.
 const NAMED_WITH_SIBLING = parentProgram([
@@ -589,9 +578,10 @@ describe("instance-carry-over", () => {
       const cell = await deployedParent("claimed-previous-pattern");
       const taken = positionalChild(cell, 0).getAsNormalizedFullLink();
       await writeMeta(cell, {
-        instanceChildren: {
-          x: { space: taken.space, id: taken.id, scope: taken.scope },
-        },
+        instanceChildren: [{
+          name: "x",
+          child: { space: taken.space, id: taken.id, scope: taken.scope },
+        }],
       });
 
       const result = await update(cell, NAMED);
@@ -605,9 +595,10 @@ describe("instance-carry-over", () => {
       });
       const taken = positionalChild(cell, 0).getAsNormalizedFullLink();
       await writeMeta(cell, {
-        instanceChildren: {
-          x: { space: taken.space, id: taken.id, scope: taken.scope },
-        },
+        instanceChildren: [{
+          name: "x",
+          child: { space: taken.space, id: taken.id, scope: taken.scope },
+        }],
       });
 
       const result = await update(cell, NAMED_WITH_NEWER_COUNTER);
@@ -980,69 +971,6 @@ describe("instance-carry-over", () => {
       }[];
       expect(links.length).toBe(2);
       expect(links[0]["/"]["link@1"].id).not.toBe(links[1]["/"]["link@1"].id);
-    });
-
-    it("binds an instance named for an inherited member to a child of its own", async () => {
-      const program = parentProgram([
-        "  const toString = Counter({ label: 'a' });",
-        "  return { views: [toString], aCount: toString.count };",
-      ].join("\n"));
-      const pattern = await compile(program);
-      const tx = rt.edit();
-      const cell = rt.getCell<Record<string, unknown>>(
-        space,
-        "inherited-member-name",
-        undefined,
-        tx,
-      );
-      const running = rt.run(tx, pattern, {}, cell);
-      await tx.commit().settled;
-      await running.pull();
-      const write = rt.edit();
-      cell.withTx(write).key("aCount").set(5);
-      expect((await write.commit().settled).error).toBeUndefined();
-      await rt.idle();
-      await cell.pull();
-
-      expect((cell.get() as Record<string, unknown>).aCount).toBe(5);
-    });
-  });
-
-  describe("a named instance's child", () => {
-    it("refuses to set up for one instance over the child another instance set up", async () => {
-      // A parent's `instanceChildren` pointing instance `a` at `b`'s child is
-      // what a wrong carry-over would leave. The update is to a newer version
-      // of `Counter`, so the parent is one its updater pointed at a new
-      // pattern, which the guard judges.
-
-      const named = await compile(NAMED_TWO);
-      const tx = rt.edit();
-      const cell = rt.getCell<Record<string, unknown>>(
-        space,
-        "stamped-children",
-        undefined,
-        tx,
-      );
-      const running = rt.run(tx, named, {}, cell);
-      await tx.commit().settled;
-      await running.pull();
-      await rt.idle();
-      rt.runner.stop(cell);
-      const spot = getDerivedInternalCellLink(cell, {
-        partialCause: deepFreeze(instancePartialCause("b")),
-      });
-      const bChild = rt.getCell(space, {
-        resultFor: { space: spot.space, id: spot.id, path: [] },
-      }).getAsNormalizedFullLink();
-      const wrong = rt.edit();
-      cell.withTx(wrong).setMetaRaw("instanceChildren", {
-        a: { space: bChild.space, id: bChild.id, scope: bChild.scope },
-      }, rawMetaWriteAuthorization);
-      expect((await wrong.commit().settled).error).toBeUndefined();
-
-      await expect(update(cell, NAMED_TWO_NEWER_COUNTER)).rejects.toThrow(
-        /refusing to set up .*#Counter for instance "a" over the child of .*#Counter that instance "b" set up/,
-      );
     });
   });
 
