@@ -523,6 +523,11 @@ describe("selectRuns", () => {
       .toThrow("--second quick");
   });
 
+  it("refuses the same shape as --first and --second, which would pair a run with itself", () => {
+    expect(() => selectRuns(runs, { first: "deep", second: "deep" }))
+      .toThrow("--first and --second are both deep");
+  });
+
   it("refuses shapes that never meet in one case, which would pair nothing", () => {
     const apart = [
       { case: "a", variant: "default", state: "completed" },

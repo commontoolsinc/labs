@@ -259,6 +259,9 @@ export const selectRuns = <
   runs: readonly T[],
   wanted: { only?: string; first: string; second: string },
 ): T[] => {
+  if (wanted.first === wanted.second) {
+    throw new Error(`--first and --second are both ${wanted.first}`);
+  }
   const kept = runs.filter((run) =>
     run.state === "completed" && run.measured !== false &&
     (wanted.only === undefined || run.case === wanted.only)
