@@ -169,6 +169,8 @@ describe("the repository's gate suites", () => {
     expect(reached("packages/runner/src/builder/pattern.ts")).toEqual([
       "check-cause-assignments",
     ]);
+    expect(reached("packages/runner/src/builtins/sqlite/query-node.ts"))
+      .toEqual(["check-cause-assignments"]);
     // An ordinary source file reaches no gate. What runs for it is what
     // the score chose, which is what keeps this feature a fraction of a
     // lane rather than the bulk of one.

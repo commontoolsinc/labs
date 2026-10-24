@@ -28,6 +28,7 @@ import {
   movedCells,
 } from "./cause-assignments-lib.ts";
 import type { DumpOutput } from "./cause-assignments-dump.ts";
+import { UNEVALUABLE_PATTERNS } from "./pattern-compat-unevaluable.ts";
 import {
   ACCEPTED_MOVES,
   type AcceptedMove,
@@ -35,28 +36,33 @@ import {
 
 /**
  * The trees a pattern's numbering is built by: the transformer that lowers
- * pattern source, the compiler driving it, the builder that numbers the cells
- * and classifies them, and the schema generator that classification reads.
- * A change touching none of them cannot move a cell, and the gate passes it
- * without compiling anything.
+ * pattern source, the compiler and harness driving it, the builder that
+ * numbers the cells and classifies them, the builtins whose node factories
+ * and result schemas the builder takes in (`sqliteQuery`'s factory runs
+ * `lift()` as its module evaluates), and the schema generator that
+ * classification reads. The gate passes a change touching none of them, or
+ * its own files, without compiling anything; a change elsewhere that moves a
+ * cell is one it does not see.
  */
 export const COMPILER_PATHS: readonly string[] = [
   "packages/js-compiler/",
   "packages/runner/src/builder/",
+  "packages/runner/src/builtins/",
   "packages/runner/src/harness/",
   "packages/schema-generator/src/",
   "packages/ts-transformers/src/",
 ];
 
 /**
- * This gate's own modules and the moves it forgives, a change to any of
- * which can change its verdict.
+ * This gate's own modules, the moves it forgives and the patterns it excuses
+ * from compiling, a change to any of which can change its verdict.
  */
 export const GATE_PATHS: readonly string[] = [
   "tasks/cause-assignments-accepted-moves.ts",
   "tasks/cause-assignments-dump.ts",
   "tasks/cause-assignments-lib.ts",
   "tasks/check-cause-assignments.ts",
+  "tasks/pattern-compat-unevaluable.ts",
   "tasks/pattern-files.ts",
 ];
 
@@ -78,6 +84,13 @@ export interface Comparison {
 
   /** The patterns compared, which compiled on both sides from one source. */
   compared: number;
+
+  /**
+   * The patterns either side failed to compile, less those
+   * `UNEVALUABLE_PATTERNS` lists. Such a pattern is in neither side's
+   * builds, so it would otherwise pass unseen.
+   */
+  compileErrors: { side: "base" | "head"; pattern: string; error: string }[];
 }
 
 /**
@@ -88,6 +101,7 @@ export function compareDumps(
   base: DumpOutput,
   head: DumpOutput,
   accepted: readonly AcceptedMove[],
+  unevaluable: ReadonlySet<string> = UNEVALUABLE_PATTERNS,
 ): Comparison {
   const before = new Map(
     base.assignments.map((assignment) => [assignment.pattern, assignment]),
@@ -97,6 +111,10 @@ export function compareDumps(
     forgiven: [],
     unused: [],
     compared: 0,
+    compileErrors: [
+      ...base.errors.map((error) => ({ side: "base" as const, ...error })),
+      ...head.errors.map((error) => ({ side: "head" as const, ...error })),
+    ].filter((error) => !unevaluable.has(error.pattern)),
   };
   const used = new Set<AcceptedMove>();
   for (const after of head.assignments) {
@@ -125,6 +143,45 @@ export function compareDumps(
   }
   comparison.unused = accepted.filter((entry) => !used.has(entry));
   return comparison;
+}
+
+/**
+ * What is wrong with `entries` as accepted moves: an entry with no reason, a
+ * digest not spelled as the gate prints one, or a pattern and pair of builds
+ * named twice. An empty list says nothing is.
+ */
+export function acceptedMoveProblems(
+  entries: readonly AcceptedMove[],
+): string[] {
+  const problems: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    const name = `${entry.pattern} (${entry.base} -> ${entry.head})`;
+    if (entry.reason.trim() === "") {
+      problems.push(`${name} gives no reason`);
+    }
+    for (const digest of [entry.base, entry.head]) {
+      if (!/^[0-9a-f]{16}$/.test(digest)) {
+        problems.push(`${name} names ${JSON.stringify(digest)}, not a digest`);
+      }
+    }
+    if (seen.has(name)) problems.push(`${name} is named twice`);
+    seen.add(name);
+  }
+  return problems;
+}
+
+/** The report of the patterns either side failed to compile. */
+export function describeCompileErrors(comparison: Comparison): string {
+  const lines = [
+    "These patterns did not compile, so their numbering could not be " +
+    "compared:",
+    "",
+  ];
+  for (const { side, pattern, error } of comparison.compileErrors) {
+    lines.push(`${pattern} (${side} build): ${error}`);
+  }
+  return lines.join("\n");
 }
 
 /** The report of `comparison`'s failing patterns. */
@@ -223,6 +280,14 @@ async function dumpTree(
 }
 
 async function main() {
+  const problems = acceptedMoveProblems(ACCEPTED_MOVES);
+  if (problems.length > 0) {
+    console.error(
+      "tasks/cause-assignments-accepted-moves.ts:\n" +
+        problems.map((problem) => `  ${problem}`).join("\n"),
+    );
+    Deno.exit(1);
+  }
   const baseRef = Deno.args[0] ?? "origin/main";
   let mergeBase: string;
   try {
@@ -290,6 +355,10 @@ async function main() {
         `  the accepted entry for ${entry.pattern} (${entry.base} -> ` +
           `${entry.head}) forgives nothing in this run and can be removed`,
       );
+    }
+    if (comparison.compileErrors.length > 0) {
+      console.error(describeCompileErrors(comparison));
+      Deno.exitCode = 1;
     }
     if (comparison.failing.length > 0) {
       console.error(describeFailures(comparison));

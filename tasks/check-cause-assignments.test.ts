@@ -1,11 +1,19 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { compareDumps, describeFailures } from "./check-cause-assignments.ts";
+import {
+  acceptedMoveProblems,
+  compareDumps,
+  describeCompileErrors,
+  describeFailures,
+} from "./check-cause-assignments.ts";
 import {
   assignmentDigest,
   type PatternAssignment,
 } from "./cause-assignments-lib.ts";
-import type { AcceptedMove } from "./cause-assignments-accepted-moves.ts";
+import {
+  ACCEPTED_MOVES,
+  type AcceptedMove,
+} from "./cause-assignments-accepted-moves.ts";
 
 const CHILD = "cell, computed, written by sub-pattern child#Child";
 const LIFT = "cell, computed, written by function";
@@ -68,6 +76,7 @@ describe("check-cause-assignments", () => {
         forgiven: [],
         unused: [],
         compared: 1,
+        compileErrors: [],
       });
     });
 
@@ -119,6 +128,77 @@ describe("check-cause-assignments", () => {
         "room.tsx",
       ]);
       expect(comparison.unused).toEqual([entry]);
+    });
+
+    it("returns each pattern either side failed to compile", () => {
+      const comparison = compareDumps(
+        {
+          assignments: [],
+          errors: [{ pattern: "a.tsx", error: "base broke" }],
+        },
+        {
+          assignments: [NUMBERED],
+          errors: [{ pattern: "b.tsx", error: "head broke" }],
+        },
+        [],
+        new Set(),
+      );
+
+      expect(comparison.compileErrors).toEqual([
+        { side: "base", pattern: "a.tsx", error: "base broke" },
+        { side: "head", pattern: "b.tsx", error: "head broke" },
+      ]);
+      expect(describeCompileErrors(comparison)).toContain(
+        "b.tsx (head build): head broke",
+      );
+    });
+
+    it("returns no compile error for a pattern listed as unevaluable", () => {
+      const comparison = compareDumps(
+        dump(),
+        {
+          assignments: [],
+          errors: [{ pattern: "listed.tsx", error: "never evaluates" }],
+        },
+        [],
+        new Set(["listed.tsx"]),
+      );
+
+      expect(comparison.compileErrors).toEqual([]);
+    });
+  });
+
+  describe("acceptedMoveProblems()", () => {
+    const entry = (overrides: Partial<AcceptedMove> = {}): AcceptedMove => ({
+      pattern: "room.tsx",
+      base: assignmentDigest(NUMBERED),
+      head: assignmentDigest(RENUMBERED),
+      reason: "the transformer reads `row[UI]` in place",
+      ...overrides,
+    });
+
+    it("returns nothing for an entry with a reason and two digests", () => {
+      expect(acceptedMoveProblems([entry()])).toEqual([]);
+    });
+
+    it("returns a problem for an entry whose reason is blank", () => {
+      expect(acceptedMoveProblems([entry({ reason: "  " })])).toEqual([
+        `room.tsx (${assignmentDigest(NUMBERED)} -> ${
+          assignmentDigest(RENUMBERED)
+        }) gives no reason`,
+      ]);
+    });
+
+    it("returns a problem for a digest not spelled as the gate prints one", () => {
+      expect(acceptedMoveProblems([entry({ head: "abc" })]).length).toBe(1);
+    });
+
+    it("returns a problem for a pattern and pair of builds named twice", () => {
+      expect(acceptedMoveProblems([entry(), entry()]).length).toBe(1);
+    });
+
+    it("returns nothing for the moves the repository accepts", () => {
+      expect(acceptedMoveProblems(ACCEPTED_MOVES)).toEqual([]);
     });
   });
 

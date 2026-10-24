@@ -28,7 +28,8 @@ export interface AcceptedMove {
 
   /**
    * Why the move ships: what the change gains by it, and what becomes of the
-   * deployed pieces whose cells it moves.
+   * deployed pieces whose cells it moves. The gate refuses to run on an entry
+   * that gives none.
    */
   reason: string;
 }
