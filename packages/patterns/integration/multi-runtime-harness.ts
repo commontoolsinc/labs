@@ -71,6 +71,7 @@ import type {
 } from "@commonfabric/runner/cfc";
 import { listenServingMemoryServer } from "@commonfabric/runner/executor/serving-memory-server.deno";
 import { PatternsRoute } from "@commonfabric/runner/patterns-route.deno";
+import { withStuckNet } from "@commonfabric/test-support/stuck-net";
 import { terminateWorker } from "@commonfabric/utils/worker-lifetime";
 import {
   type CommitRejection,
@@ -213,13 +214,6 @@ export interface MultiRuntimeHarnessOptions {
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
-
-/** Total event-consequence quiescence budget per `settle()` call on a
- * harness whose server serves, or that it cannot see into (see `settle`):
- * generous against the measured ~2–3 s serving drain of a 40-event
- * pipelined storm, small against the suite timeouts a wedged consequence
- * would otherwise eat. */
-const SERVED_SETTLE_QUIESCENCE_BUDGET_MS = 10_000;
 
 /**
  * The execution-lease TTL of the serving loop the harness hosts. That loop
@@ -654,19 +648,6 @@ export class MultiRuntimeSession {
   }
 
   /**
-   * Wait, bounded by `timeoutMs`, until every event this session fired has
-   * its terminal consequence ARRIVED back here (speculation.md §4 step 2 —
-   * the overlay's outstanding-intent set is empty). Resolves with the
-   * still-outstanding count when the budget elapses first. Instant on the
-   * OFF arm (no overlay). See `MultiRuntimeHarness.settle`.
-   */
-  async eventQuiescence(timeoutMs?: number): Promise<{ pending: number }> {
-    return await this.#client.call("eventQuiescence", { timeoutMs }) as {
-      pending: number;
-    };
-  }
-
-  /**
    * Wait — with no budget — until every event THIS session fired has its
    * terminal consequence (consequenced, errored, dropped, or refused)
    * arrived back here: the overlay's outstanding-intent set is empty
@@ -1067,52 +1048,29 @@ export class MultiRuntimeHarness {
    * event a served handler itself emits) is no session's intent and commits
    * in a LATER wave, outside the wait; cascades ride the ordinary barrier
    * rounds, so a test asserting on cascade results still needs enough rounds
-   * (or `settleUntil()`, or `waitFor()` against a toolshed). The wait shares ONE budget across the whole `settle()`
-   * call, so a genuinely wedged consequence leaves the caller's assert to
-   * speak instead of hanging the harness — LOUDLY: exhausting the budget
-   * with intents still outstanding warns once, so a red assert after it
-   * identifies itself as budget exhaustion (a slow serving drain) rather than
-   * a lost write. The barrier then pulls each replica to a head ≥ every
-   * first-order consequence commit. The wait returns at once where there is
-   * no overlay and so no outstanding intent, as on an OFF-posture toolshed.
+   * (or `settleUntil()`, or `waitFor()` against a toolshed). The wait has no
+   * budget, since a budget that ran out on a slow but healthy drain would hand
+   * the caller's next read a mid-drain head. It runs under the shared
+   * stuck-condition net instead, so a consequence that never arrives fails the
+   * call with an error naming the session, rather than hanging the run. The
+   * barrier then pulls each replica to a head ≥ every first-order consequence
+   * commit. The wait returns at once where there is no overlay and so no
+   * outstanding intent, as on an OFF-posture toolshed.
    */
   async settle(rounds = 2): Promise<void> {
-    const quiescenceDeadline = this.#awaitsServedConsequences
-      ? Date.now() + SERVED_SETTLE_QUIESCENCE_BUDGET_MS
-      : undefined;
-    let quiescenceWarned = false;
     for (let i = 0; i < rounds; i++) {
       await Promise.all(this.sessions.map((session) => session.idle()));
       await this.#server?.idle();
-      if (quiescenceDeadline !== undefined) {
-        const budget = Math.max(0, quiescenceDeadline - Date.now());
-        const outcomes = await Promise.all(
-          this.sessions.map((session) => session.eventQuiescence(budget)),
-        );
-        // #6158 review F1: the worker returns pending > 0 ONLY at its
-        // deadline, so any nonzero here means the shared budget ran out
-        // with consequences still outstanding — the reads that follow may
-        // see a MID-DRAIN head. Say so once, so the resulting red names
-        // itself instead of presenting as the OW52 "loss" shape.
-        if (!quiescenceWarned && outcomes.some((o) => o.pending > 0)) {
-          quiescenceWarned = true;
-          const detail = outcomes
-            .map((outcome, index) =>
-              outcome.pending > 0
-                ? `${this.sessions[index].label}: ${outcome.pending}`
-                : undefined
+      if (this.#awaitsServedConsequences) {
+        await Promise.all(
+          this.sessions.map((session) =>
+            withStuckNet(
+              session.awaitEventConsequences(),
+              `settle(): the consequence of every event session ` +
+                `"${session.label}" fired`,
             )
-            .filter((entry) => entry !== undefined)
-            .join(", ");
-          console.warn(
-            `[multi-runtime-harness] settle: event-consequence quiescence ` +
-              `budget (${SERVED_SETTLE_QUIESCENCE_BUDGET_MS} ms) exhausted ` +
-              `with intents still outstanding (${detail}) — subsequent ` +
-              `reads may see a mid-drain head. A red assert after this ` +
-              `line is BUDGET EXHAUSTION (a slow serving drain or a wedged ` +
-              `consequence), not the OW52 loss shape.`,
-          );
-        }
+          ),
+        );
       }
       await Promise.all(this.sessions.map((session) => session.barrier()));
       await Promise.all(this.sessions.map((session) => session.idle()));
