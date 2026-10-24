@@ -202,8 +202,8 @@ caused by that sandbox is not test evidence. The complete rule is in
 
 A script that runs the Chrome binary itself, rather than through Astral or the
 integration browser launcher, passes `--use-mock-keychain` and
-`--password-store=basic`, or Chrome on macOS can show the developer a keychain
-password dialog
+`--password-store=basic`. Without `--use-mock-keychain`, Chrome on macOS can
+show the developer a keychain password dialog
 ([details](docs/development/TESTING.md#starting-chrome-without-the-launcher)).
 
 ## Instructions for committing to this repository

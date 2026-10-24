@@ -112,8 +112,8 @@ Each of these gates fails CI on its own, and none of them run as part of
   `packages/runner/src/cfc/kernel/manifest.ts` naming a function the snapshot
   lacks or a kernel symbol that does not exist, a `§` citation under
   `packages/runner/src/cfc/` naming a section the specification has not, or more
-  than three `SPEC-PENDING` markers under `packages/`, or one naming no specs
-  pull request. The specification is private and the snapshot is what crosses:
+  than three `SPEC-PENDING` markers in the files it governs (`GOVERNED_SOURCE`
+  in `tasks/check-cfc-correspondence.ts`), or one naming no specs pull request. The specification is private and the snapshot is what crosses:
   `deno task cfc-spec-snapshot` regenerates it from a specs checkout, and labs
   CI never reads the specification itself. A citation written on purpose to
   something else is recorded in `EXEMPTIONS` in the task, and an entry whose
