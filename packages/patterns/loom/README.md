@@ -352,7 +352,7 @@ owner-authorized workflow. A root without `bindMeeting` is unsupported for that
 workflow: a caller must not infer support from an absent key, replace the root,
 or overwrite its contents to adopt it.
 
-Run and attach all sixteen tests when deploying or updating source:
+Run and attach all seventeen tests when deploying or updating source:
 
 ```sh
 deno task cf test packages/patterns/loom/style.test.tsx
