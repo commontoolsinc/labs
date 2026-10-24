@@ -800,9 +800,8 @@ export async function check(
     for (const { at, files } of named) {
       const current = files.filter((file) => standing.has(file.path));
       const read = await readFiles(current, resolver);
-      if (read.length === 0 && current.length === files.length) {
-        empty.push(at);
-      }
+      const superseded = files.length > 0 && current.length === 0;
+      if (read.length === 0 && !superseded) empty.push(at);
       reads.push(read);
     }
     if (empty.length > 0) {

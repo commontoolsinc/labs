@@ -1122,6 +1122,23 @@ describe("reading a run's gathered artifacts", () => {
       ) => finding.message);
       expect(failing.length).toBe(1);
       expect(failing[0]).toContain('"bakes"');
+      // A latest attempt that recorded nothing leaves its path holding
+      // nothing, whatever the attempt before it recorded.
+      const rerun = `${root}/rerun`;
+      await artifact(rerun, "test-records-tests-1-a1", facts, ["bakes"]);
+      await artifact(rerun, "test-records-tests-1-a2", facts, []);
+      const emptied = await check({
+        root: REPOSITORY,
+        store: { records: [rerun], commit: "c0ffee" },
+      });
+      expect(
+        emptied.findings.filter((finding) => finding.fails).map((finding) =>
+          finding.message
+        ),
+      ).toEqual([
+        `${rerun} hold no records, so the store half read nothing of what ` +
+        "they were to carry",
+      ]);
     } finally {
       await Deno.remove(root, { recursive: true });
     }
