@@ -591,20 +591,24 @@ async function recordFiles(at: string): Promise<RecordFile[]> {
  * The record files of `files`, less every one in an artifact that a later
  * attempt at the same job superseded. A job that is re-run ships its
  * artifact under the new attempt, beside the one the attempt before it
- * shipped, and the run as it stands is each job's latest attempt.
+ * shipped, and the run as it stands is each job's latest attempt. A file
+ * belongs to the artifact named by the directory it sits in, however the
+ * file was found.
  */
 function latestAttempts(files: readonly RecordFile[]): RecordFile[] {
+  const shippedIn = (file: RecordFile) =>
+    shippedArtifact(path.basename(path.dirname(file.path)));
   const latest = new Map<string, number>();
-  for (const { from } of files) {
-    const shipped = shippedArtifact(from);
+  for (const file of files) {
+    const shipped = shippedIn(file);
     if (shipped === undefined) continue;
     latest.set(
       shipped.artifact,
       Math.max(latest.get(shipped.artifact) ?? 0, shipped.attempt),
     );
   }
-  return files.filter(({ from }) => {
-    const shipped = shippedArtifact(from);
+  return files.filter((file) => {
+    const shipped = shippedIn(file);
     return shipped === undefined ||
       shipped.attempt === latest.get(shipped.artifact);
   });
@@ -635,13 +639,23 @@ export async function readRecords(
   paths: readonly string[],
   aliases?: AliasResolver,
 ): Promise<StoredIdentity[]> {
-  const resolver = aliases ?? await loadAliasResolver();
-  const records: StoredIdentity[] = [];
   const files: RecordFile[] = [];
   for (const at of paths) {
     for (const file of await recordFiles(at)) files.push(file);
   }
-  for (const file of latestAttempts(files)) {
+  return await readFiles(
+    latestAttempts(files),
+    aliases ?? await loadAliasResolver(),
+  );
+}
+
+/** The records in `files`, their identities resolved through `resolver`. */
+async function readFiles(
+  files: readonly RecordFile[],
+  resolver: AliasResolver,
+): Promise<StoredIdentity[]> {
+  const records: StoredIdentity[] = [];
+  for (const file of files) {
     const text = await Deno.readTextFile(file.path);
     for (const group of parseReportGroups(text)) {
       // An alias applies only to records from days before the rename, so
@@ -766,15 +780,29 @@ export async function check(
     // is a part of the run the store half did not see, and summing them
     // first would let one path's records answer for another's. Judging
     // the part that did arrive is the guard reporting on a corpus it
-    // only partly read.
+    // only partly read. Which attempt at a job stands is decided across
+    // every path, and a path whose artifacts a later attempt superseded
+    // arrived all the same.
     const resolver = await loadAliasResolver();
+    const named: { at: string; files: RecordFile[] }[] = [];
+    for (const at of options.store.records) {
+      named.push({ at, files: await recordFiles(at) });
+    }
+    const standing = new Set(
+      latestAttempts(named.flatMap(({ files }) => files)).map((file) =>
+        file.path
+      ),
+    );
     // A run's records, and the findings they yield, can outnumber the
     // arguments one function call takes.
     const reads: StoredIdentity[][] = [];
     const empty: string[] = [];
-    for (const at of options.store.records) {
-      const read = await readRecords([at], resolver);
-      if (read.length === 0) empty.push(at);
+    for (const { at, files } of named) {
+      const current = files.filter((file) => standing.has(file.path));
+      const read = await readFiles(current, resolver);
+      if (read.length === 0 && current.length === files.length) {
+        empty.push(at);
+      }
       reads.push(read);
     }
     if (empty.length > 0) {

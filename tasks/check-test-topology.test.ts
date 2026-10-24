@@ -1092,12 +1092,36 @@ describe("reading a run's gathered artifacts", () => {
         ["test-records-tests-2-a10", "cools"],
         ["test-records-tests-3-a1", "rises"],
       ]);
-      // The same holds where each artifact is named on its own.
-      const named = await readRecords(
-        [`${root}/test-records-tests-1-a1`, `${root}/test-records-tests-1-a2`],
-        new AliasResolver([]),
-      );
-      expect(named.map((record) => record.test.n)).toEqual(["bakes"]);
+      // The same holds where each artifact, or each file, is named on its
+      // own.
+      for (const tail of ["", "/records.ndjson"]) {
+        const named = await readRecords(
+          [
+            `${root}/test-records-tests-1-a1${tail}`,
+            `${root}/test-records-tests-1-a2${tail}`,
+          ],
+          new AliasResolver([]),
+        );
+        expect(named.map((record) => record.test.n)).toEqual(["bakes"]);
+      }
+      // And where the check is handed each artifact as a path of its own:
+      // the superseded one is neither judged nor taken for a path that
+      // arrived empty.
+      const { findings } = await check({
+        root: REPOSITORY,
+        store: {
+          records: [
+            `${root}/test-records-tests-1-a1`,
+            `${root}/test-records-tests-1-a2`,
+          ],
+          commit: "c0ffee",
+        },
+      });
+      const failing = findings.filter((finding) => finding.fails).map((
+        finding,
+      ) => finding.message);
+      expect(failing.length).toBe(1);
+      expect(failing[0]).toContain('"bakes"');
     } finally {
       await Deno.remove(root, { recursive: true });
     }
