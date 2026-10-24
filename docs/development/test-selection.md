@@ -703,8 +703,9 @@ that somebody who has just fixed something can refresh without waiting.
 Each run reads the newest aggregate it can, fetches only the objects whose
 runs are not already folded into it, folds them, ages the counters, scores
 everything, and creates one manifest object and one aggregate object. It
-reads and folds two hundred objects at a time, so what it holds is bounded
-by the number of tests rather than by the number of runs.
+reads two hundred objects at a time and folds each day as one batch,
+spooled to a temporary file, so what it holds in memory is bounded by the
+number of tests rather than by the number of runs.
 
 A manifest holds every identity in the aggregate that the topology can
 place, rather than the identities that ran inside the window the run
@@ -734,9 +735,8 @@ same way. `foldObservations` holds every batch to this, and since each day
 is one batch replayed in time order, an off-`main` record counts when
 `main` recorded the identity before it. A record that reaches the store
 late is folded by a later run, so whether it counts depends on what that
-run's aggregate already holds: one arriving after `main`'s record is
-folded counts, and one folded before a late `main` record arrives does
-not.
+run's aggregate already holds: one folded after `main`'s record counts,
+and one folded before a late `main` record arrives does not.
 
 An identity's cost window holds, for each day, how many of its passing
 executions fell in each duration bucket, and its cost is the ninetieth

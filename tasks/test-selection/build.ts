@@ -146,8 +146,9 @@ export interface AggregateState {
   states: Record<string, IdentityState>;
 
   /**
-   * The file each identity's records named, by identity key, for the
-   * identities whose records named one at all. Everything else about an
+   * The file each identity's records from `main` named, by identity key,
+   * for the identities whose records from `main` named one at all. No
+   * other record says where an identity runs. Everything else about an
    * identity's surface follows from the identity, and an identity absent
    * here is its own invocation unit.
    *
@@ -1116,10 +1117,11 @@ export class Fold {
     );
     const files = { ...aggregate.files };
     this.#resolved = resolveHistory(this.#states, files, resolver);
-    // A record produces a state and a surface together, so an identity
-    // the aggregate holds a state for has a surface, and the file its
-    // records named is the only part of that surface the identity does
-    // not already say. Seeding these is what makes the manifest hold
+    // A record from `main` produces a state and a surface together, and
+    // no other record produces either, so an identity the aggregate holds
+    // a state for has a surface, and the file its records from `main`
+    // named is the only part of that surface the identity does not
+    // already say. Seeding these is what makes the manifest hold
     // every identity the aggregate scores rather than the ones whose
     // records this run happened to read.
     this.#held = noContributions();
