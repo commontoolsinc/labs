@@ -1293,7 +1293,12 @@ first does so for free. The classes:
   sealed transaction is held to the store's head at the read's path,
   under the intrusion exemption above: a commit after the read's seq
   that wrote the path and that the tenure's own derived commits do not
-  account for makes the read STALE. The reads are what the client arm
+  account for makes the read STALE. The check is made again inside the
+  store transaction that commits the wave, as every written document's
+  head is: the batch carries each contribution's reads, a commit admitted
+  between the wave's own check and that transaction stales a read there,
+  and the refusal names the read, so that the event requeues alone and
+  the wave re-attempts. The reads are what the client arm
   validates, and the replica gap above is why the basis cannot stand in
   for them here: a commit admitted before the seal opened the wave sits
   at or below the basis while the run that read the doc never saw it,
