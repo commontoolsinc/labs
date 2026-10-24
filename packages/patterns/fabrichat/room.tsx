@@ -965,7 +965,7 @@ const viewerProfileOf = (
 
 /** What a room's reader may do to one of its messages. */
 export interface ChatMessageRights extends MessageRights {
-  /** The message, as `messages.latest` links it. */
+  /** The message's own cell, as `messages.latest` links it. */
   message: MessageCell;
 }
 
