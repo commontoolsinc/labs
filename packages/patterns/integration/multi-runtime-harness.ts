@@ -1056,25 +1056,15 @@ export class MultiRuntimeHarness {
    * to a head ≥ every first-order consequence commit. The wait returns at once
    * where there is no overlay and so no outstanding intent, as on an
    * OFF-posture toolshed.
+   *
+   * After `rounds` rounds, those harnesses run more for as long as a session
+   * still has an event awaiting its consequence. A round's step 4 runs the
+   * reactions to what its barrier delivered, and one of them can fire an
+   * event, whose consequence the caller's next read would otherwise race.
    */
   async settle(rounds = 2): Promise<void> {
-    for (let i = 0; i < rounds; i++) {
-      await Promise.all(this.sessions.map((session) => session.idle()));
-      await this.#server?.idle();
-      if (this.#awaitsServedConsequences) {
-        await Promise.all(
-          this.sessions.map((session) =>
-            withStuckNet(
-              session.awaitEventConsequences(),
-              `settle(): the consequence of every event session ` +
-                `"${session.label}" fired`,
-            )
-          ),
-        );
-      }
-      await Promise.all(this.sessions.map((session) => session.barrier()));
-      await Promise.all(this.sessions.map((session) => session.idle()));
-    }
+    for (let i = 0; i < rounds; i++) await this.#settleRound();
+    while (await this.#anyEventOutstanding()) await this.#settleRound();
   }
 
   /**
@@ -1130,7 +1120,9 @@ export class MultiRuntimeHarness {
 
   /**
    * Poll until `predicate` resolves truthy, settling between attempts.
-   * Use for assertions about state that must cross runtimes.
+   * Use for assertions about state that must cross runtimes. Gives up at the
+   * first attempt made once `timeout` has passed; a settle in progress then
+   * runs to its end, and the attempt after it is the last.
    */
   async waitFor(
     description: string,
@@ -1139,12 +1131,13 @@ export class MultiRuntimeHarness {
   ): Promise<void> {
     const startedAt = Date.now();
     let lastError: unknown;
-    while (Date.now() - startedAt < timeout) {
+    while (true) {
       try {
         if (await predicate()) return;
       } catch (error) {
         lastError = error;
       }
+      if (Date.now() - startedAt >= timeout) break;
       await this.settle(1);
     }
     throw new Error(
@@ -1179,5 +1172,37 @@ export class MultiRuntimeHarness {
   terminate(): void {
     for (const session of this.sessions) void session.client().terminate();
     this.#releasePatternEnvironment();
+  }
+
+  /** Helper for `settle()`, which runs one of its rounds. */
+  async #settleRound(): Promise<void> {
+    await Promise.all(this.sessions.map((session) => session.idle()));
+    await this.#server?.idle();
+    if (this.#awaitsServedConsequences) {
+      await Promise.all(
+        this.sessions.map((session) =>
+          withStuckNet(
+            session.awaitEventConsequences(),
+            `settle(): the consequence of every event session ` +
+              `"${session.label}" fired`,
+          )
+        ),
+      );
+    }
+    await Promise.all(this.sessions.map((session) => session.barrier()));
+    await Promise.all(this.sessions.map((session) => session.idle()));
+  }
+
+  /**
+   * Helper for `settle()`, which says whether a session has fired an event
+   * whose consequence has yet to arrive back at it. Always `false` on a
+   * harness that does not wait for served consequences.
+   */
+  async #anyEventOutstanding(): Promise<boolean> {
+    if (!this.#awaitsServedConsequences) return false;
+    const counts = await Promise.all(
+      this.sessions.map((session) => session.outstandingEventCount()),
+    );
+    return counts.some((count) => (count ?? 0) > 0);
   }
 }
