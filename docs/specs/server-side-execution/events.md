@@ -124,7 +124,8 @@ handler fires
   post-commit outbox, at the commit's verdict and only on success. A
   transaction that fails or is aborted fired nothing: no intent is
   outstanding for it, no outcome is signaled, and the echo its local run
-  left on the overlay is retired. So an attempt run again fires its event once, under the id
+  left on the overlay is retired, with the echoes of the cascade that run
+  queued, however late those run. So an attempt run again fires its event once, under the id
   that attempt minted, or under the caller's own id, which every attempt
   shares. A fire through a transaction that has already committed
   happens at once, and one through a transaction that has already failed
