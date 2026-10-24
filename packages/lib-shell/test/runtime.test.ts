@@ -708,6 +708,29 @@ describe("RuntimeInternals", () => {
     }
   });
 
+  it("rejects a starting request after a non-starting load of the piece failed, asking the worker once", async () => {
+    // Only the first load fails, so the starting request that would upgrade a
+    // non-starting entry resolves if it asks the worker again.
+    const space = "did:key:z6Mk-lib-shell-failed-upgrade" as DID;
+    const client = new MockRuntimeClient();
+    client.failNextGetPiece = true;
+    const runtime = new RuntimeInternals(client as any);
+
+    try {
+      await expect(
+        runtime.getPattern(space, "fid1:broken", { start: false }),
+      ).rejects.toThrow("the socket went away");
+      await expect(runtime.getPattern(space, "fid1:broken")).rejects.toThrow(
+        "the socket went away",
+      );
+      expect(client.getPieceCalls).toEqual([
+        { pieceId: "fid1:broken", runIt: false, space, scope: "space" },
+      ]);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("loads a failed piece again once it is refreshed", async () => {
     const space = "did:key:z6Mk-lib-shell-failed-refresh" as DID;
     const client = new MockRuntimeClient();

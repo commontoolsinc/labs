@@ -387,10 +387,21 @@ export function createRuntimeClientOptions({
   };
 }
 
-/** One loaded piece, and whether the load started it. */
+/** One loaded piece, whether the load started it, and whether it failed. */
 interface PatternCacheEntry {
-  promise: Promise<PieceHandle<NameSchema>>;
-  started: boolean;
+  /** The load, as every caller asking for this address is handed it. */
+  readonly promise: Promise<PieceHandle<NameSchema>>;
+
+  /** Whether the load asked the worker to start the piece. */
+  readonly started: boolean;
+
+  /**
+   * Whether the load has rejected. A failed load answers every caller,
+   * whichever start mode it was asked in: starting does everything a load
+   * without starting does and more, so a starting caller has no better
+   * chance of success than the load that already failed.
+   */
+  failed: boolean;
 }
 
 /** Where a slug reference lands, as a page address can carry it. */
@@ -614,15 +625,16 @@ export class RuntimeInternals extends EventTarget {
    *
    * Cached per (space, scope, id) — a pattern's whole address. A cache entry
    * created with `start: false` is upgraded (re-fetched with start) when a
-   * starting caller asks for the same pattern.
+   * starting caller asks for the same pattern, unless that load failed.
    *
    * A load that fails is cached too, and every later request for that
    * address rejects with the same error without asking the worker again,
-   * until {@link RuntimeInternals.invalidatePattern} or
+   * whether or not it asks to start the piece, until
+   * {@link RuntimeInternals.invalidatePattern} or
    * {@link RuntimeInternals.refreshPattern} drops it. So a failing piece is
-   * fetched and started once however often it is asked for, which is what
-   * keeps a caller that asks on a schedule of its own from repeating the
-   * failure on that schedule.
+   * fetched once however often it is asked for, which is what keeps a caller
+   * that asks on a schedule of its own from repeating the failure on that
+   * schedule.
    */
   getPattern(
     space: DID,
@@ -636,7 +648,7 @@ export class RuntimeInternals extends EventTarget {
     const scope = options?.scope ?? "space";
     const byId = this.#patternCacheSlot(space, scope);
     const cached = byId.get(id);
-    if (cached && (cached.started || !start)) {
+    if (cached && (cached.started || cached.failed || !start)) {
       return cached.promise;
     }
     const promise = (async () => {
@@ -651,7 +663,11 @@ export class RuntimeInternals extends EventTarget {
       }
       return piece;
     })();
-    byId.set(id, { promise, started: start });
+    const entry: PatternCacheEntry = { promise, started: start, failed: false };
+    byId.set(id, entry);
+    promise.catch(() => {
+      entry.failed = true;
+    });
     return promise;
   }
 
