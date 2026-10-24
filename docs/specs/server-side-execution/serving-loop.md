@@ -1352,10 +1352,12 @@ commits overwrote is DROPPED from the consequence, and so is a whole-doc
 path with a `set` or `delete` (the root) or with a `replace`, `add` or
 `remove` patch; a write that merges into existing content (`append`,
 `splice`, `increment`, and the like) overwrites nothing. The rule holds
-wherever the session's write fell: before the wave's basis, which is
-where a requeued or late-drained handler finds it, or mid-wave, where the
-overlap would otherwise requeue the event and the requeued run would
-write over it again. The event still completes: its other writes, its
+wherever the session's write fell: below the wave's basis, which is
+where a requeued or late-drained handler finds it — a run that read the
+doc before the write reached its replica is requeued on the stale read,
+and its replay meets the write here — or mid-wave, for a doc the run
+wrote without reading, where the overlap would otherwise requeue the
+event. The event still completes: its other writes, its
 consequence mark and its watermark advance ride the wave commit, and
 `consequenceOf` names it, so a wave whose consequence lost every domain
 write still commits that entry's consequence, and an entry held behind
