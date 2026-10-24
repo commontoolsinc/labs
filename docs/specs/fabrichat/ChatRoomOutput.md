@@ -397,7 +397,8 @@ Sends a message from the sender.
   attachments; a sender whose profile hasn't resolved; a `replyTo` whose
   `message` is outside the room's space; more attachments than the room's
   `maxAttachments`; or an attachment that names no entry, an entry outside the
-  room's space, or one removed from its store.
+  room's space, one whose blob is in another space's blob store, or one removed
+  from its store.
   Otherwise the room takes `replyTo` as sent: a client sends a reply only to a
   message of the room that is not deleted, with a `shownIn` its target allows
   (see [`ChatReply`](ChatReply.md)).

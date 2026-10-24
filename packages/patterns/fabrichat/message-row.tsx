@@ -131,40 +131,72 @@ interface AttachmentInput {
 
 /**
  * One file a message attaches: a preview where it is an image, and a link that
- * downloads it, each read through the entry under the viewer's own access; or,
- * once the entry is removed from its store, a note that it was.
+ * downloads it, each read through the entry under the viewer's own access; a
+ * note that the entry was removed from its store, once it is; or a note that
+ * the file can't be shown, to a viewer who can't read the entry. Which of
+ * them shows differs by viewer, so each is in the tree and shown or hidden
+ * through a prop, as the row's own controls are.
  */
 const FabriChatAttachment = pattern<AttachmentInput, { [UI]: VNode }>(
   ({ entry }) => {
     const name = computed(() => entry.get()?.name ?? "");
     const mediaType = computed(() => entry.get()?.mediaType ?? "");
     const blob = computed(() => entry.get()?.blob);
-    const isRemoved = computed(() => entry.get()?.removedAt !== undefined);
-    const isImage = computed(() =>
-      !isRemoved && (entry.get()?.mediaType ?? "").startsWith("image/")
+    const shown = computed((): "file" | "removed" | "unreadable" => {
+      const value = entry.get();
+      return value === undefined
+        ? "unreadable"
+        : value.removedAt !== undefined
+        ? "removed"
+        : "file";
+    });
+    const fileDisplay = computed((): ChatDisplay =>
+      shown === "file" ? "flex" : "none"
+    );
+    const imageDisplay = computed((): ChatDisplay =>
+      shown === "file" && (entry.get()?.mediaType ?? "").startsWith("image/")
+        ? "block"
+        : "none"
+    );
+    const removedDisplay = computed((): ChatDisplay =>
+      shown === "removed" ? "block" : "none"
+    );
+    const unreadableDisplay = computed((): ChatDisplay =>
+      shown === "unreadable" ? "block" : "none"
     );
     return {
-      [UI]: isRemoved
-        ? (
-          <cf-text variant="caption" style={{ fontStyle: "italic" }}>
-            This file was removed.
-          </cf-text>
-        )
-        : (
-          <cf-vstack gap="1">
-            {isImage
-              ? (
-                <cf-image
-                  blob={blob}
-                  media-type={mediaType}
-                  alt={name}
-                  style="max-width: 16rem; max-height: 16rem;"
-                />
-              )
-              : null}
+      [UI]: (
+        <div>
+          <div
+            hidden
+            style={{
+              display: fileDisplay,
+              flexDirection: "column",
+              gap: "0.25rem",
+            }}
+          >
+            <div hidden style={{ display: imageDisplay }}>
+              <cf-image
+                blob={blob}
+                media-type={mediaType}
+                alt={name}
+                style="max-width: 16rem; max-height: 16rem;"
+              />
+            </div>
             <cf-blob-link blob={blob} name={name}>{name}</cf-blob-link>
-          </cf-vstack>
-        ),
+          </div>
+          <div hidden style={{ display: removedDisplay }}>
+            <cf-text variant="caption" style={{ fontStyle: "italic" }}>
+              This file was removed.
+            </cf-text>
+          </div>
+          <div hidden style={{ display: unreadableDisplay }}>
+            <cf-text variant="caption" style={{ fontStyle: "italic" }}>
+              This file can't be shown.
+            </cf-text>
+          </div>
+        </div>
+      ),
     };
   },
 );

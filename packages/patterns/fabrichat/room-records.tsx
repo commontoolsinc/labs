@@ -833,6 +833,10 @@ const textOf = (event: RoomStreamEvent): string => {
   return typeof text === "string" ? text.trim() : "";
 };
 
+/** Whether `event` carries its text as a string, empty or not. */
+const hasTextIn = (event: RoomStreamEvent): boolean =>
+  typeof (event?.body ?? event?.target?.value) === "string";
+
 /**
  * The emoji an event sends: its own, the one its control is bound to, or the
  * text typed into a rendered control.
@@ -863,12 +867,13 @@ const DELETED = "That message was deleted.";
 /**
  * The files `links` names, as the attachments of a message sent into the
  * room: each an entry of the space `room`, any of the room's records, lives
- * in, and not removed, and no more of them than the room's policy allows. Each
- * entry is read alone, so a send reads no more of the store than the files it
- * attaches.
+ * in, whose bytes are in that space's blob store too, and not removed, and no
+ * more of them than the room's policy allows. Each entry is read alone, so a
+ * send reads no more of the store than the files it attaches.
  *
  * @throws If there are more than the policy allows, or one names no entry, an
- *   entry outside the room's space, or a removed one.
+ *   entry outside the room's space, one whose blob is in another space, or a
+ *   removed one.
  */
 const attachmentsIn = (
   room: Cell<unknown>,
@@ -886,6 +891,9 @@ const attachmentsIn = (
     }
     const value = entry.get();
     if (value === undefined) throw new Error("That file can't be found.");
+    if (value.blob?.space !== spaceOf(room)) {
+      throw new Error("That file's bytes aren't in this chat's space.");
+    }
     if (value.removedAt !== undefined) {
       throw new Error("That file was removed.");
     }
@@ -963,8 +971,8 @@ const leaveTombstone = (target: MessageCell, keepsAuthor: boolean): void => {
  * such as a reaction added twice, writes nothing and succeeds.
  *
  * @throws If the profile hasn't resolved, the send has neither text nor
- *   attachments, `attachmentsIn()` refuses its attachments, or `reply` names
- *   a message outside the room's space.
+ *   attachments, its text isn't a string, `attachmentsIn()` refuses its
+ *   attachments, or `reply` names a message outside the room's space.
  */
 const sendInto = (
   event: RoomStreamEvent,
@@ -981,6 +989,7 @@ const sendInto = (
   if (body === "" && attachments.length === 0) {
     throw new Error("This send has no text in `body`, and no attachments.");
   }
+  if (!hasTextIn(event)) throw new Error("This send's `body` isn't text.");
   const target = reply?.resolveAsCell();
   if (target !== undefined && !isInRoomOf(messages, target)) {
     throw new Error(NOT_IN_ROOM);
@@ -1070,7 +1079,10 @@ export const commitEdit = handler<RoomStreamEvent, EditState>(
       throw new Error("Only its author can edit a message.");
     }
     const body = textOf(event);
-    if (body === "" && (current.attachments?.length ?? 0) === 0) {
+    if (
+      !hasTextIn(event) ||
+      (body === "" && (current.attachments?.length ?? 0) === 0)
+    ) {
       throw new Error("This edit has no text in `body`.");
     }
     target.key("body").set(body);
