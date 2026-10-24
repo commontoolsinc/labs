@@ -189,7 +189,13 @@ handler fires
   beyond the space's commit sequence — same as today. A consequence
   takes effect at its event's place in the firing session's order: a
   write that session committed after the event supersedes the
-  consequence writes it overwrote (serving-loop.md §3d).
+  consequence writes it overwrote (serving-loop.md §3d). A requeue
+  decided at the wave commit keeps the per-stream order: the later
+  entries of that stream the wave processed requeue with the requeued
+  head and re-drain behind it. It does not reach another stream, so a
+  later entry of another stream the wave consequenced keeps its commit,
+  and across streams the arrival order holds between requeues
+  (PROPOSED 2026-10-23, awaiting ruling; serving-loop.md §3d).
 - **Terminal positions.** An error consequence, a T3 dropped notice,
   and a `needs-attention` notice each complete processing at the event's
   arrival position even when the handler produces no domain writes. A
@@ -552,7 +558,14 @@ loop's duty).
   followers), and a withdrawal landing while a drain pass is mid-
   iteration stops the pass before it queues later arrivals behind the
   barrier's back — else a later arrival's consequence lands ahead of
-  the withdrawn entry's re-drain, the b01 inversion. The piece-start
+  the withdrawn entry's re-drain, the b01 inversion. A requeue decided
+  at the wave commit — a stale recorded read or a semantic rebase
+  conflict (serving-loop.md §3d) — is the barrier's third arm: the
+  later entries of the same stream that sealed into that wave are
+  withdrawn with the requeued head, and the drain holds them, and every
+  later same-space arrival, behind it until its replay commits; a head
+  waiting on §3d's catch-up gate is a deferred head like any other
+  (PROPOSED 2026-10-23, awaiting ruling). The piece-start
   deferral (a served entry whose piece could not be started, or whose
   piece stands registered between pattern graphs — T3) carries
   the same in-queue sweep; cross-space neighbours and LT1 in-process
