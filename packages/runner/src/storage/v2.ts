@@ -192,6 +192,7 @@ import {
   Unit,
   type ViewInterestLease,
 } from "./interface.ts";
+import { endLocalReadValidationStretch } from "./local-read-policy.ts";
 import {
   getBlindStructuralTarget,
   isDurableReadTx,
@@ -10006,6 +10007,12 @@ export class SpaceReplica
     } finally {
       this.#frameApplyDepth -= 1;
       this.#frameTouchedKeys = undefined;
+      // What the frame brought can change what a commit's validations
+      // before it proved, so none after it stands on them. That holds for a
+      // frame a read applies itself through the store read-through as well:
+      // such a read between a pre-commit pass and its commit makes the
+      // commit's validations check again, which is the safe direction.
+      endLocalReadValidationStretch();
     }
     if (pushed) {
       this.#completeThroughSeq = Math.max(this.#completeThroughSeq, sync.toSeq);
