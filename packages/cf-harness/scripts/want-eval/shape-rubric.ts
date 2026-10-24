@@ -8,8 +8,12 @@
 
 import type { JSONSchema } from "@commonfabric/api";
 import type { HarnessModelToolDescriptor } from "../../src/contracts/tool-descriptor.ts";
-import type { HarnessAssistantTranscriptMessage } from "../../src/contracts/transcript.ts";
+import type {
+  HarnessAssistantTranscriptMessage,
+  HarnessToolCall,
+} from "../../src/contracts/transcript.ts";
 import { validateStructuredResultValue } from "../../src/structured-result.ts";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 /**
  * The rubric, one line each, in the order the judge scores them. Length is
@@ -157,7 +161,7 @@ const fieldOf = (value: unknown, name: string): unknown =>
     : undefined;
 
 const scoresOf = (value: unknown, label: string): Record<Criterion, Score> => {
-  if (typeof value !== "object" || value === null) {
+  if (!isObjectNotArray(value)) {
     throw new Error(`no scores for run ${label}`);
   }
   const scoreOf = (key: Criterion): Score => {
@@ -237,6 +241,139 @@ export const pairRuns = <T extends { case: string; variant: string }>(
       second: seconds[index],
     }));
   });
+};
+
+/**
+ * The runs a judge reads: completed, measured, and of the case asked for. A
+ * case or shape that no run has is refused, since judging it would report
+ * nothing as if nothing differed.
+ */
+export const selectRuns = <
+  T extends {
+    case: string;
+    variant: string;
+    state: string;
+    measured?: boolean;
+  },
+>(
+  runs: readonly T[],
+  wanted: { only?: string; first: string; second: string },
+): T[] => {
+  const kept = runs.filter((run) =>
+    run.state === "completed" && run.measured !== false &&
+    (wanted.only === undefined || run.case === wanted.only)
+  );
+  const refuseUnless = (has: (run: T) => boolean, flag: string) => {
+    if (!kept.some(has)) {
+      throw new Error(`no completed, measured run has ${flag}`);
+    }
+  };
+  if (wanted.only !== undefined) {
+    refuseUnless(() => true, `--only ${wanted.only}`);
+  }
+  refuseUnless(
+    (run) => run.variant === wanted.first,
+    `--first ${wanted.first}`,
+  );
+  refuseUnless(
+    (run) => run.variant === wanted.second,
+    `--second ${wanted.second}`,
+  );
+  return kept;
+};
+
+/** One reply the judge made, as it came back, and which order it read. */
+export interface JudgeReply {
+  case: string;
+  firstJob: string;
+  secondJob: string;
+  firstWasA: boolean;
+  content: string;
+  toolCalls: readonly HarnessToolCall[];
+}
+
+const messageOf = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
+
+/**
+ * One pair judged in both orders: a verdict that flips with the order is the
+ * judge's lean, not a difference between the runs. Every reply is handed to
+ * `onReply` before it is read. Anything that stops a reading — an unknown
+ * case, a run record that will not load, a failed call, a reply with no valid
+ * verdict — is an error of this pair alone.
+ */
+export const judgePair = async <T extends { job: string }>(
+  pair: { case: string; first: T; second: T },
+  ask: string | undefined,
+  options: {
+    material: (run: T) => Promise<RunMaterial>;
+    turn: (
+      prompt: string,
+      tools: readonly HarnessModelToolDescriptor[],
+    ) => Promise<HarnessAssistantTranscriptMessage>;
+    onReply: (reply: JudgeReply) => void;
+    repliesFile: string;
+  },
+): Promise<JudgedPair> => {
+  const judged = (verdicts: Verdict[], errors: string[]): JudgedPair => ({
+    case: pair.case,
+    firstJob: pair.first.job,
+    secondJob: pair.second.job,
+    verdicts,
+    errors,
+  });
+  if (ask === undefined) {
+    return judged([], [`no case ${pair.case} in the cases`]);
+  }
+  let first: RunMaterial;
+  let second: RunMaterial;
+  try {
+    [first, second] = await Promise.all([
+      options.material(pair.first),
+      options.material(pair.second),
+    ]);
+  } catch (error) {
+    return judged([], [`could not read the runs: ${messageOf(error)}`]);
+  }
+  const readings = await Promise.all([true, false].map(async (firstWasA) => {
+    let reply;
+    try {
+      reply = await options.turn(
+        firstWasA
+          ? pairPrompt(ask, first, second)
+          : pairPrompt(ask, second, first),
+        [VERDICT_TOOL],
+      );
+    } catch (error) {
+      return { error: messageOf(error) };
+    }
+    options.onReply({
+      case: pair.case,
+      firstJob: pair.first.job,
+      secondJob: pair.second.job,
+      firstWasA,
+      content: reply.content,
+      toolCalls: reply.toolCalls ?? [],
+    });
+    try {
+      const verdict = verdictOf(reply);
+      return {
+        verdict: {
+          ...unblind(verdict, firstWasA),
+          reason: verdict.reason,
+          firstWasA,
+        },
+      };
+    } catch (error) {
+      return {
+        error: `${messageOf(error)} (reply saved in ${options.repliesFile})`,
+      };
+    }
+  }));
+  return judged(
+    readings.flatMap((one) => one.verdict !== undefined ? [one.verdict] : []),
+    readings.flatMap((one) => one.error !== undefined ? [one.error] : []),
+  );
 };
 
 /** The median of `values`; the mean of the middle two for an even count. */

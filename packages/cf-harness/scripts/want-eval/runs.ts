@@ -8,15 +8,16 @@
 import { basename, join } from "@std/path";
 
 /**
- * Where a runner keeps its local jobs' runs: under `CF_HARNESS_HOME` when it
- * is set, as the harness keeps its home, else `~/.cf-harness`.
+ * The harness home, as the harness resolves it: `CF_HARNESS_HOME` when it is
+ * set, else `~/.cf-harness`.
  */
+export const defaultHarnessHome = (): string =>
+  Deno.env.get("CF_HARNESS_HOME") ??
+    join(Deno.env.get("HOME") ?? "", ".cf-harness");
+
+/** Where a runner keeps its local jobs' runs, under the harness home. */
 export const defaultRunsRoot = (): string =>
-  join(
-    Deno.env.get("CF_HARNESS_HOME") ??
-      join(Deno.env.get("HOME") ?? "", ".cf-harness"),
-    "agent-runs/local",
-  );
+  join(defaultHarnessHome(), "agent-runs/local");
 
 /**
  * The newest run directory of a job under `runsRoot`: the root run, not a

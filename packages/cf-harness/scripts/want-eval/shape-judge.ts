@@ -2,7 +2,7 @@
  * The shape judge: reads a shape eval's results, pairs each case's runs under
  * two shapes (`default` and `deep` unless told otherwise), and asks a cheap
  * model which run left the person better served, scoring both on the rubric
- * in `shape-rubric.ts`. The runs are shown in a random order under neutral
+ * in `shape-rubric.ts`. Each pair is shown in both orders under neutral
  * labels, without their shapes. The model gives its verdict as a call to the
  * one tool it is offered, `submit_verdict`. Writes `<label>.json` (every
  * verdict), `<label>.replies.json` (every reply the judge made, as it came
@@ -27,19 +27,22 @@ import {
   recordUndeclaredFlags,
   refuseUndeclaredFlags,
 } from "../../src/cli-flags.ts";
-import type { HarnessToolCall } from "../../src/contracts/transcript.ts";
-import { codexEvalToolModel } from "../task-classification-eval.ts";
-import { defaultRunsRoot, rootRunOf, transcriptsOf } from "./runs.ts";
+import { codexEvalToolModel } from "../codex-eval-model.ts";
+import {
+  defaultHarnessHome,
+  defaultRunsRoot,
+  rootRunOf,
+  transcriptsOf,
+} from "./runs.ts";
 import {
   type JudgedPair,
+  judgePair,
+  type JudgeReply,
   materialOf,
-  pairPrompt,
   pairRuns,
+  selectRuns,
   summarise,
   summaryTable,
-  unblind,
-  VERDICT_TOOL,
-  verdictOf,
   winnerOf,
 } from "./shape-rubric.ts";
 
@@ -61,7 +64,7 @@ const args = parseArgs(Deno.args, {
     label: "judged",
     first: "default",
     second: "deep",
-    "harness-home": join(Deno.env.get("HOME") ?? ".", ".cf-harness"),
+    "harness-home": defaultHarnessHome(),
     owner: "local",
     "runs-root": defaultRunsRoot(),
   },
@@ -91,96 +94,54 @@ const suite: { cases: { id: string; text: string }[] } = JSON.parse(
   await Deno.readTextFile(new URL("./shape-cases.json", import.meta.url)),
 );
 const asks = new Map(suite.cases.map((c) => [c.id, c.text]));
-const runs: ShapeRun[] = [];
+const read: ShapeRun[] = [];
 for (const path of args.results.split(",")) {
-  const read: ShapeRun[] = JSON.parse(await Deno.readTextFile(path));
-  for (const run of read) {
-    if (
-      run.state === "completed" && run.measured !== false &&
-      (args.only === undefined || run.case === args.only)
-    ) runs.push(run);
-  }
+  const runsOfFile: ShapeRun[] = JSON.parse(await Deno.readTextFile(path));
+  for (const run of runsOfFile) read.push(run);
 }
-const model = codexEvalToolModel(args["harness-home"], args.owner);
+let runs: ShapeRun[];
+try {
+  runs = selectRuns(read, args);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  Deno.exit(2);
+}
+const model = codexEvalToolModel(
+  args["harness-home"],
+  args.owner,
+  "shape-judge",
+);
 await ensureDir(args.out);
 const repliesFile = join(args.out, `${args.label}.replies.json`);
 
 /** Every reply the judge made, as it came back. */
-const replies: {
-  case: string;
-  firstJob: string;
-  secondJob: string;
-  firstWasA: boolean;
-  content: string;
-  toolCalls: readonly HarnessToolCall[];
-}[] = [];
-const messageOf = (error: unknown) =>
-  error instanceof Error ? error.message : String(error);
+const replies: JudgeReply[] = [];
 const pairs = pairRuns(runs, args.first, args.second);
 console.error(`judging ${pairs.length} pairs with ${model.name}`);
 
-// Each pair is read twice, once in each order: a verdict that flips with the
-// order is the judge's lean, not a difference between the runs.
-const judged: JudgedPair[] = await Promise.all(pairs.map(async (pair) => {
-  const ask = asks.get(pair.case);
-  if (ask === undefined) throw new Error(`no case ${pair.case} in the cases`);
-  const material = async (run: ShapeRun) =>
-    materialOf(
-      run.answer,
-      await transcriptsOf(await rootRunOf(run.job, args["runs-root"])),
-    );
-  const [first, second] = await Promise.all([
-    material(pair.first),
-    material(pair.second),
-  ]);
-  const readings = await Promise.all([true, false].map(async (firstWasA) => {
-    let reply;
-    try {
-      reply = await model.turn(
-        firstWasA
-          ? pairPrompt(ask, first, second)
-          : pairPrompt(ask, second, first),
-        [VERDICT_TOOL],
-      );
-    } catch (error) {
-      return { error: messageOf(error) };
-    }
-    replies.push({
-      case: pair.case,
-      firstJob: pair.first.job,
-      secondJob: pair.second.job,
-      firstWasA,
-      content: reply.content,
-      toolCalls: reply.toolCalls ?? [],
+let judged: JudgedPair[];
+try {
+  judged = await Promise.all(pairs.map(async (pair) => {
+    const one = await judgePair(pair, asks.get(pair.case), {
+      material: async (run) =>
+        materialOf(
+          run.answer,
+          await transcriptsOf(await rootRunOf(run.job, args["runs-root"])),
+        ),
+      turn: model.turn,
+      onReply: (reply) => replies.push(reply),
+      repliesFile,
     });
-    try {
-      const verdict = verdictOf(reply);
-      return {
-        verdict: {
-          ...unblind(verdict, firstWasA),
-          reason: verdict.reason,
-          firstWasA,
-        },
-      };
-    } catch (error) {
-      return { error: `${messageOf(error)} (reply saved in ${repliesFile})` };
-    }
+    console.error(
+      `judged ${pair.case}${one.errors.length > 0 ? `: ${one.errors}` : ""}`,
+    );
+    return one;
   }));
-  const verdicts = readings.flatMap((one) =>
-    one.verdict !== undefined ? [one.verdict] : []
-  );
-  const errors = readings.flatMap((one) =>
-    one.error !== undefined ? [one.error] : []
-  );
-  console.error(`judged ${pair.case}${errors.length > 0 ? `: ${errors}` : ""}`);
-  return {
-    case: pair.case,
-    firstJob: pair.first.job,
-    secondJob: pair.second.job,
-    verdicts,
-    errors,
-  };
-}));
+} finally {
+  // Written whatever became of the judging: a reply is the evidence a failed
+  // reading is diagnosed from.
+  await Deno.writeTextFile(repliesFile, JSON.stringify(replies, null, 2));
+}
 
 const shapeOf = (winner: string) =>
   winner === "first" ? args.first : winner === "second" ? args.second : winner;
@@ -209,6 +170,5 @@ await Deno.writeTextFile(
   join(args.out, `${args.label}.json`),
   JSON.stringify(judged, null, 2),
 );
-await Deno.writeTextFile(repliesFile, JSON.stringify(replies, null, 2));
 await Deno.writeTextFile(join(args.out, `${args.label}.md`), table);
 console.log(table);

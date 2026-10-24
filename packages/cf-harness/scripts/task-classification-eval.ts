@@ -14,19 +14,11 @@ import { parseArgs } from "@std/cli/parse-args";
 import { join } from "@std/path";
 
 import {
-  defaultHarnessCredentialStorePath,
-  FileHarnessCredentialStore,
-} from "../src/auth/credential-store.ts";
-import { OpenAICodexCredentialResolver } from "../src/auth/openai-codex.ts";
-import {
   recordUndeclaredFlags,
   refuseFlagsWithoutValue,
   refuseUndeclaredFlags,
 } from "../src/cli-flags.ts";
-import type { HarnessModelToolDescriptor } from "../src/contracts/tool-descriptor.ts";
-import type { HarnessAssistantTranscriptMessage } from "../src/contracts/transcript.ts";
-import { OpenAICodexResponsesClient } from "../src/model/openai-codex-responses.ts";
-import { researchModel } from "../src/research/runner.ts";
+import { codexEvalToolModel } from "./codex-eval-model.ts";
 import {
   classifyTaskByModel,
   classifyTaskByRule,
@@ -43,55 +35,16 @@ export interface EvalModel {
   ask: (prompt: string) => Promise<string>;
 }
 
-/** A model offered tools: its name and one turn, the reply as it came back. */
-export interface EvalToolModel {
-  name: string;
-  turn: (
-    prompt: string,
-    tools: readonly HarnessModelToolDescriptor[],
-  ) => Promise<HarnessAssistantTranscriptMessage>;
-}
-
-/** The Codex research model on the owner's credential, offered tools. */
-export const codexEvalToolModel = (
-  harnessHome: string,
-  ownerKey: string,
-): EvalToolModel => {
-  const credentialOwner = {
-    type: "cf-harness.credential-owner-ref",
-    version: 1,
-    ownerKey,
-  } as const;
-  const client = new OpenAICodexResponsesClient({
-    credentialResolver: new OpenAICodexCredentialResolver({
-      store: new FileHarnessCredentialStore({
-        path: defaultHarnessCredentialStorePath(harnessHome),
-      }),
-      ownerKey,
-      credentialOwner,
-    }),
-    credentialOwner,
-  });
-  const model = researchModel(client.providerId);
-  return {
-    name: model,
-    turn: async (prompt, tools) =>
-      (await client.complete({
-        model,
-        transcript: [{ role: "user", content: prompt }],
-        tools,
-        nativeModelToolIds: [],
-        runId: "task-classification-eval",
-      })).assistant,
-  };
-};
-
 /** The Codex research model on the owner's credential in `harnessHome`. */
 export const codexEvalModel = (
   harnessHome: string,
   ownerKey: string,
 ): EvalModel => {
-  const model = codexEvalToolModel(harnessHome, ownerKey);
+  const model = codexEvalToolModel(
+    harnessHome,
+    ownerKey,
+    "task-classification-eval",
+  );
   return {
     name: model.name,
     ask: async (prompt) => (await model.turn(prompt, [])).content,

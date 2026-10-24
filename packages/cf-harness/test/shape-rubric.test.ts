@@ -4,6 +4,7 @@ import type { HarnessAssistantTranscriptMessage } from "../src/contracts/transcr
 import {
   CRITERIA,
   type JudgedPair,
+  judgePair,
   LIMITS,
   materialOf,
   median,
@@ -11,6 +12,7 @@ import {
   pairRuns,
   RUBRIC,
   type Score,
+  selectRuns,
   spread,
   summarise,
   summaryTable,
@@ -19,6 +21,10 @@ import {
   verdictOf,
   winnerOf,
 } from "../scripts/want-eval/shape-rubric.ts";
+import {
+  defaultHarnessHome,
+  defaultRunsRoot,
+} from "../scripts/want-eval/runs.ts";
 
 /** Every criterion at `score`, as a judge would write it. */
 const side = (score: number) =>
@@ -487,5 +493,134 @@ describe("shape-rubric", () => {
         "| 0 / 0 / 0 / 0 (1 failed) | - | - | - | even |",
       );
     });
+  });
+});
+
+describe("selectRuns", () => {
+  const runs = [
+    { case: "a", variant: "default", state: "completed" },
+    { case: "a", variant: "deep", state: "completed" },
+    { case: "a", variant: "deep", state: "failed" },
+    { case: "b", variant: "deep", state: "completed", measured: false },
+  ];
+
+  it("keeps completed, measured runs of the case asked for", () => {
+    expect(selectRuns(runs, { first: "default", second: "deep" })).toEqual(
+      runs.slice(0, 2),
+    );
+    expect(
+      selectRuns(runs, { only: "a", first: "default", second: "deep" }),
+    ).toEqual(runs.slice(0, 2));
+  });
+
+  it("refuses a case or shape no run has, rather than judging nothing", () => {
+    expect(() =>
+      selectRuns(runs, { only: "zzz", first: "default", second: "deep" })
+    ).toThrow("--only zzz");
+    expect(() => selectRuns(runs, { first: "defualt", second: "deep" }))
+      .toThrow("--first defualt");
+    expect(() => selectRuns(runs, { first: "default", second: "quick" }))
+      .toThrow("--second quick");
+  });
+});
+
+describe("judgePair", () => {
+  const pair = {
+    case: "a",
+    first: { job: "d" },
+    second: { job: "p" },
+  };
+  const material = { answer: "x", pages: [], reads: [] };
+  const verdictReply = (winner: string): HarnessAssistantTranscriptMessage => ({
+    role: "assistant",
+    content: "",
+    toolCalls: [{
+      id: "c",
+      type: "function",
+      function: {
+        name: "submit_verdict",
+        arguments: JSON.stringify({
+          A: side(3),
+          B: side(4),
+          winner,
+          reason: "r",
+        }),
+      },
+    }],
+  });
+
+  it("reads the pair in both orders and hands every reply over", async () => {
+    const replies: unknown[] = [];
+    const judged = await judgePair(pair, "ask", {
+      material: () => Promise.resolve(material),
+      turn: () => Promise.resolve(verdictReply("B")),
+      onReply: (reply) => replies.push(reply),
+      repliesFile: "r.json",
+    });
+
+    expect(judged.errors).toEqual([]);
+    expect(judged.verdicts.map((v) => [v.firstWasA, v.winner])).toEqual([
+      [true, "second"],
+      [false, "first"],
+    ]);
+    expect(replies).toHaveLength(2);
+  });
+
+  it("records a run record that would not load as that pair's error", async () => {
+    const judged = await judgePair(pair, "ask", {
+      material: (run) =>
+        run.job === "p"
+          ? Promise.reject(new Error("no artifacts for p"))
+          : Promise.resolve(material),
+      turn: () => Promise.reject(new Error("must not be asked")),
+      onReply: () => {},
+      repliesFile: "r.json",
+    });
+
+    expect(judged.verdicts).toEqual([]);
+    expect(judged.errors).toEqual([
+      "could not read the runs: no artifacts for p",
+    ]);
+    expect(winnerOf(judged)).toBeUndefined();
+  });
+
+  it("records a case missing from the cases file as that pair's error", async () => {
+    const judged = await judgePair(pair, undefined, {
+      material: () => Promise.resolve(material),
+      turn: () => Promise.resolve(verdictReply("A")),
+      onReply: () => {},
+      repliesFile: "r.json",
+    });
+
+    expect(judged.errors).toEqual(["no case a in the cases"]);
+  });
+
+  it("names the saved reply when a reply carries no verdict", async () => {
+    const replies: unknown[] = [];
+    const judged = await judgePair(pair, "ask", {
+      material: () => Promise.resolve(material),
+      turn: () => Promise.resolve({ role: "assistant", content: "B wins" }),
+      onReply: (reply) => replies.push(reply),
+      repliesFile: "r.json",
+    });
+
+    expect(judged.errors).toHaveLength(2);
+    expect(judged.errors[0]).toContain("got 0");
+    expect(judged.errors[0]).toContain("reply saved in r.json");
+    expect(replies).toHaveLength(2);
+  });
+});
+
+describe("defaultHarnessHome", () => {
+  it("is CF_HARNESS_HOME when set, and the runs root sits under it", () => {
+    const was = Deno.env.get("CF_HARNESS_HOME");
+    Deno.env.set("CF_HARNESS_HOME", "/tmp/elsewhere");
+    try {
+      expect(defaultHarnessHome()).toBe("/tmp/elsewhere");
+      expect(defaultRunsRoot()).toBe("/tmp/elsewhere/agent-runs/local");
+    } finally {
+      if (was === undefined) Deno.env.delete("CF_HARNESS_HOME");
+      else Deno.env.set("CF_HARNESS_HOME", was);
+    }
   });
 });
