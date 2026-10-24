@@ -268,7 +268,8 @@ export type EnsurePieceOptions = {
    * Start the pieces the owning piece's inputs come from before the owning
    * piece itself (`startInputSources()`), and leave the owning piece to one
    * of them when its graph sets it up as a child. An event's auto-load asks
-   * for this: a stream a nested pattern defines belongs to the nested
+   * for this wherever the runtime's run of the handler is the one that
+   * counts: a stream a nested pattern defines belongs to the nested
    * instance, whose inputs the instance enclosing it derives, and a nested
    * instance started on its own runs its handlers against inputs nothing in
    * the runtime derives.

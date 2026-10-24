@@ -907,17 +907,23 @@ function chainOnCommit(
 }
 
 /**
- * Starts the piece an event's stream belongs to, starting first the pieces
- * its inputs come from (`EnsurePieceOptions.startInputSources`). A stream a
- * nested pattern defines belongs to the nested instance, whose handler reads
- * what the instance enclosing it derives.
+ * Starts the piece an event's stream belongs to. A runtime whose run of the
+ * handler is the one that counts, a serving runtime or any runtime with server
+ * execution off, starts first the pieces its inputs come from
+ * (`EnsurePieceOptions.startInputSources`): a stream a nested pattern defines
+ * belongs to the nested instance, whose handler reads what the instance
+ * enclosing it derives. A client under server execution runs the handler only
+ * as its speculative echo, which the served run replaces, so it starts the
+ * piece alone and leaves the pieces upstream of it, and the documents they
+ * read, to the server.
  */
 function startEventPiece(
   runtime: Runtime,
   eventLink: NormalizedFullLink,
 ): Promise<EnsurePieceVerdict> {
   return ensurePieceRunningVerdict(runtime, eventLink, {
-    startInputSources: true,
+    startInputSources: runtime.experimental.serverExecution !== true ||
+      runtime.servingPosture,
   });
 }
 

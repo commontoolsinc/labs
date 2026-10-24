@@ -7,7 +7,7 @@ import { ensurePieceRunningVerdict } from "../src/ensure-piece-running.ts";
 import type { NormalizedFullLink } from "../src/link-types.ts";
 import { getMetaLink } from "../src/link-utils.ts";
 import { setResultCell } from "../src/result-utils.ts";
-import { Runtime } from "../src/runtime.ts";
+import { type ExperimentalOptions, Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 
 const signer = await Identity.fromPassphrase(
@@ -92,10 +92,11 @@ describe("ensure-piece-running", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtimes: Runtime[];
 
-  const newRuntime = (): Runtime => {
+  const newRuntime = (experimental?: ExperimentalOptions): Runtime => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      ...(experimental !== undefined ? { experimental } : {}),
     });
     runtimes.push(runtime);
     return runtime;
@@ -182,6 +183,21 @@ describe("ensure-piece-running", () => {
     const { stream } = await stopAfterInputChanges(NESTED_PROGRAM);
 
     expect(await seenAfterEvent(stream)).toBe(10);
+  });
+
+  it("starts only the stream's own piece for a client under server execution, whose run of the handler is an echo", async () => {
+    const { stream, enclosing } = await stopAfterInputChanges(PROGRAM);
+
+    const client = newRuntime({ serverExecution: true });
+    client.scheduler.queueEvent(stream, {});
+    await client.idle();
+
+    // The stream's document links back to the nested instance that owns it.
+    const owner = getMetaLink(client.getCellFromLink(stream), "result")!;
+    expect(client.runner.isRunning(client.getCellFromLink(owner))).toBe(true);
+    expect(client.runner.isRunning(client.getCellFromLink(enclosing))).toBe(
+      false,
+    );
   });
 
   it("starts no nested piece whose argument's links cannot be read", async () => {
