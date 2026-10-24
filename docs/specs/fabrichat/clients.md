@@ -107,7 +107,12 @@ A client that draws natively MUST:
   text.
 - **Show obliterated messages as removed**, by whoever the tombstone is labeled
   with, and drop anything the client had kept of the message: its text, its
-  sender, and its reactions.
+  sender, its attachments, and its reactions.
+- **Show attachments through their entries.** A client reads each attachment's
+  name, media type and blob through its link, under the reader's own access,
+  shows an entry removed from its store as removed, and fetches and shows the
+  bytes as FabriFile's clients do (see [showing a
+  file](../fabrifile/clients.md#showing-a-file)).
 - **Show replies where they say they are shown**: the main conversation and each
   thread, derived from `replyTo` as [`ChatReply`](ChatReply.md#the-two-views)
   states, with flat threads. A thread's reply count and latest reply time are
@@ -176,8 +181,10 @@ adapter.
 A room refuses a message act outside its stream's rules, and a send that
 awaits its handling is rejected with the room's reason. A client MUST still
 check each event against those rules before sending it: a
-non-empty body, a reply whose target is in the room, not deleted, and allowed
-for its `shownIn`, a single emoji (see
+non-empty body, or one or more attachments, entries of the store of the room's
+space and no more of them than the room's `maxAttachments`, a reply whose
+target is in the room, not deleted, and allowed for its `shownIn`, a single
+emoji (see
 [`ChatRoomOutput`](ChatRoomOutput.md#streams)), and it offers an act only
 where `messageRights` and `canSend` allow it.
 

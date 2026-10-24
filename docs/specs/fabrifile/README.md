@@ -219,5 +219,7 @@ the Loom's space uses the Loom's (see
   runtime for the URL its space's host serves it at.
 - **A root's store.** `FileStoreRecord`, `FileStoreRecordCell` and
   `ensureFileStore` are what a root keeps its store with
-  ([`FileStore.md`](FileStore.md#where-it-lives)). No message links an entry
-  yet: a room offers its space's store, and attachments are still to come.
+  ([`FileStore.md`](FileStore.md#where-it-lives)). A room offers its space's
+  store, and a FabriChat message's attachments link its entries
+  ([`ChatMessage`](../fabrichat/ChatMessage.md#fields)). A room's composer
+  doesn't attach files yet.

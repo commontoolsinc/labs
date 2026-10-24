@@ -16,7 +16,8 @@ The room keeps these `PerSpace` values, shared by everyone the space admits:
   list in the order the room recorded them, each message an object pushed onto
   it and so a document of its own. Each message links a list of its own
   reactions, a document the send that made the message makes, which each
-  reaction is pushed onto.
+  reaction is pushed onto, and links each file it attaches, an entry of its
+  space's store, which the send reads to check it and the room never writes.
 - Those who joined the room: profile links, in the order they were added, a
   roster only `addParticipant` writes
   (`packages/patterns/loom/participants.tsx`).
@@ -205,10 +206,12 @@ each setting at an initial value:
 | How long an entry stays in `recentActivity` | `recentActivityWindowNsec` | 10 minutes |
 | How many of the newest messages `messages.latest` holds | `maxWindowCount` | 100 |
 | The most message windows a session can have open | `maxOpenWindows` | 50 |
+| The most attachments a message may have | `maxAttachments` | 10 |
 
 These are the first build's values. Once the configuration exists, rooms can
 differ from them. The room reads `ownersMayObliterate`,
-`deletionIsObliteration`, and `maxWindowCount`; the other keys are stated for
+`deletionIsObliteration`, `maxWindowCount`, and `maxAttachments`; the other
+keys are stated for
 the policy's shape, which a user's Home carries, and read by nothing. `ownersMayObliterate` is there for a group room with many
 OWNERs; a direct room is set up without it, and its two people each obliterate
 only their own messages. The room's kind picks which policy document
