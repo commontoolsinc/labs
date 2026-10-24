@@ -15,6 +15,7 @@ import {
   Writable,
 } from "commonfabric";
 import FabriChatRoom from "../fabrichat/room.tsx";
+import { ensureFileStore } from "../fabrifile/store.tsx";
 import {
   admitPanel,
   assertRemovable,
@@ -702,6 +703,7 @@ export default pattern<LoomInput, LoomOutput>(
       presentation,
       participants,
       chatRoom,
+      fileStore,
       meeting,
       hiddenPanels,
       privatePanels,
@@ -715,6 +717,7 @@ export default pattern<LoomInput, LoomOutput>(
     );
     const roster = computed(() => rosterProfiles(participants));
     const room = computed(() => chatRoom.get().room);
+    const store = computed(() => fileStore.get().store);
     const viewerPanels = computed(() =>
       viewerList(panels.get(), hiddenPanels.get(), privatePanels.get())
     );
@@ -892,6 +895,9 @@ export default pattern<LoomInput, LoomOutput>(
       chatRoom: room,
       setChatRoom: setChatRoom({ chatRoom }),
       ensureChatRoom: ensureChatRoom({ chatRoom }),
+      fileStore: store,
+      ensureFileStore: ensureFileStore({ fileStore }),
+      fileStoreRecord: fileStore,
       meeting,
       bindMeeting: bindMeeting({ meeting, storedFields: meeting }),
       setStyle: setStyle({ style }),

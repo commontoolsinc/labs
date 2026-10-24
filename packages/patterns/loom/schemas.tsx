@@ -1,6 +1,7 @@
 /** Public linked-cell contract of a shared Loom. */
 
 import type {
+  Cell,
   Default,
   JSONValue,
   NAME,
@@ -12,6 +13,11 @@ import type {
   VNode,
   Writable,
 } from "commonfabric";
+import type { FileStoreOutput } from "../fabrifile/schemas.tsx";
+import type {
+  FileStoreRecord,
+  FileStoreRecordCell,
+} from "../fabrifile/store.tsx";
 import type { PanelAdderDid, PanelAdderProfile } from "./admission.tsx";
 import type {
   ParticipantProfile,
@@ -193,6 +199,10 @@ export interface LoomInput {
   >;
   participants?: PerSpace<ParticipantRosterCell>;
   chatRoom?: PerSpace<ChatRoomCell>;
+
+  /** The Loom's space's file store, absent until it is first needed. */
+  fileStore?: PerSpace<FileStoreRecordCell>;
+
   meeting?: PerSpace<MeetingAssociationCell>;
   hiddenPanels?: PerUser<Writable<Writable<Panel>[] | Default<[]>>>;
   privatePanels?: PerUser<Writable<PrivatePanel[] | Default<[]>>>;
@@ -298,6 +308,19 @@ export interface LoomOutput {
   chatRoom?: Writable<LinkedChatRoom>;
   setChatRoom: Stream<ChatRoomChoice>;
   ensureChatRoom: Stream<void>;
+
+  /** The Loom's space's file store, absent until `ensureFileStore` names one. */
+  fileStore?: Cell<FileStoreOutput>;
+
+  /** Names a new store as the Loom's space's, unless it names one already. */
+  ensureFileStore: Stream<void>;
+
+  /**
+   * Where the Loom keeps its space's file store, which its chat room, as a
+   * FabriChat container's, names a store in too.
+   */
+  fileStoreRecord: Cell<FileStoreRecord>;
+
   meeting: MeetingAssociation;
   bindMeeting: Stream<BindMeetingRequest>;
   retitleLoom: Stream<{ title: string }>;
