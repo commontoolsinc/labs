@@ -4048,6 +4048,38 @@ export class WavePreconditionError extends Error {
 }
 
 /**
+ * A wave commit's re-verification of a served handler's recorded reads
+ * failed: a commit after a read's seq wrote the read's path, and the holder's
+ * own derived commits do not account for it (serving-loop.md §3d). Names each
+ * stale read by its contribution and its position in that contribution's
+ * reads, with the seq of the newest such commit, so the wave commit step
+ * requeues the owning event alone and re-attempts — whole-wave CAS failure is
+ * forbidden.
+ */
+export class WaveStaleReadError extends Error {
+  override readonly name = "WaveStaleReadError";
+  readonly staleReads: ReadonlyArray<{
+    contribution: number;
+    read: number;
+    seq: number;
+  }>;
+  constructor(
+    staleReads: ReadonlyArray<
+      { contribution: number; read: number; seq: number }
+    >,
+  ) {
+    super(
+      `wave commit re-verification: handler read(s) went stale: ` +
+        staleReads.map((stale) =>
+          `contribution ${stale.contribution} read ${stale.read} at seq ` +
+          `${stale.seq}`
+        ).join(", "),
+    );
+    this.staleReads = staleReads;
+  }
+}
+
+/**
  * A derived commit carries an operation on its space's ACL document.
  * No derived producer may write that document, in any memory ACL mode: the
  * derived admission checks the lease and nothing of INV-12's shape or of any
@@ -4233,6 +4265,117 @@ LIMIT 1
     }) !== undefined;
 
 /**
+ * Returns the `seq` of the newest write after `afterSeq` that a read at `path`
+ * of this document instance conflicts with, or `null` when none does: the
+ * check a wave commit holds a served handler's recorded reads to
+ * (serving-loop.md §3d). A write other than a `patch` conflicts whatever the
+ * read's path, as it does for a client commit's reads; a `patch` conflicts
+ * when `patchOverlapsRead()`, or `patchOverlapsNonRecursiveRead()` for a
+ * shallow read, matches one of its patches that `commutes` does not except.
+ * A write by `holder`'s own derived commits is no conflict, under the
+ * exemption `hasIntrusionSince()` states and in the same NULL-safe shape, so
+ * an absent `holder` exempts nothing.
+ */
+export const findStaleReadSeq = (
+  engine: Engine,
+  options: {
+    branch?: BranchName;
+    id: EntityId;
+    scopeKey: string;
+    afterSeq: number;
+    path: readonly string[];
+    nonRecursive?: boolean;
+    holder?: string;
+
+    /** A patch the read is held not to conflict with. */
+    commutes?: (patch: PatchOp) => boolean;
+  },
+): number | null => {
+  const rows = engine.database.prepare(`
+SELECT r.seq, r.op, r.data
+FROM revision r JOIN "commit" c ON c.seq = r.commit_seq
+WHERE r.branch = :branch AND r.id = :id AND r.scope_key = :scope_key
+  AND r.seq > :after_seq
+  AND NOT (:holder IS NOT NULL AND c.class = 'derived' AND c.holder IS :holder)
+ORDER BY r.seq DESC, r.op_index DESC
+`).all({
+      branch: options.branch ?? DEFAULT_BRANCH,
+      id: options.id,
+      scope_key: options.scopeKey,
+      after_seq: options.afterSeq,
+      holder: options.holder ?? null,
+    }) as Array<{ seq: number; op: string; data: string | null }>;
+  for (const row of rows) {
+    if (row.op !== "patch") return row.seq;
+    const patches = decodeStoredPatchList(row.data).filter((patch) =>
+      options.commutes?.(patch) !== true
+    );
+    const overlaps = options.nonRecursive === true
+      ? patchOverlapsNonRecursiveRead(patches, options.path)
+      : patchOverlapsRead(patches, options.path);
+    if (overlaps) return row.seq;
+  }
+  return null;
+};
+
+/**
+ * Whether `patch`, a write to the document a served handler's read named,
+ * left what the read observed as it was: a tail append to a stream sidecar's
+ * entries — an `append` or `add-unique` at `/value/entries` — creates only
+ * new indices, so a read of an entry at a numeric index below `entries`
+ * observed nothing it changed. Every other write stales a read it overlaps.
+ */
+export const streamTailAppendCommutes = (
+  readId: EntityId,
+  readPath: readonly string[],
+  patch: PatchOp,
+): boolean => {
+  if (!String(readId).startsWith(STREAM_ENTRIES_DOC_PREFIX)) return false;
+  if (patch.op !== "append" && patch.op !== "add-unique") return false;
+  const patchPath = parsePointer(patch.path);
+  return patchPath.length === 2 && patchPath[0] === "value" &&
+    patchPath[1] === "entries" && readPath.length > 2 &&
+    readPath[0] === "value" && readPath[1] === "entries" &&
+    String(Number(readPath[2])) === String(readPath[2]);
+};
+
+/**
+ * One recorded read of a served handler run, held to the store at a wave
+ * commit (serving-loop.md §3d).
+ */
+export type WaveHandlerRead = {
+  id: EntityId;
+  scopeKey: string;
+  path: readonly string[];
+  seq: number;
+  nonRecursive?: boolean;
+};
+
+/**
+ * Like `findStaleReadSeq()`, for a served handler's read: the stream tail
+ * append `streamTailAppendCommutes()` names is excepted, and `holder`'s own
+ * derived commits are exempt.
+ */
+export const findHandlerStaleReadSeq = (
+  engine: Engine,
+  read: WaveHandlerRead,
+  holder: string | undefined,
+  branch?: BranchName,
+): number | null =>
+  findStaleReadSeq(engine, {
+    ...(branch === undefined ? {} : { branch }),
+    id: read.id,
+    scopeKey: read.scopeKey,
+    afterSeq: read.seq,
+    path: read.path,
+    ...(read.nonRecursive === undefined
+      ? {}
+      : { nonRecursive: read.nonRecursive }),
+    ...(holder === undefined ? {} : { holder }),
+    commutes: (patch) => streamTailAppendCommutes(read.id, read.path, patch),
+  });
+
+/**
  * One admitted commit as the serving loop's subscription sees it
  * (serving-loop.md §1 plane (d), §3): class + holder for the self-echo
  * skip, and the written doc INSTANCES for dirtiness marking. Assembled
@@ -4370,8 +4513,10 @@ export type WaveBasisInstance = {
  * query and this call the engine may admit concurrent commits, and the
  * re-verification here — inside the transaction — is the load-bearing
  * concurrency check (§3d forbids blind derived writes). On conflict it
- * throws {@link WaveCommitConflictError} naming the moved docs, and
- * nothing is applied.
+ * throws {@link WaveCommitConflictError} naming the moved docs, or
+ * {@link WaveStaleReadError} naming the served handler reads
+ * `waveBasis.handlerReads` carries that a commit staled, and nothing is
+ * applied.
  */
 export const applyWaveCommit = (
   engine: Engine,
@@ -4385,6 +4530,15 @@ export const applyWaveCommit = (
        * sit at EXACTLY that head — §3d's re-CAS against the new head; a
        * further move invalidates the field-level merge. */
       rebasedHeads: ReadonlyArray<{ doc: string; head: number }>;
+
+      /** Per contribution: the recorded reads of a served handler run the
+       * batch commits, each held to the store's head at its path inside
+       * this transaction (§3d), so that a commit admitted after the wave's
+       * own check cannot land a write computed from what it replaced. */
+      handlerReads?: ReadonlyArray<{
+        contribution: number;
+        reads: ReadonlyArray<WaveHandlerRead>;
+      }>;
     };
     basisInstances?: readonly WaveBasisInstance[];
 
@@ -4478,6 +4632,27 @@ export const applyWaveCommit = (
       }
       if (conflicted.size > 0) {
         throw new WaveCommitConflictError([...conflicted]);
+      }
+      // A served handler's recorded reads, re-verified here as the written
+      // docs are: the wave's own check ran before this transaction, and a
+      // commit admitted since can have staled a read of a doc the batch
+      // does not write (§3d).
+      const staleReads: Array<
+        { contribution: number; read: number; seq: number }
+      > = [];
+      for (const { contribution, reads } of waveBasis.handlerReads ?? []) {
+        for (const [index, read] of reads.entries()) {
+          const seq = findHandlerStaleReadSeq(
+            txEngine,
+            read,
+            applyOptions.holder,
+            applyOptions.commit.branch,
+          );
+          if (seq !== null) staleReads.push({ contribution, read: index, seq });
+        }
+      }
+      if (staleReads.length > 0) {
+        throw new WaveStaleReadError(staleReads);
       }
       // Preconditions pre-checked ONE BY ONE so a failure names its
       // index: the shared validator throws on the first failure without
